@@ -238,6 +238,40 @@ export function createTmdb({
       );
     },
 
+    // The raw TMDB methods below serve the Seerr compatibility API. They return the TMDB answer as it is.
+    searchPage(query: string, page = 1, language?: string): Promise<unknown> {
+      return get('/search/multi', { query, page: String(page), include_adult: 'false', ...(language ? { language } : {}) }, 10 * 60_000);
+    },
+
+    discover(mediaType: MediaType, params: Record<string, string>): Promise<unknown> {
+      return get(`/discover/${mediaType}`, params);
+    },
+
+    trending(mediaType: 'all' | MediaType, window: 'day' | 'week', page = 1, language?: string): Promise<unknown> {
+      return get(`/trending/${mediaType}/${window}`, { page: String(page), ...(language ? { language } : {}) });
+    },
+
+    detailsRaw(mediaType: MediaType, id: number, language?: string): Promise<unknown> {
+      const append = mediaType === 'movie' ? 'credits,external_ids,videos,release_dates,alternative_titles' : 'credits,external_ids,videos,content_ratings,alternative_titles';
+      return get(`/${mediaType}/${id}`, { append_to_response: append, ...(language ? { language } : {}) });
+    },
+
+    similar(mediaType: MediaType, id: number, page = 1, language?: string): Promise<unknown> {
+      return get(`/${mediaType}/${id}/similar`, { page: String(page), ...(language ? { language } : {}) });
+    },
+
+    recommendationsPage(mediaType: MediaType, id: number, page = 1, language?: string): Promise<unknown> {
+      return get(`/${mediaType}/${id}/recommendations`, { page: String(page), ...(language ? { language } : {}) });
+    },
+
+    personCredits(id: number, language?: string): Promise<unknown> {
+      return get(`/person/${id}/combined_credits`, language ? { language } : {});
+    },
+
+    genres(mediaType: MediaType, language?: string): Promise<unknown> {
+      return get(`/genre/${mediaType}/list`, language ? { language } : {});
+    },
+
     // Every series that has this TVDB ID. The caller must ask for a match unless exactly one comes back.
     async findSeriesByTvdb(tvdbId: number): Promise<SearchResult[]> {
       const raw = (await get(`/find/${tvdbId}`, { external_source: 'tvdb_id' })) as Raw;

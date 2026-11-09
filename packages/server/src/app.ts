@@ -54,6 +54,7 @@ import { librarySearchStart } from './routes/library/search/post.ts';
 import { librarySearchPreview } from './routes/library/search/preview/post.ts';
 import { restoreGate, type Restorer } from './system/restore.ts';
 import { adapterAuth, compatRouter, unsupported, wrongPath } from './compatibility/router.ts';
+import { seerrRouter, seerrWrongPath } from './compatibility/seerr.ts';
 import { createEvents, type Events } from './core/events.ts';
 import { indexersGet } from './routes/indexers/get.ts';
 import { indexersCreate } from './routes/indexers/post.ts';
@@ -366,6 +367,8 @@ export function createApp(db: Db, { services, urlBase = '', events = createEvent
   });
   // Seerr and other callers use /api/v3 on their own. The answer names the right paths, because the native API would answer 401.
   app.use(`${urlBase}/api/v3`, wrongPath(urlBase));
+  // A Seerr client adds /api/v1 to the address. The adapter lives under /seerr.
+  app.use(`${urlBase}/api/v1`, seerrWrongPath(urlBase));
   app.use(`${urlBase}/api`, api, onError);
 
   // The adapters for the indexer manager and Seerr. They use the API key and the shapes of Sonarr and Radarr.
@@ -388,10 +391,21 @@ export function createApp(db: Db, { services, urlBase = '', events = createEvent
     // Any other path under the adapter name gets a JSON answer. The page fallback below would answer with HTML.
     app.use(`${urlBase}/${name}`, wrongPath(urlBase));
   }
+
+  const seerr = express.Router();
+  seerr.use(express.json({ limit: '100kb' }));
+  if (restorer) seerr.use(restoreGate(restorer));
+  seerr.use(seerrRouter(db, { urlBase, tmdb, events, enqueue, services }));
+  app.use(`${urlBase}/seerr/api/v1`, seerr, onError);
+  app.use(`${urlBase}/seerr`, seerrWrongPath(urlBase));
+
   // The same answers for the paths without the URL base. A path that the URL base itself starts with is not one of them.
   const clashes = (path: string) => urlBase === path || urlBase.startsWith(`${path}/`);
   if (urlBase) {
-    for (const path of ['/sonarr', '/radarr', '/api/v3']) if (!clashes(path)) app.use(path, wrongPath(urlBase));
+    for (const path of ['/sonarr', '/radarr', '/api/v3', '/seerr', '/api/v1']) {
+      if (clashes(path)) continue;
+      app.use(path, path === '/seerr' || path === '/api/v1' ? seerrWrongPath(urlBase) : wrongPath(urlBase));
+    }
   }
 
   if (webDir) {

@@ -372,3 +372,96 @@ describe('without a TMDB client', () => {
     }
   });
 });
+
+describe('tmdb raw methods', () => {
+  it('searches a page and passes its language', async () => {
+    const { send, calls } = fakeTmdb({
+      '/search/multi': () => json({ page: 2, total_pages: 5, total_results: 80, results: [{ id: 603, media_type: 'movie', title: 'The Matrix' }] }),
+    });
+    const page = await client(send).searchPage('matrix', 2, 'es');
+    expect(page).toMatchObject({ page: 2, total_pages: 5, total_results: 80, results: [{ id: 603 }] });
+    expect(JSON.stringify(page)).not.toContain(KEY);
+    expect(calls[0]!.searchParams.get('query')).toBe('matrix');
+    expect(calls[0]!.searchParams.get('page')).toBe('2');
+    expect(calls[0]!.searchParams.get('language')).toBe('es');
+  });
+
+  it('discovers movies and series with the TMDB names', async () => {
+    const { send, calls } = fakeTmdb({
+      '/discover/movie': () => json({ page: 1, total_pages: 1, total_results: 0, results: [] }),
+      '/discover/tv': () => json({ page: 1, total_pages: 1, total_results: 0, results: [] }),
+    });
+    const tmdb = client(send);
+    await tmdb.discover('movie', { page: '1', language: 'es', with_genres: '28', sort_by: 'popularity.desc', include_adult: 'false' });
+    await tmdb.discover('tv', { page: '2', with_networks: '213' });
+    expect(calls.map((url) => url.pathname)).toEqual(['/3/discover/movie', '/3/discover/tv']);
+    expect(calls[0]!.searchParams.get('with_genres')).toBe('28');
+    expect(calls[0]!.searchParams.get('sort_by')).toBe('popularity.desc');
+    expect(calls[0]!.searchParams.get('include_adult')).toBe('false');
+    expect(calls[1]!.searchParams.get('page')).toBe('2');
+    expect(calls[1]!.searchParams.get('with_networks')).toBe('213');
+  });
+
+  it('reads trending and details with the appended parts', async () => {
+    const { send, calls } = fakeTmdb({
+      '/trending/all/day': () => json({ page: 2, results: [{ id: 603, media_type: 'movie' }] }),
+      '/movie/603': () => json({ id: 603, title: 'The Matrix', credits: { cast: [] }, external_ids: { imdb_id: 'tt0133093' }, videos: { results: [] } }),
+    });
+    const tmdb = client(send);
+    expect(await tmdb.trending('all', 'day', 2)).toMatchObject({ page: 2 });
+    expect(calls[0]!.pathname).toBe('/3/trending/all/day');
+    expect(calls[0]!.searchParams.get('page')).toBe('2');
+
+    const details = await tmdb.detailsRaw('movie', 603, 'es');
+    expect(details).toMatchObject({ id: 603, credits: { cast: [] }, external_ids: { imdb_id: 'tt0133093' }, videos: { results: [] } });
+    const url = calls[1]!;
+    expect(url.pathname).toBe('/3/movie/603');
+    expect(url.searchParams.get('language')).toBe('es');
+    const append = (url.searchParams.get('append_to_response') ?? '').split(',').map((part) => part.trim());
+    expect(append).toEqual(expect.arrayContaining(['credits', 'external_ids', 'videos']));
+    expect(JSON.stringify(details)).not.toContain(KEY);
+  });
+
+  it('reads similar and recommended pages', async () => {
+    const { send, calls } = fakeTmdb({
+      '/movie/603/similar': () => json({ page: 4, results: [{ id: 604 }] }),
+      '/tv/1396/recommendations': () => json({ page: 5, results: [{ id: 1397 }] }),
+    });
+    const tmdb = client(send);
+    expect(await tmdb.similar('movie', 603, 4, 'es')).toMatchObject({ page: 4, results: [{ id: 604 }] });
+    expect(await tmdb.recommendationsPage('tv', 1396, 5, 'es')).toMatchObject({ page: 5, results: [{ id: 1397 }] });
+    expect(calls[0]!.pathname).toBe('/3/movie/603/similar');
+    expect(calls[0]!.searchParams.get('page')).toBe('4');
+    expect(calls[0]!.searchParams.get('language')).toBe('es');
+    expect(calls[1]!.pathname).toBe('/3/tv/1396/recommendations');
+    expect(calls[1]!.searchParams.get('page')).toBe('5');
+    expect(calls[1]!.searchParams.get('language')).toBe('es');
+  });
+
+  it('reads person credits and genres', async () => {
+    const { send, calls } = fakeTmdb({
+      '/person/287/combined_credits': () => json({ id: 287, cast: [{ id: 603, media_type: 'movie' }], crew: [] }),
+      '/genre/movie/list': () => json({ genres: [{ id: 28, name: 'Action' }] }),
+      '/genre/tv/list': () => json({ genres: [{ id: 18, name: 'Drama' }] }),
+    });
+    const tmdb = client(send);
+    expect(await tmdb.personCredits(287, 'es')).toMatchObject({ id: 287, cast: [{ id: 603 }] });
+    expect(await tmdb.genres('movie', 'es')).toMatchObject({ genres: [{ id: 28, name: 'Action' }] });
+    expect(await tmdb.genres('tv', 'es')).toMatchObject({ genres: [{ id: 18, name: 'Drama' }] });
+    expect(calls[0]!.pathname).toBe('/3/person/287/combined_credits');
+    expect(calls[0]!.searchParams.get('language')).toBe('es');
+    expect(calls[1]!.pathname).toBe('/3/genre/movie/list');
+    expect(calls[1]!.searchParams.get('language')).toBe('es');
+    expect(calls[2]!.pathname).toBe('/3/genre/tv/list');
+    expect(calls[2]!.searchParams.get('language')).toBe('es');
+  });
+
+  it('caches equal raw calls and reports the health', async () => {
+    const { send } = fakeTmdb({ '/search/multi': () => json({ page: 1, results: [] }) });
+    const tmdb = client(send);
+    await tmdb.searchPage('same', 1, 'en');
+    await tmdb.searchPage('same', 1, 'en');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(tmdb.status()).toMatchObject({ ok: true });
+  });
+});

@@ -3,6 +3,7 @@ import { Low, Memory, type Adapter } from 'lowdb';
 import { TextFile } from 'lowdb/node';
 import { dirname, join } from 'node:path';
 import type { CompatCommand } from '../compatibility/common.ts';
+import type { SeerrRequest } from '../compatibility/seerr.ts';
 import type { Job } from './jobs.ts';
 import type { Override, Title } from '../library/library.ts';
 import type { Indexer } from '../library/grab/indexers.ts';
@@ -133,6 +134,8 @@ export type Data = {
   webhooks: WebhookState[];
   // The commands that callers of the Sonarr and Radarr adapters sent. The ID is the same after a restart.
   compat: { commandSeq: number; commands: Record<string, CompatCommand> };
+  // The requests that callers of the Seerr adapter sent. The ID is the same after a restart.
+  seerr: { requestSeq: number; requests: Record<string, SeerrRequest> };
 };
 
 export type Db = Low<Data>;
@@ -175,6 +178,7 @@ export const emptyData = (): Data => ({
   calendarFeedToken: null,
   webhooks: [],
   compat: { commandSeq: 0, commands: {} },
+  seerr: { requestSeq: 0, requests: {} },
 });
 
 // The profiles in the order of the chain, the best first. A profile that the order lacks goes after the others.
@@ -229,6 +233,7 @@ export function withDefaults(data: Data): Data {
   // The one destination of an older file becomes one webhook for each event of the queue.
   const webhooks = [...(data.webhooks ?? [])];
   if (oldWebhook?.url) for (const type of ['available', 'stuck'] as const) webhooks.push({ id: randomUUID(), type, url: oldWebhook.url });
+  const seerr = { ...empty.seerr, ...(data.seerr ?? {}) };
   const next: Data = {
     ...empty,
     ...rest,
@@ -238,6 +243,7 @@ export function withDefaults(data: Data): Data {
     profiles,
     profileOrder,
     webhooks,
+    seerr,
   };
   if (old) {
     const url = new URL(old.url);
