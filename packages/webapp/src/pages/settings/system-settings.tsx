@@ -2,7 +2,7 @@ import type { BackupsResponse, UpdateCheck, VersionInfo } from '@ladarr/shared/t
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../../lib/api.ts';
-import { Badge, Button, Details, EmptyState, List, Row, Section, Spinner, Text } from 'nebula';
+import { Badge, Button, Details, Divider, EmptyState, List, Row, Section, Spinner, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { formatBytes, describeError } from '../../lib/format.ts';
@@ -50,16 +50,9 @@ export function SystemVersion() {
     <Section
       title={t('System')}
       action={
-        <>
-          {result?.available && (
-            <Button pending={installing} onClick={() => void install()}>
-              {t('Install update')}
-            </Button>
-          )}
-          <Button pending={pending} disabled={!data} onClick={() => void check()}>
-            {t('Check updates')}
-          </Button>
-        </>
+        <Button pending={pending} disabled={!data} onClick={() => void check()}>
+          {t('Check updates')}
+        </Button>
       }
     >
       {error && !data ? (
@@ -69,13 +62,24 @@ export function SystemVersion() {
       ) : (
         <Details items={[{ label: t('Installed version'), value: data?.version ?? '' }]} />
       )}
-      {result && (
-        <Text variant="body">
-          {result.available ? t('Version {version} is available.', { version: result.latest }) : t('You have the latest version.')}
-        </Text>
-      )}
-      {result?.notes && <pre>{result.notes}</pre>}
-      {installed && <Text variant="body">{t('Update to {version} installed. The server restarts.', { version: installed })}</Text>}
+      {result && !result.available && <Text variant="body">{t('You have the latest version.')}</Text>}
+      {installing ? (
+        <div className="grid w-full justify-items-center">
+          <Spinner label={t('Installing update')} />
+        </div>
+      ) : result?.available ? (
+        <>
+          <Divider />
+          <div className="flex w-full items-center justify-between gap-4">
+            <Text variant="heading">{t('New version {version}', { version: result.latest })}</Text>
+            <Button pending={installing} onClick={() => void install()}>
+              {t('Install update')}
+            </Button>
+          </div>
+          {result.notes && <pre>{result.notes}</pre>}
+        </>
+      ) : null}
+      {installed && <Text variant="body" className="w-full text-center text-success">{t('Version {version} installed, the server will restart...', { version: installed })}</Text>}
       {failed && <Alert tone="danger">{t('The request did not complete.')}</Alert>}
     </Section>
   );
