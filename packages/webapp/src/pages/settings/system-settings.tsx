@@ -67,7 +67,7 @@ export function SystemVersion() {
         <div className="grid w-full justify-items-center">
           <Spinner label={t('Installing update')} />
         </div>
-      ) : result?.available ? (
+      ) : result?.available && !installed ? (
         <>
           <Divider />
           <div className="flex w-full items-center justify-between gap-4">
