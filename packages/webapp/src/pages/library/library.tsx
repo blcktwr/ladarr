@@ -1,13 +1,13 @@
 import type { LibraryType } from '@ladarr/shared/enums';
 import type { CastMember, EpisodeRef, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary } from '@ladarr/shared/types';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useState, type MouseEvent, type ReactNode } from 'react';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { ArrowLeft, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
 import { Link as RouterLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
 import { ResultItem } from '../search/result-item.tsx';
 import { LibraryFilterSelect, SearchPlanButton, type LibraryView } from './calendar-filters.tsx';
-import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, EmptyState, Gallery, Modal, Pagination, Pane, Section, Spinner, SubMenu, Table, Text, Thumbnail } from 'nebula';
+import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, EmptyState, Gallery, Modal, Pane, Section, Spinner, SubMenu, Table, Text, Thumbnail } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { Link, LoadFailed, LoadingGallery, pageWidth } from '../../components/index.ts';
 import { ModalActions } from '../../components/modal-actions.tsx';
@@ -45,12 +45,33 @@ function TitlePoster({ title, selected, onSelectedChange }: { title: TitleSummar
 function LibraryList() {
   const [type, setType] = useState<'all' | LibraryType>('all');
   const [view, setView] = useState<LibraryView>('all');
-  const [page, setPage] = useState(0);
   const selection = useSelection();
   const [removal, setRemoval] = useState<PlanRequest | null>(null);
   const [importing, setImporting] = useState(false);
   const [addingManually, setAddingManually] = useState(false);
-  const { data, error, isFetching: loading, refetch: reload } = useQuery<{ items: TitleSummary[]; total: number }>({ queryKey: [`/library?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}${type === 'all' ? '' : `&type=${type}`}${view === 'all' ? '' : `&filter=${view}`}`], placeholderData: keepPreviousData });
+  const { data, error, isFetching: loading, isFetchingNextPage, refetch: reload, fetchNextPage, hasNextPage } = useInfiniteQuery({
+    queryKey: ['/library', type, view],
+    queryFn: ({ pageParam }) => api<{ items: TitleSummary[]; total: number }>(`/library?limit=${PAGE_SIZE}&offset=${pageParam}${type === 'all' ? '' : `&type=${type}`}${view === 'all' ? '' : `&filter=${view}`}`),
+    initialPageParam: 0,
+    // The next page starts after the titles that the gallery has.
+    getNextPageParam: (last, pages) => {
+      const loaded = pages.reduce((sum, page) => sum + page.items.length, 0);
+      return loaded < last.total ? loaded : undefined;
+    },
+  });
+  const items = data?.pages.flatMap((page) => page.items) ?? [];
+  const total = data?.pages.at(-1)?.total ?? 0;
+  // The end of the gallery takes the next page before it reaches the screen.
+  const more = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = more.current;
+    if (!node) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting) && !isFetchingNextPage && !error) void fetchNextPage();
+    }, { rootMargin: '600px 0px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [error, fetchNextPage, hasNextPage, isFetchingNextPage]);
   useLive('library.changed', () => void reload());
   // Needs attention depends on the queue, and a queue change is not a library change.
   useLive('queue.changed', () => view === 'attention' && void reload());
@@ -75,9 +96,8 @@ function LibraryList() {
       </div>
     );
   }
-  const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
   // With no title in the catalog, the type menu and the filter have nothing to act on.
-  const catalogEmpty = (data?.total ?? 0) === 0 && type === 'all' && view === 'all';
+  const catalogEmpty = total === 0 && type === 'all' && view === 'all';
 
   return (
     <div className={catalog}>
@@ -92,7 +112,6 @@ function LibraryList() {
               value={type}
               onValueChange={(key) => {
                 setType(key as typeof type);
-                setPage(0);
               }}
               items={[
                 { value: 'all', label: t('All') },
@@ -107,7 +126,6 @@ function LibraryList() {
               value={view}
               onChange={(next) => {
                 setView(next);
-                setPage(0);
               }}
             />
           )}
@@ -117,18 +135,18 @@ function LibraryList() {
       <ImportBackupDialog open={importing} onClose={() => setImporting(false)} />
       <AddManuallyDialog open={addingManually} onClose={() => setAddingManually(false)} />
       <PlanDialog request={removal} onClose={() => setRemoval(null)} onDone={() => selection.clear()} />
-      {data?.items.length === 0 ? (
+      {items.length === 0 ? (
         <EmptyState>{view !== 'all' ? t('No titles match this filter.') : type === 'all' ? t('Your catalog is empty. Search for a title to add it.') : t('No titles of this type.')}</EmptyState>
       ) : (
         <Gallery>
-          {data?.items.map((title) => (
+          {items.map((title) => (
             <Actions key={title.key}>
               <TitlePoster title={title} selected={selection.has(title.key)} onSelectedChange={() => selection.toggle(title.key)} />
             </Actions>
           ))}
         </Gallery>
       )}
-      {pages > 1 && <Pagination aria-label={t('Pages')} page={page + 1} count={pages} onPageChange={(next) => setPage(next - 1)} />}
+      {hasNextPage && <div ref={more} aria-hidden="true" className="h-px" />}
     </div>
   );
 }
