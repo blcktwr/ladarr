@@ -43,6 +43,8 @@ export function dropTitle(db: Db, key: string, queue?: Queue, cancelJob?: (id: s
     deleteItemLog(entry.id);
     delete db.data.queue[entry.id];
   }
+  // The file of the title holds the lines of its targets, so it goes with the title.
+  deleteItemLog(key);
 }
 
 // Removes one season of a series, its targets, their logs, and its jobs. The title, the other seasons, and the files on

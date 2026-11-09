@@ -83,26 +83,34 @@ let itemsOn = false;
 let inQueue: (itemId: string) => boolean = () => false;
 // The moment when the current record of an item began. A line before it belongs to an older record of the same ID.
 let startedAt: (itemId: string) => number = () => 0;
+// A title is not a target of the queue, so its own lines stay in the app log until a target of the title enters the
+// queue. From then on, its file joins the lines of the title and of its targets.
+let isTitleKey: (itemId: string) => boolean = () => false;
 
 // A target file holds the same line as the app log. The path is the ID of the target with a safe name.
 const itemFile = (itemId: string) => join(itemsDir, `${itemId.replace(/[^A-Za-z0-9]+/g, '_')}.log`);
 
-// Takes the line from the app log and writes it to the file of its target when the target is in the queue.
+// Takes the line from the app log and writes it to the file of its target when the target is in the queue. A line of a
+// target also goes to the file of its title, so the page reads the whole log of a series in one place.
 const keepItemLine = (line: string) => {
   if (!itemsOn || !itemsDir || !line.includes('"type":"catalog"')) return;
-  let entry: { type?: unknown; itemId?: unknown };
+  let entry: { type?: unknown; itemId?: unknown; titleKey?: unknown };
   try {
-    entry = JSON.parse(line) as { type?: unknown; itemId?: unknown };
+    entry = JSON.parse(line) as { type?: unknown; itemId?: unknown; titleKey?: unknown };
   } catch {
     return;
   }
   if (entry.type !== 'catalog' || typeof entry.itemId !== 'string' || !inQueue(entry.itemId)) return;
-  try {
-    mkdirSync(itemsDir, { recursive: true });
-    appendFileSync(itemFile(entry.itemId), line);
-  } catch {
-    /* The app log still has the line. */
-  }
+  const append = (id: string) => {
+    try {
+      mkdirSync(itemsDir, { recursive: true });
+      appendFileSync(itemFile(id), line);
+    } catch {
+      /* The app log still has the line. */
+    }
+  };
+  append(entry.itemId);
+  if (typeof entry.titleKey === 'string' && entry.titleKey !== entry.itemId) append(entry.titleKey);
 };
 
 // A request has no level: it is written to the same file, and the code of the answer says how it went.
@@ -142,6 +150,7 @@ export function logToFile(file: string, maxBytes = 1_000_000) {
   itemsOn = false;
   inQueue = () => false;
   startedAt = () => 0;
+  isTitleKey = () => false;
   const open = (name: string) => createStream(basename(name), { path: dirname(name), size: `${maxBytes}B`, rotate: 1 });
   streams = [open(files.logs), open(files.requests)];
   const app = streams[0]!;
@@ -160,10 +169,13 @@ export function configureItemLogs(db: Db) {
   itemsOn = db.data.settings.keepQueueLogs !== false;
   inQueue = (itemId) => {
     const entry = db.data.queue[itemId];
-    return Boolean(entry) && entry.stage !== 'available';
+    if (entry) return entry.stage !== 'available';
+    // A title is not a target, but the targets of the title keep its file, with their lines and the lines of the title.
+    return Object.values(db.data.queue).some((other) => other.titleKey === itemId && other.stage !== 'available');
   };
   // A target begins when its entry enters the queue. A title begins when the person adds it.
   startedAt = (itemId) => db.data.queue[itemId]?.createdAt ?? db.data.titles[itemId]?.addedAt ?? 0;
+  isTitleKey = (itemId) => Object.hasOwn(db.data.titles, itemId);
   if (!itemsOn) forgetItemLogs();
   else forgetItemLogsOutsideQueue(db);
 }
@@ -191,7 +203,9 @@ function forgetItemLogs() {
 // an older version left behind.
 function forgetItemLogsOutsideQueue(db: Db) {
   if (!itemsDir) return;
-  const keep = new Set(Object.keys(db.data.queue).filter((id) => inQueue(id)).map((id) => basename(itemFile(id))));
+  // The keys are the targets in the queue and the titles of those targets. A title file holds the lines of its targets.
+  const ids = new Set([...Object.keys(db.data.queue), ...Object.values(db.data.queue).map((entry) => entry.titleKey)]);
+  const keep = new Set([...ids].filter((id) => inQueue(id)).map((id) => basename(itemFile(id))));
   try {
     for (const name of readdirSync(itemsDir)) if (!keep.has(name)) rmSync(join(itemsDir, name), { force: true });
   } catch {
@@ -296,11 +310,12 @@ export const traffic = {
   warn: (message: string, fields?: Record<string, unknown>) => write('warn', message, fields, 'requests'),
 };
 
-export type LogFilter = { itemId?: string; itemType?: string; kind?: 'logs' | 'requests'; type?: LogType; requestId?: string };
+export type LogFilter = { itemId?: string; itemType?: string; titleKey?: string; kind?: 'logs' | 'requests'; type?: LogType; requestId?: string };
 
 const matches = (entry: LogEntry, filter: LogFilter) =>
   (!filter.type || (entry.type ?? 'system') === filter.type) &&
   (!filter.itemId || entry.itemId === filter.itemId) &&
+  (!filter.titleKey || entry.titleKey === filter.titleKey) &&
   (!filter.itemType || entry.itemType === filter.itemType) &&
   (!filter.requestId || entry.requestId === filter.requestId);
 
@@ -318,19 +333,20 @@ const parseLines = (text: string): LogEntry[] =>
 
 // The file of a target holds its whole log, so the limit does not cut it. Null means that the target has no file, and
 // the app log answers for it.
-async function readItemLog(itemId: string, filter: LogFilter): Promise<LogEntry[] | null> {
+async function readItemFile(itemId: string): Promise<LogEntry[] | null> {
   if (!itemsDir) return null;
   const text = await readFile(itemFile(itemId), 'utf8').catch(() => null);
-  if (text === null) return null;
-  const since = startedAt(itemId);
-  return parseLines(text).filter((entry) => matches(entry, filter) && (!since || Date.parse(entry.time) >= since));
+  return text === null ? null : parseLines(text);
 }
 
-export async function recentLogs(limit: number, filter: LogFilter = {}): Promise<LogEntry[]> {
-  if (filter.itemId && (filter.kind ?? 'logs') === 'logs') {
-    const own = await readItemLog(filter.itemId, filter);
-    if (own) return own;
-  }
+async function readItemLog(itemId: string, filter: LogFilter): Promise<LogEntry[] | null> {
+  const entries = await readItemFile(itemId);
+  if (entries === null) return null;
+  const since = startedAt(itemId);
+  return entries.filter((entry) => matches(entry, filter) && (!since || Date.parse(entry.time) >= since));
+}
+
+async function readAppLog(limit: number, filter: LogFilter, since: number): Promise<LogEntry[]> {
   const file = files[filter.kind ?? 'logs'];
   if (!file) return [];
   const entries: LogEntry[] = [];
@@ -338,6 +354,36 @@ export async function recentLogs(limit: number, filter: LogFilter = {}): Promise
     const text = await readFile(name, 'utf8').catch(() => '');
     entries.push(...parseLines(text));
   }
-  const since = filter.itemId ? startedAt(filter.itemId) : 0;
   return entries.filter((entry) => matches(entry, filter) && (!since || Date.parse(entry.time) >= since)).slice(-limit);
+}
+
+// The key of a line, so a line that the app log and a file hold both shows once.
+const lineKey = (entry: LogEntry) => `${entry.time}|${entry.level}|${entry.event ?? ''}|${entry.itemId ?? ''}|${entry.message}`;
+
+// The log of a title joins its file, which holds the lines of the title and of its targets, with the older lines of the
+// app log, which hold the waits before the first target of the title existed.
+async function readTitleLog(limit: number, filter: LogFilter): Promise<LogEntry[]> {
+  const titleKey = filter.itemId!;
+  const since = startedAt(titleKey);
+  const app = await readAppLog(limit, { ...filter, itemId: undefined, titleKey }, since);
+  const file = (await readItemFile(titleKey))?.filter((entry) => matches(entry, { ...filter, itemId: undefined }) && (!since || Date.parse(entry.time) >= since)) ?? [];
+  const seen = new Set<string>();
+  const entries: LogEntry[] = [];
+  for (const entry of [...app, ...file]) {
+    const key = lineKey(entry);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push(entry);
+  }
+  return entries.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
+}
+
+export async function recentLogs(limit: number, filter: LogFilter = {}): Promise<LogEntry[]> {
+  if (filter.itemId && (filter.kind ?? 'logs') === 'logs') {
+    if (isTitleKey(filter.itemId)) return readTitleLog(limit, filter);
+    const own = await readItemLog(filter.itemId, filter);
+    if (own) return own;
+  }
+  const since = filter.itemId ? startedAt(filter.itemId) : 0;
+  return readAppLog(limit, filter, since);
 }

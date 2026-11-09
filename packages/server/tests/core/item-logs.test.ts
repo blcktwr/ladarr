@@ -73,12 +73,14 @@ describe('item logs', () => {
     catalog.info('search.started', 'Search started', item);
 
     await closeLog();
-    expect(readdirSync(join(dirname(file), 'items'))).toEqual(['tv_1_1x2.log']);
+    expect(readdirSync(join(dirname(file), 'items'))).toEqual(['tv_1.log', 'tv_1_1x2.log']);
     const own = itemEntries(file, 'tv:1:1x2');
     expect(own).toHaveLength(1);
     expect(own[0]).toMatchObject({ type: 'catalog', event: 'search.started', itemId: 'tv:1:1x2', itemType: 'tv', title: 'Show', target: 'S01E02' });
     // The line of the item file is the same line as the line of the app log.
     expect(own[0]).toEqual((await recentLogs(10))[0]);
+    // The file of the title holds the same line, so the page of the series shows it.
+    expect(itemEntries(file, 'tv:1')).toEqual(own);
   });
 
   it('keeps the first entry of an item after the app log rotates, and ignores the limit', async () => {
@@ -176,6 +178,30 @@ describe('item logs', () => {
     expect(existsSync(join(dirname(file), 'items'))).toBe(false);
     // The app log still gets the entries.
     expect((await recentLogs(10)).map((line) => line.message)).toEqual(['First', 'Second']);
+  });
+
+  it('joins the lines of the targets of a title in the log of the title', async () => {
+    const file = join(folder(), 'ladarr.log');
+    const db = await dbWith('tv:1:1x1', 'tv:1:1x2');
+    db.data.titles['tv:1'] = { key: 'tv:1', mediaType: 'tv', addedAt: 0 } as never;
+    for (const id of ['tv:1:1x1', 'tv:1:1x2']) db.data.queue[id]!.titleKey = 'tv:1';
+    logToFile(file);
+    configureItemLogs(db);
+
+    catalog.info('search', 'Series line', fields('tv:1', 'tv', 'tv:1', 'Show', 'Series'));
+    catalog.info('search', 'First episode line', fields('tv:1:1x1', 'tv', 'tv:1', 'Show', 'S01E01'));
+    catalog.info('search', 'Second episode line', fields('tv:1:1x2', 'tv', 'tv:1', 'Show', 'S01E02'));
+
+    await closeLog();
+    // The title has no entry in the queue, so its own line also stays in the app log. Its file joins the lines of the
+    // title and of its targets.
+    expect(existsSync(itemPath(file, 'tv:1'))).toBe(true);
+    // A restart keeps the file of the title while its targets are in the queue.
+    configureItemLogs(db);
+    expect(existsSync(itemPath(file, 'tv:1'))).toBe(true);
+    expect((await recentLogs(10, { itemId: 'tv:1', itemType: 'tv' })).map((line) => line.message)).toEqual(['Series line', 'First episode line', 'Second episode line']);
+    // The log of one target keeps only the lines of that target.
+    expect((await recentLogs(10, { itemId: 'tv:1:1x1', itemType: 'tv' })).map((line) => line.message)).toEqual(['First episode line']);
   });
 
   it('writes the cause of a status change', async () => {
