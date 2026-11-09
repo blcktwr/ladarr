@@ -14,7 +14,7 @@ const alerts = async () => (await app.get('/alerts')).body.alerts as { id: strin
 
 const problems = [
   { id: 'problem:indexers_missing', title: 'No indexer is set.', message: 'Add an indexer in Settings.' },
-  { id: 'problem:metadata_missing', title: 'No metadata provider is connected.', message: 'Set TMDB_API_KEY and start the server again.' },
+  { id: 'problem:metadata_missing', title: 'No metadata provider is connected.', message: 'Build the image with a TMDB key.' },
 ];
 
 describe('alerts', () => {

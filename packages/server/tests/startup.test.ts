@@ -14,7 +14,7 @@ afterAll(() => {
 });
 
 // Vitest sets NODE_ENV to "test", and then lowdb keeps the data in memory only.
-const start = (configDir: string) => spawnSync(process.execPath, [entry], { env: { ...process.env, NODE_ENV: 'production', PORT: '0', LADARR_CONFIG_DIR: configDir, TMDB_API_KEY: '' }, encoding: 'utf8', timeout: 15_000 });
+const start = (configDir: string) => spawnSync(process.execPath, [entry], { env: { ...process.env, NODE_ENV: 'production', PORT: '0', LADARR_CONFIG_DIR: configDir, LADARR_TMDB_BASE_URL: 'http://127.0.0.1:1' }, encoding: 'utf8', timeout: 15_000 });
 
 describe('start', () => {
   it('refuses a data file of a newer schema and leaves the file as it is', () => {

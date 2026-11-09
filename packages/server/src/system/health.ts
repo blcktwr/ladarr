@@ -22,10 +22,10 @@ const rootText: Record<Exclude<RootProblem, 'low_space'>, { message: string; act
 export async function collectProblems({ db, tmdb, heartbeat, backupDir, clientCheck, ffprobe }: Sources): Promise<Problem[]> {
   const problems: Problem[] = [];
 
-  if (!tmdb) problems.push({ id: 'metadata_missing', message: 'No metadata provider is connected.', action: 'Set TMDB_API_KEY and start the server again.' });
+  if (!tmdb) problems.push({ id: 'metadata_missing', message: 'No metadata provider is connected.', action: 'Build the image with a TMDB key.' });
   else {
     const { code } = tmdb.status();
-    if (code === 'invalid_key') problems.push({ id: 'metadata_rejected', message: 'TMDB rejects the API key.', action: 'Set a valid TMDB_API_KEY and start the server again.' });
+    if (code === 'invalid_key') problems.push({ id: 'metadata_rejected', message: 'TMDB rejects the API key.', action: 'Build the image with a valid TMDB key.' });
     else if (code) problems.push({ id: 'metadata_unavailable', message: 'TMDB does not answer.', action: 'Saved data stays visible until TMDB answers.' });
   }
 

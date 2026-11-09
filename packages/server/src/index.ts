@@ -42,7 +42,7 @@ configureItemLogs(db);
 const events = createEvents();
 
 const tmdb = config.tmdbApiKey ? createTmdb({ apiKey: config.tmdbApiKey, baseUrl: config.tmdbBaseUrl }) : undefined;
-if (!tmdb) log.warn('TMDB_API_KEY is not set, so titles cannot be searched');
+if (!tmdb) log.warn('No TMDB key is in this build, so titles cannot be searched');
 // Not awaited: the server starts at once, and the status shows the result when it arrives.
 else void withOutboundRequests(() => tmdb.check().then(({ ok, code }) => ok || log.warn('TMDB check failed', { code })));
 

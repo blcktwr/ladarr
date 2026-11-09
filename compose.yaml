@@ -9,7 +9,6 @@ services:
     ports:
       - "${LADARR_PORT:-3000}:3000"
     environment:
-      TMDB_API_KEY: ${TMDB_API_KEY:-}
       LADARR_URL_BASE: ${LADARR_URL_BASE:-}
     volumes:
       - ${LADARR_CONFIG:-./config}:/config

@@ -25,7 +25,7 @@ describe('stop signal', () => {
     const configDir = join(dir, signal);
     const port = await freePort();
     // Vitest sets NODE_ENV to "test", and then lowdb keeps the data in memory only.
-    const child = spawn(process.execPath, [entry], { env: { ...process.env, NODE_ENV: 'production', PORT: String(port), LADARR_CONFIG_DIR: configDir, TMDB_API_KEY: '' }, stdio: 'ignore' });
+    const child = spawn(process.execPath, [entry], { env: { ...process.env, NODE_ENV: 'production', PORT: String(port), LADARR_CONFIG_DIR: configDir, LADARR_TMDB_BASE_URL: 'http://127.0.0.1:1' }, stdio: 'ignore' });
     const exit = new Promise<number | null>((resolve) => child.once('exit', resolve));
 
     let ready = false;

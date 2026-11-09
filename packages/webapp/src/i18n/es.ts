@@ -847,8 +847,8 @@ export const es: Record<string, string> = {
 
   // The problems of the setup. The server sends the English text and the variables.
   'No metadata provider is connected.': 'No hay ningún proveedor de metadatos conectado.',
-  'Set TMDB_API_KEY and start the server again.': 'Define TMDB_API_KEY y reinicia el servidor.',
-  'Set a valid TMDB_API_KEY and start the server again.': 'Define una TMDB_API_KEY válida y reinicia el servidor.',
+  'Build the image with a TMDB key.': 'Compila la imagen con una clave de TMDB.',
+  'Build the image with a valid TMDB key.': 'Compila la imagen con una clave de TMDB válida.',
   'TMDB does not answer.': 'TMDB no responde.',
   'Saved data stays visible until TMDB answers.': 'Los datos guardados siguen visibles hasta que TMDB responda.',
   'The worker does not run.': 'El worker no se ejecuta.',
