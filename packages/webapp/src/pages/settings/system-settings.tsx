@@ -62,7 +62,7 @@ export function SystemVersion() {
       ) : (
         <Details items={[{ label: t('Installed version'), value: data?.version ?? '' }]} />
       )}
-      {result && !result.available && <Text variant="body">{t('You have the latest version.')}</Text>}
+      {result && !result.available && <Text variant="body" className="w-full text-center text-success">{t('You have the latest version.')}</Text>}
       {installing ? (
         <div className="grid w-full justify-items-center">
           <Spinner label={t('Installing update')} />
