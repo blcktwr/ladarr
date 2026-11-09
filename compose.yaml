@@ -1,7 +1,7 @@
 services:
   ladarr:
     build: .
-    image: ladarr:${LADARR_TAG:-local}
+    image: ghcr.io/blcktwr/ladarr:${LADARR_TAG:-latest}
     user: "${LADARR_UID:-1000}:${LADARR_GID:-1000}"
     restart: unless-stopped
     # After this time, Docker sends SIGKILL. See docs/installation.md, section Stop and restart.
