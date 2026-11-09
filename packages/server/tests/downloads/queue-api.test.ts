@@ -158,7 +158,7 @@ describe('requests and summary', () => {
     expect((await api.get('/queue?stage=searching')).body.total).toBe(0);
   });
 
-  it('shows a target that fetches its release in the Searching tab, under the targets that search now', async () => {
+  it('shows a target that fetches its release in the Searching tab, above the targets that search now', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
     const searching = title({ rootId: 'tv', key: 'tv:1', episodes: [aired(1)] });
@@ -169,17 +169,17 @@ describe('requests and summary', () => {
     const fetchingEntry = pipe.queue.ensure(fetching.key, 1, 1);
     pipe.queue.request(searchingEntry, 'test');
     pipe.queue.request(fetchingEntry, 'test');
-    // The fetching title began first, so a tie keeps it first without the order of the search.
-    fetchingEntry.createdAt = 1;
-    searchingEntry.createdAt = 2;
+    // The searching title began first, so the order of creation alone would put it first.
+    searchingEntry.createdAt = 1;
+    fetchingEntry.createdAt = 2;
     pipe.queue.move(fetchingEntry, { stage: 'fetching', branch: null, reason: null }, 'test');
     pipe.queue.move(searchingEntry, { stage: 'searching' }, 'test');
 
     const list = (await api.get('/queue?stage=searching')).body;
     expect(list.total).toBe(2);
     expect(list.items.map((item: { key: string; counts: Record<string, number> }) => [item.key, item.counts])).toEqual([
-      ['tv:1', { searching: 1 }],
       ['tv:2', { fetching: 1 }],
+      ['tv:1', { searching: 1 }],
     ]);
     // Fetching has no tab of its own.
     expect((await api.get('/queue?stage=fetching')).body.total).toBe(0);
@@ -514,6 +514,19 @@ describe('order', () => {
       ['Show Name S01E01', 'available'],
       ['Show Name S01E02', 'downloading'],
     ]);
+  });
+
+  it('puts the target that has its release above the one that only searches', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    addFilm(11);
+    addFilm(12);
+    // The first target came first, but it only searches. The second one has its release and waits for a slot.
+    pipe.queue.move(target('movie:11', 1_000), { stage: 'searching' }, 'test');
+    pipe.queue.move(target('movie:12', 2_000), { stage: 'fetching', branch: null, reason: null }, 'test');
+
+    expect(await rows()).toEqual(['movie:12', 'movie:11']);
+    expect((await api.get('/queue?stage=searching')).body.items.map((item: { id: string }) => item.id)).toEqual(['movie:12', 'movie:11']);
   });
 
   it('ranks a waiting target with a searching one', async () => {

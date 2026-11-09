@@ -26,11 +26,11 @@ export function queueGet(db: Db, poller: Poller, importStatus: ImportStatus | un
     // The progress of a group is that of its least advanced target, so the number of episodes does not matter. The
     // part of its download is that of its least advanced downloading target, the one that ends the wait for
     // Validating.
-    const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number; download: number; searching: boolean }>();
+    const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number; download: number; ready: boolean; searching: boolean }>();
     for (const entry of all) {
       if (!shown(db, entry) || (!f.cleared && entry.clearedAt)) continue;
       const key = entry.season === null ? entry.id : entry.titleKey;
-      const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY, download: -1, searching: false };
+      const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY, download: -1, ready: false, searching: false };
       group.entries.push(entry);
       if (matches(db, entry, f)) group.matching++;
       group.first = Math.min(group.first, entry.createdAt);
@@ -42,7 +42,10 @@ export function queueGet(db: Db, poller: Poller, importStatus: ImportStatus | un
         const part = transfer ? (transfer.entryProgress?.[entry.id] ?? transfer.progress) : null;
         if (part !== null) group.download = group.download < 0 ? part : Math.min(group.download, part);
       }
-      // The search of a title runs now, so its row stays above the rows that only fetch their release.
+      // A target that has its release waits for a free slot of its client. Its row goes above the rows that only
+      // search, because it is the target that takes the next slot.
+      if (entry.stage === 'fetching' && entry.branch === null && entry.reason === null) group.ready = true;
+      // The search of a title runs now, so its row stays above the rows that wait for their next search.
       if (entry.stage === 'searching' && entry.branch === null) group.searching = true;
       groups.set(key, group);
     }
@@ -53,9 +56,9 @@ export function queueGet(db: Db, poller: Poller, importStatus: ImportStatus | un
       if (!title) continue;
       const matchesLoading = !f.cleared && !f.priority && (!f.key || f.key === 'searching') && (!f.type || f.type === 'tv') && (!f.q || title.meta.title.toLowerCase().includes(f.q));
       if (!matchesLoading) continue;
-      groups.set(key, { entries: [], matching: 1, first: title.addedAt, progress: STAGE_RANK.get('searching')!, download: -1, searching: true });
+      groups.set(key, { entries: [], matching: 1, first: title.addedAt, progress: STAGE_RANK.get('searching')!, download: -1, ready: false, searching: true });
     }
-    const rows = [...groups.entries()].filter(([, g]) => g.matching > 0 && Number.isFinite(g.progress)).sort((a, b) => b[1].progress - a[1].progress || b[1].download - a[1].download || Number(b[1].searching) - Number(a[1].searching) || a[1].first - b[1].first || a[0].localeCompare(b[0]));
+    const rows = [...groups.entries()].filter(([, g]) => g.matching > 0 && Number.isFinite(g.progress)).sort((a, b) => b[1].progress - a[1].progress || b[1].download - a[1].download || Number(b[1].ready) - Number(a[1].ready) || Number(b[1].searching) - Number(a[1].searching) || a[1].first - b[1].first || a[0].localeCompare(b[0]));
     const items: QueueRow[] = rows.slice(offset, offset + limit).map(([key, group]) => {
       const first = group.entries[0];
       if (!first) {
