@@ -466,13 +466,13 @@ function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onBack
   );
 }
 
-const keys = ['queued', 'searching', 'no_match', 'downloading', 'validating', 'importing', 'stuck'];
+const keys = ['queued', 'searching', 'downloading', 'validating', 'importing', 'stuck'];
 
 // The stages of the whole page. The row is wide, so it lies above the container of the queue.
 function StageMenu({ summary, filters, setFilters }: { summary: QueueSummary | undefined; filters: Filters; setFilters: (f: Filters) => void }) {
   const counts = shownCounts(summary?.counts ?? {});
-  // A target that found no release waits for its next search, so it counts in Searching.
-  counts.searching = (counts.searching ?? 0) + (summary?.counts.not_found ?? 0);
+  // A target that found no release, or no release that fits the preset, waits for its next search, so it counts in Searching.
+  counts.searching = (counts.searching ?? 0) + (summary?.counts.not_found ?? 0) + (summary?.counts.no_match ?? 0);
   return (
     <SubMenu
       fill

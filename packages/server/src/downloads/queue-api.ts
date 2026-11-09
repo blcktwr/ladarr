@@ -30,10 +30,10 @@ type Deps = {
 const DAY_MS = 24 * 60 * 60_000;
 const MAX_PAGE = 200;
 // The key of an entry for a filter. A target that waits for its turn in the queue is Waiting. A target that waits
-// for its next search is Searching, also when the last search found no release.
+// for its next search is Searching, also when the last search found no release or no release that fits the preset.
 const filterKeyOf = (entry: QueueEntry) => {
   const key = queueKey(entry);
-  return key === 'waiting' || key === 'not_found' ? 'searching' : key;
+  return key === 'waiting' || key === 'not_found' || key === 'no_match' ? 'searching' : key;
 };
 
 // The jobs that move a target through the download flow. The jobs page shows only these.

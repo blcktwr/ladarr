@@ -126,11 +126,13 @@ describe('requests and summary', () => {
     expect(await total('searching')).toBe(1);
     expect(await total('not_found')).toBe(0);
 
-    // The indexers answered, and every release was rejected.
+    // The indexers answered, and every release was rejected. The target also waits for its next search, so it is
+    // in Searching, and its row keeps the key that says it found no release that fits the preset.
     move({ code: 'all_rejected' });
     expect((await detail()).key).toBe('no_match');
     expect((await api!.get('/queue/summary')).body.counts).toEqual({ no_match: 1 });
-    expect(await total('no_match')).toBe(1);
+    expect(await total('searching')).toBe(1);
+    expect(await total('no_match')).toBe(0);
     expect(await total('not_found')).toBe(0);
 
     // The search reached its budget. The target searches again, so it stays in the searching stage.
