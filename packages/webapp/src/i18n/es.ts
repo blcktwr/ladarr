@@ -248,6 +248,8 @@ export const es: Record<string, string> = {
   'Check updates': 'Buscar actualizaciones',
   'Installed version': 'Versión instalada',
   'Version {version} is available.': 'La versión {version} está disponible.',
+  'Install update': 'Instalar actualización',
+  'Update to {version} installed. The server restarts.': 'Actualización a la versión {version} instalada. El servidor se reinicia.',
   'You have the latest version.': 'Tienes la última versión.',
   'Import backup': 'Importar backup',
   'Blocklist': 'Lista de bloqueo',

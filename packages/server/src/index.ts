@@ -16,6 +16,7 @@ import { createEvents } from './core/events.ts';
 import { closeLog, configureItemLogs, log, logToFile } from './core/log.ts';
 import { createRestorer } from './system/restore.ts';
 import { firstUnwritable } from './core/permissions.ts';
+import { installUpdate } from './system/update.ts';
 import { createTmdb } from './metadata/tmdb.ts';
 import { createWebhooks } from './integrations/webhook.ts';
 import { createWorker } from './core/worker.ts';
@@ -88,6 +89,12 @@ const server = createApp(db, {
   persist,
   services: { queue, finder, poller, clients, importStatus },
   indexers,
+  installUpdate: () => installUpdate(),
+  // The jobs stop before the files change. The ones that run finish first, so no import is cut in the middle.
+  pauseQueue: () => worker.drain(),
+  resumeQueue: () => worker.resume(),
+  // The files of the new version are in place. A clean stop saves the data, and Docker starts the process again.
+  restart: () => void shutdown('update'),
 }).listen(config.port, () => {
   log.info('server listening', { port: config.port });
 });

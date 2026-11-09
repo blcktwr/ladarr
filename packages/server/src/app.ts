@@ -31,6 +31,7 @@ import { libraryRouter } from './library/library-api.ts';
 import { libraryToolsRouter } from './library/library-tools.ts';
 import { setupChecks } from './system/setup-checks.ts';
 import { APP_VERSION, checkForUpdate } from './system/version.ts';
+import { UpdateError } from './system/update.ts';
 import { migrationRouter } from './migration/migration.ts';
 import { SourceError } from './migration/migration-source.ts';
 import { log, recentLogs, traffic } from './core/log.ts';
@@ -44,7 +45,7 @@ import { webhookRouter } from './integrations/webhook.ts';
 
 export type Services = { queue: Queue; finder: Finder; poller: Poller; clients: Clients; importStatus?: ImportStatus };
 
-type Options = { services?: Services; urlBase?: string; events?: Events; webDir?: string; heartbeat?: () => number; tmdb?: Tmdb; configDir?: string; backupDir?: string; enqueue?: (input: EnqueueInput) => ReturnType<typeof enqueueJob>; cancelJob?: (id: string) => void; persist?: () => void; restorer?: Restorer; indexers?: IndexerService };
+type Options = { services?: Services; urlBase?: string; events?: Events; webDir?: string; heartbeat?: () => number; tmdb?: Tmdb; configDir?: string; backupDir?: string; enqueue?: (input: EnqueueInput) => ReturnType<typeof enqueueJob>; cancelJob?: (id: string) => void; persist?: () => void; restorer?: Restorer; indexers?: IndexerService; installUpdate?: () => Promise<{ version: string }>; pauseQueue?: () => Promise<void>; resumeQueue?: () => void; restart?: () => void };
 
 const HEARTBEAT_MAX_AGE_MS = 30_000;
 
@@ -70,7 +71,7 @@ const PROVIDER_ERRORS = {
   unavailable: { status: 503, error: 'metadata_unavailable' },
 } as const;
 
-export function createApp(db: Db, { services, urlBase = '', events = createEvents(), webDir, heartbeat, tmdb, configDir, backupDir, enqueue = (input) => enqueueJob(db, input), cancelJob, persist, restorer, indexers }: Options = {}) {
+export function createApp(db: Db, { services, urlBase = '', events = createEvents(), webDir, heartbeat, tmdb, configDir, backupDir, enqueue = (input) => enqueueJob(db, input), cancelJob, persist, restorer, indexers, installUpdate, pauseQueue, resumeQueue, restart }: Options = {}) {
   const api = express.Router();
   // A change of the indexers or of the clients can lift the block of a target. The target goes on, and the pages read the new state.
   const retries = services ? createRetry({ db, queue: services.queue, finder: services.finder, enqueue }) : undefined;
@@ -131,6 +132,26 @@ export function createApp(db: Db, { services, urlBase = '', events = createEvent
     } catch (error) {
       log.warn('update check failed', { error });
       res.status(502).json({ error: 'update_unavailable' });
+    }
+  });
+  // The update stops the queue and waits for the jobs that run, then it replaces the files. The process
+  // restarts after the answer. A failed install starts the queue again.
+  let updating = false;
+  api.post('/system/update', async (_req, res) => {
+    if (!installUpdate) return void res.status(404).json({ error: 'update_unavailable' });
+    if (updating) return void res.status(409).json({ error: 'update_in_progress' });
+    updating = true;
+    try {
+      await pauseQueue?.();
+      const { version } = await installUpdate();
+      res.on('finish', () => restart?.());
+      res.status(202).json({ version });
+    } catch (error) {
+      updating = false;
+      resumeQueue?.();
+      const code = error instanceof UpdateError ? error.code : 'failed';
+      log.warn('update install failed', { code, error });
+      res.status(code === 'no_update' ? 409 : 502).json({ error: code === 'no_update' ? 'no_update' : 'update_failed' });
     }
   });
   api.get('/alerts', async (_req, res) => {

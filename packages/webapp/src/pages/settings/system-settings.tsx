@@ -16,6 +16,8 @@ export function SystemVersion() {
   const [result, setResult] = useState<UpdateCheck | null>(null);
   const [failed, setFailed] = useState(false);
   const [pending, setPending] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installed, setInstalled] = useState('');
 
   async function check() {
     setFailed(false);
@@ -30,13 +32,34 @@ export function SystemVersion() {
     }
   }
 
+  async function install() {
+    setFailed(false);
+    setInstalled('');
+    setInstalling(true);
+    try {
+      const applied = await api<{ version: string }>('/system/update', { method: 'POST', body: {} });
+      setInstalled(applied.version);
+    } catch {
+      setFailed(true);
+    } finally {
+      setInstalling(false);
+    }
+  }
+
   return (
     <Section
       title={t('System')}
       action={
-        <Button pending={pending} disabled={!data} onClick={() => void check()}>
-          {t('Check updates')}
-        </Button>
+        <>
+          {result?.available && (
+            <Button pending={installing} onClick={() => void install()}>
+              {t('Install update')}
+            </Button>
+          )}
+          <Button pending={pending} disabled={!data} onClick={() => void check()}>
+            {t('Check updates')}
+          </Button>
+        </>
       }
     >
       {error && !data ? (
@@ -51,6 +74,7 @@ export function SystemVersion() {
           {result.available ? t('Version {version} is available.', { version: result.latest }) : t('You have the latest version.')}
         </Text>
       )}
+      {installed && <Text variant="body">{t('Update to {version} installed. The server restarts.', { version: installed })}</Text>}
       {failed && <Alert tone="danger">{t('The request did not complete.')}</Alert>}
     </Section>
   );

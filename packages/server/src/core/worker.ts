@@ -150,6 +150,13 @@ export function createWorker(
       setImmediate(tick);
     },
 
+    // Starts no new job and waits for the running ones to end. It does not stop them, so a job that copies a
+    // file keeps its work. The caller resumes the queue when it does not go on with the restart.
+    async drain() {
+      paused = true;
+      await Promise.allSettled([...inflight.values()].map((entry) => entry.done));
+    },
+
     // Handlers that ignore the signal keep their lease. Another start recovers them after it expires.
     async stop() {
       stopping = true;

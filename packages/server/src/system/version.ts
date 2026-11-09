@@ -1,7 +1,8 @@
 import type { UpdateCheck } from '@ladarr/shared/types';
 import { readFileSync } from 'node:fs';
 
-const LATEST_RELEASE = 'https://api.github.com/repos/blcktwr/ladarr/releases/latest';
+export const RELEASE_URL = 'https://api.github.com/repos/blcktwr/ladarr/releases/latest';
+export const RELEASE_HEADERS = { accept: 'application/vnd.github+json', 'user-agent': 'ladarr' };
 const MAX_AGE_MS = 10_000;
 
 // The version of the server that runs. The backup manifest has the same number.
@@ -22,8 +23,8 @@ export function isNewerVersion(candidate: string, current: string): boolean {
 
 // Reads the latest release of the repository. GitHub needs a user agent, and a public repository needs no token.
 export async function checkForUpdate(fetchImpl: typeof fetch = fetch): Promise<UpdateCheck> {
-  const res = await fetchImpl(LATEST_RELEASE, {
-    headers: { accept: 'application/vnd.github+json', 'user-agent': 'ladarr' },
+  const res = await fetchImpl(RELEASE_URL, {
+    headers: RELEASE_HEADERS,
     signal: AbortSignal.timeout(MAX_AGE_MS),
   });
   if (!res.ok) throw new Error(`GitHub answered with status ${res.status}.`);

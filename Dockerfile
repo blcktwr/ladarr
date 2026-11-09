@@ -25,6 +25,9 @@ COPY packages/shared packages/shared
 COPY packages/server packages/server
 COPY --from=build /app/packages/webapp/dist packages/webapp/dist
 
+# The update from the settings downloads a bundle into /app, so the user of the process must write there.
+RUN chown -R node:node /app
+
 ENV NODE_ENV=production \
     PORT=3000 \
     LADARR_CONFIG_DIR=/config \
