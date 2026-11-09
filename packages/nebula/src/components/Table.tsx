@@ -26,7 +26,7 @@ type TableProps = ({ title: string; 'aria-label'?: never } | { title?: never; 'a
   loading?: boolean;
   // A control at the right of the title, such as a Button that adds a row. The row of the title is as tall as the control, so the control does not touch the labels of the columns.
   action?: ReactNode;
-  // A row that enters, leaves, or moves goes to its place in 200ms. A table with a detail row does not animate.
+  // A row that enters, leaves, or moves goes to its place in 200ms, and so does the detail under it.
   animated?: boolean;
 };
 
@@ -51,8 +51,7 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
   const fixed = columns.some(column => column.width);
   const id = useId();
   const still = useReducedMotion();
-  // A detail is a second row under the row, so the pair cannot leave as one.
-  const moving = animated && !still && body.every(row => !row.detail);
+  const moving = animated && !still;
 
   const click = (row: Row) =>
     row.onClick
@@ -93,7 +92,7 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
           <tbody className="[&>tr+tr>td]:shadow-(--groove)">
             {moving ? (
               <AnimatePresence initial={false} mode="popLayout">
-                {body.map(row => (
+                {body.flatMap(row => [
                   <motion.tr
                     key={row.key}
                     data-row={row.key}
@@ -106,8 +105,17 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
                     className={row.onClick ? 'cursor-pointer' : undefined}
                   >
                     {cells(row)}
-                  </motion.tr>
-                ))}
+                  </motion.tr>,
+                  ...(row.detail
+                    ? [
+                        <motion.tr key={`${row.key}:detail`} layout="position" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition}>
+                          <td colSpan={columns.length} className="px-6 py-2 bg-(--recess-lit)">
+                            {row.detail}
+                          </td>
+                        </motion.tr>,
+                      ]
+                    : []),
+                ])}
               </AnimatePresence>
             ) : (
               body.map(row => (

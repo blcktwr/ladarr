@@ -88,6 +88,7 @@ export function JobsPanel() {
         <div className="min-w-0 overflow-x-hidden">
           <Table
             aria-label={t('Jobs in the queue')}
+            animated
             columns={[
               { label: t('Job'), hideLabel: true },
               { label: t('Actions'), hideLabel: true, align: 'end' },
