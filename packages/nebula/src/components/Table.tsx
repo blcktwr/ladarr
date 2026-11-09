@@ -39,6 +39,10 @@ const control = 'button, a, input, select, textarea, [role="button"], [role="lin
 // The motion of a row follows the theme: the ease-stone curve, in 200ms.
 const transition: Transition = { duration: 0.2, ease: [0.16, 1, 0.3, 1] };
 
+// A row enters from below and leaves toward the top, so the rows move up as the work goes on. The top row is the work
+// that is closest to its end.
+const shift = 8;
+
 // A table of data on a pane. It goes past the padding of the pane to its two edges, so the grooves between the rows go across the full pane.
 // The grooves are carved in the pane: a dark line, with a bright line under it. A wide table scrolls inside the pane.
 // It can have a title above it, as a Section. While loading is on, three rows show a bar in each cell.
@@ -97,9 +101,9 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
                     key={row.key}
                     data-row={row.key}
                     layout="position"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
+                    initial={{ opacity: 0, y: shift }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -shift }}
                     transition={transition}
                     onClick={click(row)}
                     className={row.onClick ? 'cursor-pointer' : undefined}
@@ -108,7 +112,7 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
                   </motion.tr>,
                   ...(row.detail
                     ? [
-                        <motion.tr key={`${row.key}:detail`} layout="position" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition}>
+                        <motion.tr key={`${row.key}:detail`} layout="position" initial={{ opacity: 0, y: shift }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -shift }} transition={transition}>
                           <td colSpan={columns.length} className="px-6 py-2 bg-(--recess-lit)">
                             {row.detail}
                           </td>
