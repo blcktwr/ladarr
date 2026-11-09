@@ -660,6 +660,22 @@ export const es: Record<string, string> = {
   'The target stopped. Select Clear from the list to remove it.': 'El objetivo se detuvo. Elige Quitar de la lista para eliminarlo.',
   '{reason} Open Logs for the next step.': '{reason} Abre Registros para ver el paso siguiente.',
 
+  // Import checks
+  'The title and its library folder exist.': 'El título y su carpeta de biblioteca existen.',
+  'The library folder is available.': 'La carpeta de biblioteca está disponible.',
+  'The download is in the client.': 'La descarga está en el cliente.',
+  'The download is complete.': 'La descarga está completa.',
+  'The download folder is readable.': 'La carpeta de descarga se puede leer.',
+  'The download folder is inside the downloads folder.': 'La carpeta de descarga está dentro de la carpeta de descargas.',
+  'The video files are found.': 'Se encuentran los archivos de vídeo.',
+  'The destination is inside the library folder.': 'El destino está dentro de la carpeta de biblioteca.',
+  'The file is readable.': 'El archivo se puede leer.',
+  'The destination name is free.': 'El nombre de destino está libre.',
+  'No two files have the same name.': 'Dos archivos no tienen el mismo nombre.',
+  'The file is in the folder of the title.': 'El archivo está en la carpeta del título.',
+  'The library record is updated.': 'El registro de la biblioteca está actualizado.',
+  'The replaced file is removed.': 'El archivo reemplazado se elimina.',
+
   // Progress lines
   'Shared download, {count} targets': 'Descarga compartida, {count} objetivos',
   'ETA unknown': 'ETA desconocido',

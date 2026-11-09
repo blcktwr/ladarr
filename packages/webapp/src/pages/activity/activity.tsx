@@ -1,7 +1,7 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
 import type { LogEntry, LogsResponse, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Check, ChevronDown, ChevronRight, ExternalLink, Pause, Play } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, Pause, Play } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
@@ -86,6 +86,49 @@ function ReleaseDetails({ release }: { release: NonNullable<QueueEntryView['rele
 // The file of an episode: its name, with its size at the end.
 function FileDetails({ file }: { file: NonNullable<QueueEntryView['file']> }) {
   return <Text variant="small">{file.name} ({formatBytes(file.sizeBytes)})</Text>;
+}
+
+// The steps of the import journal. A check with a higher place is done.
+const importStates = ['planned', 'staged', 'published', 'committed', 'retired'] as const;
+const importRank = (entry: QueueEntryView) => (entry.import ? importStates.indexOf(entry.import.state) : 0);
+
+// The checks that ladarr does before a target is complete. The checks of the validation pass together when the plan of
+// the import is made. The steps of the import follow one by one.
+function ImportChecks({ entry }: { entry: QueueEntryView }) {
+  if (entry.stage !== 'validating' && entry.stage !== 'importing') return null;
+  const planned = entry.stage === 'importing';
+  const rank = importRank(entry);
+  const steps = [
+    { label: 'The title and its library folder exist.', done: planned },
+    { label: 'The library folder is available.', done: planned },
+    { label: 'The download is in the client.', done: planned },
+    { label: 'The download is complete.', done: true },
+    { label: 'The download folder is readable.', done: planned },
+    { label: 'The download folder is inside the downloads folder.', done: planned },
+    { label: 'The video files are found.', done: planned },
+    { label: 'The destination is inside the library folder.', done: planned },
+    { label: 'The file is readable.', done: planned },
+    { label: 'The destination name is free.', done: planned },
+    { label: 'No two files have the same name.', done: planned },
+    { label: 'The file is in the folder of the title.', done: rank >= 1 },
+    { label: 'The file has its final name.', done: rank >= 2 },
+    { label: 'The library record is updated.', done: rank >= 3 },
+    { label: 'The replaced file is removed.', done: rank >= 4 },
+  ];
+  return (
+    <List>
+      {steps.map((step) => (
+        <Row key={step.label}>
+          {step.done ? (
+            <Check className="size-4.5 shrink-0 text-success" role="img" aria-label={t('Done')} />
+          ) : (
+            <Circle className="size-4.5 shrink-0 text-fog" role="img" aria-label={t('Waiting')} />
+          )}
+          <Text variant="small">{t(step.label)}</Text>
+        </Row>
+      ))}
+    </List>
+  );
 }
 
 const sourceLabels: Record<string, string> = { webdl: 'WEB-DL', webrip: 'WEBRip', bluray: 'BluRay', hdtv: 'HDTV', dvd: 'DVD', cam: 'CAM', telesync: 'TS' };
@@ -192,6 +235,7 @@ function EntryDetails({ entry, label = true, inline = false, showRejected = true
   // The reason shows under the status of a movie. The list and the episodes keep the status and the hint.
   const reason = entry.reason ? t(entry.reason.message) : null;
   const rejected = showRejected && entry.key === 'no_match' ? (entry.search?.rejected ?? []) : [];
+  const checks = entry.stage === 'validating' || entry.stage === 'importing';
   if (inline) {
     return (
       <div className="grid gap-2 w-full min-w-0">
@@ -207,11 +251,12 @@ function EntryDetails({ entry, label = true, inline = false, showRejected = true
   return (
     <div className="grid gap-4 w-full min-w-0">
       {name}
-      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={Boolean(data) || rejected.length > 0}>
+      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={Boolean(data) || rejected.length > 0 || checks}>
         <TransferProgress entry={entry} />
       </DetailStatus>
       {rejected.length > 0 && <NoMatchReleases items={rejected.map((release) => ({ entry, release }))} onDone={onDone} />}
       {data}
+      <ImportChecks entry={entry} />
     </div>
   );
 }
@@ -470,6 +515,11 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
     }
   }
   const qualities = [...new Set(unique.flatMap((release) => (release.quality ? [release.quality] : [])))];
+  // The target of the checklist: the one that is furthest behind in the import. A target that a reason stops comes
+  // after the targets that move.
+  const importing = entries
+    .filter((entry) => entry.stage === 'validating' || entry.stage === 'importing')
+    .sort((a, b) => Number(Boolean(a.reason)) - Number(Boolean(b.reason)) || (a.stage === b.stage ? importRank(a) - importRank(b) : a.stage === 'validating' ? -1 : 1))[0];
   const message =
     status === 'no_match'
       ? t('The indexers have releases, but none fits your selected qualities.')
@@ -496,8 +546,9 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
             )}
           </div>
         )}
+        {importing && <ImportChecks entry={importing} />}
       </div>
-      {unique.length > 0 && (
+      {(unique.length > 0 || importing) && (
         <div className="mt-6">
           <Divider />
         </div>
