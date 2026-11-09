@@ -434,17 +434,25 @@ export function queueRouter({ db, queue, finder, poller, clients, enqueue, persi
     }
 
     // Counts of a group cover all its entries in the view. A filter picks the groups that have a matching entry.
-    // The progress of a group is that of its least advanced target, so the number of episodes does not matter.
-    const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number; searching: boolean }>();
+    // The progress of a group is that of its least advanced target, so the number of episodes does not matter. The
+    // part of its download is that of its least advanced downloading target, the one that ends the wait for
+    // Validating.
+    const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number; download: number; searching: boolean }>();
     for (const entry of all) {
       if (!shown(entry) || (!f.cleared && entry.clearedAt)) continue;
       const key = entry.season === null ? entry.id : entry.titleKey;
-      const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY, searching: false };
+      const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY, download: -1, searching: false };
       group.entries.push(entry);
       if (matches(entry, f)) group.matching++;
       group.first = Math.min(group.first, entry.createdAt);
       // An available target is finished. It does not hold the group back.
       if (entry.stage !== 'available') group.progress = Math.min(group.progress, progressOf(entry));
+      // A download that works: it has no branch, no reason, and a part of its file from the client.
+      if (entry.stage === 'downloading' && entry.branch === null && entry.reason === null) {
+        const transfer = entry.transferHash ? poller.transfer(entry.transferHash) : undefined;
+        const part = transfer ? (transfer.entryProgress?.[entry.id] ?? transfer.progress) : null;
+        if (part !== null) group.download = group.download < 0 ? part : Math.min(group.download, part);
+      }
       // The search of a title runs now, so its row stays above the rows that only fetch their release.
       if (entry.stage === 'searching' && entry.branch === null) group.searching = true;
       groups.set(key, group);
@@ -456,9 +464,9 @@ export function queueRouter({ db, queue, finder, poller, clients, enqueue, persi
       if (!title) continue;
       const matchesLoading = !f.cleared && !f.priority && (!f.key || f.key === 'searching') && (!f.type || f.type === 'tv') && (!f.q || title.meta.title.toLowerCase().includes(f.q));
       if (!matchesLoading) continue;
-      groups.set(key, { entries: [], matching: 1, first: title.addedAt, progress: STAGE_RANK.get('searching')!, searching: true });
+      groups.set(key, { entries: [], matching: 1, first: title.addedAt, progress: STAGE_RANK.get('searching')!, download: -1, searching: true });
     }
-    const rows = [...groups.entries()].filter(([, g]) => g.matching > 0 && Number.isFinite(g.progress)).sort((a, b) => b[1].progress - a[1].progress || Number(b[1].searching) - Number(a[1].searching) || a[1].first - b[1].first || a[0].localeCompare(b[0]));
+    const rows = [...groups.entries()].filter(([, g]) => g.matching > 0 && Number.isFinite(g.progress)).sort((a, b) => b[1].progress - a[1].progress || b[1].download - a[1].download || Number(b[1].searching) - Number(a[1].searching) || a[1].first - b[1].first || a[0].localeCompare(b[0]));
     const items: QueueRow[] = rows.slice(offset, offset + limit).map(([key, group]) => {
       const first = group.entries[0];
       if (!first) {

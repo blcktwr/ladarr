@@ -403,6 +403,80 @@ describe('order', () => {
     expect(await rows()).toEqual(['group:tv:2', 'group:tv:1']);
   });
 
+  it('puts the movie that has more of its download above the one that was created earlier', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+
+    // A movie that really downloads its release, so the client reports the part of the transfer. The titles differ,
+    // so each search finds its own release.
+    async function downloadingFilm(tmdbId: number, name: string, release: string, createdAt: number) {
+      const film = addFilm(tmdbId);
+      film.meta = { ...film.meta, tmdbId, title: name, originalTitle: name };
+      pipe!.queue.ensure(film.key, null, null).createdAt = createdAt;
+      pipe!.tracker.state.items = [{ title: release, size: 100 * 120 * MIB }];
+      pipe!.finder.requestSearch(film.key);
+      await until(() => pipe!.queue.get(film.key)!.stage === 'downloading');
+      return hashOf(release);
+    }
+
+    const older = await downloadingFilm(11, 'Alpha Film', 'Alpha.Film.2019.1080p.BluRay-GRP', 1_000);
+    const newer = await downloadingFilm(12, 'Beta Film', 'Beta.Film.2019.1080p.WEB-DL-GRP', 2_000);
+    pipe.qbit.progress(older, 0.25);
+    pipe.qbit.progress(newer, 0.75);
+    await until(() => pipe!.poller.transfer(older)?.progress === 0.25 && pipe!.poller.transfer(newer)?.progress === 0.75);
+
+    // The second movie came later, and its transfer has more of the download, so it goes first.
+    expect(await rows()).toEqual(['movie:12', 'movie:11']);
+  });
+
+  it('puts the series whose slowest downloading episode has more above the one that was created earlier', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const slow = title({ key: 'tv:2', tmdbId: 2, rootId: 'tv', meta: { ...title().meta, tmdbId: 2, title: 'Other Show', originalTitle: 'Other Show' }, episodes: [aired(1), aired(2)] });
+    const fast = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
+    pipe.db.data.titles[slow.key] = slow;
+    pipe.db.data.titles[fast.key] = fast;
+    // The first series came first.
+    for (const number of [1, 2]) pipe.queue.ensure('tv:2', 1, number).createdAt = 1_000 + number;
+    for (const number of [1, 2]) pipe.queue.ensure('tv:1', 1, number).createdAt = 2_000 + number;
+
+    // A pack for each series. The files download one before the other.
+    const slowPack = 'Other.Show.S01.1080p.WEB-DL-GRP';
+    const fastPack = 'Show.Name.S01.1080p.WEB-DL-GRP';
+    const slowFiles = ['Other.Show.S01E01.mkv', 'Other.Show.S01E02.mkv'];
+    const fastFiles = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'];
+    pipe.tracker.state.items = [{ title: slowPack, size: 2 * 60 * 45 * MIB, files: slowFiles }];
+    pipe.finder.requestSearch('tv:2');
+    await until(() => ['tv:2:1x1', 'tv:2:1x2'].every((id) => pipe!.queue.get(id)!.stage === 'downloading'));
+    pipe.tracker.state.items = [{ title: fastPack, size: 2 * 60 * 45 * MIB, files: fastFiles }];
+    pipe.finder.requestSearch('tv:1');
+    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => pipe!.queue.get(id)!.stage === 'downloading'));
+
+    const slowHash = hashOf(slowPack, slowFiles);
+    const fastHash = hashOf(fastPack, fastFiles);
+    pipe.qbit.progress(slowHash, 0.7);
+    pipe.qbit.progress(fastHash, 0.62);
+    pipe.qbit.setFiles(slowHash, [
+      { name: `${slowPack}/Other.Show.S01E01.mkv`, size: 60 * 45 * MIB, progress: 0.9 },
+      { name: `${slowPack}/Other.Show.S01E02.mkv`, size: 60 * 45 * MIB, progress: 0.5 },
+    ]);
+    pipe.qbit.setFiles(fastHash, [
+      { name: `${fastPack}/Show.Name.S01E01.mkv`, size: 60 * 45 * MIB, progress: 0.65 },
+      { name: `${fastPack}/Show.Name.S01E02.mkv`, size: 60 * 45 * MIB, progress: 0.6 },
+    ]);
+    await until(
+      () =>
+        pipe!.poller.transfer(slowHash)?.entryProgress?.['tv:2:1x1'] === 0.9 &&
+        pipe!.poller.transfer(slowHash)?.entryProgress?.['tv:2:1x2'] === 0.5 &&
+        pipe!.poller.transfer(fastHash)?.entryProgress?.['tv:1:1x1'] === 0.65 &&
+        pipe!.poller.transfer(fastHash)?.entryProgress?.['tv:1:1x2'] === 0.6,
+    );
+
+    // The first series came first and has the episode that is further, but the second series goes first: its
+    // slowest downloading episode has more of its file than the slowest one of the first series.
+    expect(await rows()).toEqual(['group:tv:1', 'group:tv:2']);
+  });
+
   it('leaves finished rows out of the list and keeps the group', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
