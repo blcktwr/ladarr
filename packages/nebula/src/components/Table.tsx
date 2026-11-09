@@ -1,4 +1,5 @@
-import { Fragment, useId, type ReactNode } from 'react';
+import { AnimatePresence, motion, useReducedMotion, type Transition } from 'motion/react';
+import { Fragment, useId, type MouseEvent, type ReactNode } from 'react';
 import { Actions } from './Actions.tsx';
 import { Skeleton } from './Skeleton.tsx';
 
@@ -25,6 +26,8 @@ type TableProps = ({ title: string; 'aria-label'?: never } | { title?: never; 'a
   loading?: boolean;
   // A control at the right of the title, such as a Button that adds a row. The row of the title is as tall as the control, so the control does not touch the labels of the columns.
   action?: ReactNode;
+  // A row that enters, leaves, or moves goes to its place in 200ms. A table with a detail row does not animate.
+  animated?: boolean;
 };
 
 // The cells of the first and the last column have the padding of the pane, so the text aligns with the content of the pane.
@@ -33,16 +36,37 @@ const cell = 'px-3 first:pl-6 last:pr-6';
 // A click on a control inside a row keeps the action of the control.
 const control = 'button, a, input, select, textarea, [role="button"], [role="link"], [role="menuitem"]';
 
+// The motion of a row follows the theme: the ease-stone curve, in 200ms.
+const transition: Transition = { duration: 0.2, ease: [0.16, 1, 0.3, 1] };
+
 // A table of data on a pane. It goes past the padding of the pane to its two edges, so the grooves between the rows go across the full pane.
 // The grooves are carved in the pane: a dark line, with a bright line under it. A wide table scrolls inside the pane.
 // It can have a title above it, as a Section. While loading is on, three rows show a bar in each cell.
 // A row can have a click that opens something, such as the episodes of a series, and a detail that opens under it, across all the columns.
 // The pointer shows the click, and a click on a control inside the row keeps the action of the control.
-export function Table({ title, 'aria-label': label, columns, rows = [], loading = false, action }: TableProps) {
+// With animated, a row that enters, leaves, or moves takes its place with motion, unless the system asks for reduced motion.
+export function Table({ title, 'aria-label': label, columns, rows = [], loading = false, action, animated = false }: TableProps) {
   const body: Row[] = loading ? ['1', '2', '3'].map(key => ({ key, cells: columns.map((_, index) => <Skeleton key={index} className="inline-block align-middle h-3.5 w-24 max-w-full" />) })) : rows;
   // A width keeps the columns the same for every row set, so the layout does not follow the content.
   const fixed = columns.some(column => column.width);
   const id = useId();
+  const still = useReducedMotion();
+  // A detail is a second row under the row, so the pair cannot leave as one.
+  const moving = animated && !still && body.every(row => !row.detail);
+
+  const click = (row: Row) =>
+    row.onClick
+      ? (event: MouseEvent<HTMLTableRowElement>) => {
+          if (!(event.target instanceof Element) || !event.target.closest(control)) row.onClick?.();
+        }
+      : undefined;
+
+  const cells = (row: Row) =>
+    row.cells.map((content, index) => (
+      <td key={index} className={`${cell} h-16 py-2 ${columns[index]?.align === 'end' ? 'text-right' : 'text-left'}`}>
+        {content}
+      </td>
+    ));
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-5 justify-self-stretch">
       {(title || action) && (
@@ -52,7 +76,7 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
           {action && <div className="ml-auto"><Actions>{action}</Actions></div>}
         </div>
       )}
-      <div className="-mx-6 overflow-x-auto [contain:paint]">
+      <div className="-mx-6 overflow-x-auto overflow-y-hidden [contain:paint]">
         <table aria-label={label} aria-labelledby={title ? id : undefined} aria-busy={loading || undefined} className={`w-full border-separate border-spacing-0 text-ink text-[15px]/6 ${fixed ? 'table-fixed' : ''}`}>
           <colgroup>
             {columns.map((column, index) => <col key={index} style={column.width ? { width: column.width } : undefined} />)}
@@ -67,34 +91,40 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
             </tr>
           </thead>
           <tbody className="[&>tr+tr>td]:shadow-(--groove)">
-            {body.map(row => (
-              <Fragment key={row.key}>
-                <tr
-                  data-row={row.key}
-                  onClick={
-                    row.onClick
-                      ? event => {
-                          if (!(event.target instanceof Element) || !event.target.closest(control)) row.onClick?.();
-                        }
-                      : undefined
-                  }
-                  className={row.onClick ? 'cursor-pointer' : undefined}
-                >
-                  {row.cells.map((content, index) => (
-                    <td key={index} className={`${cell} h-16 py-2 ${columns[index]?.align === 'end' ? 'text-right' : 'text-left'}`}>
-                      {content}
-                    </td>
-                  ))}
-                </tr>
-                {row.detail && (
-                  <tr>
-                    <td colSpan={columns.length} className="px-6 py-2 bg-(--recess-lit)">
-                      {row.detail}
-                    </td>
+            {moving ? (
+              <AnimatePresence initial={false} mode="popLayout">
+                {body.map(row => (
+                  <motion.tr
+                    key={row.key}
+                    data-row={row.key}
+                    layout="position"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={transition}
+                    onClick={click(row)}
+                    className={row.onClick ? 'cursor-pointer' : undefined}
+                  >
+                    {cells(row)}
+                  </motion.tr>
+                ))}
+              </AnimatePresence>
+            ) : (
+              body.map(row => (
+                <Fragment key={row.key}>
+                  <tr data-row={row.key} onClick={click(row)} className={row.onClick ? 'cursor-pointer' : undefined}>
+                    {cells(row)}
                   </tr>
-                )}
-              </Fragment>
-            ))}
+                  {row.detail && (
+                    <tr>
+                      <td colSpan={columns.length} className="px-6 py-2 bg-(--recess-lit)">
+                        {row.detail}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))
+            )}
           </tbody>
         </table>
       </div>

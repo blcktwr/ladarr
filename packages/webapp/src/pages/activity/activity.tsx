@@ -750,6 +750,7 @@ function QueueView() {
               <Table
                 aria-label={t('Queue')}
                 loading={loading}
+                animated
                 columns={[
                   { label: t('Title'), hideLabel: true },
                   { label: t('Actions'), hideLabel: true, align: 'end' },
