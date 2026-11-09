@@ -1,9 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Router, type Request, type RequestHandler, type Response } from 'express';
-import { BackupError, createBackup, isBackupName, readBackup } from './backup.ts';
+import type { RequestHandler, Response } from 'express';
+import { BackupError, createBackup, readBackup } from './backup.ts';
 import { withDefaults, type Db } from '../core/db.ts';
-import { unfinishedImports } from '../library/importer.ts';
+import { unfinishedImports } from '../library/imports/importer.ts';
 import type { EnqueueInput } from '../core/jobs.ts';
 import { log } from '../core/log.ts';
 import { scanJob } from '../library/scan.ts';
@@ -100,69 +100,4 @@ export const restoreGate =
     next();
   };
 
-// A backup holds one database file, packed. The limit is far above the size of any real backup.
 export const MAX_UPLOAD_BYTES = 128 * 1024 ** 2;
-
-// Reads the body of a request into memory, and stops at the limit.
-async function readBody(req: Request, maxBytes: number) {
-  const chunks: Buffer[] = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += chunk.length;
-    if (total > maxBytes) return undefined;
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
-// The body is the backup file. The user sends a file that is not in the backup folder, for example from another machine.
-async function restoreUpload(restorer: Restorer, req: Request, res: Response) {
-  if (!req.is(['application/zip', 'application/octet-stream'])) return void res.status(400).json({ error: 'invalid_archive' });
-  // A refusal by size does not read the whole body, so the connection closes.
-  const tooLarge = () => void res.set('Connection', 'close').status(413).json({ error: 'backup_too_large' });
-  if (Number(req.headers['content-length']) > MAX_UPLOAD_BYTES) return tooLarge();
-  const body = await readBody(req, MAX_UPLOAD_BYTES).catch(() => null);
-  if (body === undefined) return tooLarge();
-  // A client that stops the upload leaves no complete file.
-  if (!body?.length) return void res.status(400).json({ error: 'invalid_archive' });
-  try {
-    res.json({ ok: true, ...(await restorer.restore(body, res)) });
-  } catch (error) {
-    if (error instanceof BackupError) return void res.status(422).json({ error: error.code });
-    if (error instanceof RestoreError) return void res.status(409).json({ error: error.code });
-    throw error;
-  }
-}
-
-// The first run has no owner, so the setup screen has no session. A backup carries its own owner, and the restore
-// takes the place of the setup. The route closes as soon as an owner exists, which is the same window that the setup
-// form already has.
-export function setupRestoreRouter({ restorer, db }: { restorer: Restorer; db: Db }) {
-  const router = Router();
-  router.post('/restore', async (req, res) => {
-    if (db.data.owner) return void res.status(409).json({ error: 'setup_closed' });
-    await restoreUpload(restorer, req, res);
-  });
-  return router;
-}
-
-export function restoreRouter(restorer: Restorer) {
-  const router = Router();
-  router.post('/restore', async (req, res) => {
-    if (!res.locals.session) return void res.status(403).json({ error: 'session_required' });
-    await restoreUpload(restorer, req, res);
-  });
-  router.post('/:name/restore', async (req, res) => {
-    // The API key must not replace the owner login and the API key. Only a session starts a restore.
-    if (!res.locals.session) return void res.status(403).json({ error: 'session_required' });
-    if (!isBackupName(req.params.name)) return void res.status(404).json({ error: 'not_found' });
-    try {
-      res.json({ ok: true, ...(await restorer.restore(req.params.name, res)) });
-    } catch (error) {
-      if (error instanceof BackupError) return void res.status(422).json({ error: error.code });
-      if (error instanceof RestoreError) return void res.status(error.code === 'not_found' ? 404 : 409).json({ error: error.code });
-      throw error;
-    }
-  });
-  return router;
-}

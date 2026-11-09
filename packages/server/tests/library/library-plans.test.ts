@@ -6,8 +6,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createEvents } from '../../src/core/events.ts';
 import { enqueue } from '../../src/core/jobs.ts';
 import { seriesCounts } from '../../src/library/library.ts';
-import { dropTitle, forgetFile, retireFile, seeFile, type Seen } from '../../src/library/library-remove.ts';
-import { createQueue } from '../../src/downloads/queue.ts';
+import { dropTitle, forgetFile, retireFile, seeFile, type Seen } from '../../src/library/tools/remove.ts';
+import { createQueue } from '../../src/library/downloads/queue.ts';
 import { scanTitle } from '../../src/library/scan.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';

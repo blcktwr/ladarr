@@ -1,6 +1,6 @@
-import type { Indexer } from '../../src/acquisition/indexers.ts';
+import type { Indexer } from '../../src/library/grab/indexers.ts';
 import type { Episode, Title } from '../../src/library/library.ts';
-import type { RawRelease } from '../../src/acquisition/torznab.ts';
+import type { RawRelease } from '../../src/library/grab/torznab.ts';
 
 export const NOW = Date.UTC(2024, 5, 1);
 

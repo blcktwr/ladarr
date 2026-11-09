@@ -1,4 +1,4 @@
-import type { Finder, SearchPayload } from '../acquisition/finder.ts';
+import type { Finder, SearchPayload } from '../library/grab/finder.ts';
 import { withTitleLock } from '../core/title-lock.ts';
 import type { Handler } from '../core/worker.ts';
 

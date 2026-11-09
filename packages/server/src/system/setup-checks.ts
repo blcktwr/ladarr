@@ -1,5 +1,5 @@
 import type { SetupChecks } from '@ladarr/shared/types';
-import type { ClientCheck } from '../downloads/client-api.ts';
+import type { ClientCheck } from '../library/downloads/client-api.ts';
 import type { Db } from '../core/db.ts';
 
 // What the setup shows about the two connections that a download needs.

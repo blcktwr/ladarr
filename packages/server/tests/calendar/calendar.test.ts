@@ -1,9 +1,9 @@
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
-import { libraryFilter } from '../../src/library/library-filters.ts';
-import { buildIcal } from '../../src/calendar/calendar-feed.ts';
-import { addDays, calendarEvents, dayOf, isDay, MAX_EVENTS } from '../../src/calendar/calendar.ts';
+import { libraryFilter } from '../../src/library/tools/filters.ts';
+import { buildIcal } from '../../src/library/calendar/calendar-feed.ts';
+import { addDays, calendarEvents, dayOf, isDay, MAX_EVENTS } from '../../src/library/calendar/calendar.ts';
 import { openDb, type Db } from '../../src/core/db.ts';
 import type { Title } from '../../src/library/library.ts';
 import { startTestApp } from '../helpers/test-app.ts';

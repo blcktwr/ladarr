@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { emptyData, openDb, type Db } from '../../src/core/db.ts';
-import type { Indexer, IndexerPush } from '../../src/acquisition/indexers.ts';
+import type { Indexer, IndexerPush } from '../../src/library/grab/indexers.ts';
 import { createLimiter } from '../../src/core/limiter.ts';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
-import { createIndexerService, IndexerError, parseCaps, parseFeed } from '../../src/acquisition/torznab.ts';
+import { createIndexerService, IndexerError, parseCaps, parseFeed } from '../../src/library/grab/torznab.ts';
 
 const FEED = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">

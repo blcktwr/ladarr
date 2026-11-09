@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { emptyData, openDb, SCHEMA_VERSION, type Data } from '../../src/core/db.ts';
 import type { Job } from '../../src/core/jobs.ts';
-import type { QueueEntry } from '../../src/downloads/queue.ts';
+import type { QueueEntry } from '../../src/library/downloads/queue.ts';
 
 const queueKeys = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq'];
 

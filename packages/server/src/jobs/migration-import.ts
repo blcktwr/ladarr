@@ -2,7 +2,7 @@ import type { Db } from '../core/db.ts';
 import type { Events } from '../core/events.ts';
 import { JobError } from '../core/jobs.ts';
 import type { MigrateDeps } from '../migration/migration.ts';
-import { AddError, addTitle } from '../library/library-add.ts';
+import { AddError, addTitle } from '../library/tools/add.ts';
 import { requestVerification } from '../library/verification.ts';
 import { TmdbError } from '../metadata/tmdb.ts';
 import { log } from '../core/log.ts';

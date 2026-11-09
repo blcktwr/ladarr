@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import express from 'express';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { openDb, type Db } from '../../src/core/db.ts';
-import { describeProbe, libraryFilesRouter } from '../../src/library/library-files.ts';
+import { describeProbe, libraryFilesRouter } from '../../src/library/tools/files.ts';
 import type { ffprobeRaw } from '../../src/library/probe.ts';
 import { scanTitle } from '../../src/library/scan.ts';
 import { startTestApp } from '../helpers/test-app.ts';

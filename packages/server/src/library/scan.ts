@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
 import type { Db, MediaFile } from '../core/db.ts';
-import { filesVersion } from './library-remove.ts';
+import { filesVersion } from './tools/remove.ts';
 import { isSample, isVideoFile, parseEpisodes } from './parse.ts';
 import { checkRoot } from './roots.ts';
 

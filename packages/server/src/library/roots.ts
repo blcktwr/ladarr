@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, readdir, realpath, stat, statfs, unlink, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { Router } from 'express';
-import type { MediaType, RootProblem } from '@ladarr/shared/enums';
-import type { FolderListing, RootCheck } from '@ladarr/shared/types';
+import { access, realpath, stat, statfs, unlink, writeFile } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import type { RootProblem } from '@ladarr/shared/enums';
+import type { RootCheck } from '@ladarr/shared/types';
 import type { Db, Root } from '../core/db.ts';
 
 
@@ -33,7 +32,7 @@ export async function checkRoot(path: string, knownDev?: number): Promise<RootCh
   return { problems, freeBytes };
 }
 
-const inside = (parent: string, child: string) => {
+export const inside = (parent: string, child: string) => {
   const path = relative(parent, child);
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path));
 };
@@ -58,101 +57,5 @@ export async function validateNewRoot(db: Db, input: string, configDir?: string,
   return { path, dev: (await stat(path)).dev, check };
 }
 
-const refusal = (result: object): result is Refusal => 'error' in result;
+export const refusal = (result: object): result is Refusal => 'error' in result;
 
-export function rootsRouter(db: Db, { configDir }: { configDir?: string } = {}) {
-  const router = Router();
-
-  router.get('/', async (_req, res) => {
-    const roots = await Promise.all(Object.values(db.data.roots).map(async (root) => ({ ...root, check: await checkRoot(root.path, root.dev) })));
-    res.json({ roots });
-  });
-
-  // The folders inside a folder of the disk, for the picker of the settings. Dot folders stay out.
-  router.get('/browse', async (req, res) => {
-    const input = typeof req.query.path === 'string' ? req.query.path : '';
-    if (!isAbsolute(input)) return void res.status(400).json({ error: 'path_not_absolute' });
-    const path = await realpath(resolve(input)).catch(() => undefined);
-    if (!path) return void res.status(400).json({ error: 'root_unusable', problems: ['not_found'] });
-    const info = await stat(path).catch(() => undefined);
-    if (!info?.isDirectory()) return void res.status(400).json({ error: 'root_unusable', problems: ['not_directory'] });
-    const entries = await readdir(path, { withFileTypes: true }).catch(() => undefined);
-    if (!entries) return void res.status(400).json({ error: 'root_unusable', problems: ['not_readable'] });
-    const folders = entries.filter((entry) => (entry.isDirectory() || entry.isSymbolicLink()) && !entry.name.startsWith('.')).map((entry) => entry.name).sort();
-    res.json({ path, parent: path === resolve('/') ? null : dirname(path), folders } satisfies FolderListing);
-  });
-
-  // Shows what adding the folder would do, and saves nothing.
-  router.post('/check', async (req, res) => {
-    const path = typeof req.body?.path === 'string' ? req.body.path : '';
-    if (!path) return void res.status(400).json({ error: 'invalid_path' });
-    const result = await validateNewRoot(db, path, configDir);
-    if (refusal(result)) return void res.status(400).json(result);
-    res.json({ path: result.path, check: result.check });
-  });
-
-  router.post('/', async (req, res) => {
-    const { path, mediaType } = (req.body ?? {}) as { path?: unknown; mediaType?: MediaType };
-    if (typeof path !== 'string' || !path || (mediaType !== 'movie' && mediaType !== 'tv')) {
-      return void res.status(400).json({ error: 'invalid_root' });
-    }
-    const result = await validateNewRoot(db, path, configDir);
-    if (refusal(result)) return void res.status(400).json(result);
-    // The check awaited, so another request may have added an overlapping folder. Check again before the save.
-    if (Object.values(db.data.roots).some((root) => inside(root.path, result.path) || inside(result.path, root.path))) {
-      return void res.status(400).json({ error: 'root_overlaps_root' });
-    }
-    const root: Root = { id: randomUUID(), path: result.path, mediaType, dev: result.dev };
-    db.data.roots[root.id] = root;
-    // The first root of a media type becomes its default.
-    const defaults = db.data.settings.defaultRoots;
-    defaults[mediaType] ??= root.id;
-    await db.write();
-    res.status(201).json({ ...root, check: result.check });
-  });
-
-  // A saved folder changes its path. The record keeps its id, so the defaults and the settings that name it stay valid.
-  router.patch('/:id', async (req, res) => {
-    const root = db.data.roots[req.params.id];
-    if (!root) return void res.status(404).json({ error: 'not_found' });
-    const path = typeof req.body?.path === 'string' ? req.body.path : '';
-    if (!path) return void res.status(400).json({ error: 'invalid_path' });
-    const titles = Object.values(db.data.titles).filter((title) => title.rootId === root.id).length;
-    if (titles) return void res.status(409).json({ error: 'root_in_use', titles });
-    const result = await validateNewRoot(db, path, configDir, root.id);
-    if (refusal(result)) return void res.status(400).json(result);
-    // The check awaited, so another request may have added an overlapping folder. Check again before the save.
-    if (Object.entries(db.data.roots).some(([id, other]) => id !== root.id && (inside(other.path, result.path) || inside(result.path, other.path)))) {
-      return void res.status(400).json({ error: 'root_overlaps_root' });
-    }
-    root.path = result.path;
-    root.dev = result.dev;
-    await db.write();
-    res.json({ ...root, check: result.check });
-  });
-
-  // The user says that the disk at this path is the right one. This stores its device number again.
-  router.post('/:id/accept-mount', async (req, res) => {
-    const root = db.data.roots[req.params.id];
-    if (!root) return void res.status(404).json({ error: 'not_found' });
-    const info = await stat(root.path).catch(() => undefined);
-    if (!info?.isDirectory()) return void res.status(409).json({ error: 'root_unusable', problems: ['not_found'] });
-    root.dev = info.dev;
-    await db.write();
-    res.json({ ok: true });
-  });
-
-  // The record goes away. The folder and its files stay where they are.
-  router.delete('/:id', async (req, res) => {
-    const root = db.data.roots[req.params.id];
-    if (!root) return void res.status(404).json({ error: 'not_found' });
-    const titles = Object.values(db.data.titles).filter((title) => title.rootId === root.id).length;
-    if (titles) return void res.status(409).json({ error: 'root_in_use', titles });
-    if (db.data.settings.defaultRoots[root.mediaType] === root.id) return void res.status(409).json({ error: 'root_is_default' });
-    delete db.data.roots[root.id];
-    await db.write();
-    res.json({ ok: true });
-  });
-
-  return router;
-}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { bestOf, decide, explainDecision, topRejections, type Context, type Want } from '../../src/acquisition/decide.ts';
-import { defaultProfiles, defaultSizes, type Profile } from '../../src/acquisition/quality.ts';
+import { bestOf, decide, explainDecision, topRejections, type Context, type Want } from '../../src/library/grab/decide.ts';
+import { defaultProfiles, defaultSizes, type Profile } from '../../src/library/grab/quality.ts';
 import { episode, indexer, movie, NOW, release, title } from '../helpers/test-fixtures.ts';
 import { emptyData } from '../../src/core/db.ts';
 

@@ -1,13 +1,10 @@
-import type { RenameCheck, RenameOverview, RenameRow } from '@ladarr/shared/types';
+import type { RenameRow } from '@ladarr/shared/types';
 import { lstat, realpath } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { Router } from 'express';
 import type { Db } from '../core/db.ts';
-import type { ImportStatus } from './import-status.ts';
-import { inside, type JournalStep } from './importer.ts';
-import { keyOf, openJournal, PlanError, readableRoot, titleBusy } from './import-plan.ts';
-import type { EnqueueInput, Job } from '../core/jobs.ts';
-import { episodePath, exampleNames, folderName, moviePath, templateProblem, type NamingTemplates } from './naming.ts';
+import { inside, type JournalStep } from './imports/importer.ts';
+import { keyOf, PlanError, readableRoot } from './imports/plan.ts';
+import { episodePath, folderName, moviePath, type NamingTemplates } from './naming.ts';
 
 export type { RenameRow };
 
@@ -79,80 +76,3 @@ export async function planRename(db: Db, titleKey: string, naming: NamingTemplat
   return { title, rootReal, rows, steps: [...steps.values()] };
 }
 
-const STATUS: Record<string, number> = { title_not_found: 404, root_unavailable: 409, title_busy: 409, nothing_to_rename: 409 };
-
-type Deps = { db: Db; enqueue: (input: EnqueueInput) => Job; status: ImportStatus };
-
-export function renameRouter({ db, enqueue, status }: Deps) {
-  const router = Router();
-  const fail = (res: import('express').Response, error: unknown) => {
-    if (!(error instanceof PlanError)) throw error;
-    res.status(STATUS[error.code] ?? 400).json({ error: error.code });
-  };
-  const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-
-  // The templates of the request, or the saved ones. A template that is not valid never reaches the plan.
-  function templatesOf(body: Record<string, unknown>): NamingTemplates | { invalid: string } {
-    if (body.movie === undefined && body.episode === undefined) return db.data.settings.naming;
-    const next = { movie: body.movie, episode: body.episode };
-    for (const kind of ['movie', 'episode'] as const) if (templateProblem(kind, next[kind])) return { invalid: kind };
-    return next as NamingTemplates;
-  }
-
-  // The names of a sample movie and a sample episode, and the problem of each template.
-  router.post('/examples', (req, res) => {
-    const body = isObject(req.body) ? req.body : {};
-    const problems = { movie: templateProblem('movie', body.movie), episode: templateProblem('episode', body.episode) };
-    res.json({ problems, examples: problems.movie || problems.episode ? null : exampleNames(body as NamingTemplates) } satisfies RenameCheck);
-  });
-
-  router.post('/preview', async (req, res) => {
-    const body = isObject(req.body) ? req.body : {};
-    const naming = templatesOf(body);
-    if ('invalid' in naming) return void res.status(400).json({ error: 'invalid_template', field: naming.invalid });
-    try {
-      const { rows } = await planRename(db, String(body.titleKey ?? ''), naming);
-      res.json({ rows, counts: { rename: rows.filter((row) => row.status === 'rename').length, blocked: rows.filter((row) => row.status === 'blocked').length } });
-    } catch (error) {
-      fail(res, error);
-    }
-  });
-
-  // The titles that new templates would change, with the count of files that change and the count that are blocked.
-  router.post('/overview', async (req, res) => {
-    const body = isObject(req.body) ? req.body : {};
-    const naming = templatesOf(body);
-    if ('invalid' in naming) return void res.status(400).json({ error: 'invalid_template', field: naming.invalid });
-    const titles: { titleKey: string; title: string; year: number | null; rename: number; blocked: number }[] = [];
-    const withFiles = new Set(Object.values(db.data.files).map((file) => file.titleKey));
-    for (const title of Object.values(db.data.titles)) {
-      if (!withFiles.has(title.key)) continue;
-      try {
-        const { rows } = await planRename(db, title.key, naming);
-        const rename = rows.filter((row) => row.status === 'rename').length;
-        const blocked = rows.filter((row) => row.status === 'blocked').length;
-        if (rename || blocked) titles.push({ titleKey: title.key, title: title.meta.title, year: title.meta.year, rename, blocked });
-      } catch (error) {
-        // A root that is not available gives no answer for its titles. The other titles go on.
-        if (!(error instanceof PlanError)) throw error;
-      }
-    }
-    titles.sort((a, b) => a.title.localeCompare(b.title));
-    res.json({ titles: titles.slice(0, 200), total: titles.length } satisfies RenameOverview);
-  });
-
-  // The plan is made again here, with the saved templates.
-  router.post('/apply', async (req, res) => {
-    try {
-      const plan = await planRename(db, String(isObject(req.body) ? req.body.titleKey : ''));
-      if (!plan.steps.length) throw new PlanError('nothing_to_rename');
-      if (titleBusy(db, plan.title.key)) throw new PlanError('title_busy');
-      const journal = await openJournal({ db, enqueue, status }, { kind: 'rename', titleKey: plan.title.key, sourceBase: plan.rootReal, steps: plan.steps });
-      res.status(202).json({ id: journal.id, total: plan.steps.length });
-    } catch (error) {
-      fail(res, error);
-    }
-  });
-
-  return router;
-}

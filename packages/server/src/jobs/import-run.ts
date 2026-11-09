@@ -1,6 +1,6 @@
 import { JobError } from '../core/jobs.ts';
-import { ClientError } from '../downloads/qbittorrent.ts';
-import { createImporter, type ImportDeps } from '../library/importer.ts';
+import { ClientError } from '../library/downloads/qbittorrent.ts';
+import { createImporter, type ImportDeps } from '../library/imports/importer.ts';
 import type { Handler } from '../core/worker.ts';
 
 export function importRunHandler(deps: ImportDeps): Handler {

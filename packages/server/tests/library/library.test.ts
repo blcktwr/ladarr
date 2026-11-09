@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { availability, isMonitored, mergeEpisodes, seriesCounts, titleKey, type Episode, type Title } from '../../src/library/library.ts';
 import { metadataRefreshHandler } from '../../src/jobs/metadata-refresh.ts';
-import { createQueue } from '../../src/downloads/queue.ts';
+import { createQueue } from '../../src/library/downloads/queue.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { enqueue } from '../../src/core/jobs.ts';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';

@@ -1,0 +1,43 @@
+import type { SearchResult } from '@ladarr/shared/types';
+import type { RequestHandler } from 'express';
+import type { Db } from '../core/db.ts';
+import { titleKey } from '../library/library.ts';
+import { TmdbError, type Tmdb } from '../metadata/tmdb.ts';
+
+// The oldest title comes first. A title with no year is not known to be old, so it goes last.
+export const oldestFirst = (results: SearchResult[]) =>
+  [...results].sort((a, b) => (a.year ?? Number.MAX_SAFE_INTEGER) - (b.year ?? Number.MAX_SAFE_INTEGER));
+
+// Marks the results that are in the library already.
+export function inLibrary(db: Db) {
+  return (results: SearchResult[]): SearchResult[] =>
+    results.map(({ mediaType, tmdbId, title, year, overview, posterPath, originalLanguage }) => {
+      const library = db.data.titles[titleKey(mediaType, tmdbId)];
+      return {
+        mediaType,
+        tmdbId,
+        title,
+        year,
+        overview,
+        posterPath,
+        originalLanguage,
+        libraryKey: library?.key ?? null,
+        seriesType: mediaType === 'tv' ? (library?.seriesType ?? null) : null,
+      };
+    });
+}
+
+export function notFoundAsEmpty(err: unknown): undefined {
+  if (err instanceof TmdbError && err.code === 'not_found') return undefined;
+  throw err;
+}
+
+export const searchTarget =
+  (tmdb: Tmdb | undefined): RequestHandler<{ mediaType: string; tmdbId: string }> =>
+  (req, res, next) => {
+    const { mediaType, tmdbId } = req.params;
+    if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
+    if ((mediaType !== 'movie' && mediaType !== 'tv') || !/^[1-9]\d*$/.test(tmdbId)) return void res.status(404).json({ error: 'not_found' });
+    res.locals.target = { mediaType, id: Number(tmdbId) };
+    next();
+  };

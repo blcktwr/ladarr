@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { infoHashOf, magnetHash } from '../../src/acquisition/torrent.ts';
+import { infoHashOf, magnetHash } from '../../src/library/grab/torrent.ts';
 
 describe('infoHashOf', () => {
   const info = Buffer.from('d6:lengthi1000e4:name4:file12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe');

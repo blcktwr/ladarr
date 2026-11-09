@@ -6,8 +6,8 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { catalog, closeLog, configureItemLogs, deleteItemLog, log, logToFile, recentLogs } from '../../src/core/log.ts';
-import { createQueue, type QueueEntry } from '../../src/downloads/queue.ts';
-import { dropTitle } from '../../src/library/library-remove.ts';
+import { createQueue, type QueueEntry } from '../../src/library/downloads/queue.ts';
+import { dropTitle } from '../../src/library/tools/remove.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'ladarr-item-logs-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));

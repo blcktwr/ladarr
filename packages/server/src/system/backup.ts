@@ -3,7 +3,6 @@ import type { BackupRow } from '@ladarr/shared/types';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Router } from 'express';
 import { strFromU8, strToU8, unzip, zip } from 'fflate';
 import { emptyData, SCHEMA_VERSION, type Data, type Db } from '../core/db.ts';
 import { APP_VERSION } from './version.ts';
@@ -126,31 +125,3 @@ export async function pruneBackups(dir: string, keep = KEEP_AUTO) {
   for (const old of auto.slice(keep)) await rm(join(dir, old.name), { force: true });
 }
 
-export function backupRouter(db: Db, dir: string) {
-  const router = Router();
-
-  router.get('/', async (_req, res) => {
-    res.json({ backups: await listBackups(dir) });
-  });
-
-  router.post('/', async (_req, res) => {
-    res.status(201).json({ backup: await createBackup(db, dir, 'manual') });
-  });
-
-  router.param('name', (_req, res, next, name) => (isBackupName(name) ? next() : void res.status(404).json({ error: 'not_found' })));
-
-  router.get('/:name/download', (req, res) => {
-    res.download(join(dir, req.params.name), req.params.name, (err) => {
-      if (err && !res.headersSent) res.status(404).json({ error: 'not_found' });
-    });
-  });
-
-  router.delete('/:name', async (req, res) => {
-    const file = join(dir, req.params.name);
-    if (!(await stat(file).catch(() => undefined))) return void res.status(404).json({ error: 'not_found' });
-    await rm(file);
-    res.json({ ok: true });
-  });
-
-  return router;
-}

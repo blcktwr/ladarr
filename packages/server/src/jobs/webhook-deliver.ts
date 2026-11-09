@@ -1,7 +1,7 @@
 import type { Db } from '../core/db.ts';
 import { JobError } from '../core/jobs.ts';
 import { log } from '../core/log.ts';
-import { DELIVER, MAX_ATTEMPTS, send, type DeliveryPayload } from '../integrations/webhook.ts';
+import { DELIVER, MAX_ATTEMPTS, send, type DeliveryPayload } from '../core/webhook.ts';
 import type { Handler } from '../core/worker.ts';
 
 // A receiver that is busy or down can recover. Another status means that the address or the receiver is wrong.

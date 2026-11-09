@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, sy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { guessTitle } from '../../src/library/library-folders.ts';
+import { guessTitle } from '../../src/library/tools/folders.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { movie, title } from '../helpers/test-fixtures.ts';
 import type { MediaType, Tmdb } from '../../src/metadata/tmdb.ts';

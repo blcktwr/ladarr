@@ -2,19 +2,19 @@ import type { Language, MediaType } from '@ladarr/shared/enums';
 import { Low, Memory, type Adapter } from 'lowdb';
 import { TextFile } from 'lowdb/node';
 import { dirname, join } from 'node:path';
-import type { CompatCommand } from '../integrations/compat-common.ts';
+import type { CompatCommand } from '../compatibility/common.ts';
 import type { Job } from './jobs.ts';
 import type { Override, Title } from '../library/library.ts';
-import type { Indexer } from '../acquisition/indexers.ts';
+import type { Indexer } from '../library/grab/indexers.ts';
 import { randomUUID } from 'node:crypto';
-import type { ClientConfig } from '../downloads/qbittorrent.ts';
-import type { QueueEntry } from '../downloads/queue.ts';
-import type { ImportJournal } from '../library/importer.ts';
+import type { ClientConfig } from '../library/downloads/qbittorrent.ts';
+import type { QueueEntry } from '../library/downloads/queue.ts';
+import type { ImportJournal } from '../library/imports/importer.ts';
 import type { VerificationState } from '../library/verification.ts';
 import type { SourceDownload, SourceEpisode } from '../migration/migration-source.ts';
 import { DEFAULT_NAMING, type NamingTemplates } from '../library/naming.ts';
-import { defaultProfiles, defaultSizes, type Profile, type ReleaseSource, type SizeLimits } from '../acquisition/quality.ts';
-import type { WebhookState } from '../integrations/webhook.ts';
+import { defaultProfiles, defaultSizes, type Profile, type ReleaseSource, type SizeLimits } from '../library/grab/quality.ts';
+import type { WebhookState } from './webhook.ts';
 
 // Change this number when a new version cannot read the file of an old one, or the other way round.
 // Version 2 keeps the queue work in queue.json, so an older version must not open the new db.json.

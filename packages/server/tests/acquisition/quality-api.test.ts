@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { emptyData, withDefaults, type Data } from '../../src/core/db.ts';
-import { QUALITIES } from '../../src/acquisition/quality.ts';
+import { QUALITIES } from '../../src/library/grab/quality.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { title } from '../helpers/test-fixtures.ts';
 

@@ -7,7 +7,7 @@ import { openDb } from '../../src/core/db.ts';
 import { metadataRefreshHandler } from '../../src/jobs/metadata-refresh.ts';
 import { queueInitialHandler } from '../../src/jobs/queue-initial.ts';
 import { createTmdb } from '../../src/metadata/tmdb.ts';
-import { timespan } from '../../src/integrations/compat-common.ts';
+import { timespan } from '../../src/compatibility/common.ts';
 import { FakeRadarr, FakeSonarr, type AddSeriesOptions, type RadarrMovieOptions } from '../helpers/test-seerr.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 

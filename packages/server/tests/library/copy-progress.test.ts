@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createImportStatus } from '../../src/library/import-status.ts';
+import { createImportStatus } from '../../src/library/imports/status.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { movie } from '../helpers/test-fixtures.ts';
 import { noLink, sleep } from '../helpers/test-import.ts';

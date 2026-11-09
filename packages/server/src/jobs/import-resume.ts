@@ -1,6 +1,6 @@
 import type { Db } from '../core/db.ts';
 import { enqueue as enqueueJob } from '../core/jobs.ts';
-import { unfinishedImports } from '../library/importer.ts';
+import { unfinishedImports } from '../library/imports/importer.ts';
 import type { Handler } from '../core/worker.ts';
 
 const RESUME_EVERY_MS = 10 * 60_000;

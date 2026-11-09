@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { decide, type Context, type Want } from '../../src/acquisition/decide.ts';
+import { decide, type Context, type Want } from '../../src/library/grab/decide.ts';
 import { emptyData, type Db, type MediaFile } from '../../src/core/db.ts';
 import { episode, indexer, movie, NOW, release, title } from '../helpers/test-fixtures.ts';
-import { manualUpgradeTargets, upgradeResolutions } from '../../src/acquisition/upgrades.ts';
-import type { Profile } from '../../src/acquisition/quality.ts';
+import { manualUpgradeTargets, upgradeResolutions } from '../../src/library/grab/upgrades.ts';
+import type { Profile } from '../../src/library/grab/quality.ts';
 
 const MIB = 1024 * 1024;
 

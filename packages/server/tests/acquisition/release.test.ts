@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeTitle, parseRelease } from '../../src/acquisition/release.ts';
+import { normalizeTitle, parseRelease } from '../../src/library/grab/release.ts';
 
 describe('parseRelease', () => {
   it.each([

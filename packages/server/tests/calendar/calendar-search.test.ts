@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { BULK_SEARCH_JOB } from '../../src/calendar/calendar-search.ts';
+import { BULK_SEARCH_JOB } from '../../src/library/calendar/calendar-search.ts';
 import { librarySearchHandler } from '../../src/jobs/library-search.ts';
 import { openDb, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
-import { createFinder } from '../../src/acquisition/finder.ts';
+import { createFinder } from '../../src/library/grab/finder.ts';
 import { enqueue, type Job } from '../../src/core/jobs.ts';
-import { createQueue } from '../../src/downloads/queue.ts';
+import { createQueue } from '../../src/library/downloads/queue.ts';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
 import { startPipeline } from '../helpers/test-pipeline.ts';
 import type { Title } from '../../src/library/library.ts';

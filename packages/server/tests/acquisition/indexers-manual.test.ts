@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { openDb } from '../../src/core/db.ts';
 import { createLimiter } from '../../src/core/limiter.ts';
 import { startTestApp } from '../helpers/test-app.ts';
-import { createIndexerService } from '../../src/acquisition/torznab.ts';
+import { createIndexerService } from '../../src/library/grab/torznab.ts';
 
 const CAPS = '<caps><searching><search available="yes" supportedParams="q"/></searching><categories><category id="5000" name="TV"/></categories></caps>';
 

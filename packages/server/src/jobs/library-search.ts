@@ -1,7 +1,7 @@
 import type { Db } from '../core/db.ts';
 import type { EnqueueInput, Job } from '../core/jobs.ts';
-import type { Finder } from '../acquisition/finder.ts';
-import { BULK_SEARCH_JOB, type BulkSearchPayload } from '../calendar/calendar-search.ts';
+import type { Finder } from '../library/grab/finder.ts';
+import { BULK_SEARCH_JOB, type BulkSearchPayload } from '../library/calendar/calendar-search.ts';
 import type { Handler } from '../core/worker.ts';
 
 // One batch ends at 25 titles or 300 started targets, whichever comes first.
