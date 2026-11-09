@@ -11,7 +11,7 @@ import { JobsPanel } from './activity-jobs.tsx';
 import { SeriesBlocklist } from './activity-blocklist.tsx';
 import { MatchDialog } from './activity-match.tsx';
 import { LoadFailed, ModalActions, pageWidth } from '../../components/index.ts';
-import { catalogPath, formatBytes, formatRate, posterUrl, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
+import { catalogPath, formatBytes, posterUrl, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
 import { useLive } from '../../lib/live.ts';
@@ -88,16 +88,14 @@ function FileDetails({ file }: { file: NonNullable<QueueEntryView['file']> }) {
   return <Text variant="small">{file.name} ({formatBytes(file.sizeBytes)})</Text>;
 }
 
-// The progress of a download: the part that is done and the rate of the client.
+// The progress of a download: the part that is done.
 function TransferProgress({ entry }: { entry: QueueEntryView }) {
   const percent = downloadPercent(entry);
   if (percent === null || !entry.transfer) return null;
   return (
     <div className="grid gap-1">
       <Progress value={percent} label={`${entry.label} · ${t('Download')}`} />
-      <Text variant="small">
-        {percent}% · {formatRate(entry.transfer.downloadRate)}
-      </Text>
+      <Text variant="small">{percent}%</Text>
     </div>
   );
 }

@@ -165,8 +165,6 @@ export const statusHelpText = (key: string) => (Object.hasOwn(statusHelp, key) ?
 export const stageColor = (key: string): 'default' | 'accent' | 'success' | 'warning' | 'danger' =>
   key === 'available' ? 'success' : key === 'paused' ? 'warning' : key === 'queued' || key === 'cancelled' ? 'default' : 'accent';
 
-export const formatRate = (bytesPerSecond: number) => `${formatBytes(bytesPerSecond)}/s`;
-
 export function formatDuration(seconds: number) {
   if (seconds < 60) return `${Math.round(seconds)} s`;
   if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
