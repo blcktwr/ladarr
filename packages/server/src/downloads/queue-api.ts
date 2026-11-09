@@ -33,7 +33,9 @@ const MAX_PAGE = 200;
 // for its next search is Searching, also when the last search found no release or no release that fits the preset.
 // Fetching the release belongs to the search, so it shows in the same tab.
 const searchKey = (key: string) => (key === 'waiting' || key === 'not_found' || key === 'no_match' || key === 'fetching' ? 'searching' : key);
-const filterKeyOf = (entry: QueueEntry) => searchKey(queueKey(entry));
+// Validating belongs to the import, so it shows in the same tab.
+const importKey = (key: string) => (key === 'validating' ? 'importing' : key);
+const filterKeyOf = (entry: QueueEntry) => importKey(searchKey(queueKey(entry)));
 
 // The jobs that move a target through the download flow. The jobs page shows only these.
 const ITEM_JOB_TYPES = new Set(['queue.initial', 'queue.search', 'queue.grab', 'import.run']);

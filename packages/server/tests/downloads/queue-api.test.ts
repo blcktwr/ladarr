@@ -298,6 +298,9 @@ describe('requests and summary', () => {
     // Without a reason, the stage is the key.
     pipe!.queue.move(entry, { stage: 'validating', branch: null, reason: null }, 'test');
     expect((await detail()).key).toBe('validating');
+    // Validating belongs to the import tab, so the filter of that tab returns the target.
+    expect(await total('importing')).toBe(1);
+    expect(await total('validating')).toBe(0);
   });
 
   it('pauses the queue from the API and shows it in the summary', async () => {

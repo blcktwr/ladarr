@@ -466,7 +466,7 @@ function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onBack
   );
 }
 
-const keys = ['queued', 'searching', 'downloading', 'validating', 'importing', 'stuck'];
+const keys = ['queued', 'searching', 'downloading', 'importing', 'stuck'];
 
 // The stages of the whole page. The row is wide, so it lies above the container of the queue.
 function StageMenu({ summary, filters, setFilters }: { summary: QueueSummary | undefined; filters: Filters; setFilters: (f: Filters) => void }) {
@@ -474,6 +474,8 @@ function StageMenu({ summary, filters, setFilters }: { summary: QueueSummary | u
   // A target that found no release, or no release that fits the preset, waits for its next search, so it counts in Searching.
   // Fetching the release belongs to the search too, so it counts there as well.
   counts.searching = (counts.searching ?? 0) + (summary?.counts.not_found ?? 0) + (summary?.counts.no_match ?? 0) + (summary?.counts.fetching ?? 0);
+  // Validating belongs to the import, so it counts in Importing.
+  counts.importing = (counts.importing ?? 0) + (summary?.counts.validating ?? 0);
   return (
     <SubMenu
       fill
