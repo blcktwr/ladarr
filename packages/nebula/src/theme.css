@@ -1,0 +1,295 @@
+@import '@fontsource-variable/inter';
+
+/* The classes of the components are in these folders, so the app that uses the theme builds them too. */
+@source './components';
+@source './theme';
+
+/* Hover applies on touch screens too, as it did before Tailwind. */
+@custom-variant hover (&:hover);
+/* A key is pointed at when the pointer is on it, or the arrow keys are on it in a list. data-state=hover forces it, for the sheet. */
+@custom-variant pointed (&:is(:hover, [data-highlighted], [data-state=hover]):not([data-disabled]));
+/* A key is pressed when it is held down. data-state=press forces it, for the sheet. */
+@custom-variant pressed (&:is(:active, [data-state=press]):not([data-disabled]));
+
+/* A line through the middle that strikes out a disabled component. It goes a little past the edges. */
+@utility struck {
+  border-image: var(--strike) 0 fill / 0 / 4px;
+}
+
+/* Colours of the Spire mark. The light theme sets them again below. */
+@theme static {
+  --font-sans: 'Inter Variable', sans-serif;
+  --ease-stone: cubic-bezier(.16, 1, .3, 1);
+  --animate-turn: turn 900ms linear infinite;
+  @keyframes turn {
+    to { rotate: 1turn; }
+  }
+  /* A bar a third of its track wide goes from before the track to past its end: 300% of the bar is the track. */
+  --animate-sweep: sweep 1.4s ease-in-out infinite;
+  @keyframes sweep {
+    from { translate: -100%; }
+    to { translate: 300%; }
+  }
+  /* The arrow of the download icon falls into the tray, waits there, then lifts again. The fall accelerates, so it reads as weight. */
+  --animate-drop: drop 1.8s infinite;
+  @keyframes drop {
+    0%, 100% { transform: translateY(-2px); animation-timing-function: cubic-bezier(.55, 0, .9, .45); }
+    42% { transform: translateY(2px); animation-timing-function: linear; }
+    52% { transform: translateY(2px); animation-timing-function: cubic-bezier(.1, .55, .45, 1); }
+    100% { transform: translateY(-2px); }
+  }
+  /* The tray takes the weight of the arrow for a moment. */
+  --animate-tray: tray 1.8s ease-in-out infinite;
+  @keyframes tray {
+    0%, 44% { transform: translateY(0); }
+    50% { transform: translateY(0.6px); }
+    58%, 100% { transform: translateY(0); }
+  }
+  /* The grain of the waiting icon falls from the top bulb to the bottom one. It fades before the glass turns. */
+  --animate-fall: fall 2.4s ease-in-out infinite;
+  @keyframes fall {
+    0% { transform: translateY(0); opacity: 0; }
+    12% { opacity: 1; }
+    58% { transform: translateY(8px); opacity: 1; }
+    72%, 100% { transform: translateY(8px); opacity: 0; }
+  }
+  /* The glass of the waiting icon turns over when the grain has fallen. Half a turn gives the same shape, so the loop has no jump. */
+  --animate-flip: flip 2.4s ease-in-out infinite;
+  @keyframes flip {
+    0%, 72% { transform: rotate(0deg); }
+    92%, 100% { transform: rotate(180deg); }
+  }
+  /* The magnifier of the searching icon wanders on two axes with different periods, so the float has no set path. */
+  --animate-drift-x: drift-x 3.1s ease-in-out infinite;
+  @keyframes drift-x {
+    0%, 100% { transform: translateX(0); }
+    19% { transform: translateX(0.9px); }
+    37% { transform: translateX(1.1px); }
+    46% { transform: translateX(0.2px); }
+    64% { transform: translateX(-1px); }
+    81% { transform: translateX(-0.6px); }
+  }
+  --animate-drift-y: drift-y 4.3s ease-in-out infinite;
+  @keyframes drift-y {
+    0%, 100% { transform: translateY(0); }
+    14% { transform: translateY(-0.7px); }
+    29% { transform: translateY(-1.2px); }
+    43% { transform: translateY(-0.3px); }
+    61% { transform: translateY(0.9px); }
+    78% { transform: translateY(0.5px); }
+  }
+  /* The line of the searching icon sweeps across the lens. */
+  --animate-sweep-x: sweep-x 1.4s ease-in-out infinite;
+  @keyframes sweep-x {
+    0%, 100% { transform: translateX(-2px); }
+    50% { transform: translateX(2px); }
+  }
+  /* The line of the validating icon scans the page from top to bottom. */
+  --animate-scan: scan 1.8s ease-in-out infinite;
+  @keyframes scan {
+    0% { transform: translateY(-2px); opacity: 0; }
+    15% { opacity: 1; }
+    75% { transform: translateY(7px); opacity: 1; }
+    90%, 100% { transform: translateY(7px); opacity: 0; }
+  }
+  /* The arrow of the importing icon goes into the box and fades at the far side, then the next one comes. */
+  --animate-enter: enter 2.2s ease-in-out infinite;
+  @keyframes enter {
+    0%, 6% { transform: translateX(0); opacity: 0; }
+    14% { opacity: 1; }
+    48%, 56% { transform: translateX(6px); opacity: 1; }
+    64%, 100% { transform: translateX(6px); opacity: 0; }
+  }
+  /* The wall of the importing icon closes after the arrow goes in. */
+  --animate-seal: seal 2.2s ease-in-out infinite;
+  @keyframes seal {
+    0%, 64% { opacity: 0; }
+    72%, 88% { opacity: 1; }
+    95%, 100% { opacity: 0; }
+  }
+  /* A check or an X draws once, then stays. The path has a length of 1. */
+  --animate-draw: draw 420ms cubic-bezier(.16, 1, .3, 1) forwards;
+  @keyframes draw {
+    from { stroke-dashoffset: 1; }
+    to { stroke-dashoffset: 0; }
+  }
+  /* The bars of the pause icon settle when the target pauses. */
+  --animate-settle: settle 200ms cubic-bezier(.16, 1, .3, 1) forwards;
+  @keyframes settle {
+    from { transform: translateY(-1.5px); opacity: .55; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  /* The blocked icon breathes in brightness, so the state that waits for a person reads as live. */
+  --animate-breathe: breathe 2s ease-in-out infinite;
+  @keyframes breathe {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .6; }
+  }
+
+  --color-night: #161616;
+  --color-night-deep: #040404;
+  --color-stone: #1a1c1d;
+  --color-stone-rim: rgb(255 255 255 / 7%);
+  /* The dark edge around a block of stone. */
+  --color-outline: #0a0b0b;
+  /* The line around a raised key. It is gray, so that it does not look black on a pane. */
+  --color-edge: #1c1e1f;
+  /* The stone of a slab that lies over the page, such as a list or a panel. */
+  --color-slab: #222526;
+  /* The stone under the content of a page, where fields lie. It differs from a field and from the page, so that neither gets lost. */
+  --color-pane: #303132;
+  /* The veil over the content while it loads, and over the whole app while a modal is open. */
+  --color-veil: rgb(4 4 4 / 55%);
+  /* The flat stone of a field, a checkbox and a switch. */
+  --color-field: #222526;
+  --color-field-hover: #2a2e2f;
+  --color-fog: #949f9f;
+  --color-ink: #d4dada;
+  --color-ink-strong: #eef2f1;
+  --color-point: #f6e9d3;
+  /* The colour of mist. */
+  --color-haze: rgb(190 200 200);
+  --color-accent: #ffffff;
+  --color-error: #e07a6a;
+  --color-success: #7fb48b;
+  /* The label on a dark color, and the label on a light color. */
+  --color-ink-light: #ffffff;
+  --color-ink-dark: #1a1408;
+  --color-warning: #d8a85a;
+  /* The navbar is the nearest thing on screen, so it is the darkest. */
+  --color-navbar: #070808;
+  --color-tab: #2b2f30;
+  /* A small icon button sinks into the stone when pressed. */
+  --color-dent: rgb(0 0 0 / 30%);
+}
+
+@layer base {
+  /* The stone that keys are made of, in each state. A component takes these through Tailwind, as in shadow-(--edge). */
+  :root {
+    /* Carved stone: a bevelled block. Its thickness shows below its face, so the face stays one even surface. */
+    --stone: linear-gradient(#2c3032, #222527);
+    --stone-lit: linear-gradient(#383d3f, #2b2f30);
+    --stone-sunk: #18191a;
+    --edge: inset 0 1px 0 rgb(255 255 255 / 10%), 0 0 0 1px var(--color-edge), 0 3px 0 var(--color-edge), 0 4px 8px rgb(0 0 0 / 20%);
+    --edge-lit: inset 0 1px 0 rgb(255 255 255 / 16%), 0 0 0 1px var(--color-edge), 0 3px 0 var(--color-edge), 0 4px 8px rgb(0 0 0 / 20%);
+    --edge-sunk: inset 0 2px 5px rgb(0 0 0 / 70%), 0 0 0 1px var(--color-edge), 0 1px 0 rgb(255 255 255 / 5%);
+    /* The small key of a switch has the edge without the shadow. */
+    --thumb-edge: inset 0 1px 0 rgb(255 255 255 / 10%), 0 0 0 1px var(--color-outline), 0 3px 0 var(--color-outline);
+    --emboss: 0 -1px 0 rgb(0 0 0 / 55%);
+    /* Ghost has no block to raise: pointing at it carves a recess. */
+    --recess-lit: rgb(0 0 0 / 22%);
+    --recess-sunk: rgb(0 0 0 / 35%);
+    --recess-edge-lit: inset 0 1px 3px rgb(0 0 0 / 55%), 0 1px 0 rgb(255 255 255 / 4%);
+    --recess-edge-sunk: inset 0 2px 5px rgb(0 0 0 / 70%), 0 1px 0 rgb(255 255 255 / 5%);
+    /* A key that is on, such as a checked checkbox or switch, is made of the accent, with the same relief. */
+    --key: linear-gradient(#ffffff, #e3e7e7);
+    --key-sunk: #e3e7e7;
+    --key-edge: inset 0 1px 0 #ffffff, 0 3px 0 #8f9999, 0 0 0 1px var(--color-outline), 0 4px 8px rgb(0 0 0 / 50%);
+    /* A tag on a poster, such as the type of content. The shadow follows its notch. */
+    --bookmark-edge: inset 0 1px 0 #ffffff;
+    --bookmark-shadow: 0 0 1px rgb(0 0 0 / 70%), 0 1px 0 rgb(0 0 0 / 45%), 0 3px 6px rgb(0 0 0 / 35%);
+    /* A key made of red, for an action that destroys data. It has the relief of a key. */
+    --danger: linear-gradient(#d93a30, #aa221b);
+    --danger-lit: linear-gradient(#e44a3f, #b82a22);
+    --danger-sunk: #8a1c16;
+    --danger-edge: inset 0 1px 0 rgb(255 255 255 / 30%), 0 3px 0 #5c120e, 0 0 0 1px #3a0c09, 0 4px 8px rgb(0 0 0 / 50%);
+    /* The fills of an alert with a tone. They have the relief of a key. */
+    --success: linear-gradient(#43895c, #286a3e);
+    --warning: linear-gradient(#e6b866, #c8923a);
+    --success-edge: inset 0 1px 0 rgb(255 255 255 / 30%), 0 3px 0 #17452b, 0 0 0 1px #0c2a1a, 0 4px 8px rgb(0 0 0 / 50%);
+    --warning-edge: inset 0 1px 0 rgb(255 255 255 / 40%), 0 3px 0 #7d5516, 0 0 0 1px #4d340d, 0 4px 8px rgb(0 0 0 / 50%);
+    /* The bar on the current item is a small block of the accent. Its thickness shows below it. */
+    --bar-edge: 0 1px 0 #8f9999, 0 2px 4px rgb(0 0 0 / 50%);
+    /* A slab casts a shadow on the page: a list below it, a side panel to its left. */
+    --slab-shadow: inset 0 1px 0 rgb(255 255 255 / 8%), 0 0 0 1px var(--color-outline), 0 12px 32px rgb(0 0 0 / 50%);
+    --panel-shadow: 0 0 0 1px var(--color-outline), -12px 0 32px rgb(0 0 0 / 50%);
+    --navbar-edge: 0 1px 0 rgb(255 255 255 / 5%);
+    /* The groove between the rows of a table, carved in the pane: a dark line, and the light from above on its lower edge. */
+    --groove: inset 0 1px 0 rgb(0 0 0 / 35%), inset 0 2px 0 rgb(255 255 255 / 5%);
+    /* The line between two parts of a pane: a groove deeper than the groove of a table. Its two lines run the full width. */
+    --divider:
+      linear-gradient(rgb(0 0 0 / 65%), rgb(0 0 0 / 65%)),
+      linear-gradient(rgb(255 255 255 / 12%), rgb(255 255 255 / 12%));
+    /* The page under everything: near-black with haze, and the Spire's grain over it. The Background component shows it. */
+    --backdrop:
+      var(--grain),
+      radial-gradient(50% 30% at 22% 28%, rgb(170 180 180 / 6%), transparent),
+      radial-gradient(45% 28% at 80% 58%, rgb(170 180 180 / 5%), transparent),
+      radial-gradient(64% 64% at 50% 46%, var(--color-night), var(--color-night-deep));
+
+    /* The Spire's grain. It also dithers the banding out of dark gradients. */
+    --grain-texture: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' seed='13' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  .14 0 0 0 -.03'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+    /* Off for now. Set --grain back to var(--grain-texture) to bring it back. */
+    --grain: none;
+    /* The line of the struck utility: 15° off level, in the text colour. */
+    --strike: linear-gradient(15deg, transparent calc(50% - 1.25px), currentColor calc(50% - .5px) calc(50% + .5px), transparent calc(50% + 1.25px));
+    --icon-close: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'><path d='M18 6 6 18M6 6l12 12'/></svg>");
+  }
+
+  /* The same marks in daylight. The stone is pale, and the light from above casts softer shadows. */
+  [data-theme=light] {
+    --color-night: #f5f6f6;
+    --color-night-deep: #e2e6e6;
+    --color-stone-rim: rgb(0 0 0 / 8%);
+    --color-outline: #c4cbcb;
+    --color-edge: #c4cbcb;
+    --color-slab: #fbfcfc;
+    --color-pane: #fbfcfc;
+    --color-veil: rgb(245 246 246 / 55%);
+    --color-field: #e3e7e7;
+    --color-field-hover: #eaeded;
+    --color-fog: #5d6969;
+    --color-ink: #273030;
+    --color-ink-strong: #0c1010;
+    --color-point: #8a5a1c;
+    --color-haze: rgb(30 40 40);
+    --color-accent: #000000;
+    --color-error: #c2412f;
+    --color-success: #2d7a46;
+    --color-warning: #94650f;
+    /* In daylight the nearest thing is the brightest. */
+    --color-navbar: #ffffff;
+    --color-tab: #e3e7e7;
+    --color-dent: rgb(0 0 0 / 10%);
+
+    --stone: linear-gradient(#fbfcfc, #eaeded);
+    --stone-lit: linear-gradient(#ffffff, #f3f5f5);
+    --stone-sunk: #e1e5e5;
+    --edge: inset 0 1px 0 rgb(255 255 255 / 90%), 0 0 0 1px var(--color-edge), 0 3px 0 var(--color-edge), 0 4px 8px rgb(0 0 0 / 10%);
+    --edge-lit: inset 0 1px 0 #ffffff, 0 0 0 1px var(--color-edge), 0 3px 0 var(--color-edge), 0 4px 8px rgb(0 0 0 / 10%);
+    --edge-sunk: inset 0 2px 5px rgb(0 0 0 / 18%), 0 0 0 1px var(--color-edge), 0 1px 0 rgb(255 255 255 / 80%);
+    --thumb-edge: inset 0 1px 0 rgb(255 255 255 / 90%), 0 0 0 1px var(--color-outline), 0 3px 0 var(--color-outline);
+    --emboss: 0 1px 0 rgb(255 255 255 / 80%);
+    --recess-lit: rgb(0 0 0 / 5%);
+    --recess-sunk: rgb(0 0 0 / 9%);
+    --recess-edge-lit: inset 0 1px 3px rgb(0 0 0 / 14%), 0 1px 0 rgb(255 255 255 / 80%);
+    --recess-edge-sunk: inset 0 2px 5px rgb(0 0 0 / 20%), 0 1px 0 rgb(255 255 255 / 80%);
+    --key: linear-gradient(#34383a, #000000);
+    --key-sunk: #000000;
+    --key-edge: inset 0 1px 0 rgb(255 255 255 / 25%), 0 3px 0 #000000, 0 0 0 1px #000000, 0 4px 8px rgb(0 0 0 / 20%);
+    --bookmark-edge: inset 0 1px 0 rgb(255 255 255 / 25%);
+    --bookmark-shadow: 0 0 1px rgb(0 0 0 / 25%), 0 1px 0 rgb(0 0 0 / 12%), 0 3px 6px rgb(0 0 0 / 12%);
+    --danger-edge: inset 0 1px 0 rgb(255 255 255 / 40%), 0 3px 0 #6e1812, 0 0 0 1px #6e1812, 0 4px 8px rgb(0 0 0 / 20%);
+    --success-edge: inset 0 1px 0 rgb(255 255 255 / 30%), 0 3px 0 #17452b, 0 0 0 1px #17452b, 0 4px 8px rgb(0 0 0 / 20%);
+    --warning-edge: inset 0 1px 0 rgb(255 255 255 / 40%), 0 3px 0 #7d5516, 0 0 0 1px #7d5516, 0 4px 8px rgb(0 0 0 / 20%);
+    --bar-edge: 0 1px 0 #000000, 0 2px 4px rgb(0 0 0 / 15%);
+    --slab-shadow: inset 0 1px 0 #ffffff, 0 0 0 1px var(--color-outline), 0 8px 24px rgb(0 0 0 / 12%);
+    --panel-shadow: 0 0 0 1px var(--color-outline), -8px 0 24px rgb(0 0 0 / 12%);
+    --navbar-edge: 0 1px 0 rgb(0 0 0 / 8%);
+    --groove: inset 0 1px 0 rgb(0 0 0 / 10%), inset 0 2px 0 #ffffff;
+    --divider:
+      linear-gradient(rgb(0 0 0 / 30%), rgb(0 0 0 / 30%)),
+      linear-gradient(#ffffff, #ffffff);
+    /* In daylight the haze is brighter than the ground. */
+    --backdrop:
+      var(--grain),
+      radial-gradient(50% 30% at 22% 28%, rgb(255 255 255 / 60%), transparent),
+      radial-gradient(45% 28% at 80% 58%, rgb(255 255 255 / 50%), transparent),
+      radial-gradient(64% 64% at 50% 46%, var(--color-night), var(--color-night-deep));
+  }
+
+  /* Text keeps the browser's normal line height, as before Tailwind; preflight sets 1.5. */
+  html { line-height: normal; }
+
+  [data-theme] { color: var(--color-ink); }
+}

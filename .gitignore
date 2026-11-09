@@ -1,0 +1,13 @@
+node_modules
+config
+dist
+.env
+.tmp-def
+.tmp-codex
+data
+test-results
+playwright-report
+bench/results.json
+.artifacts
+*.oci.tar
+.plans

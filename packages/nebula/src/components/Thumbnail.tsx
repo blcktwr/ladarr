@@ -1,0 +1,103 @@
+import { useState } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
+import { block, bookmark } from '../theme/stone.ts';
+import { Checkbox } from './Checkbox.tsx';
+import { Skeleton } from './Skeleton.tsx';
+
+// The width of the poster. xs is for a row of a list, which has its own data next to the poster. md is the size of a list of posters. lg is for a single poster, such as on a Backdrop.
+const sizes = { xs: 'w-20', sm: 'w-32', md: 'w-40', lg: 'w-56' };
+
+type Content = {
+  // The poster. It is at 2:3, and it fills that box. An empty image shows the bare block.
+  image: string;
+  title: string;
+  // A number for a film, or a text for a series, such as 2019–2023.
+  year: number | string;
+};
+
+// While loading is on, the content is not necessary.
+type ThumbnailProps = (Content | ({ loading: true } & Partial<Content>)) & {
+  // The skeleton of the thumbnail while its data loads: a pulse on the block, and a bar for the title and for the year.
+  loading?: boolean;
+  // The type of content, such as Movies, Series or Anime. It shows as a bookmark at the top left corner of the poster, with its text from top to bottom.
+  type?: string;
+  // Elements that show over the poster, on a scrim, when the pointer or the focus is on the poster. They are at the bottom center, such as buttons.
+  overlay?: ReactNode;
+  // With onSelectedChange, a checkbox at the top right corner of the poster selects it. The checkbox shows when the pointer or the focus is on the poster. While it is on, it always shows.
+  selected?: boolean;
+  onSelectedChange?: (selected: boolean) => void;
+  size?: keyof typeof sizes;
+  className?: string;
+};
+
+// A poster of a film or a series, with its title and its year under it, and its type on a bookmark at the top left corner.
+// The poster is a block of stone. While the image loads, the skeleton shows on the block. Then the image fades in. If the image does not load, the bare block stays.
+// The title has one row, and a long title is cut, so the years of a row of posters stay on one line. The pointer on the title shows all of it.
+// className is for layout only, such as a margin.
+export function Thumbnail({ image = '', title = '', year = '', loading = false, type, overlay, selected = false, onSelectedChange, size = 'md', className = '' }: ThumbnailProps) {
+  // The image that ended its load, so a new image starts with the skeleton.
+  const [done, setDone] = useState('');
+  const ready = done === image;
+  // While it loads, there is nothing to select.
+  const selectable = onSelectedChange && !loading;
+  // Ctrl or Cmd and a click on the poster or its title select it too. A click on a button or on the checkbox does its own work.
+  const select = (event: MouseEvent) => {
+    if (!selectable || (event.target as Element).closest('button, label')) return;
+    event.preventDefault();
+    onSelectedChange(!selected);
+  };
+  return (
+    // On a Mac, Ctrl and a click give no click, but a context menu with the left button.
+    <figure
+      aria-busy={loading || undefined}
+      onClick={event => (event.ctrlKey || event.metaKey) && select(event)}
+      onContextMenu={event => event.ctrlKey && event.button === 0 && select(event)}
+      className={`relative grid content-start gap-3 ${sizes[size]} max-w-full ${className}`}
+    >
+      <div className={`${block} group relative w-full aspect-2/3 rounded-md overflow-hidden`}>
+        {(loading || (image && !ready)) && <Skeleton className="absolute inset-0" />}
+        {/* The title below names the image, so the image has no text of its own. */}
+        {!loading && image && (
+          <img
+            src={image}
+            alt=""
+            loading="lazy"
+            onLoad={() => setDone(image)}
+            onError={() => setDone(image)}
+            className={`absolute inset-0 size-full object-cover transition-opacity duration-200 ease-stone motion-reduce:transition-none ${ready ? 'opacity-100' : 'opacity-0'}`}
+          />
+        )}
+        {overlay && !loading && (
+          <div className="absolute inset-0 flex flex-wrap items-end justify-center gap-3 p-3 bg-night-deep/60 opacity-0 transition-opacity duration-200 ease-stone motion-reduce:transition-none group-hover:opacity-100 group-focus-within:opacity-100">
+            {overlay}
+          </div>
+        )}
+        {selectable && (
+          <div className={`absolute top-2 right-2 transition-opacity duration-200 ease-stone motion-reduce:transition-none ${selected ? '' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}>
+            <Checkbox aria-label={title} checked={selected} onCheckedChange={onSelectedChange} />
+          </div>
+        )}
+      </div>
+      <figcaption className="grid grid-cols-[minmax(0,1fr)] gap-1 px-1.5">
+        {loading ? (
+          // The bars have the height of the lines of the title and of the year.
+          <>
+            <Skeleton className="h-3.5 my-0.75 w-3/4" />
+            <Skeleton className="h-3.25 w-10" />
+          </>
+        ) : (
+          <>
+            <span title={title} className="truncate text-ink text-[15px]/5 font-medium">{title}</span>
+            <span className="text-fog text-[13px]/none">{year}</span>
+            {/* The bookmark hangs from the top edge of the poster, with a notch in the bottom edge. It is in the caption, after the year, so its text names the figure after the title and the year. */}
+            {type && (
+              <span className={`${bookmark} absolute top-0 left-1.5 flex w-6 min-h-14 items-center justify-center pt-2 pb-4 rounded-b-sm text-center text-[11px]/none font-[550] tracking-[.02em] [writing-mode:vertical-rl] [clip-path:polygon(0_0,100%_0,100%_100%,50%_calc(100%_-_0.5rem),0_100%)]`}>
+                <span className="rotate-180">{type}</span>
+              </span>
+            )}
+          </>
+        )}
+      </figcaption>
+    </figure>
+  );
+}

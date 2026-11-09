@@ -1,0 +1,16 @@
+services:
+  ladarr:
+    build: .
+    image: ladarr:${LADARR_TAG:-local}
+    user: "${LADARR_UID:-1000}:${LADARR_GID:-1000}"
+    restart: unless-stopped
+    # After this time, Docker sends SIGKILL. See docs/installation.md, section Stop and restart.
+    stop_grace_period: 30s
+    ports:
+      - "${LADARR_PORT:-3000}:3000"
+    environment:
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+      LADARR_URL_BASE: ${LADARR_URL_BASE:-}
+    volumes:
+      - ${LADARR_CONFIG:-./config}:/config
+      - ${LADARR_DATA:-./data}:/data

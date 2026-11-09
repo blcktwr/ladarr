@@ -1,0 +1,10 @@
+{
+  "name": "@ladarr/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./config": "./src/config.ts",
+    "./enums": "./src/enums.ts",
+    "./types": "./src/types.ts"
+  }
+}

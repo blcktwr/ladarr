@@ -1,0 +1,37 @@
+@import "tailwindcss";
+@import "nebula/theme.css";
+
+/* The page under the background. Its color shows when the window scrolls past the end and while the browser paints the page in tiles, so it must not be white. */
+html {
+  background-color: var(--color-night-deep);
+}
+
+/* A box that holds more than its height or width shows a thin round thumb in the stone colors, on a clear track.
+   A box that fits shows no scroll bar. Firefox reads the properties, and the other browsers read the pseudo-elements. */
+@supports (-moz-appearance: none) {
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-haze) 32%, transparent) transparent;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--color-haze) 32%, transparent);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--color-haze) 55%, transparent);
+}
