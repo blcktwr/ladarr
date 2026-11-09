@@ -27,12 +27,12 @@ type Target = { titleKey: string; season?: number; number?: number };
 type Episode = EpisodeRef;
 
 const PAGE_SIZE = 48;
-// The catalog has the margins of the app. The thumbnails lie on the page with no pane.
+// The title page keeps the margins of the app. The thumbnails lie on the page with no pane.
 const column = `grid gap-8 ${pageWidth}`;
-// The catalog uses the full width of the page, like the search results.
+// The catalog has the margins of the app.
 const catalog = 'grid gap-8 p-6';
-// The title of the catalog keeps the margins of the app, so it does not follow the full width of the thumbnails.
-const catalogTitle = 'mx-auto w-[min(1200px,calc(100%-40px))]';
+// The title and the thumbnails of the catalog share a centered column, and their content aligns at its left edge.
+const catalogColumn = 'mx-auto w-[min(1200px,calc(100%-40px))]';
 
 function TitlePoster({ title, selected, onSelectedChange }: { title: TitleSummary; selected: boolean; onSelectedChange: (selected: boolean) => void }) {
   return (
@@ -79,7 +79,7 @@ function LibraryList() {
   if (error && !data) {
     return (
       <div className={catalog}>
-        <div className={catalogTitle}>
+        <div className={catalogColumn}>
           <Text variant="title">{t('Catalog')}</Text>
         </div>
         <LoadFailed onRetry={reload} />
@@ -89,10 +89,12 @@ function LibraryList() {
   if (loading && !data) {
     return (
       <div className={catalog}>
-        <div className={catalogTitle}>
+        <div className={catalogColumn}>
           <Text variant="title">{t('Catalog')}</Text>
         </div>
-        <LoadingGallery />
+        <div className={catalogColumn}>
+          <LoadingGallery />
+        </div>
       </div>
     );
   }
@@ -101,7 +103,7 @@ function LibraryList() {
 
   return (
     <div className={catalog}>
-      <div className={`${catalogTitle} flex flex-wrap items-center justify-between gap-4`}>
+      <div className={`${catalogColumn} flex flex-wrap items-center justify-between gap-4`}>
         <Text variant="title">{t('Catalog')}</Text>
         <Actions>
           <BulkActions selection={selection} onRemove={setRemoval} />
@@ -138,13 +140,15 @@ function LibraryList() {
       {items.length === 0 ? (
         <EmptyState>{view !== 'all' ? t('No titles match this filter.') : type === 'all' ? t('Your catalog is empty. Search for a title to add it.') : t('No titles of this type.')}</EmptyState>
       ) : (
-        <Gallery>
-          {items.map((title) => (
-            <Actions key={title.key}>
-              <TitlePoster title={title} selected={selection.has(title.key)} onSelectedChange={() => selection.toggle(title.key)} />
-            </Actions>
-          ))}
-        </Gallery>
+        <div className={catalogColumn}>
+          <Gallery>
+            {items.map((title) => (
+              <Actions key={title.key}>
+                <TitlePoster title={title} selected={selection.has(title.key)} onSelectedChange={() => selection.toggle(title.key)} />
+              </Actions>
+            ))}
+          </Gallery>
+        </div>
       )}
       {hasNextPage && <div ref={more} aria-hidden="true" className="h-px" />}
     </div>
