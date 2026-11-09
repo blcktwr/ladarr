@@ -30,7 +30,7 @@ async function rejectedFilm(items: { title: string; size: number }[]) {
 }
 
 describe('the rejected releases of a search with no match', () => {
-  it('lists the releases that only the preferences rejected, and grabs one by hand', async () => {
+  it('lists every release that the search rejected, and grabs a grabbable one by hand', async () => {
     const { entry, detail } = await rejectedFilm([
       { title: LOW, size: LOW_SIZE },
       { title: WRONG, size: 100 * 120 * MIB },
@@ -39,7 +39,8 @@ describe('the rejected releases of a search with no match', () => {
     const view = await detail();
     expect(Array.isArray(view.search.rejected)).toBe(true);
     // A 720p BluRay that the default 1080p/2160p profiles reject for its quality is still a release that a person
-    // can pick. The API lists it without the link, the magnet, or the info hash: the link carries the API key.
+    // can pick, so it is grabbable. The API lists it without the link, the magnet, or the info hash: the link carries
+    // the API key.
     const item = view.search.rejected.find((release: { title: string }) => release.title === LOW);
     expect(item).toMatchObject({
       indexerId: 1,
@@ -50,12 +51,16 @@ describe('the rejected releases of a search with no match', () => {
       resolution: 720,
       source: 'bluray',
       kind: 'single',
+      grabbable: true,
     });
     expect(item).not.toHaveProperty('link');
     expect(item).not.toHaveProperty('magnet');
     expect(item).not.toHaveProperty('infoHash');
-    // A release of another title can never be taken, so it is not in the list.
-    expect(view.search.rejected.map((release: { title: string }) => release.title)).not.toContain(WRONG);
+    // A release of another title breaks a safety check, so a manual grab cannot take it. The list still shows it,
+    // with the reason that stopped it, and says that it is not grabbable.
+    const wrong = view.search.rejected.find((release: { title: string }) => release.title === WRONG);
+    expect(wrong).toMatchObject({ title: WRONG, grabbable: false });
+    expect(wrong.reasons).toContain('The title of the release is not this title.');
 
     const grab = await api!.post(`/queue/entries/${entry.id}/releases/grab`, { indexerId: 1, guid: LOW });
     expect(grab.status).toBe(202);
@@ -65,7 +70,7 @@ describe('the rejected releases of a search with no match', () => {
     expect(pipe!.qbit.torrents.has(hashOf(LOW))).toBe(true);
   });
 
-  it('does not list a blocklisted release, and never takes it', async () => {
+  it('lists a blocklisted release as not grabbable, and never takes it', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
     const m = film();
@@ -79,8 +84,12 @@ describe('the rejected releases of a search with no match', () => {
     await until(() => entry!.branch === 'waiting' && entry!.reason?.code === 'all_rejected');
 
     const view = (await api.get(`/queue/entries/${entry!.id}`)).body.entry;
-    // A blocklisted release breaks a safety check, and a manual grab does not skip safety checks. It is not in the list.
-    expect(view.search.rejected.map((release: { title: string }) => release.title)).toEqual([LOW]);
+    // A blocklisted release breaks a safety check, and a manual grab does not skip safety checks. The list shows it
+    // with its reason and says that it is not grabbable, next to the release that a person can still take.
+    expect(view.search.rejected.map((release: { title: string }) => release.title)).toEqual(expect.arrayContaining([LOW, BLOCKED]));
+    const blocked = view.search.rejected.find((release: { title: string }) => release.title === BLOCKED);
+    expect(blocked).toMatchObject({ title: BLOCKED, grabbable: false });
+    expect(blocked.reasons).toContain('The release is on the blocklist.');
 
     const grab = await api.post(`/queue/entries/${entry!.id}/releases/grab`, { indexerId: 1, guid: BLOCKED });
     expect([404, 409]).toContain(grab.status);

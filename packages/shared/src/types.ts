@@ -419,7 +419,8 @@ export type QueueTransfer = {
   peers: number;
 };
 
-// A release that the last search found and rejected, but that a person can still take by hand.
+// A release that the last search found and rejected. A grabbable release passes the safety checks, so a person can
+// take it by hand; the others stay in the list with the reasons that stopped them.
 export type QueueRejectedRelease = {
   indexerId: number;
   guid: string;
@@ -429,6 +430,8 @@ export type QueueRejectedRelease = {
   resolution: number | null;
   source: string;
   kind: 'single' | 'multi' | 'pack';
+  grabbable: boolean;
+  reasons: string[];
 };
 
 export type QueueSearch = {

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { profilesFor } from '../../core/db.ts';
 import { languageOfRegion } from '../../core/languages.ts';
 import { episodeEligibleAt } from '../../core/dates.ts';
-import { bestOf, decide, explainDecision, rejectionSummary, topRejections, type Context, type Decision, type Want } from './decide.ts';
+import { bestOf, decide, explainDecision, REJECTION_TEXT, rejectionSummary, topRejections, type Context, type Decision, type Want } from './decide.ts';
 import { indexerName, indexersFor, notUsedReason, seedLimits, type Indexer, type IndexerApp } from './indexers.ts';
 import { explainProfile } from './quality.ts';
 import { enqueue as enqueueJob, JobError, prioritize, type EnqueueInput, type Job } from '../../core/jobs.ts';
@@ -417,29 +417,30 @@ export function createFinder({ db, queue, indexers, enqueue, now = Date.now }: D
         queue.move(entry, { stage: 'available', branch: null, reason: null }, 'no better release');
         continue;
       }
-      // The releases that a person can take by hand. Only a release that a manual choice accepts stays: a release of
-      // another title, or one that breaks a safety check, is not in the list.
+      // Every release that the search found and rejected. A release that a manual choice accepts is grabbable, so a
+      // person can take it by hand. The others stay in the list with the reasons that stopped them.
       const rejected = decisions
-        .filter((decision) => {
-          if (decision.accepted) return false;
-          const want = wantForRelease(title, decision.release, entry.season ?? undefined, entry.number ?? undefined);
-          return want ? decide(decision.release, want, manualCtx).accepted : false;
-        })
+        .filter((decision) => !decision.accepted)
         .sort((a, b) => a.rejections.length - b.rejections.length || (b.release.seeders ?? 0) - (a.release.seeders ?? 0))
         .slice(0, MAX_CANDIDATES)
-        .map((decision) => ({
-          indexerId: decision.release.indexerId,
-          guid: decision.release.guid,
-          title: decision.release.title,
-          link: decision.release.link,
-          magnet: decision.release.magnet,
-          infoHash: decision.hash,
-          sizeBytes: decision.release.sizeBytes,
-          seeders: decision.release.seeders,
-          resolution: decision.parsed.resolution,
-          source: decision.parsed.source,
-          kind: decision.kind,
-        }));
+        .map((decision) => {
+          const want = wantForRelease(title, decision.release, entry.season ?? undefined, entry.number ?? undefined);
+          return {
+            indexerId: decision.release.indexerId,
+            guid: decision.release.guid,
+            title: decision.release.title,
+            link: decision.release.link,
+            magnet: decision.release.magnet,
+            infoHash: decision.hash,
+            sizeBytes: decision.release.sizeBytes,
+            seeders: decision.release.seeders,
+            resolution: decision.parsed.resolution,
+            source: decision.parsed.source,
+            kind: decision.kind,
+            grabbable: want ? decide(decision.release, want, manualCtx).accepted : false,
+            reasons: decision.rejections.map((code) => REJECTION_TEXT[code] ?? code),
+          };
+        });
       Object.assign(entry.search!, { result: code === 'no_indexers' ? 'no_results' : code, accepted: 0, candidates: decisions.length, topRejections: rejections, nextAt: now() + RESEARCH_MS, rejected });
       // The releases that came closest to acceptance first: the fewest reasons, then the most seeders. A person sees
       // what the indexers offered and which rule stopped each one.

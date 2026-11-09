@@ -50,7 +50,8 @@ export type Attempt = {
 
 export type StageEvent = { at: number; stage: Stage; branch: Branch | null; attempt: number; cause: string; detail?: string };
 
-// A release of the last search that a person can take by hand. The link stays on the server: it carries the API key.
+// A release of the last search that was rejected. A grabbable release passes the safety checks, so a person can take
+// it by hand. The link stays on the server: it carries the API key.
 export type RejectedRelease = {
   indexerId: number;
   guid: string;
@@ -63,6 +64,8 @@ export type RejectedRelease = {
   resolution: number | null;
   source: string;
   kind: 'single' | 'multi' | 'pack';
+  grabbable: boolean;
+  reasons: string[];
 };
 
 export type SearchState = {

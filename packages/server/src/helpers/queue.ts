@@ -219,6 +219,8 @@ export function view(db: Db, poller: Poller, importStatus: ImportStatus | undefi
             resolution: release.resolution,
             source: release.source,
             kind: release.kind,
+            grabbable: release.grabbable,
+            reasons: release.reasons,
           })),
         }
       : null,

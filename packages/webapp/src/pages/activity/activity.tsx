@@ -173,14 +173,20 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
             <Row
               key={`${item.release.indexerId}:${item.release.guid}`}
               actions={
-                <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
-                  <Check />
-                </Button>
+                item.release.grabbable ? (
+                  <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
+                    <Check />
+                  </Button>
+                ) : undefined
               }
             >
-              <Text variant="small">
-                {quality} · {size}
-              </Text>
+              <div className="grid gap-1 min-w-0">
+                <Text variant="small">{item.release.title}</Text>
+                <Text variant="small">
+                  {quality} · {size}
+                </Text>
+                {item.release.reasons.length > 0 && <Text variant="small">{item.release.reasons.map((reason) => t(reason)).join(' ')}</Text>}
+              </div>
             </Row>
           );
         })}
