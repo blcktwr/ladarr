@@ -472,7 +472,8 @@ const keys = ['queued', 'searching', 'downloading', 'validating', 'importing', '
 function StageMenu({ summary, filters, setFilters }: { summary: QueueSummary | undefined; filters: Filters; setFilters: (f: Filters) => void }) {
   const counts = shownCounts(summary?.counts ?? {});
   // A target that found no release, or no release that fits the preset, waits for its next search, so it counts in Searching.
-  counts.searching = (counts.searching ?? 0) + (summary?.counts.not_found ?? 0) + (summary?.counts.no_match ?? 0);
+  // Fetching the release belongs to the search too, so it counts there as well.
+  counts.searching = (counts.searching ?? 0) + (summary?.counts.not_found ?? 0) + (summary?.counts.no_match ?? 0) + (summary?.counts.fetching ?? 0);
   return (
     <SubMenu
       fill

@@ -31,10 +31,9 @@ const DAY_MS = 24 * 60 * 60_000;
 const MAX_PAGE = 200;
 // The key of an entry for a filter. A target that waits for its turn in the queue is Waiting. A target that waits
 // for its next search is Searching, also when the last search found no release or no release that fits the preset.
-const filterKeyOf = (entry: QueueEntry) => {
-  const key = queueKey(entry);
-  return key === 'waiting' || key === 'not_found' || key === 'no_match' ? 'searching' : key;
-};
+// Fetching the release belongs to the search, so it shows in the same tab.
+const searchKey = (key: string) => (key === 'waiting' || key === 'not_found' || key === 'no_match' || key === 'fetching' ? 'searching' : key);
+const filterKeyOf = (entry: QueueEntry) => searchKey(queueKey(entry));
 
 // The jobs that move a target through the download flow. The jobs page shows only these.
 const ITEM_JOB_TYPES = new Set(['queue.initial', 'queue.search', 'queue.grab', 'import.run']);
@@ -45,7 +44,8 @@ const isItemJob = (job: Job) => job.type.startsWith('item.') || ITEM_JOB_TYPES.h
 const STAGE_RANK = new Map(STAGES.map((stage, index) => [stage, index]));
 const progressOf = (entry: QueueEntry) => {
   const key = queueKey(entry);
-  return STAGE_RANK.get(key === 'waiting' || key === 'not_found' || key === 'no_match' ? 'searching' : entry.stage)!;
+  const stage = searchKey(key) === 'searching' ? 'searching' : entry.stage;
+  return STAGE_RANK.get(stage)!;
 };
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -435,16 +435,18 @@ export function queueRouter({ db, queue, finder, poller, clients, enqueue, persi
 
     // Counts of a group cover all its entries in the view. A filter picks the groups that have a matching entry.
     // The progress of a group is that of its least advanced target, so the number of episodes does not matter.
-    const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number }>();
+    const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number; searching: boolean }>();
     for (const entry of all) {
       if (!shown(entry) || (!f.cleared && entry.clearedAt)) continue;
       const key = entry.season === null ? entry.id : entry.titleKey;
-      const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY };
+      const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY, searching: false };
       group.entries.push(entry);
       if (matches(entry, f)) group.matching++;
       group.first = Math.min(group.first, entry.createdAt);
       // An available target is finished. It does not hold the group back.
       if (entry.stage !== 'available') group.progress = Math.min(group.progress, progressOf(entry));
+      // The search of a title runs now, so its row stays above the rows that only fetch their release.
+      if (entry.stage === 'searching' && entry.branch === null) group.searching = true;
       groups.set(key, group);
     }
     // A series that waits for its episodes has no target yet. The page shows the series itself as searching, so
@@ -454,9 +456,9 @@ export function queueRouter({ db, queue, finder, poller, clients, enqueue, persi
       if (!title) continue;
       const matchesLoading = !f.cleared && !f.priority && (!f.key || f.key === 'searching') && (!f.type || f.type === 'tv') && (!f.q || title.meta.title.toLowerCase().includes(f.q));
       if (!matchesLoading) continue;
-      groups.set(key, { entries: [], matching: 1, first: title.addedAt, progress: STAGE_RANK.get('searching')! });
+      groups.set(key, { entries: [], matching: 1, first: title.addedAt, progress: STAGE_RANK.get('searching')!, searching: true });
     }
-    const rows = [...groups.entries()].filter(([, g]) => g.matching > 0 && Number.isFinite(g.progress)).sort((a, b) => b[1].progress - a[1].progress || a[1].first - b[1].first || a[0].localeCompare(b[0]));
+    const rows = [...groups.entries()].filter(([, g]) => g.matching > 0 && Number.isFinite(g.progress)).sort((a, b) => b[1].progress - a[1].progress || Number(b[1].searching) - Number(a[1].searching) || a[1].first - b[1].first || a[0].localeCompare(b[0]));
     const items: QueueRow[] = rows.slice(offset, offset + limit).map(([key, group]) => {
       const first = group.entries[0];
       if (!first) {

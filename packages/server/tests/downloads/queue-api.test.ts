@@ -159,6 +159,33 @@ describe('requests and summary', () => {
     expect((await api.get('/queue?stage=searching')).body.total).toBe(0);
   });
 
+  it('shows a target that fetches its release in the Searching tab, under the targets that search now', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const searching = title({ rootId: 'tv', key: 'tv:1', episodes: [aired(1)] });
+    const fetching = title({ rootId: 'tv', key: 'tv:2', tmdbId: 2, meta: { ...title().meta, tmdbId: 2, title: 'Other Show' }, episodes: [episode(1, 1, '2020-01-01')] });
+    pipe.db.data.titles[searching.key] = searching;
+    pipe.db.data.titles[fetching.key] = fetching;
+    const searchingEntry = pipe.queue.ensure(searching.key, 1, 1);
+    const fetchingEntry = pipe.queue.ensure(fetching.key, 1, 1);
+    pipe.queue.request(searchingEntry, 'test');
+    pipe.queue.request(fetchingEntry, 'test');
+    // The fetching title began first, so a tie keeps it first without the order of the search.
+    fetchingEntry.createdAt = 1;
+    searchingEntry.createdAt = 2;
+    pipe.queue.move(fetchingEntry, { stage: 'fetching', branch: null, reason: null }, 'test');
+    pipe.queue.move(searchingEntry, { stage: 'searching' }, 'test');
+
+    const list = (await api.get('/queue?stage=searching')).body;
+    expect(list.total).toBe(2);
+    expect(list.items.map((item: { key: string; counts: Record<string, number> }) => [item.key, item.counts])).toEqual([
+      ['tv:1', { searching: 1 }],
+      ['tv:2', { fetching: 1 }],
+    ]);
+    // Fetching has no tab of its own.
+    expect((await api.get('/queue?stage=fetching')).body.total).toBe(0);
+  });
+
   it('shows a series as one group, with the episodes of every season as lazy children', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
