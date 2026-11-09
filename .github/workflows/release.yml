@@ -64,12 +64,20 @@ jobs:
           '
           sha256sum "ladarr-${{ steps.version.outputs.version }}.tar.gz" > "ladarr-${{ steps.version.outputs.version }}.tar.gz.sha256"
 
+      # A second run of the same tag adds the files to the release that is already there.
       - name: Create the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "ladarr-${{ steps.version.outputs.version }}.tar.gz" \
-            "ladarr-${{ steps.version.outputs.version }}.tar.gz.sha256" \
-            --title "v$GITHUB_REF_NAME" \
-            --generate-notes
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              "ladarr-${{ steps.version.outputs.version }}.tar.gz" \
+              "ladarr-${{ steps.version.outputs.version }}.tar.gz.sha256" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "ladarr-${{ steps.version.outputs.version }}.tar.gz" \
+              "ladarr-${{ steps.version.outputs.version }}.tar.gz.sha256" \
+              --title "v$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
