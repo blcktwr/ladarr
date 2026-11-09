@@ -87,6 +87,12 @@ test('the catalog shows the type of a title on its poster', async ({ page }) => 
   // The poster shows no availability badge.
   await expect(movie).not.toContainText('Available');
   await expect(show).not.toContainText('Available');
+  // The row of posters is centered, so the space on each side of it is the same.
+  const mainBox = (await page.getByRole('main').boundingBox())!;
+  const boxes = [(await movie.boundingBox())!, (await show.boundingBox())!].sort((a, b) => a.x - b.x);
+  const left = boxes[0]!.x - mainBox.x;
+  const right = mainBox.x + mainBox.width - (boxes[1]!.x + boxes[1]!.width);
+  expect(Math.abs(left - right)).toBeLessThanOrEqual(2);
   const patched = await stack.call('PATCH', '/library/tv:1', { seriesType: 'anime' });
   if (patched.status >= 300) throw new Error(`PATCH /library/tv:1 answered ${patched.status}: ${JSON.stringify(patched.body)}`);
   try {
