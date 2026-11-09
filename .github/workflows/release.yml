@@ -19,7 +19,7 @@ jobs:
       - name: Set the version from the tag
         id: version
         run: |
-          npm version "$GITHUB_REF_NAME" --no-git-tag-version --allow-same-version --workspace @ladarr/server
+          npm version "$GITHUB_REF_NAME" --no-git-tag-version --allow-same-version
           echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
@@ -48,7 +48,7 @@ jobs:
       - name: Set the version from the tag
         id: version
         run: |
-          npm version "$GITHUB_REF_NAME" --no-git-tag-version --allow-same-version --workspace @ladarr/server
+          npm version "$GITHUB_REF_NAME" --no-git-tag-version --allow-same-version
           echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
 
       # The container image runs Alpine with musl, so the bundle must use the same platform.

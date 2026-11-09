@@ -1,14 +1,12 @@
 import type { BackupKind } from '@ladarr/shared/enums';
 import type { BackupRow } from '@ladarr/shared/types';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Router } from 'express';
 import { strFromU8, strToU8, unzip, zip } from 'fflate';
 import { emptyData, SCHEMA_VERSION, type Data, type Db } from '../core/db.ts';
-
-const APP_VERSION: string = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+import { APP_VERSION } from './version.ts';
 
 // A safety backup is the copy that a restore makes of the current data before it replaces the data.
 export class BackupError extends Error {

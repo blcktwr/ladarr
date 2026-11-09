@@ -21,7 +21,7 @@ const release = (tag: string) => json({ tag_name: tag, html_url: HTML_URL });
 
 describe('installed version', () => {
   it('is the version in package.json', () => {
-    const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
+    const pkg = JSON.parse(readFileSync(new URL('../../../../package.json', import.meta.url), 'utf8')) as { version: string };
     expect(APP_VERSION).toBe(pkg.version);
   });
 });

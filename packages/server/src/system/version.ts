@@ -5,8 +5,8 @@ export const RELEASE_URL = 'https://api.github.com/repos/blcktwr/ladarr/releases
 export const RELEASE_HEADERS = { accept: 'application/vnd.github+json', 'user-agent': 'ladarr' };
 const MAX_AGE_MS = 10_000;
 
-// The version of the server that runs. The backup manifest has the same number.
-export const APP_VERSION: string = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+// The version of the server that runs. The root of the repository holds it, and the backup manifest has the same number.
+export const APP_VERSION: string = JSON.parse(readFileSync(new URL('../../../../package.json', import.meta.url), 'utf8')).version;
 
 const parts = (version: string) => version.replace(/^v/i, '').split('.').map((part) => Number.parseInt(part, 10) || 0);
 
