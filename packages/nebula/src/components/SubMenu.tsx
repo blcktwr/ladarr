@@ -12,7 +12,7 @@ type SubMenuProps = Omit<Tabs.Root.Props, 'children' | 'className' | 'orientatio
 
 // The sections inside a page, such as the queue and the finished tasks of the activity page. The page shows the content of the selected section.
 // The row is a slab of stone, as the list of a side menu. Its items are ghost keys, and the selected item is a raised block.
-// count shows the number of items of the section, in a badge at the end of its key.
+// count shows the number of items of the section, in a badge at the end of its key. The badge has a fixed width, so a change of the count does not move the items.
 // On a narrow screen the items go on more than one row, so the slab and its shadow are not cut.
 // className is for layout only, such as a margin.
 export function SubMenu({ 'aria-label': label, items, fill = false, className = '', ...props }: SubMenuProps) {
@@ -26,7 +26,7 @@ export function SubMenu({ 'aria-label': label, items, fill = false, className = 
             className={({ active }) => `${key} ${active ? block : ghost} flex items-center justify-center gap-2 h-10 px-4 rounded-[5px] cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-accent ${fill ? 'grow' : ''}`}
           >
             {item.label}
-            {item.count !== undefined && <Badge>{item.count}</Badge>}
+            {item.count !== undefined && <Badge width="2rem">{item.count}</Badge>}
           </Tabs.Tab>
         ))}
       </Tabs.List>
