@@ -1,23 +1,25 @@
-import type { Problem, WebhookTestResult } from '@ladarr/shared/types';
+import type { WebhookTestResult } from '@ladarr/shared/types';
 import { randomUUID } from 'node:crypto';
-import type { MediaType } from '@ladarr/shared/enums';
+import type { MediaType, WebhookEventType } from '@ladarr/shared/enums';
 import { Router } from 'express';
 import type { Db } from '../core/db.ts';
 import type { EnqueueInput } from '../core/jobs.ts';
 import { outboundFetch } from '../core/http.ts';
 import { log } from '../core/log.ts';
-import { withOutboundRequests } from '../core/outbound.ts';
 import type { MoveHook } from '../downloads/queue.ts';
 import { reasonInfo } from '../core/reasons.ts';
 
 // Raise this number when a receiver must change to read the body of an event.
 export const EVENT_SCHEMA_VERSION = 1;
 
-// The address is a secret, because it can hold a token. It never goes to a log or to an API answer.
-// `health` holds the problems of the last check, as ID and message. It is null until the first check.
-export type WebhookState = { url: string | null; health: Record<string, string> | null };
+// The destination of one event type. The address is a secret, because it can hold a token.
+// It never goes to a log or to an API answer.
+export type WebhookState = { id: string; type: WebhookEventType; url: string };
 
-export type EventType = 'import_complete' | 'needs_attention' | 'health_restored' | 'test';
+// The statuses of the queue that start a webhook. The test is not one of them: it saves nothing.
+const WEBHOOK_EVENT_TYPES = ['stuck', 'available'] as const satisfies readonly WebhookEventType[];
+
+export type EventType = WebhookEventType | 'test';
 
 export type WebhookEvent = {
   schemaVersion: typeof EVENT_SCHEMA_VERSION;
@@ -30,13 +32,15 @@ export type WebhookEvent = {
   problem: { id: string; message: string } | null;
 };
 
+// The delivery job of one webhook. The event is the same for each webhook of its type.
+export type DeliveryPayload = { webhookId: string; event: WebhookEvent };
+
 export const DELIVER = 'webhook.deliver';
 const TIMEOUT_MS = 10_000;
 // With the backoff of the job engine, ten attempts cover an outage of about 36 minutes.
 export const MAX_ATTEMPTS = 10;
 // A long outage must not make an unlimited backlog.
 const MAX_PENDING = 1_000;
-const HEALTH_EVERY_MS = 60_000;
 
 export const newEvent = (type: EventType, now: number, fields: Partial<Pick<WebhookEvent, 'title' | 'episode' | 'reason' | 'problem'>> = {}): WebhookEvent => ({
   schemaVersion: EVENT_SCHEMA_VERSION,
@@ -71,21 +75,23 @@ export async function send(url: string, event: WebhookEvent, { signal, timeoutMs
 type Deps = {
   db: Db;
   enqueue: (input: EnqueueInput) => unknown;
-  persist: () => void;
-  // The current health problems. The same list as the health page.
-  problems: () => Promise<Problem[]>;
-  intervalMs?: number;
   now?: () => number;
 };
 
-// Makes the events and puts each one in a durable delivery job. Nothing here waits for the network.
-export function createWebhooks({ db, enqueue, persist, problems, intervalMs = HEALTH_EVERY_MS, now = Date.now }: Deps) {
-  function emit(type: EventType, fields: Parameters<typeof newEvent>[2]) {
-    if (!db.data.webhook.url) return;
+// Makes the events and puts each one in a durable delivery job for each webhook of its type.
+// Nothing here waits for the network.
+export function createWebhooks({ db, enqueue, now = Date.now }: Deps) {
+  function emit(type: WebhookEventType, fields: Parameters<typeof newEvent>[2]) {
+    const targets = db.data.webhooks.filter((webhook) => webhook.type === type);
+    if (!targets.length) return;
     // shortcut: this counts all jobs for each event. Fine for thousands of jobs, so keep a counter if it is not.
-    const pending = Object.values(db.data.jobs).filter((job) => job.type === DELIVER && job.state !== 'failed').length;
-    if (pending >= MAX_PENDING) return void log.warn('webhook backlog is full, so an event is dropped', { eventType: type });
-    enqueue({ type: DELIVER, payload: newEvent(type, now(), fields) });
+    let pending = Object.values(db.data.jobs).filter((job) => job.type === DELIVER && job.state !== 'failed').length;
+    const event = newEvent(type, now(), fields);
+    for (const target of targets) {
+      if (pending >= MAX_PENDING) return void log.warn('webhook backlog is full, so an event is dropped', { eventType: type });
+      enqueue({ type: DELIVER, payload: { webhookId: target.id, event } satisfies DeliveryPayload });
+      pending++;
+    }
   }
 
   // The hook of the queue. An error here must never reach the import.
@@ -100,52 +106,17 @@ export function createWebhooks({ db, enqueue, persist, problems, intervalMs = HE
         title: { key: entry.titleKey, mediaType, name: title?.meta.title ?? null, year: title?.meta.year ?? null, ids: { tmdb: Number(tmdbId), tvdb: title?.meta.tvdbId ?? null, imdb: title?.meta.imdbId ?? null } },
         episode: entry.season === null || entry.number === null ? null : { season: entry.season, number: entry.number, name: title?.episodes.find((e) => e.season === entry.season && e.number === entry.number)?.name ?? null },
       };
-      if (imported) emit('import_complete', fields);
+      if (imported) emit('available', fields);
       else {
         const code = entry.reason?.code ?? 'unknown';
-        emit('needs_attention', { ...fields, reason: { code, message: reasonInfo(code).message } });
+        emit('stuck', { ...fields, reason: { code, message: reasonInfo(code).message } });
       }
     } catch (error) {
       log.error('could not make a webhook event', { error });
     }
   };
 
-  let checking = false;
-  // The first check sets the baseline. A later check sends one event for each problem that is gone.
-  async function checkHealth() {
-    if (checking || !db.data.webhook.url) return;
-    checking = true;
-    try {
-      // The webhook schema holds plain text, so the template of the problem is filled here.
-      const text = (problem: Problem) =>
-        problem.message.replace(/\{(\w+)\}/g, (_, name: string) => String(problem.params?.[name] ?? `{${name}}`));
-      const found = Object.fromEntries((await problems()).map((problem) => [problem.id, text(problem)]));
-      const state = db.data.webhook;
-      if (!state.url) return;
-      const previous = state.health;
-      if (previous && JSON.stringify(Object.keys(previous)) === JSON.stringify(Object.keys(found))) return;
-      state.health = found;
-      persist();
-      for (const [id, message] of Object.entries(previous ?? {})) if (!(id in found)) emit('health_restored', { problem: { id, message } });
-    } catch (error) {
-      log.warn('could not check the health for webhook events', { error });
-    } finally {
-      checking = false;
-    }
-  }
-
-  let timer: NodeJS.Timeout | undefined;
-  return {
-    onMove,
-    checkHealth,
-    start() {
-      timer = setInterval(() => void withOutboundRequests(checkHealth), intervalMs);
-      timer.unref();
-    },
-    stop() {
-      clearInterval(timer);
-    },
-  };
+  return { onMove };
 }
 
 // The address must be http or https, and it must have no user name or password. Returns it, or nothing.
@@ -159,37 +130,66 @@ function parseUrl(value: unknown) {
 }
 
 // The user sees the host of the destination. The rest of the address can hold a token.
-const view = (url: string | null) => (url ? { host: new URL(url).host } : null);
+const view = (webhook: WebhookState) => ({ id: webhook.id, type: webhook.type, host: new URL(webhook.url).host });
+
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+// The type and the address are both required. Returns them, or the field that is wrong.
+function parse(body: unknown) {
+  if (!isObject(body)) return { field: 'type' as const };
+  const type = body.type;
+  if (typeof type !== 'string' || !WEBHOOK_EVENT_TYPES.includes(type as WebhookEventType)) return { field: 'type' as const };
+  const url = parseUrl(body.url);
+  if (!url) return { field: 'url' as const };
+  return { type: type as WebhookEventType, url };
+}
 
 export function webhookRouter(db: Db, { timeoutMs }: { timeoutMs?: number } = {}) {
   const router = Router();
 
-  router.get('/', (_req, res) => void res.json({ webhook: view(db.data.webhook.url) }));
+  router.get('/', (_req, res) => void res.json({ webhooks: db.data.webhooks.map(view) }));
 
-  router.put('/', async (req, res) => {
+  router.post('/', async (req, res) => {
+    const parsed = parse(req.body);
+    if ('field' in parsed) return void res.status(400).json({ error: 'invalid_setting', field: parsed.field });
+    const webhook: WebhookState = { id: randomUUID(), ...parsed };
+    db.data.webhooks.push(webhook);
+    await db.write();
+    res.status(201).json({ webhook: view(webhook) });
+  });
+
+  router.put('/:id', async (req, res) => {
+    const webhook = db.data.webhooks.find((item) => item.id === req.params.id);
+    if (!webhook) return void res.status(404).json({ error: 'not_found' });
+    const parsed = parse(req.body);
+    if ('field' in parsed) return void res.status(400).json({ error: 'invalid_setting', field: parsed.field });
+    Object.assign(webhook, parsed);
+    await db.write();
+    res.json({ webhook: view(webhook) });
+  });
+
+  // The events that wait go with the webhook. Another webhook must not get them.
+  router.delete('/:id', async (req, res) => {
+    const index = db.data.webhooks.findIndex((item) => item.id === req.params.id);
+    if (index < 0) return void res.status(404).json({ error: 'not_found' });
+    db.data.webhooks.splice(index, 1);
+    for (const job of Object.values(db.data.jobs)) if (job.type === DELIVER && (job.payload as DeliveryPayload | null)?.webhookId === req.params.id) delete db.data.jobs[job.id];
+    await db.write();
+    res.status(204).end();
+  });
+
+  // Sends a test event to an address that is not saved. It saves nothing.
+  router.post('/test', async (req, res) => {
     const url = parseUrl(req.body?.url);
     if (!url) return void res.status(400).json({ error: 'invalid_setting', field: 'url' });
-    db.data.webhook = { url, health: null };
-    await db.write();
-    res.json({ webhook: view(url) });
+    res.json(await send(url, newEvent('test', Date.now()), { timeoutMs }));
   });
 
-  // The events that wait go with the destination. A new destination must not get them.
-  router.delete('/', async (_req, res) => {
-    db.data.webhook = { url: null, health: null };
-    for (const job of Object.values(db.data.jobs)) if (job.type === DELIVER) delete db.data.jobs[job.id];
-    await db.write();
-    res.json({ webhook: null });
-  });
-
-  // Sends a test event to the address in the body, or to the saved address. It saves nothing.
-  router.post('/test', async (req, res) => {
-    const given = req.body?.url;
-    const url = given === undefined ? db.data.webhook.url : parseUrl(given);
-    if (given !== undefined && !url) return void res.status(400).json({ error: 'invalid_setting', field: 'url' });
-    if (!url) return void res.status(409).json({ error: 'webhook_missing' });
-    const result = await send(url, newEvent('test', Date.now()), { timeoutMs });
-    res.json(result);
+  // Tests a saved webhook, with the address of the server.
+  router.post('/:id/test', async (req, res) => {
+    const webhook = db.data.webhooks.find((item) => item.id === req.params.id);
+    if (!webhook) return void res.status(404).json({ error: 'not_found' });
+    res.json(await send(webhook.url, newEvent('test', Date.now()), { timeoutMs }));
   });
 
   return router;

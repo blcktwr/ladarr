@@ -171,6 +171,7 @@ export const es: Record<string, string> = {
   'Downloading': 'Descargando',
   'Validating': 'Validando',
   'Importing': 'Importando',
+  'Completed': 'Completado',
   'Waiting for a release': 'Esperando un estreno',
   'Needs attention': 'Requiere atención',
   'Cancelled': 'Cancelado',

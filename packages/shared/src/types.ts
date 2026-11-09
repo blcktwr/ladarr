@@ -21,6 +21,7 @@ import type {
   RootProblem,
   TorrentStatus,
   TrackerStatus,
+  WebhookEventType,
 } from './enums.ts';
 
 // The shapes of the domain and of the HTTP API. The server and the web app both import them.
@@ -630,7 +631,7 @@ export type WebhookTestResult = { ok: true } | { ok: false; code: 'unreachable' 
 
 export type BlocklistRow = { id: string; title: string; reason: { code: string; message: string }; at: number };
 // The host of the webhook destination. The rest of the address can hold a token, so the API never sends it.
-export type WebhookView = { host: string };
+export type WebhookView = { id: string; type: WebhookEventType; host: string };
 
 // A download client as the user sees it. The secrets stay on the server.
 export type ClientView = { id: string; name: string; type: 'qbittorrent'; host: string; port: number; auth: 'apiKey' | 'password'; username: string | null; enabled: boolean; maxDownloads: number };

@@ -10,7 +10,7 @@ type Sources = { db: Db; tmdb?: Tmdb; heartbeat?: () => number; backupDir?: stri
 const HEARTBEAT_MAX_AGE_MS = 30_000;
 const BACKUP_MAX_AGE_MS = 48 * 60 * 60_000;
 
-// The messages and the actions are keys of the web i18n. The webhook sends the text with its variables filled.
+// The messages and the actions are keys of the web i18n.
 const rootText: Record<Exclude<RootProblem, 'low_space'>, { message: string; action: string }> = {
   not_found: { message: 'The folder {path} does not exist.', action: 'Mount the disk or fix the path. The library records stay.' },
   not_directory: { message: 'The path {path} is not a folder.', action: 'Select a folder in Settings.' },

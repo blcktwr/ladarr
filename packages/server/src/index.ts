@@ -1,13 +1,11 @@
 import { dirname } from 'node:path';
 import { loadConfig } from '@ladarr/shared/config';
 import { createApp } from './app.ts';
-import { createClientCheck, createClients } from './downloads/client-api.ts';
+import { createClients } from './downloads/client-api.ts';
 import { createImportStatus } from './library/import-status.ts';
 import { createFinder } from './acquisition/finder.ts';
-import { collectProblems } from './system/health.ts';
 import { unfinishedImports } from './library/importer.ts';
 import { createLimiter } from './core/limiter.ts';
-import { ffprobeAvailable } from './library/probe.ts';
 import { createPoller } from './downloads/poller.ts';
 import { createQueue } from './downloads/queue.ts';
 import { createIndexerService } from './acquisition/torznab.ts';
@@ -49,12 +47,9 @@ else void withOutboundRequests(() => tmdb.check().then(({ ok, code }) => ok || l
 const save = createSaver(db);
 const persist = () => void save().catch((error) => log.error('could not save the database', { error }));
 const clients = createClients(db);
-const clientCheck = createClientCheck(clients);
 const webhooks = createWebhooks({
   db,
-  persist,
   enqueue: (input) => worker.enqueue(input),
-  problems: () => collectProblems({ db, tmdb, heartbeat: () => worker.heartbeat, backupDir: config.backupDir, clientCheck, ffprobe: ffprobeAvailable }),
 });
 const queue = createQueue(db, events, persist, webhooks.onMove);
 const limiter = createLimiter(db, persist);
@@ -68,7 +63,6 @@ const worker = createWorker(
   jobHandlers({ db, backupDir: config.backupDir, events, save, tmdb, enqueue: (input) => worker.enqueue(input), clients, queue, finder, indexers, importStatus }),
 );
 worker.start();
-webhooks.start();
 poller.start();
 // An import that stopped in the middle runs again. Its journal says where to go on.
 for (const hash of unfinishedImports(db)) worker.enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
@@ -109,7 +103,6 @@ async function shutdown(signal: string) {
     server.close();
     server.closeAllConnections();
     poller.stop();
-    webhooks.stop();
     limiter.stop();
     // The worker aborts its jobs, waits for them, and saves the database.
     await worker.stop();

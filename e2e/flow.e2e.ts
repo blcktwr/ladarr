@@ -259,10 +259,11 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   await page.keyboard.press('Escape');
   await expect(pushed).toBeHidden();
 
-  // The webhook: an empty view, then one address that the user adds, tests, and removes. ladarr has one webhook, so Add waits until the user removes it.
+  // The webhook: an empty view, then one status and address that the user adds, tests, and removes.
   const receiver = createServer((_req, res) => void res.end('ok'));
   await new Promise<void>((resolve) => receiver.listen(0, '127.0.0.1', resolve));
   const host = `127.0.0.1:${(receiver.address() as AddressInfo).port}`;
+  const webhookName = `Completed ${host}`;
   await expect(page.getByText('No webhook is set.')).toBeVisible();
   await page.getByRole('button', { name: 'Add webhook' }).click();
   const hook = page.getByRole('dialog', { name: 'Add a webhook' });
@@ -271,18 +272,17 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   // The alerts wait under the modal, so the test checks that this one is there, and not that it shows.
   await expect(page.getByRole('region', { name: 'Notifications', includeHidden: true }).getByText('The receiver accepted the test event.')).toHaveCount(1);
   // The test saves nothing.
-  expect((await (await page.request.get(`${URL_BASE}/api/webhook`)).json()).webhook).toBeNull();
+  expect((await (await page.request.get(`${URL_BASE}/api/webhook`)).json()).webhooks).toEqual([]);
   await hook.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(hook).toBeHidden();
   const webhook = page.getByRole('table', { name: 'Webhook' });
   await expect(webhook.getByRole('cell', { name: host, exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Add webhook' })).toBeDisabled();
-  await webhook.getByRole('button', { name: `Actions for ${host}` }).click();
+  await webhook.getByRole('button', { name: `Actions for ${webhookName}` }).click();
   await page.getByRole('menuitem', { name: 'Test' }).click();
   await expect(notices.getByText('The receiver accepted the test event.').first()).toBeVisible();
-  await webhook.getByRole('button', { name: `Actions for ${host}` }).click();
+  await webhook.getByRole('button', { name: `Actions for ${webhookName}` }).click();
   await page.getByRole('menuitem', { name: 'Remove' }).click();
-  await page.getByRole('alertdialog', { name: `Remove ${host}?` }).getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('alertdialog', { name: `Remove ${webhookName}?` }).getByRole('button', { name: 'Remove' }).click();
   await expect(page.getByText('No webhook is set.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add webhook' })).toBeEnabled();
   receiver.close();

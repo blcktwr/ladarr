@@ -31,6 +31,9 @@ export type TorrentStatus = 'metadata' | 'queued' | 'checking' | 'moving' | 'dow
 
 export type TrackerStatus = 'disabled' | 'not_contacted' | 'working' | 'updating' | 'not_working' | 'unknown';
 
+// The status of a queue entry that starts a webhook.
+export type WebhookEventType = 'stuck' | 'available';
+
 // The app of the indexer manager.
 export type IndexerApp = 'sonarr' | 'radarr';
 

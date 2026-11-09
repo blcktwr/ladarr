@@ -1,7 +1,7 @@
 import type { Db } from '../core/db.ts';
 import { JobError } from '../core/jobs.ts';
 import { log } from '../core/log.ts';
-import { DELIVER, MAX_ATTEMPTS, send, type WebhookEvent } from '../integrations/webhook.ts';
+import { DELIVER, MAX_ATTEMPTS, send, type DeliveryPayload } from '../integrations/webhook.ts';
 import type { Handler } from '../core/worker.ts';
 
 // A receiver that is busy or down can recover. Another status means that the address or the receiver is wrong.
@@ -15,11 +15,11 @@ export function webhookDeliverHandler({ db, timeoutMs }: { db: Db; timeoutMs?: n
       separate: true,
       maxAttempts: MAX_ATTEMPTS,
       async run(job, { signal }) {
-        const url = db.data.webhook.url;
-        // The user removed the destination, so the event has no receiver.
-        if (!url) return;
-        const event = job.payload as WebhookEvent;
-        const result = await send(url, event, { signal, timeoutMs });
+        const { webhookId, event } = job.payload as DeliveryPayload;
+        const webhook = db.data.webhooks.find((item) => item.id === webhookId);
+        // The user removed the webhook, so the event has no receiver.
+        if (!webhook) return;
+        const result = await send(webhook.url, event, { signal, timeoutMs });
         if (result.ok) return;
         if (signal.aborted) throw new Error('stopped');
         const permanent = result.status !== null && !retryable(result.status);

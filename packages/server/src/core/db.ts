@@ -18,7 +18,8 @@ import type { WebhookState } from '../integrations/webhook.ts';
 
 // Change this number when a new version cannot read the file of an old one, or the other way round.
 // Version 2 keeps the queue work in queue.json, so an older version must not open the new db.json.
-export const SCHEMA_VERSION = 3;
+// Version 4 keeps the webhooks in a list, so an older version must not open the new db.json.
+export const SCHEMA_VERSION = 4;
 
 export type Settings = {
   setupCompleted: boolean;
@@ -128,8 +129,8 @@ export type Data = {
   blocklist: Record<string, { title: string; reason: string; at: number; titleKey?: string; season?: number }>;
   // The secret in the URL of the iCal feed. Null means that the feed is off.
   calendarFeedToken: string | null;
-  // The optional destination for events. See webhook.ts.
-  webhook: WebhookState;
+  // The destinations for events, one for each event type. See webhook.ts.
+  webhooks: WebhookState[];
   // The commands that callers of the Sonarr and Radarr adapters sent. The ID is the same after a restart.
   compat: { commandSeq: number; commands: Record<string, CompatCommand> };
 };
@@ -172,7 +173,7 @@ export const emptyData = (): Data => ({
   imports: {},
   blocklist: {},
   calendarFeedToken: null,
-  webhook: { url: null, health: null },
+  webhooks: [],
   compat: { commandSeq: 0, commands: {} },
 });
 
@@ -218,13 +219,16 @@ export function withDefaults(data: Data): Data {
   // The default profile is the first profile of the chain now.
   const { defaultPreset, ...settings } = loaded;
   // An older file has one client with a download folder. That client becomes the first of the list, and it owns the downloads that are open.
-  const { downloadClient: old, ...rest } = data as Data & { downloadClient?: OneClient | null };
+  const { downloadClient: old, webhook: oldWebhook, ...rest } = data as Data & { downloadClient?: OneClient | null; webhook?: { url: string | null } | null };
   const profiles = data.profiles && Object.keys(data.profiles).length ? data.profiles : defaultProfiles();
   // An older file has no order: its default profile comes first, then the other profiles in the order of the object.
   const stored = (data.profileOrder ?? []).filter((id) => Object.hasOwn(profiles, id));
   const profileOrder = [...stored];
   if (!data.profileOrder && defaultPreset && Object.hasOwn(profiles, defaultPreset)) profileOrder.push(defaultPreset);
   for (const id of Object.keys(profiles)) if (!profileOrder.includes(id)) profileOrder.push(id);
+  // The one destination of an older file becomes one webhook for each event of the queue.
+  const webhooks = [...(data.webhooks ?? [])];
+  if (oldWebhook?.url) for (const type of ['available', 'stuck'] as const) webhooks.push({ id: randomUUID(), type, url: oldWebhook.url });
   const next: Data = {
     ...empty,
     ...rest,
@@ -233,6 +237,7 @@ export function withDefaults(data: Data): Data {
     settings,
     profiles,
     profileOrder,
+    webhooks,
   };
   if (old) {
     const url = new URL(old.url);
