@@ -76,24 +76,26 @@ test('Add on a title that is not in the catalog adds it', async ({ page }) => {
   expect((await stack.call('GET', '/library/movie:2')).body.title.presetOverride).toBeNull();
 });
 
-test('the catalog shows no badge on a poster', async ({ page }) => {
+test('the catalog shows the type of a title on its poster', async ({ page }) => {
   await page.goto(URL_BASE);
-  const movie = page.getByRole('main').getByRole('link', { name: 'Movie Name 2019', exact: true });
-  const show = page.getByRole('main').getByRole('link', { name: 'Show Name 2020', exact: true });
+  const movie = page.getByRole('main').getByRole('link', { name: 'Movie Name 2019 Movies', exact: true });
+  const show = page.getByRole('main').getByRole('link', { name: 'Show Name 2020 Series', exact: true });
   await expect(movie).toBeVisible();
   await expect(show).toBeVisible();
+  await expect(movie).toContainText('Movies');
+  await expect(show).toContainText('Series');
+  // The poster shows no availability badge.
   await expect(movie).not.toContainText('Available');
-  await expect(movie).not.toContainText('Movies');
   await expect(show).not.toContainText('Available');
-  await expect(show).not.toContainText('Series');
   const patched = await stack.call('PATCH', '/library/tv:1', { seriesType: 'anime' });
   if (patched.status >= 300) throw new Error(`PATCH /library/tv:1 answered ${patched.status}: ${JSON.stringify(patched.body)}`);
   try {
     await page.reload();
-    await expect(page.getByRole('main').getByRole('link', { name: 'Show Name 2020', exact: true })).toBeVisible();
+    const anime = page.getByRole('main').getByRole('link', { name: 'Show Name 2020 Anime', exact: true });
+    await expect(anime).toBeVisible();
     await page.getByRole('tab', { name: 'Anime' }).click();
-    await expect(page.getByRole('main').getByRole('link', { name: 'Show Name 2020', exact: true })).toBeVisible();
-    await expect(page.getByRole('main').getByRole('link', { name: 'Movie Name 2019', exact: true })).toHaveCount(0);
+    await expect(anime).toBeVisible();
+    await expect(page.getByRole('main').getByRole('link', { name: /Movie Name/ })).toHaveCount(0);
   } finally {
     const restored = await stack.call('PATCH', '/library/tv:1', { seriesType: 'standard' });
     if (restored.status >= 300) throw new Error(`PATCH /library/tv:1 answered ${restored.status}: ${JSON.stringify(restored.body)}`);

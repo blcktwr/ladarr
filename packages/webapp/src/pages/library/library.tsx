@@ -11,7 +11,7 @@ import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, Empty
 import { Alert } from '../../components/alert.tsx';
 import { Link, LoadFailed, LoadingGallery, pageWidth } from '../../components/index.ts';
 import { ModalActions } from '../../components/modal-actions.tsx';
-import { catalogPath, posterUrl, describeError, errorMessages, shownKey, statusLabel } from '../../lib/format.ts';
+import { catalogPath, contentType, posterUrl, describeError, errorMessages, shownKey, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { useLive } from '../../lib/live.ts';
 import { StatusText } from '../../lib/status.tsx';
@@ -37,7 +37,7 @@ const catalogTitle = 'mx-auto w-[min(1200px,calc(100%-40px))]';
 function TitlePoster({ title, selected, onSelectedChange }: { title: TitleSummary; selected: boolean; onSelectedChange: (selected: boolean) => void }) {
   return (
     <RouterLink to={catalogPath(title.key)}>
-      <Thumbnail image={posterUrl(title.posterPath, 'w342') ?? ''} title={title.title} year={title.year ?? ''} selected={selected} onSelectedChange={onSelectedChange} />
+      <Thumbnail image={posterUrl(title.posterPath, 'w342') ?? ''} title={title.title} year={title.year ?? ''} type={contentType(title.mediaType, title.seriesType)} selected={selected} onSelectedChange={onSelectedChange} />
     </RouterLink>
   );
 }

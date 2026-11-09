@@ -46,7 +46,7 @@ const groupRow = (page: Page) => page.locator('[data-row="group:tv:1"]');
 
 // Pages that need a signed-in owner. The name tells what the user sees.
 const PAGES: [string, Opener][] = [
-  ['catalog', open('/catalog', (page) => expect(page.getByRole('link', { name: 'Show Name 2020', exact: true })).toBeVisible())],
+  ['catalog', open('/catalog', (page) => expect(page.getByRole('link', { name: 'Show Name 2020 Series', exact: true })).toBeVisible())],
   [
     'series',
     async (page) => {
@@ -276,7 +276,7 @@ function recordMotion() {
 
 // A walk through the parts of the app that move: tabs, the inspector of the queue, a menu, a dialog, and an alert dialog.
 async function walk(page: Page) {
-  await open('/catalog', (p) => expect(p.getByRole('link', { name: 'Show Name 2020', exact: true })).toBeVisible())(page);
+  await open('/catalog', (p) => expect(p.getByRole('link', { name: 'Show Name 2020 Series', exact: true })).toBeVisible())(page);
   await page.locator('a[href$="/activity"]').click();
   // A season opens and closes in the inspector, and the menu of the series opens the log of the title.
   await page.getByRole('button', { name: 'Show episodes of Season 1' }).click();
