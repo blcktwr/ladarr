@@ -418,6 +418,18 @@ export type QueueTransfer = {
   peers: number;
 };
 
+// A release that the last search found and rejected, but that a person can still take by hand.
+export type QueueRejectedRelease = {
+  indexerId: number;
+  guid: string;
+  title: string;
+  sizeBytes: number;
+  seeders: number | null;
+  resolution: number | null;
+  source: string;
+  kind: 'single' | 'multi' | 'pack';
+};
+
 export type QueueSearch = {
   at: number;
   indexers: { id: number; name: string; state: 'waiting' | 'done' | 'failed' | 'skipped'; count: number | null; error?: string }[];
@@ -426,6 +438,7 @@ export type QueueSearch = {
   result: string | null;
   topRejections: string[];
   nextAt: number | null;
+  rejected: QueueRejectedRelease[];
 };
 
 export type QueueEntryView = {

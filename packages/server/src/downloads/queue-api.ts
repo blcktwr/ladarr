@@ -5,6 +5,7 @@ import { REJECTION_TEXT } from '../acquisition/decide.ts';
 import type { Finder } from '../acquisition/finder.ts';
 import { qualityLabel } from '../acquisition/quality.ts';
 import { parseRelease } from '../acquisition/release.ts';
+import type { RawRelease } from '../acquisition/torznab.ts';
 import type { ImportStatus } from '../library/import-status.ts';
 import { listDownloadFiles } from '../library/importer.ts';
 import { deprioritize, enqueue as enqueueJob, prioritize, type EnqueueInput, type Job } from '../core/jobs.ts';
@@ -266,7 +267,22 @@ export function queueRouter({ db, queue, finder, poller, clients, enqueue, persi
       // The client has a torrent for this target. An attached torrent is one that the user chose. ladarr did not add it.
       hasTorrent: Boolean(entry.transferHash),
       attached: Boolean(entry.release?.external),
-      search: entry.search ?? null,
+      // The link and the magnet stay on the server: they carry the API key of the indexer.
+      search: entry.search
+        ? {
+            ...entry.search,
+            rejected: (entry.search.rejected ?? []).map((release) => ({
+              indexerId: release.indexerId,
+              guid: release.guid,
+              title: release.title,
+              sizeBytes: release.sizeBytes,
+              seeders: release.seeders,
+              resolution: release.resolution,
+              source: release.source,
+              kind: release.kind,
+            })),
+          }
+        : null,
       // A pack gives one transfer to several entries. The numbers are the numbers of the torrent, and they count once.
       // The part of an episode comes from its own file when the client reports it.
       transfer: transfer
@@ -589,6 +605,43 @@ export function queueRouter({ db, queue, finder, poller, clients, enqueue, persi
     const outcome = finder.grabManual(entries, decision.release, want);
     if (!('reserved' in outcome)) return void res.status(409).json({ error: 'release_rejected', rejections: outcome.rejections.map((code) => ({ code, message: REJECTION_TEXT[code] ?? code })) });
     res.status(202).json({ started: entries.map((entry) => entry.id) });
+  });
+
+  // A release of the last search that the user picks by hand after a no-match. The preferences are skipped, the
+  // safety checks are not.
+  router.post('/entries/:id/releases/grab', (req, res) => {
+    const entry = db.data.queue[req.params.id];
+    const { indexerId, guid } = (req.body ?? {}) as { indexerId?: unknown; guid?: unknown };
+    if (!entry || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
+    if (typeof indexerId !== 'number' || typeof guid !== 'string') return void res.status(400).json({ error: 'invalid_request' });
+    const candidate = (entry.search?.rejected ?? []).find((release) => release.indexerId === indexerId && release.guid === guid);
+    if (!candidate) return void res.status(404).json({ error: 'release_not_found' });
+    const title = titleOf(entry)!;
+    const release: RawRelease = {
+      indexerId: candidate.indexerId,
+      guid: candidate.guid,
+      title: candidate.title,
+      link: candidate.link,
+      magnet: candidate.magnet,
+      infoHash: candidate.infoHash,
+      sizeBytes: candidate.sizeBytes,
+      publishedAt: null,
+      seeders: candidate.seeders,
+      peers: null,
+      categories: [],
+    };
+    const want = finder.wantForRelease(title, release, entry.season ?? undefined, entry.number ?? undefined);
+    if (!want) {
+      const rejections = [{ code: 'not_an_episode', message: REJECTION_TEXT.not_an_episode }];
+      return void res.status(409).json({ error: 'release_rejected', rejections });
+    }
+    const targets: [number | null, number | null][] =
+      want.kind === 'movie' ? [[null, null]] : want.kind === 'episode' ? [[want.season, want.number]] : title.episodes.filter((episode) => episode.season === want.season).map((episode) => [episode.season, episode.number]);
+    if (!targets.length) return void res.status(409).json({ error: 'release_rejected', rejections: [{ code: 'wrong_season', message: REJECTION_TEXT.wrong_season }] });
+    const entries = targets.map(([season, number]) => queue.ensure(entry.titleKey, season, number));
+    const outcome = finder.grabManual(entries, release, want);
+    if (!('reserved' in outcome)) return void res.status(409).json({ error: 'release_rejected', rejections: outcome.rejections.map((code) => ({ code, message: REJECTION_TEXT[code] ?? code })) });
+    res.status(202).json({ started: entries.map((item) => item.id) });
   });
 
   // --- Actions ----------------------------------------------------------------------------

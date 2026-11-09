@@ -50,6 +50,21 @@ export type Attempt = {
 
 export type StageEvent = { at: number; stage: Stage; branch: Branch | null; attempt: number; cause: string; detail?: string };
 
+// A release of the last search that a person can take by hand. The link stays on the server: it carries the API key.
+export type RejectedRelease = {
+  indexerId: number;
+  guid: string;
+  title: string;
+  link: string | null;
+  magnet: string | null;
+  infoHash: string | null;
+  sizeBytes: number;
+  seeders: number | null;
+  resolution: number | null;
+  source: string;
+  kind: 'single' | 'multi' | 'pack';
+};
+
 export type SearchState = {
   at: number;
   indexers: { id: number; name: string; state: 'waiting' | 'done' | 'failed' | 'skipped'; count: number | null; error?: string }[];
@@ -59,6 +74,8 @@ export type SearchState = {
   // The rejection codes that stopped the most releases, most frequent first.
   topRejections: string[];
   nextAt: number | null;
+  // The releases that only the preferences rejected, so a person can pick one for a manual download.
+  rejected: RejectedRelease[];
 };
 
 export type ImportResult = { at: number; ok: boolean; method: 'hardlink' | 'copy' | null; path: string | null; validation: 'ffprobe' | 'basic'; detail?: string };

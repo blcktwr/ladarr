@@ -1,11 +1,11 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
-import type { LogEntry, LogsResponse, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRow, QueueSummary } from '@ladarr/shared/types';
+import type { LogEntry, LogsResponse, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Pause, Play } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronRight, ExternalLink, Pause, Play } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
-import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal, Pagination, Pane, Panel, Progress, Spinner, SubMenu, Table, Text, Thumbnail } from 'nebula';
+import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal, Pagination, Pane, Panel, Progress, Row, Spinner, SubMenu, Table, Text, Thumbnail } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
 import { SeriesBlocklist } from './activity-blocklist.tsx';
@@ -88,6 +88,80 @@ function FileDetails({ file }: { file: NonNullable<QueueEntryView['file']> }) {
   return <Text variant="small">{file.name} ({formatBytes(file.sizeBytes)})</Text>;
 }
 
+const sourceLabels: Record<string, string> = { webdl: 'WEB-DL', webrip: 'WEBRip', bluray: 'BluRay', hdtv: 'HDTV', dvd: 'DVD', cam: 'CAM', telesync: 'TS' };
+const sourceLabel = (source: string) => sourceLabels[source] ?? (source === 'unknown' ? t('Unknown source') : source);
+
+// The quality of a release as a person reads it: its resolution and its source.
+const releaseQuality = (release: QueueRejectedRelease) => [release.resolution ? `${release.resolution}p` : null, sourceLabel(release.source)].filter(Boolean).join(' ');
+
+// The releases that a search found and rejected, with the button that takes one by hand.
+function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; release: QueueRejectedRelease }[]; onDone: () => void }) {
+  const [chosen, setChosen] = useState<{ entry: QueueEntryView; release: QueueRejectedRelease } | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  function close() {
+    setChosen(null);
+    setError('');
+  }
+
+  async function download() {
+    if (!chosen) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(`/queue/entries/${chosen.entry.id}/releases/grab`, { method: 'POST', body: { indexerId: chosen.release.indexerId, guid: chosen.release.guid } });
+      onDone();
+      close();
+    } catch (err) {
+      setError(err instanceof ApiError && err.message === 'release_rejected' ? t('This release cannot be taken: it breaks a safety check.') : t('The request did not complete.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <List>
+        {items.map((item) => {
+          const quality = releaseQuality(item.release);
+          const size = formatBytes(item.release.sizeBytes);
+          return (
+            <Row
+              key={`${item.release.indexerId}:${item.release.guid}`}
+              actions={
+                <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
+                  <Check />
+                </Button>
+              }
+            >
+              <Text variant="small">
+                {quality} · {size}
+              </Text>
+            </Row>
+          );
+        })}
+      </List>
+      {chosen && (
+        <Modal open onOpenChange={(open) => !open && close()} title={t('Download this release?')}>
+          <p>
+            {releaseQuality(chosen.release)} · {formatBytes(chosen.release.sizeBytes)}
+          </p>
+          {error && <Alert tone="danger">{error}</Alert>}
+          <ModalActions>
+            <Button variant="ghost" onClick={close}>
+              {t('Cancel')}
+            </Button>
+            <Button pending={busy} onClick={() => void download()}>
+              {t('Download')}
+            </Button>
+          </ModalActions>
+        </Modal>
+      )}
+    </>
+  );
+}
+
 // The progress of a download: the part that is done.
 function TransferProgress({ entry }: { entry: QueueEntryView }) {
   const percent = downloadPercent(entry);
@@ -110,13 +184,14 @@ function downloadPercent(entry: QueueEntryView) {
 // shows the indicator of its status and the reason that stops it above the progress of the work, under the name, then
 // the fields of its release. The label is off in the inspector of a movie, where the heading of the panel says the name.
 // An episode of a series shows the percent of its download in its name.
-function EntryDetails({ entry, label = true, inline = false }: { entry: QueueEntryView; label?: boolean; inline?: boolean }) {
+function EntryDetails({ entry, label = true, inline = false, showRejected = true, onDone = () => {} }: { entry: QueueEntryView; label?: boolean; inline?: boolean; showRejected?: boolean; onDone?: () => void }) {
   const percent = inline ? downloadPercent(entry) : null;
   const data = !inline && entry.release ? <ReleaseDetails release={entry.release} /> : inline && entry.file ? <FileDetails file={entry.file} /> : null;
   const name = label && <Text>{percent === null ? entry.label : <>{entry.label} <strong>({percent}%)</strong></>}</Text>;
   const status = shownKey(entry.key);
   // The reason shows under the status of a movie. The list and the episodes keep the status and the hint.
   const reason = entry.reason ? t(entry.reason.message) : null;
+  const rejected = showRejected && entry.key === 'no_match' ? (entry.search?.rejected ?? []) : [];
   if (inline) {
     return (
       <div className="grid gap-2 w-full min-w-0">
@@ -125,15 +200,17 @@ function EntryDetails({ entry, label = true, inline = false }: { entry: QueueEnt
           <EntryStatus entry={entry} />
         </div>
         {data}
+        {rejected.length > 0 && <NoMatchReleases items={rejected.map((release) => ({ entry, release }))} onDone={onDone} />}
       </div>
     );
   }
   return (
     <div className="grid gap-4 w-full min-w-0">
       {name}
-      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={Boolean(data)}>
+      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={Boolean(data) || rejected.length > 0}>
         <TransferProgress entry={entry} />
       </DetailStatus>
+      {rejected.length > 0 && <NoMatchReleases items={rejected.map((release) => ({ entry, release }))} onDone={onDone} />}
       {data}
     </div>
   );
@@ -291,7 +368,7 @@ function EpisodeActions({ entry, run, refresh, openLogs }: { entry: QueueEntryVi
 const seasonColumns = [{ label: 'Season', hideLabel: true }, { label: 'Actions', hideLabel: true, align: 'end' as const }];
 
 // The episodes of a season, a page of them at a time.
-function SeasonEpisodes({ season, entries, run, refresh, openLogs }: { season: number; entries: QueueEntryView[]; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void }) {
+function SeasonEpisodes({ season, entries, run, refresh, openLogs, showRejected }: { season: number; entries: QueueEntryView[]; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; showRejected: boolean }) {
   const [page, setPage] = useState(1);
   const pages = Math.max(1, Math.ceil(entries.length / EPISODES));
   const current = Math.min(page, pages);
@@ -307,7 +384,7 @@ function SeasonEpisodes({ season, entries, run, refresh, openLogs }: { season: n
         rows={entries.slice((current - 1) * EPISODES, current * EPISODES).map((entry) => ({
           key: `entry:${entry.id}`,
           cells: [
-            <EntryDetails key="detail" entry={entry} inline />,
+            <EntryDetails key="detail" entry={entry} inline showRejected={showRejected} onDone={refresh} />,
             <EpisodeActions key="actions" entry={entry} run={run} refresh={refresh} openLogs={openLogs} />,
           ],
         }))}
@@ -384,6 +461,14 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   const releases = new Map<string, NonNullable<QueueEntryView['release']>>();
   for (const entry of entries) if (entry.release) releases.set(`${entry.release.title}|${entry.release.sizeBytes}`, entry.release);
   const unique = [...releases.values()];
+  // The releases that the last search found and rejected, one row for each release.
+  const rejected = new Map<string, { entry: QueueEntryView; release: QueueRejectedRelease }>();
+  for (const entry of entries) {
+    for (const release of entry.search?.rejected ?? []) {
+      const key = `${release.indexerId}:${release.guid}`;
+      if (!rejected.has(key)) rejected.set(key, { entry, release });
+    }
+  }
   const qualities = [...new Set(unique.flatMap((release) => (release.quality ? [release.quality] : [])))];
   const message =
     status === 'no_match'
@@ -395,6 +480,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
     <div className="grid min-w-0">
       <div className="grid gap-4">
         {status ? <DetailStatus status={statusLabel(status)} icon={status} message={message} /> : <Text>—</Text>}
+        {status === 'no_match' && rejected.size > 0 && <NoMatchReleases items={[...rejected.values()]} onDone={refresh} />}
         {unique.length > 0 && (
           <div>
             {unique.length === 1 ? (
@@ -421,7 +507,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
         entries={entries}
         opened={season}
         onSeason={toggle}
-        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} run={run} refresh={refresh} openLogs={openLogs} />}
+        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} run={run} refresh={refresh} openLogs={openLogs} showRejected={status !== 'no_match'} />}
       />
     </div>
   );
@@ -431,7 +517,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
 function MovieDetail({ entry, refresh }: { entry: QueueEntryView; refresh: () => void }) {
   return (
     <div className="grid gap-3">
-      <EntryDetails entry={entry} label={false} />
+      <EntryDetails entry={entry} label={false} onDone={refresh} />
       {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
     </div>
   );

@@ -293,7 +293,7 @@ export function createFinder({ db, queue, indexers, enqueue, now = Date.now }: D
       if (scope.kind === 'season') catalog[level](event, message, titleFields(title), { ...fields, season: scope.season, episodes: entries.length, covers: entries.map((entry) => entry.id), ...(name.alias ? { languages: name.languages } : {}) });
       else for (const entry of entries) catalog[level](event, message, itemFields(db, entry), { ...fields, ...(name.alias ? { languages: name.languages } : {}) });
     };
-    const state: SearchState = entries[0]?.search ?? { at: now(), indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null };
+    const state: SearchState = entries[0]?.search ?? { at: now(), indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null, rejected: [] };
     const report = (patch: (search: SearchState) => void) => {
       for (const entry of entries) {
         entry.search ??= structuredClone(state);
@@ -397,6 +397,7 @@ export function createFinder({ db, queue, indexers, enqueue, now = Date.now }: D
 
   function noResult(entries: QueueEntry[], title: Title, decisionsOf: (entry: QueueEntry) => Decision[], asked: number, answered: number, found: number, profiles: ReturnType<typeof profilesFor>) {
     const shownProfiles = profiles.map(explainProfile);
+    const manualCtx = decideContext(true);
     for (const entry of entries) {
       // One release can come from more than one query, as a pack and as a single episode. The closest decision of the
       // release stays, so the reasons and the counts do not repeat it.
@@ -416,7 +417,30 @@ export function createFinder({ db, queue, indexers, enqueue, now = Date.now }: D
         queue.move(entry, { stage: 'available', branch: null, reason: null }, 'no better release');
         continue;
       }
-      Object.assign(entry.search!, { result: code === 'no_indexers' ? 'no_results' : code, accepted: 0, candidates: decisions.length, topRejections: rejections, nextAt: now() + RESEARCH_MS });
+      // The releases that a person can take by hand. Only a release that a manual choice accepts stays: a release of
+      // another title, or one that breaks a safety check, is not in the list.
+      const rejected = decisions
+        .filter((decision) => {
+          if (decision.accepted) return false;
+          const want = wantForRelease(title, decision.release, entry.season ?? undefined, entry.number ?? undefined);
+          return want ? decide(decision.release, want, manualCtx).accepted : false;
+        })
+        .sort((a, b) => a.rejections.length - b.rejections.length || (b.release.seeders ?? 0) - (a.release.seeders ?? 0))
+        .slice(0, MAX_CANDIDATES)
+        .map((decision) => ({
+          indexerId: decision.release.indexerId,
+          guid: decision.release.guid,
+          title: decision.release.title,
+          link: decision.release.link,
+          magnet: decision.release.magnet,
+          infoHash: decision.hash,
+          sizeBytes: decision.release.sizeBytes,
+          seeders: decision.release.seeders,
+          resolution: decision.parsed.resolution,
+          source: decision.parsed.source,
+          kind: decision.kind,
+        }));
+      Object.assign(entry.search!, { result: code === 'no_indexers' ? 'no_results' : code, accepted: 0, candidates: decisions.length, topRejections: rejections, nextAt: now() + RESEARCH_MS, rejected });
       // The releases that came closest to acceptance first: the fewest reasons, then the most seeders. A person sees
       // what the indexers offered and which rule stopped each one.
       const explained = decisions.map((decision) =>
@@ -512,7 +536,7 @@ export function createFinder({ db, queue, indexers, enqueue, now = Date.now }: D
     const ctx = decideContext();
     const profiles = profilesFor(ctx.quality, title);
     for (const entry of entries) {
-      entry.search = { at: startedAt, indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null };
+      entry.search = { at: startedAt, indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null, rejected: [] };
       queue.move(entry, { stage: 'searching' }, 'search started');
     }
     let open = entries;
@@ -1013,6 +1037,17 @@ export function createFinder({ db, queue, indexers, enqueue, now = Date.now }: D
 
   // --- Interactive search -----------------------------------------------------------------
 
+  // The target that a release names. A pack covers its season, an episode covers itself, and a release that does not
+  // say which episode it has falls back to the target that the user opened.
+  function wantForRelease(title: Title, release: RawRelease, season?: number, number?: number): Want | undefined {
+    if (title.mediaType === 'movie') return { kind: 'movie', title };
+    const parsed = parseRelease(release.title);
+    if (parsed.pack && parsed.season !== null) return { kind: 'season', title, season: parsed.season };
+    const first = parsed.episodes[0];
+    if (parsed.season !== null && first !== undefined) return { kind: 'episode', title, season: parsed.season, number: first };
+    return number !== undefined && season !== undefined ? { kind: 'episode', title, season, number } : undefined;
+  }
+
   // Searches for the user to look at. It uses the interactive switch of the indexer and creates no queue entry.
   async function interactive(titleKey: string, { season, number, fresh }: { season?: number; number?: number; fresh?: boolean }, signal: AbortSignal) {
     const title = db.data.titles[titleKey];
@@ -1031,16 +1066,8 @@ export function createFinder({ db, queue, indexers, enqueue, now = Date.now }: D
     }
     const ctx = decideContext();
     const manual = decideContext(true);
-    const wantOf = (release: RawRelease): Want | undefined => {
-      if (title.mediaType === 'movie') return { kind: 'movie', title };
-      const parsed = parseRelease(release.title);
-      if (parsed.pack && parsed.season !== null) return { kind: 'season', title, season: parsed.season };
-      const first = parsed.episodes[0];
-      if (parsed.season !== null && first !== undefined) return { kind: 'episode', title, season: parsed.season, number: first };
-      return number !== undefined && season !== undefined ? { kind: 'episode', title, season, number } : undefined;
-    };
     const decisions = releases.flatMap((release) => {
-      const want = wantOf(release);
+      const want = wantForRelease(title, release, season, number);
       if (!want) return [];
       return [{ decision: decide(release, want, ctx), overridable: decide(release, want, manual).accepted, want }];
     });
@@ -1091,7 +1118,7 @@ export function createFinder({ db, queue, indexers, enqueue, now = Date.now }: D
     for (const group of bySeason.values()) enqueueSearch({ titleKey: group[0]!.titleKey, season: group[0]!.season, entryIds: group.map((e) => e.id) });
   }
 
-  return { requestSearch, reserve, fallback, block, enqueueSearch, interactive, grabManual, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, resolution: number) => upgradeFiles(title, resolution).length, clearCache: () => cache.clear() };
+  return { requestSearch, reserve, fallback, block, enqueueSearch, interactive, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, resolution: number) => upgradeFiles(title, resolution).length, clearCache: () => cache.clear() };
 }
 
 export type Finder = ReturnType<typeof createFinder>;
