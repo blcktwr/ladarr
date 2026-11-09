@@ -119,28 +119,27 @@ describe('requests and summary', () => {
     const move = (reason: { code: string } | null) => pipe!.queue.move(entry, { stage: 'queued', branch: 'waiting', reason }, 'test');
 
     // The indexers answered, and no release passed the profile. The target waits for its next search, so it is in
-    // Searching, and its row keeps the key that says it found no release.
+    // Waiting, and its row keeps the key that says it found no release.
     move({ code: 'no_results' });
     expect((await detail()).key).toBe('not_found');
     expect((await api!.get('/queue/summary')).body.counts).toEqual({ not_found: 1 });
-    expect(await total('searching')).toBe(1);
-    expect(await total('not_found')).toBe(0);
+    expect(await total('queued')).toBe(1);
+    expect(await total('searching')).toBe(0);
 
     // The indexers answered, and every release was rejected. The target also waits for its next search, so it is
-    // in Searching, and its row keeps the key that says it found no release that fits the preset.
+    // in Waiting, and its row keeps the key that says it found no release that fits the preset.
     move({ code: 'all_rejected' });
     expect((await detail()).key).toBe('no_match');
     expect((await api!.get('/queue/summary')).body.counts).toEqual({ no_match: 1 });
-    expect(await total('searching')).toBe(1);
-    expect(await total('no_match')).toBe(0);
-    expect(await total('not_found')).toBe(0);
+    expect(await total('queued')).toBe(1);
+    expect(await total('searching')).toBe(0);
 
     // The search reached its budget. The target searches again, so it stays in the searching stage.
     move({ code: 'search_deferred' });
     expect((await detail()).key).toBe('waiting');
     expect((await api!.get('/queue/summary')).body.counts).toEqual({ waiting: 1 });
     expect(await total('searching')).toBe(1);
-    expect(await total('not_found')).toBe(0);
+    expect(await total('queued')).toBe(0);
 
     move(null);
     expect((await detail()).key).toBe('waiting');
@@ -203,8 +202,9 @@ describe('requests and summary', () => {
     expect(children[0].reason.message).toContain('Not found in any indexers');
     expect(children[0].search).toMatchObject({ result: 'no_results' });
 
-    // Filters. A target that waits for its next search is Searching, also when the search found nothing.
-    expect((await api.get('/queue?stage=searching')).body.total).toBe(1);
+    // Filters. A target that waits for its next search is in Waiting, also when the search found nothing.
+    expect((await api.get('/queue?stage=queued')).body.total).toBe(1);
+    expect((await api.get('/queue?stage=searching')).body.total).toBe(0);
     expect((await api.get('/queue?stage=not_found')).body.total).toBe(0);
     expect((await api.get('/queue?stage=waiting&type=movie')).body.total).toBe(0);
     expect((await api.get('/queue?q=show')).body.total).toBe(1);

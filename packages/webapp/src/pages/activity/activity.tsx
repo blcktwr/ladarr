@@ -471,10 +471,11 @@ const keys = ['queued', 'searching', 'downloading', 'importing', 'stuck'];
 // The stages of the whole page. The row is wide, so it lies above the container of the queue.
 function StageMenu({ summary, filters, setFilters }: { summary: QueueSummary | undefined; filters: Filters; setFilters: (f: Filters) => void }) {
   const counts = shownCounts(summary?.counts ?? {});
-  // A target that found no release, or no release that fits the preset, waits for its next search, so it counts in Searching.
-  // Fetching the release belongs to the search too, so it counts there as well.
-  counts.searching = (counts.searching ?? 0) + (summary?.counts.not_found ?? 0) + (summary?.counts.no_match ?? 0) + (summary?.counts.fetching ?? 0);
-  // Validating belongs to the import, so it counts in Importing.
+  // A target that found no release, or no release that fits the preset, waits for its next search, so it counts in
+  // Waiting. Fetching the release belongs to the search, so it counts in Searching. Validating belongs to the import,
+  // so it counts in Importing.
+  counts.queued = (counts.queued ?? 0) + (summary?.counts.not_found ?? 0) + (summary?.counts.no_match ?? 0);
+  counts.searching = (counts.searching ?? 0) + (summary?.counts.fetching ?? 0);
   counts.importing = (counts.importing ?? 0) + (summary?.counts.validating ?? 0);
   return (
     <SubMenu

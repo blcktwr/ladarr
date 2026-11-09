@@ -29,10 +29,11 @@ type Deps = {
 
 const DAY_MS = 24 * 60 * 60_000;
 const MAX_PAGE = 200;
-// The key of an entry for a filter. A target that waits for its turn in the queue is Waiting. A target that waits
-// for its next search is Searching, also when the last search found no release or no release that fits the preset.
-// Fetching the release belongs to the search, so it shows in the same tab.
-const searchKey = (key: string) => (key === 'waiting' || key === 'not_found' || key === 'no_match' || key === 'fetching' ? 'searching' : key);
+// The key of an entry for a filter. A target whose last search found no release, or no release that fits the preset,
+// waits for its next search in Waiting, with its result. A target that searches or fetches its release shows in
+// Searching, because fetching belongs to the search.
+const searchKey = (key: string) =>
+  key === 'not_found' || key === 'no_match' ? 'queued' : key === 'waiting' || key === 'fetching' ? 'searching' : key;
 // Validating belongs to the import, so it shows in the same tab.
 const importKey = (key: string) => (key === 'validating' ? 'importing' : key);
 const filterKeyOf = (entry: QueueEntry) => importKey(searchKey(queueKey(entry)));
@@ -41,8 +42,8 @@ const filterKeyOf = (entry: QueueEntry) => importKey(searchKey(queueKey(entry)))
 const ITEM_JOB_TYPES = new Set(['queue.initial', 'queue.search', 'queue.grab', 'import.run']);
 const isItemJob = (job: Job) => job.type.startsWith('item.') || ITEM_JOB_TYPES.has(job.type);
 
-// The place of a stage in the journey, from the least to the most advanced. A target that waits for its next
-// search is at the searching place.
+// The place of a stage in the journey, from the least to the most advanced. A target that searches or fetches its
+// release is at the searching place.
 const STAGE_RANK = new Map(STAGES.map((stage, index) => [stage, index]));
 const progressOf = (entry: QueueEntry) => {
   const key = queueKey(entry);
