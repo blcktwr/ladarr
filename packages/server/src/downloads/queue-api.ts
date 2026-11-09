@@ -74,7 +74,7 @@ export function createRetry({ db, queue, finder, enqueue }: Pick<Deps, 'db' | 'q
       enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
     } else if ((entry.stage === 'fetching' || entry.stage === 'sending') && entry.release) {
       queue.move(entry, { branch: null, reason: null }, 'retry');
-      enqueue({ type: 'queue.grab', payload: { entryIds: sharing(entry).filter((e) => e.stage === 'fetching' || e.stage === 'sending').map((e) => e.id) }, dedupeKey: `grab:${entry.id}` });
+      enqueue({ type: 'queue.grab', payload: { entryIds: sharing(entry).filter((e) => e.stage === 'fetching' || e.stage === 'sending').map((e) => e.id) }, dedupeKey: `grab:${entry.id}`, runAt: entry.createdAt });
     } else {
       entry.release = null;
       entry.transferHash = null;
@@ -718,7 +718,7 @@ export function queueRouter({ db, queue, finder, poller, clients, enqueue, persi
             queue.move(entry, { branch: null }, 'resumed by the user');
           } else if ((entry.stage === 'fetching' || entry.stage === 'sending') && entry.release) {
             queue.move(entry, { branch: null }, 'resumed by the user');
-            enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, dedupeKey: `grab:${entry.id}` });
+            enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, dedupeKey: `grab:${entry.id}`, runAt: entry.createdAt });
           } else {
             queue.move(entry, { stage: 'queued', branch: null, reason: null }, 'resumed by the user');
             finder.enqueueSearch({ titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id] });

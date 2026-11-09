@@ -519,7 +519,11 @@ export function createFinder({ db, queue, indexers, enqueue, now = Date.now }: D
       });
       queue.move(entry, { stage: 'fetching', branch: null, reason: null }, 'release selected', release.title);
     }
-    enqueue({ type: 'queue.grab', payload: { entryIds: entries.map((e) => e.id) }, dedupeKey: `grab:${entries[0]!.id}`, priority: entries.some((e) => e.priority !== null) });
+    // The worker starts the downloads in the order of the queue, so the first target of the list takes a free slot first.
+    // A title keeps the position of its first target, as its row does.
+    const titleEntries = Object.values(db.data.queue).filter((item) => item.titleKey === entries[0]!.titleKey && item.attempt > 0 && !item.clearedAt);
+    const runAt = Math.min(entries[0]!.createdAt, ...titleEntries.map((item) => item.createdAt));
+    enqueue({ type: 'queue.grab', payload: { entryIds: entries.map((e) => e.id) }, dedupeKey: `grab:${entries[0]!.id}`, runAt, priority: entries.some((e) => e.priority !== null) });
     return true;
   }
 
