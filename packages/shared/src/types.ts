@@ -230,8 +230,9 @@ export type SystemStatus = { problems: Problem[] };
 
 // The version of the server that runs.
 export type VersionInfo = { version: string };
-// The latest release of the repository, and whether it is newer than the installed version.
-export type UpdateCheck = { available: boolean; latest: string; url: string };
+// The latest release of the repository, and whether it is newer than the installed version. notes is the text of the
+// release, which holds the changelog.
+export type UpdateCheck = { available: boolean; latest: string; url: string; notes: string | null };
 
 export type RootCheck = { problems: RootProblem[]; freeBytes: number | null };
 export type RootRow = { id: string; path: string; mediaType: MediaType; check: RootCheck };

@@ -17,7 +17,7 @@ function fakeGithub(respond: () => Response | Promise<Response>) {
   return { send, calls };
 }
 
-const release = (tag: string) => json({ tag_name: tag, html_url: HTML_URL });
+const release = (tag: string, notes?: string) => json({ tag_name: tag, html_url: HTML_URL, ...(notes === undefined ? {} : { body: notes }) });
 
 describe('installed version', () => {
   it('is the version in package.json', () => {
@@ -41,7 +41,17 @@ describe('check for update', () => {
 
   it('reports a newer release with the tag without the leading v and its url', async () => {
     const { send } = fakeGithub(() => release('v9.9.9'));
-    expect(await checkForUpdate(send)).toEqual({ available: true, latest: '9.9.9', url: HTML_URL });
+    expect(await checkForUpdate(send)).toEqual({ available: true, latest: '9.9.9', url: HTML_URL, notes: null });
+  });
+
+  it('reports the notes of the release', async () => {
+    const { send } = fakeGithub(() => release('v9.9.9', 'Full Changelog: https://github.com/blcktwr/ladarr/compare/1...2'));
+    expect((await checkForUpdate(send)).notes).toBe('Full Changelog: https://github.com/blcktwr/ladarr/compare/1...2');
+  });
+
+  it('reports no notes when the release has none', async () => {
+    const { send } = fakeGithub(() => release('v9.9.9', '   '));
+    expect((await checkForUpdate(send)).notes).toBeNull();
   });
 
   it('reports no update for the installed version', async () => {

@@ -44,12 +44,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The notes of the release list every commit since the tag before it.
+          fetch-depth: 0
 
       - name: Set the version from the tag
         id: version
         run: |
           npm version "$GITHUB_REF_NAME" --no-git-tag-version --allow-same-version
           echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
+      # The release notes are the messages of the commits since the tag before this one. A first release has no
+      # tag before it, so its notes hold every commit.
+      - name: Write the release notes
+        run: |
+          if previous=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null); then
+            git log --no-merges --pretty=format:'- %s' "$previous..$GITHUB_REF_NAME" > release-notes.md
+          else
+            git log --no-merges --pretty=format:'- %s' "$GITHUB_REF_NAME" > release-notes.md
+          fi
 
       # The container image runs Alpine with musl, so the bundle must use the same platform.
       # The job installs the production packages only, and then packs the code with them.
@@ -74,10 +87,11 @@ jobs:
               "ladarr-${{ steps.version.outputs.version }}.tar.gz" \
               "ladarr-${{ steps.version.outputs.version }}.tar.gz.sha256" \
               --clobber
+            gh release edit "$GITHUB_REF_NAME" -F release-notes.md
           else
             gh release create "$GITHUB_REF_NAME" \
               "ladarr-${{ steps.version.outputs.version }}.tar.gz" \
               "ladarr-${{ steps.version.outputs.version }}.tar.gz.sha256" \
               --title "v$GITHUB_REF_NAME" \
-              --generate-notes
+              -F release-notes.md
           fi

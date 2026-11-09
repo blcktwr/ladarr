@@ -74,6 +74,7 @@ export function SystemVersion() {
           {result.available ? t('Version {version} is available.', { version: result.latest }) : t('You have the latest version.')}
         </Text>
       )}
+      {result?.notes && <pre>{result.notes}</pre>}
       {installed && <Text variant="body">{t('Update to {version} installed. The server restarts.', { version: installed })}</Text>}
       {failed && <Alert tone="danger">{t('The request did not complete.')}</Alert>}
     </Section>

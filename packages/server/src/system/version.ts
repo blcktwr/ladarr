@@ -28,8 +28,9 @@ export async function checkForUpdate(fetchImpl: typeof fetch = fetch): Promise<U
     signal: AbortSignal.timeout(MAX_AGE_MS),
   });
   if (!res.ok) throw new Error(`GitHub answered with status ${res.status}.`);
-  const release = (await res.json()) as { tag_name?: unknown; html_url?: unknown };
+  const release = (await res.json()) as { tag_name?: unknown; html_url?: unknown; body?: unknown };
   if (typeof release.tag_name !== 'string' || typeof release.html_url !== 'string') throw new Error('The release has no tag or url.');
   const latest = release.tag_name.replace(/^v/i, '');
-  return { available: isNewerVersion(latest, APP_VERSION), latest, url: release.html_url };
+  const notes = typeof release.body === 'string' && release.body.trim() ? release.body.trim() : null;
+  return { available: isNewerVersion(latest, APP_VERSION), latest, url: release.html_url, notes };
 }
