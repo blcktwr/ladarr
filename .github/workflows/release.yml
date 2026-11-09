@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+'
 
 permissions:
   contents: write
@@ -72,5 +72,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "ladarr-${{ steps.version.outputs.version }}.tar.gz" \
             "ladarr-${{ steps.version.outputs.version }}.tar.gz.sha256" \
-            --title "$GITHUB_REF_NAME" \
+            --title "v$GITHUB_REF_NAME" \
             --generate-notes
