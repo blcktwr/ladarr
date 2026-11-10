@@ -6,7 +6,6 @@ import { ArrowLeft, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
 import { Link as RouterLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
 import { ResultItem } from '../search/result-item.tsx';
-import { LibraryFilterSelect, SearchPlanButton, type LibraryView } from './calendar-filters.tsx';
 import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, EmptyState, Gallery, Modal, Pane, Section, Spinner, SubMenu, Table, Text, Thumbnail } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { Link, LoadFailed, LoadingGallery, pageWidth } from '../../components/index.ts';
@@ -48,7 +47,7 @@ function TitlePoster({ title, selected, onSelectedChange }: { title: TitleSummar
         type={contentType(title.mediaType, title.seriesType)}
         selected={selected}
         onSelectedChange={onSelectedChange}
-        dimmed={title.mediaType === 'tv' && title.availability === 'waiting'}
+        dimmed={title.availability === 'waiting'}
       />
     </RouterLink>
   );
@@ -56,14 +55,13 @@ function TitlePoster({ title, selected, onSelectedChange }: { title: TitleSummar
 
 function LibraryList() {
   const [type, setType] = useState<'all' | LibraryType>('all');
-  const [view, setView] = useState<LibraryView>('all');
   const selection = useSelection();
   const [removal, setRemoval] = useState<PlanRequest | null>(null);
   const [importing, setImporting] = useState(false);
   const [addingManually, setAddingManually] = useState(false);
   const { data, error, isFetching: loading, isFetchingNextPage, refetch: reload, fetchNextPage, hasNextPage } = useInfiniteQuery({
-    queryKey: ['/library', type, view],
-    queryFn: ({ pageParam }) => api<{ items: TitleSummary[]; total: number }>(`/library?limit=${PAGE_SIZE}&offset=${pageParam}${type === 'all' ? '' : `&type=${type}`}${view === 'all' ? '' : `&filter=${view}`}`),
+    queryKey: ['/library', type],
+    queryFn: ({ pageParam }) => api<{ items: TitleSummary[]; total: number }>(`/library?limit=${PAGE_SIZE}&offset=${pageParam}${type === 'all' ? '' : `&type=${type}`}`),
     initialPageParam: 0,
     // The next page starts after the titles that the gallery has.
     getNextPageParam: (last, pages) => {
@@ -85,8 +83,6 @@ function LibraryList() {
     return () => observer.disconnect();
   }, [error, fetchNextPage, hasNextPage, isFetchingNextPage]);
   useLive('library.changed', () => void reload());
-  // Needs attention depends on the queue, and a queue change is not a library change.
-  useLive('queue.changed', () => view === 'attention' && void reload());
 
   if (error && !data) {
     return (
@@ -110,8 +106,8 @@ function LibraryList() {
       </div>
     );
   }
-  // With no title in the catalog, the type menu and the filter have nothing to act on.
-  const catalogEmpty = total === 0 && type === 'all' && view === 'all';
+  // With no title in the catalog, the type menu has nothing to act on.
+  const catalogEmpty = total === 0 && type === 'all';
 
   return (
     <div className={catalog}>
@@ -119,7 +115,6 @@ function LibraryList() {
         <Text variant="title">{t('Catalog')}</Text>
         <Actions>
           <BulkActions selection={selection} onRemove={setRemoval} />
-          {view === 'missing' && <SearchPlanButton label={t('Search missing')} heading={t('Search missing titles')} request={{ kind: 'search', filter: 'missing', ...(type === 'all' ? {} : { type }) }} />}
           {!catalogEmpty && (
             <SubMenu
               aria-label={t('Type')}
@@ -134,14 +129,6 @@ function LibraryList() {
               ]}
             />
           )}
-          {!catalogEmpty && (
-            <LibraryFilterSelect
-              value={view}
-              onChange={(next) => {
-                setView(next);
-              }}
-            />
-          )}
           <ActionMenu label={t('More actions')} items={[{ label: t('Import'), onClick: () => setImporting(true) }, { label: t('Add manually'), onClick: () => setAddingManually(true) }]} />
         </Actions>
       </div>
@@ -149,7 +136,7 @@ function LibraryList() {
       <AddManuallyDialog open={addingManually} onClose={() => setAddingManually(false)} />
       <PlanDialog request={removal} onClose={() => setRemoval(null)} onDone={() => selection.clear()} />
       {items.length === 0 ? (
-        <EmptyState>{view !== 'all' ? t('No titles match this filter.') : type === 'all' ? t('Your catalog is empty. Search for a title to add it.') : t('No titles of this type.')}</EmptyState>
+        <EmptyState>{type === 'all' ? t('Your catalog is empty. Search for a title to add it.') : t('No titles of this type.')}</EmptyState>
       ) : (
         <div className={catalogTiles}>
           <Gallery>
