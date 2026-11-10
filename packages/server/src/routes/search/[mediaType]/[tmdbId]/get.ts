@@ -11,6 +11,7 @@ export function searchTitle(tmdb: Tmdb | undefined, db: Db): RequestHandler {
     res.json({
       title: {
         ...inLibrary(db)([meta])[0],
+        date: meta.date,
         backdropPath: meta.backdropPath,
         rating: meta.rating,
         runtime: meta.runtime,

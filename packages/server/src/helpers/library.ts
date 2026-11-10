@@ -83,6 +83,7 @@ export function detail(db: Db, title: Title): TitleDetail {
     queueStatus: queueStatusOf(db, title.key),
     overview: meta.overview,
     aliases: meta.aliases,
+    date: meta.date,
     rating: meta.rating,
     runtime: meta.runtime,
     imdbId: meta.imdbId,

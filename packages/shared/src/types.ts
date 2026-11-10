@@ -52,7 +52,8 @@ export type SearchResult = {
 };
 
 // The TMDB facts of a title that may not be in the library. The title page shows them for both.
-export type TitlePreview = SearchResult & { backdropPath: string | null; rating: number | null; runtime: number | null; imdbId: string | null; tvdbId: number | null; providerStatus: string };
+// The date is the release date of a movie, and the first air date of a series.
+export type TitlePreview = SearchResult & { date: string | null; backdropPath: string | null; rating: number | null; runtime: number | null; imdbId: string | null; tvdbId: number | null; providerStatus: string };
 
 export type CastMember = { id: number; name: string; character: string; profilePath: string | null };
 
@@ -86,6 +87,8 @@ export type TitleDetail = TitleSummary & {
   queueStatus: string | null;
   overview: string;
   aliases: string[];
+  // The release date of a movie, and the first air date of a series.
+  date: string | null;
   rating: number | null;
   runtime: number | null;
   imdbId: string | null;
