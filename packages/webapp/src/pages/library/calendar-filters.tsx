@@ -1,39 +1,14 @@
-import type { LibraryFilter } from '@ladarr/shared/enums';
 import type { LibrarySearchRequest, SearchPlan } from '@ladarr/shared/types';
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../../lib/api.ts';
 import { t } from '../../i18n/index.ts';
-import { Button, Dropdown, List, Modal, Row } from 'nebula';
+import { Button, List, Modal, Row } from 'nebula';
 import { describeError, errorMessages } from '../../lib/format.ts';
 import { useQueueNotice } from '../../lib/queue-notice.ts';
 import { ModalActions } from '../../components/modal-actions.tsx';
 
-export type LibraryView = 'all' | LibraryFilter;
-
 export const titleCount = (n: number) => (n === 1 ? t('1 title') : t('{n} titles', { n }));
 export const fileCount = (n: number) => (n === 1 ? t('1 file') : t('{n} files', { n }));
-
-const filterLabel: Record<LibraryView, string> = {
-  all: 'All titles',
-  missing: 'Missing',
-  waiting: 'Waiting for release',
-  attention: 'Needs attention',
-  available: 'Available',
-};
-
-export function LibraryFilterSelect({ value, onChange }: { value: LibraryView; onChange: (value: LibraryView) => void }) {
-  const views = Object.keys(filterLabel) as LibraryView[];
-  const id = useId();
-  // The label is for screen readers. The selected option shows what the list does.
-  return (
-    <>
-      <label htmlFor={id} className="sr-only">
-        {t('Show')}
-      </label>
-      <Dropdown id={id} value={value} options={views.map((id) => ({ value: id, label: t(filterLabel[id]) }))} onValueChange={(id) => onChange(id as LibraryView)} />
-    </>
-  );
-}
 
 // What a plan searches for: the missing files.
 // The titles are a list of keys, or the titles of a library filter.
