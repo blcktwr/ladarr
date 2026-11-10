@@ -1,9 +1,9 @@
-import type { ProfileData, QualityResponse, QualityRow } from '@ladarr/shared/types';
+import type { ProfileData, QualityResponse, QualityRow, SizeLimits } from '@ladarr/shared/types';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, Plus } from 'lucide-react';
-import { useState } from 'react';
-import { Actions, Badge, Button, Checkbox, Field, Hint, Modal, Section, Table } from 'nebula';
-import { Alert, Confirm, ModalActions } from '../../components/index.ts';
+import { useEffect, useState } from 'react';
+import { ActionMenu, Actions, Badge, Button, Checkbox, Confirm, Field, Hint, Modal, Section, Table } from 'nebula';
+import { Alert, ModalActions } from '../../components/index.ts';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { api } from '../../lib/api.ts';
 import { describeError } from '../../lib/format.ts';
@@ -42,8 +42,7 @@ function remove(slots: Slot[], index: number) {
   return next;
 }
 
-function ProfileModal({ profile, qualities, onSaved }: { profile?: ProfileData; qualities: QualityRow[]; onSaved: () => Promise<unknown> }) {
-  const [open, setOpen] = useState(false);
+function ProfileModal({ profile, qualities, open, onOpenChange, onSaved }: { profile?: ProfileData; qualities: QualityRow[]; open: boolean; onOpenChange: (open: boolean) => void; onSaved: () => Promise<unknown> }) {
   const [draft, setDraft] = useState(() => toDraft(profile));
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -63,6 +62,13 @@ function ProfileModal({ profile, qualities, onSaved }: { profile?: ProfileData; 
     set({ slots: index < 0 ? [...slots, { id, same: false }] : remove(slots, index) });
   };
 
+  // The modal opens with the saved profile, not with what an earlier try left in the form.
+  useEffect(() => {
+    if (!open) return;
+    setDraft(toDraft(profile));
+    setError('');
+  }, [open]);
+
   async function save() {
     if (!draft.name.trim()) return setError(t('Enter a name.'));
     if (!slots.length) return setError(t('Allow at least one quality.'));
@@ -71,7 +77,7 @@ function ProfileModal({ profile, qualities, onSaved }: { profile?: ProfileData; 
     try {
       const body = { name: draft.name.trim(), items: groups };
       await api<{ profile: ProfileData }>(profile ? `/quality/profiles/${profile.id}` : '/quality/profiles', { method: profile ? 'PUT' : 'POST', body });
-      setOpen(false);
+      onOpenChange(false);
       await onSaved();
     } catch (err) {
       setError(describeError(err));
@@ -83,27 +89,9 @@ function ProfileModal({ profile, qualities, onSaved }: { profile?: ProfileData; 
   return (
     <Modal
       open={open}
-      onOpenChange={(next) => {
-        if (next) {
-          setDraft(toDraft(profile));
-          setError('');
-        }
-        setOpen(next);
-      }}
+      onOpenChange={onOpenChange}
       title={profile ? t('Edit {name}', { name: profile.name }) : t('Add a profile')}
       width="xl"
-      trigger={
-        profile ? (
-          <Button variant="ghost" aria-label={t('Edit {name}', { name: profile.name })}>
-            {t('Edit')}
-          </Button>
-        ) : (
-          <Button>
-            <Plus />
-            {t('Add profile')}
-          </Button>
-        )
-      }
     >
       {error && <Alert tone="danger">{error}</Alert>}
       <Field label={t('Name')} required value={draft.name} onValueChange={(name) => set({ name })} />
@@ -143,10 +131,107 @@ function ProfileModal({ profile, qualities, onSaved }: { profile?: ProfileData; 
   );
 }
 
+type Sizes = { min: string; preferred: string; max: string };
+
+const toSizes = ({ min, preferred, max }: SizeLimits): Sizes => ({
+  min: String(min),
+  preferred: preferred === null ? '' : String(preferred),
+  max: max === null ? '' : String(max),
+});
+
+// The three limits in order, or null. An empty preferred or max limit is not checked.
+function parseSizes({ min, preferred, max }: Sizes): SizeLimits | null {
+  const low = min.trim() === '' ? null : Number(min);
+  const mid = preferred.trim() === '' ? null : Number(preferred);
+  const high = max.trim() === '' ? null : Number(max);
+  const ordered =
+    low !== null && Number.isFinite(low) && low >= 0 &&
+    (mid === null || (Number.isFinite(mid) && mid >= low)) &&
+    (high === null || (Number.isFinite(high) && high >= (mid ?? low)));
+  return ordered ? { min: low, preferred: mid, max: high } : null;
+}
+
+// The size limits of the qualities of a profile, in MiB per minute of video. A limit belongs to the quality, so every profile that takes the quality uses the same one.
+function BitratesModal({ profile, qualities, open, onOpenChange, onSaved }: { profile: ProfileData; qualities: QualityRow[]; open: boolean; onOpenChange: (open: boolean) => void; onSaved: () => Promise<unknown> }) {
+  const ids = profile.items.flat();
+  const rows = ids.flatMap((id) => {
+    const quality = qualities.find((candidate) => candidate.id === id);
+    return quality ? [quality] : [];
+  });
+  const initial = () => Object.fromEntries(rows.map((quality) => [quality.id, toSizes(quality.sizes)]));
+  const [values, setValues] = useState<Record<string, Sizes>>(initial);
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState(false);
+
+  // The modal opens with the saved limits, not with what an earlier try left in the form.
+  useEffect(() => {
+    if (!open) return;
+    setValues(initial());
+    setError('');
+  }, [open]);
+
+  const set = (id: string, sizes: Sizes) => setValues({ ...values, [id]: sizes });
+
+  async function save() {
+    const changed: { id: string; sizes: SizeLimits }[] = [];
+    for (const quality of rows) {
+      const sizes = parseSizes(values[quality.id]!);
+      if (!sizes) return setError(t('The sizes are not in order. The minimum is the smallest, then the preferred size, then the maximum.'));
+      if (sizes.min !== quality.sizes.min || sizes.preferred !== quality.sizes.preferred || sizes.max !== quality.sizes.max) changed.push({ id: quality.id, sizes });
+    }
+    if (!changed.length) return onOpenChange(false);
+    setPending(true);
+    setError('');
+    try {
+      for (const { id, sizes } of changed) await api(`/quality/sizes/${id}`, { method: 'PUT', body: sizes });
+      onOpenChange(false);
+      await onSaved();
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onOpenChange={onOpenChange} title={t('Bitrates')} width="lg">
+      {error && <Alert tone="danger">{error}</Alert>}
+      <Table
+        aria-label={t('Bitrates')}
+        columns={[{ label: t('Quality') }, { label: t('Minimum') }, { label: t('Preferred') }, { label: t('Maximum') }]}
+        rows={rows.map((quality) => {
+          const sizes = values[quality.id]!;
+          return {
+            key: quality.id,
+            cells: [
+              quality.label,
+              <Field hideLabel label={t('Minimum for {name}', { name: quality.label })} type="number" min="0" step="any" width="sm" suffix="MiB/min" value={sizes.min} onValueChange={(min) => set(quality.id, { ...sizes, min })} />,
+              <Field hideLabel label={t('Preferred for {name}', { name: quality.label })} type="number" min="0" step="any" width="sm" suffix="MiB/min" value={sizes.preferred} onValueChange={(preferred) => set(quality.id, { ...sizes, preferred })} />,
+              <Field hideLabel label={t('Maximum for {name}', { name: quality.label })} type="number" min="0" step="any" width="sm" suffix="MiB/min" value={sizes.max} onValueChange={(max) => set(quality.id, { ...sizes, max })} />,
+            ],
+          };
+        })}
+      />
+      <ModalActions>
+        <Button pending={pending} onClick={save}>
+          {t('Save')}
+        </Button>
+      </ModalActions>
+    </Modal>
+  );
+}
+
 export function Qualities() {
   const { data, error, refetch } = useQuery<QualityResponse>({ queryKey: ['/quality'] });
   const client = useQueryClient();
   const [message, setMessage] = useState('');
+  // The modal of the profile stays on its last profile while it closes, so the close keeps its title.
+  const [editing, setEditing] = useState<ProfileData | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [bitrates, setBitrates] = useState<ProfileData | null>(null);
+  const [bitratesOpen, setBitratesOpen] = useState(false);
+  const [deleting, setDeleting] = useState<ProfileData | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const profiles = data?.profiles ?? [];
   const qualities = data?.qualities ?? [];
   // The profiles are in the lists of Settings and of the catalog too.
@@ -177,7 +262,15 @@ export function Qualities() {
   }
 
   return (
-    <Section title={t('Qualities')} action={data && <ProfileModal qualities={qualities} onSaved={refresh} />}>
+    <Section
+      title={t('Qualities')}
+      action={data && (
+        <Button onClick={() => { setEditing(null); setEditOpen(true); }}>
+          <Plus />
+          {t('Add profile')}
+        </Button>
+      )}
+    >
       {message && <Alert tone="danger">{message}</Alert>}
       {error && !data ? (
         <LoadFailed onRetry={refetch} />
@@ -195,15 +288,16 @@ export function Qualities() {
               </div>,
               <div className="flex justify-end">
                 <Actions>
-                  <Button
-                    variant="ghost"
-                    iconOnly
-                    aria-label={t('Move {name} up', { name: profile.name })}
-                    disabled={index === 0}
-                    onClick={() => void move(index, -1)}
-                  >
-                    <ArrowUp />
-                  </Button>
+                  {index > 0 && (
+                    <Button
+                      variant="ghost"
+                      iconOnly
+                      aria-label={t('Move {name} up', { name: profile.name })}
+                      onClick={() => void move(index, -1)}
+                    >
+                      <ArrowUp />
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     iconOnly
@@ -213,15 +307,32 @@ export function Qualities() {
                   >
                     <ArrowDown />
                   </Button>
-                  <ProfileModal profile={profile} qualities={qualities} onSaved={refresh} />
-                  <Confirm label={t('Delete')} title={t('Delete {name}?', { name: profile.name })} confirm={t('Delete')} onConfirm={() => void remove(profile)}>
-                    {t('Titles that use this profile must use another one first.')}
-                  </Confirm>
+                  <ActionMenu
+                    label={t('Actions for {name}', { name: profile.name })}
+                    items={[
+                      { label: t('Edit'), onClick: () => { setEditing(profile); setEditOpen(true); } },
+                      { label: t('Bitrates'), onClick: () => { setBitrates(profile); setBitratesOpen(true); } },
+                      { label: t('Delete'), danger: true, onClick: () => { setDeleting(profile); setDeleteOpen(true); } },
+                    ]}
+                  />
                 </Actions>
               </div>,
             ],
           }))}
         />
+      )}
+      <ProfileModal profile={editing ?? undefined} qualities={qualities} open={editOpen} onOpenChange={setEditOpen} onSaved={refresh} />
+      {bitrates && <BitratesModal profile={bitrates} qualities={qualities} open={bitratesOpen} onOpenChange={setBitratesOpen} onSaved={refresh} />}
+      {deleting && (
+        <Confirm
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          title={t('Delete {name}?', { name: deleting.name })}
+          confirm={t('Delete')}
+          onConfirm={() => { setDeleteOpen(false); void remove(deleting); }}
+        >
+          {t('Titles that use this profile must use another one first.')}
+        </Confirm>
       )}
     </Section>
   );
