@@ -653,9 +653,11 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
           ) : title ? (
             <Actions>
               {title.availability !== 'available' && !searched && (
-                <Button disabled={series && title.availability === 'waiting'} onClick={() => void run(() => search({ titleKey: title.key }))}>
-                  {t('Search')}
-                </Button>
+                <span title={series && title.availability === 'waiting' ? t('Not aired') : undefined}>
+                  <Button disabled={series && title.availability === 'waiting'} onClick={() => void run(() => search({ titleKey: title.key }))}>
+                    {t('Search')}
+                  </Button>
+                </span>
               )}
               {hasFile && <UpgradeDialog titleKey={title.key} />}
               <Button variant="danger" onClick={() => setPlan({ request: { action: 'remove', keys: [title.key] }, subject: title.title })}>
