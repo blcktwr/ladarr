@@ -1,0 +1,70 @@
+# Development only. The ladarr image is built from the local Dockerfile.
+# The init service makes the folders in the data volume, so the host needs no folders.
+
+name: ladarr-dev
+
+services:
+  mount-data:
+    image: node:26.9.0-alpine3.24
+    command: sh -c "mkdir -p /data/downloads /data/media/movies /data/media/tv && chown -R ${LADARR_UID:-1000}:${LADARR_GID:-1000} /data"
+    volumes:
+      - data:/data
+
+  ladarr:
+    build: .
+    image: ladarr:dev
+    init: true
+    environment:
+      LADARR_COMPAT_PORTS: ${LADARR_COMPAT_PORTS:-1}
+    ports:
+      - "${LADARR_PORT:-3000}:3000"
+      - "${LADARR_SONARR_PORT:-8989}:8989"
+      - "${LADARR_RADARR_PORT:-7878}:7878"
+      - "${LADARR_SEERR_PORT:-5055}:5055"
+    volumes:
+      # The dev database stays out of config/.
+      - ${LADARR_DEV_CONFIG:-./config-dev}:/config
+      - data:/data
+    depends_on:
+      mount-data:
+        condition: service_completed_successfully
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    environment:
+      PUID: ${LADARR_UID:-1000}
+      PGID: ${LADARR_GID:-1000}
+      TZ: ${TZ:-Etc/UTC}
+      WEBUI_PORT: ${QBITTORRENT_WEBUI_PORT:-8080}
+      TORRENTING_PORT: ${QBITTORRENT_TORRENT_PORT:-6881}
+    volumes:
+      - qbittorrent-config:/config
+      # The same volume as /data in ladarr. ladarr reads the save path from the client.
+      - data:/data
+    ports:
+      - "${QBITTORRENT_WEBUI_PORT:-8080}:${QBITTORRENT_WEBUI_PORT:-8080}"
+      - "${QBITTORRENT_TORRENT_PORT:-6881}:${QBITTORRENT_TORRENT_PORT:-6881}"
+      - "${QBITTORRENT_TORRENT_PORT:-6881}:${QBITTORRENT_TORRENT_PORT:-6881}/udp"
+    depends_on:
+      mount-data:
+        condition: service_completed_successfully
+    # In qBittorrent, set the default save path to /data/downloads.
+
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    environment:
+      PUID: ${LADARR_UID:-1000}
+      PGID: ${LADARR_GID:-1000}
+      TZ: ${TZ:-Etc/UTC}
+    volumes:
+      - jackett-config:/config
+    ports:
+      - "${JACKETT_PORT:-9117}:9117"
+    # Add a public indexer in Jackett. In ladarr, use this address:
+    # http://jackett:9117/api/v2.0/indexers/<id>/results/torznab
+
+volumes:
+  data:
+    name: ${LADARR_DATA_VOLUME:-ladarr-dev-data}
+  qbittorrent-config:
+  jackett-config:
