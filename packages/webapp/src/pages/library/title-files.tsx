@@ -43,7 +43,7 @@ export function RunProgress({ id }: { id: string }) {
             <span>{step.source}</span>
             <span>
               {stepLabel[step.state] ?? step.state}
-              {step.method ? ` · ${step.method === 'hardlink' ? t('Hard link') : t('Copy')}` : ''}
+              {step.method ? ` ${step.method === 'hardlink' ? t('Hard link') : t('Copy')}` : ''}
             </span>
             {step.copiedBytes !== null && (
               <span>

@@ -81,7 +81,7 @@ export function ReleasesDialog({ target, label, onClose }: { target: Target | nu
                     : release.title}
               </p>
               <p>
-                {release.indexer} · {formatBytes(release.sizeBytes)} · {release.seeders === null ? t('seeders unknown') : t('{n} seeders', { n: release.seeders })}
+                {release.indexer} {formatBytes(release.sizeBytes)} {release.seeders === null ? t('seeders unknown') : t('{n} seeders', { n: release.seeders })}
               </p>
               <p>{release.accepted ? t('Fits the preset.') : release.rejections.map((r) => t(r.message)).join(' ')}</p>
               {!release.overridable && <p>{t('This release cannot be downloaded.')}</p>}
