@@ -1,5 +1,5 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import type { Events } from '../../../core/events.ts';
 import type { EnqueueInput, Job } from '../../../core/jobs.ts';
 import type { Title } from '../../../library/library.ts';
@@ -10,7 +10,8 @@ type Deps = { events: Events; enqueue: (input: EnqueueInput) => Job };
 
 const hasFiles = (title: Title) => Boolean(title.fileId) || title.episodes.some((episode) => episode.fileId);
 
-export function libraryTitleUpdate(db: Db, { events, enqueue }: Deps): RequestHandler<{ key: string }> {
+export function libraryTitleUpdate({ events, enqueue }: Deps): RequestHandler<{ key: string }> {
+  const db = get();
   return async (req, res) => {
     const title: Title = res.locals.title;
     const body = req.body;

@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmS
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { openDb, type Db } from '../../src/core/db.ts';
+import { open, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { catalog, closeLog, configureItemLogs, deleteItemLog, log, logToFile, recentLogs } from '../../src/core/log.ts';
 import { createQueue, type QueueEntry } from '../../src/library/downloads/queue.ts';
@@ -57,7 +57,7 @@ function entry(id: string, stage: QueueEntry['stage'] = 'queued'): QueueEntry {
 }
 
 async function dbWith(...ids: string[]): Promise<Db> {
-  const db = await openDb('unused.json');
+  const db = await open('unused.json');
   for (const id of ids) db.data.queue[id] = entry(id);
   return db;
 }
@@ -238,7 +238,7 @@ describe('item logs', () => {
 
   it('removes the logs of the targets of a title that leaves the library', async () => {
     const file = join(folder(), 'ladarr.log');
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     logToFile(file);
     configureItemLogs(db);
     const queue = createQueue(db, createEvents(), () => {});
@@ -280,7 +280,7 @@ describe('item logs', () => {
 
   it('shows only the entries of the current record of an item', async () => {
     const file = join(folder(), 'ladarr.log');
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     const queue = createQueue(db, createEvents(), () => {});
     queue.ensure('movie:1', null, null);
     logToFile(file);

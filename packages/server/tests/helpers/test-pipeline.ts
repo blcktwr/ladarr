@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { emptyData, openDb, type Db } from '../../src/core/db.ts';
+import { emptyData, open, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { createFinder } from '../../src/library/grab/finder.ts';
 import { createImportStatus } from '../../src/library/imports/status.ts';
@@ -109,7 +109,7 @@ export async function startPipeline(options: Options = {}) {
   const folders = { tv: join(dir, 'tv'), movies: join(dir, 'movies'), downloads: join(dir, 'downloads') };
   for (const folder of Object.values(folders)) mkdirSync(folder);
 
-  const db: Db = await openDb('unused.json');
+  const db: Db = await open('unused.json');
   Object.assign(db.data, emptyData());
   db.data.roots = {
     tv: { id: 'tv', path: folders.tv, mediaType: 'tv', dev: statSync(folders.tv).dev },

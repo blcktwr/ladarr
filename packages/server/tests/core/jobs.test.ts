@@ -4,14 +4,14 @@ import { join } from 'node:path';
 import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createSaver, emptyData, openDb, type Data, type Db } from '../../src/core/db.ts';
+import { createSaver, emptyData, open, type Data, type Db } from '../../src/core/db.ts';
 import { backoffMs, claim, complete, deprioritize, enqueue, fail, JobError, prioritize, recoverExpired } from '../../src/core/jobs.ts';
 import { createWorker } from '../../src/core/worker.ts';
 
 const LEASE = 60_000;
 // The tests pass their own clock to the job functions, so jobs are due at time 0 unless a test says else.
 const add = (db: Db, input: Parameters<typeof enqueue>[1]) => enqueue(db, { runAt: 0, ...input });
-const newDb = () => openDb('unused.json');
+const newDb = () => open('unused.json');
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const until = async (check: () => boolean) => {
   for (let i = 0; i < 200 && !check(); i++) await sleep(10);

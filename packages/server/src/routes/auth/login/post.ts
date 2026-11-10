@@ -1,7 +1,7 @@
+import { get } from '../../../core/db.ts';
 import { verify } from '@node-rs/argon2';
 import type { RequestHandler } from 'express';
 import { startSession } from '../../../core/auth.ts';
-import type { Db } from '../../../core/db.ts';
 import { parsePassword } from '../../../helpers/auth.ts';
 
 const MAX_FAILURES = 5;
@@ -16,7 +16,8 @@ function throttleWait(key: string) {
   return recent.length >= MAX_FAILURES ? Math.ceil((recent[0]! + FAILURE_WINDOW_MS - Date.now()) / 1000) : 0;
 }
 
-export function authLogin(db: Db): RequestHandler {
+export function authLogin(): RequestHandler {
+  const db = get();
   return async (req, res) => {
     const key = req.ip ?? 'unknown';
     const wait = throttleWait(key);

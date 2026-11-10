@@ -1,6 +1,6 @@
 import type { SeasonRow, TitleDetail } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import { profilesInOrder, type Db } from '../core/db.ts';
+import { get, profilesInOrder, type Db } from '../core/db.ts';
 import type { Events } from '../core/events.ts';
 import { loadingTitleKeys, queueKey, type QueueEntry } from '../library/downloads/queue.ts';
 import { clock, summarize } from '../library/tools/api.ts';
@@ -40,7 +40,8 @@ export const changed = async (db: Db, events: Events, key: string) => {
 };
 
 // A request for a key outside the library, or with a bad key, gets 404.
-export function titleParam(db: Db): RequestHandler<{ key: string }> {
+export function titleParam(): RequestHandler<{ key: string }> {
+  const db = get();
   return (req, res, next) => {
     const title = KEY.test(req.params.key) ? db.data.titles[req.params.key] : undefined;
     if (!title) return void res.status(404).json({ error: 'not_found' });

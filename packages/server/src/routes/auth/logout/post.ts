@@ -1,8 +1,9 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { SESSION_COOKIE, cookiePath } from '../../../core/auth.ts';
-import type { Db } from '../../../core/db.ts';
 
-export function authLogout(db: Db): RequestHandler {
+export function authLogout(): RequestHandler {
+  const db = get();
   return async (req, res) => {
     delete db.data.sessions[res.locals.session.tokenHash];
     await db.write();

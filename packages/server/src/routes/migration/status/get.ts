@@ -1,8 +1,9 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import { progress } from '../../../helpers/migration.ts';
 
-export function migrationStatus(db: Db): RequestHandler {
+export function migrationStatus(): RequestHandler {
+  const db = get();
   return (_req, res) => {
     res.json(progress(db));
   };

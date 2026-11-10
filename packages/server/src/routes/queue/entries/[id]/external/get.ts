@@ -1,6 +1,6 @@
+import { get } from '../../../../../core/db.ts';
 import type { AttachCandidates } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../../../core/db.ts';
 import type { Clients } from '../../../../../library/downloads/client-api.ts';
 import { ClientError, type Torrent } from '../../../../../library/downloads/qbittorrent.ts';
 import { isActive } from '../../../../../library/downloads/queue.ts';
@@ -8,7 +8,8 @@ import { attachRefusal, MAX_TORRENTS } from '../../../../../helpers/queue-attach
 import { label, shown } from '../../../../../helpers/queue.ts';
 
 // The torrents of the client that the user can attach to the target, and the targets that can share the download.
-export function queueEntryExternalGet(db: Db, clients: Clients): RequestHandler<{ id: string }> {
+export function queueEntryExternalGet(clients: Clients): RequestHandler<{ id: string }> {
+  const db = get();
   return async (req, res) => {
     const entry = db.data.queue[req.params.id];
     const handles = clients.all();

@@ -1,15 +1,15 @@
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
-import { openDb, type Db } from '../../src/core/db.ts';
+import { open, type Db } from '../../src/core/db.ts';
 
 let db: Db;
 let base = '';
 let close: () => void;
 
 beforeAll(async () => {
-  db = await openDb('unused.json');
-  const server = createApp(db).listen(0);
+  db = await open('unused.json');
+  const server = createApp().listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
   close = () => server.close();

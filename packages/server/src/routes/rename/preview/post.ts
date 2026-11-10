@@ -1,9 +1,10 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import { planRename } from '../../../library/rename.ts';
 import { fail, isObject, templatesOf } from '../../../helpers/rename.ts';
 
-export function renamePreview(db: Db): RequestHandler {
+export function renamePreview(): RequestHandler {
+  const db = get();
   return async (req, res) => {
     const body = isObject(req.body) ? req.body : {};
     const naming = templatesOf(db, body);

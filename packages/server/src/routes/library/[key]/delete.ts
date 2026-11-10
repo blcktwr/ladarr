@@ -1,5 +1,5 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import type { Events } from '../../../core/events.ts';
 import type { Queue } from '../../../library/downloads/queue.ts';
 import type { Title } from '../../../library/library.ts';
@@ -9,7 +9,8 @@ import { changed } from '../../../helpers/library.ts';
 type Deps = { events: Events; queue?: Queue; cancelJob?: (id: string) => void };
 
 // The record goes away. The files stay where they are.
-export function libraryTitleDelete(db: Db, { events, queue, cancelJob }: Deps): RequestHandler<{ key: string }> {
+export function libraryTitleDelete({ events, queue, cancelJob }: Deps): RequestHandler<{ key: string }> {
+  const db = get();
   return async (_req, res) => {
     const title: Title = res.locals.title;
     // An unfinished import needs its title to end.

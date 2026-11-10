@@ -1,10 +1,11 @@
+import { get } from '../../../core/db.ts';
 import { hash } from '@node-rs/argon2';
 import type { RequestHandler } from 'express';
 import { findSession, newToken, safeEqual, startSession } from '../../../core/auth.ts';
-import type { Db } from '../../../core/db.ts';
 import { parsePassword } from '../../../helpers/auth.ts';
 
-export function authSetup(db: Db): RequestHandler {
+export function authSetup(): RequestHandler {
+  const db = get();
   return async (req, res) => {
     const password = parsePassword(req.body);
     if (!password) return void res.status(400).json({ error: 'invalid_credentials_format' });

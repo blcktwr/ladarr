@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Request, RequestHandler, Response } from 'express';
-import type { Db } from './db.ts';
+import { get, type Db } from './db.ts';
 
 export const SESSION_COOKIE = 'ladarr_session';
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -50,7 +50,8 @@ export async function startSession(db: Db, req: Request, res: Response) {
 }
 
 // A request passes with the session cookie, or with the API key in X-Api-Key when the route allows it.
-export function requireAuth(db: Db, { allowApiKey = true } = {}): RequestHandler {
+export function requireAuth({ allowApiKey = true } = {}): RequestHandler {
+  const db = get();
   return (req, res, next) => {
     const key = req.get('x-api-key');
     if (allowApiKey && key && db.data.apiKey && safeEqual(key, db.data.apiKey)) return next();

@@ -1,12 +1,13 @@
+import { get } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../../core/db.ts';
 import type { Tmdb } from '../../../../metadata/tmdb.ts';
 import { prepare } from '../../../../library/imports/source.ts';
 import { folderName } from '../../../../library/naming.ts';
 import { fail } from '../../../../helpers/import-source.ts';
 
 // Shows what an import would do. Nothing changes.
-export function importSourcePreview(db: Db, { tmdb, configDir }: { tmdb?: Tmdb; configDir?: string } = {}): RequestHandler {
+export function importSourcePreview({ tmdb, configDir }: { tmdb?: Tmdb; configDir?: string } = {}): RequestHandler {
+  const db = get();
   return async (req, res) => {
     if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
     const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;

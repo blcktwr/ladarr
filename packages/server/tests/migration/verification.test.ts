@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createFinder } from '../../src/library/grab/finder.ts';
 import type { IndexerService } from '../../src/library/grab/torznab.ts';
-import { emptyData, openDb, type Db } from '../../src/core/db.ts';
+import { emptyData, open, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { enqueue, type Job } from '../../src/core/jobs.ts';
 import { createQueue, type Queue } from '../../src/library/downloads/queue.ts';
@@ -81,7 +81,7 @@ async function setup({ mediaType = 'tv' as 'tv' | 'movie', episodes = [episode(1
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ladarr-verify-')));
   mkdirSync(join(dir, 'tv'), { recursive: true });
   mkdirSync(join(dir, 'movies'), { recursive: true });
-  const db: Db = await openDb('unused.json');
+  const db: Db = await open('unused.json');
   Object.assign(db.data, emptyData());
   db.data.roots = {
     tv: { id: 'tv', path: join(dir, 'tv'), mediaType: 'tv', dev: statSync(join(dir, 'tv')).dev },
@@ -288,7 +288,7 @@ describe('a re-import of a title that is in the library', () => {
 
 describe('the retry of a pending verification', () => {
   it('starts a pending verification again, whatever stopped it', async () => {
-    const db: Db = await openDb('unused.json');
+    const db: Db = await open('unused.json');
     Object.assign(db.data, emptyData());
     db.data.titles['tv:1'] = title('tv:1', 'tv', [episode(1, 1)]);
     db.data.verifications['tv:1'] = { key: 'tv:1', downloads: [], episodes: [], pending: true, updatedAt: 1 };
@@ -300,7 +300,7 @@ describe('the retry of a pending verification', () => {
 
 describe('the source facts of an add', () => {
   it('keeps a movie that Radarr searched before its release searchable', async () => {
-    const db: Db = await openDb('unused.json');
+    const db: Db = await open('unused.json');
     Object.assign(db.data, emptyData());
     const source: SourceData = {
       app: 'radarr',
@@ -331,7 +331,7 @@ describe('the source facts of an add', () => {
 
 describe('the sweep', () => {
   it('searches an episode that aired more than seven days ago and has no entry', async () => {
-    const db: Db = await openDb('unused.json');
+    const db: Db = await open('unused.json');
     Object.assign(db.data, emptyData());
     const queue = createQueue(db, createEvents(), () => {});
     const finder = createFinder({ db, queue, indexers: {} as IndexerService, enqueue: (input) => enqueue(db, input) });

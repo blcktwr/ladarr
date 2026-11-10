@@ -1,5 +1,5 @@
+import { get, type Db } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../../core/db.ts';
 import type { Job } from '../../../../core/jobs.ts';
 import { isActive, type Queue, type QueueEntry } from '../../../../library/downloads/queue.ts';
 import { isItemJob } from '../../../../helpers/queue.ts';
@@ -14,7 +14,8 @@ function targetsOf(db: Db, job: Job): QueueEntry[] {
 
 // The user takes a job of the item flow out of the queue. Its targets stop with a reason, so the sweep does not
 // put the same job back. A running job keeps its lease.
-export function queueJobDelete(db: Db, queue: Queue, persist: () => void = () => {}): RequestHandler<{ id: string }> {
+export function queueJobDelete(queue: Queue, persist: () => void = () => {}): RequestHandler<{ id: string }> {
+  const db = get();
   return (req, res) => {
     const job = db.data.jobs[req.params.id];
     if (!job || !isItemJob(job)) return void res.status(404).json({ error: 'not_found' });

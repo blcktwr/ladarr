@@ -1,8 +1,9 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import { parse, view } from '../../../helpers/webhook.ts';
 
-export function webhookUpdate(db: Db): RequestHandler<{ id: string }> {
+export function webhookUpdate(): RequestHandler<{ id: string }> {
+  const db = get();
   return async (req, res) => {
     const webhook = db.data.webhooks.find((item) => item.id === req.params.id);
     if (!webhook) return void res.status(404).json({ error: 'not_found' });

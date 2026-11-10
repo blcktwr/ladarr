@@ -1,7 +1,9 @@
 import { join } from 'node:path';
-import { Router } from 'express';
-import type { Db } from '../core/db.ts';
-import { candidate, clock, firstProfileId, hasFiles, isObject, noTmdb, notFound, notSupported, parseId, presentFile, profileId, readOptions, readPlacement, refuse, tmdbProblem, type CompatDeps } from './common.ts';
+import express, { Router } from 'express';
+import { get, type Db } from '../core/db.ts';
+import { onError } from '../core/errors.ts';
+import { candidate, clock, firstProfileId, hasFiles, isObject, noTmdb, notFound, notFoundPath, notSupported, parseId, presentFile, profileId, readOptions, readPlacement, refuse, tmdbProblem, type CompatDeps } from './common.ts';
+import { adapter, type AdapterOptions } from './indexer.ts';
 import { AddError, addTitle } from '../library/tools/add.ts';
 import { isMonitored, seriesCounts, type Episode, type Title } from '../library/library.ts';
 import { folderName } from '../library/naming.ts';
@@ -145,7 +147,8 @@ async function findSeries(db: Db, tmdb: Tmdb, tvdbId: number): Promise<Found> {
   return meta.tvdbId === tvdbId ? { meta } : { count: 0 };
 }
 
-export function sonarrRoutes(db: Db, deps: CompatDeps) {
+export function sonarrRoutes(deps: CompatDeps) {
+  const db = get();
   const router = Router();
   const own = (id: number | undefined) => {
     const title = id === undefined ? undefined : db.data.titles[`tv:${id}`];
@@ -268,4 +271,13 @@ export function sonarrRoutes(db: Db, deps: CompatDeps) {
   });
 
   return router;
+}
+
+// The Sonarr API on port 8989. A caller adds /api/v3, as with Sonarr.
+export function sonarr(options: AdapterOptions) {
+  const app = express();
+  app.disable('x-powered-by');
+  app.use('/api/v3', adapter('sonarr', { ...options, urlBase: '' }), onError);
+  app.use(notFoundPath('/api/v3'));
+  return app;
 }

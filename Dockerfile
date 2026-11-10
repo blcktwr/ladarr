@@ -33,7 +33,7 @@ ENV NODE_ENV=production \
     LADARR_CONFIG_DIR=/config \
     LADARR_WEB_DIR=/app/packages/webapp/dist
 USER node
-EXPOSE 3000
+EXPOSE 3000 8989 7878 5055
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD ["node", "packages/server/src/system/healthcheck.ts"]
 CMD ["node", "packages/server/src/index.ts"]

@@ -1,10 +1,11 @@
+import { get } from '../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { randomUUID } from 'node:crypto';
-import type { Db } from '../../core/db.ts';
 import type { WebhookState } from '../../core/webhook.ts';
 import { parse, view } from '../../helpers/webhook.ts';
 
-export function webhookCreate(db: Db): RequestHandler {
+export function webhookCreate(): RequestHandler {
+  const db = get();
   return async (req, res) => {
     const parsed = parse(req.body);
     if ('field' in parsed) return void res.status(400).json({ error: 'invalid_setting', field: parsed.field });

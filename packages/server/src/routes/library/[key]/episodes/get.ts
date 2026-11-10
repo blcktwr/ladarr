@@ -1,12 +1,13 @@
+import { get } from '../../../../core/db.ts';
 import type { EpisodeRow } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { episodeEligibleAt } from '../../../../core/dates.ts';
-import type { Db } from '../../../../core/db.ts';
 import { entryId, queueKey } from '../../../../library/downloads/queue.ts';
 import { clock } from '../../../../library/tools/api.ts';
 import { isMonitored, type Title } from '../../../../library/library.ts';
 
-export function libraryEpisodes(db: Db): RequestHandler<{ key: string }> {
+export function libraryEpisodes(): RequestHandler<{ key: string }> {
+  const db = get();
   return (req, res) => {
     const title: Title = res.locals.title;
     const season = Number(req.query.season);

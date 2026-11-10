@@ -1,7 +1,9 @@
 import { join, posix } from 'node:path';
-import { Router } from 'express';
-import type { Db } from '../core/db.ts';
-import { candidate, clock, firstProfileId, hasFiles, isObject, noTmdb, notFound, notSupported, parseId, presentFile, profileId, readOptions, readPlacement, refuse, tmdbProblem, type CompatDeps } from './common.ts';
+import express, { Router } from 'express';
+import { get, type Db } from '../core/db.ts';
+import { onError } from '../core/errors.ts';
+import { candidate, clock, firstProfileId, hasFiles, isObject, noTmdb, notFound, notFoundPath, notSupported, parseId, presentFile, profileId, readOptions, readPlacement, refuse, tmdbProblem, type CompatDeps } from './common.ts';
+import { adapter, type AdapterOptions } from './indexer.ts';
 import { AddError, addTitle } from '../library/tools/add.ts';
 import { availability, type Title } from '../library/library.ts';
 import { folderName } from '../library/naming.ts';
@@ -37,7 +39,8 @@ export function movieResource(db: Db, title: Title, inLibrary: boolean) {
 
 const MINIMUM = ['released', 'announced'];
 
-export function radarrRoutes(db: Db, deps: CompatDeps) {
+export function radarrRoutes(deps: CompatDeps) {
+  const db = get();
   const router = Router();
   const own = (id: number | undefined) => (id === undefined ? undefined : db.data.titles[`movie:${id}`]);
 
@@ -123,4 +126,13 @@ export function radarrRoutes(db: Db, deps: CompatDeps) {
   router.delete('/movie/:id', (_req, res) => notSupported(res, 'A movie cannot be removed through this API. Remove it in the app.'));
 
   return router;
+}
+
+// The Radarr API on port 7878. A caller adds /api/v3, as with Radarr.
+export function radarr(options: AdapterOptions) {
+  const app = express();
+  app.disable('x-powered-by');
+  app.use('/api/v3', adapter('radarr', { ...options, urlBase: '' }), onError);
+  app.use(notFoundPath('/api/v3'));
+  return app;
 }

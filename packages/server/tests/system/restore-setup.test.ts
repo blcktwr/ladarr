@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { strToU8 } from 'fflate';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
-import { openDb, type Db } from '../../src/core/db.ts';
+import { open, type Db } from '../../src/core/db.ts';
 import { createBackup, listBackups, readBackup } from '../../src/system/backup.ts';
 import { createRestorer } from '../../src/system/restore.ts';
 
@@ -26,7 +26,7 @@ function fakeWorker() {
 
 // A backup of another installation, with an owner and data that is easy to see after the restore.
 async function sourceBackup() {
-  const db = await openDb('unused.json');
+  const db = await open('unused.json');
   db.data.owner = { passwordHash: 'hash', createdAt: 1 };
   db.data.settings.region = 'FR';
   db.data.blocklist = { a: { title: 'Blocked', reason: 'bad', at: 1 } };
@@ -38,7 +38,7 @@ async function sourceBackup() {
 // Starts the app inside the setup window: no owner and no session.
 async function start(db: Db, backupDir: string) {
   const worker = fakeWorker();
-  const server = createApp(db, { backupDir, restorer: createRestorer({ db, dir: backupDir, worker }) }).listen(0);
+  const server = createApp({ backupDir, restorer: createRestorer({ db, dir: backupDir, worker }) }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
   return {
@@ -63,7 +63,7 @@ describe('restore during the setup', () => {
 
   const startEmpty = async () => {
     backupDir = fresh();
-    db = await openDb('unused.json');
+    db = await open('unused.json');
     app = await start(db, backupDir);
   };
   afterEach(() => {

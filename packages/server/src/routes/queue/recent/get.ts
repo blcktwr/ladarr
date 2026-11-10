@@ -1,10 +1,11 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import type { Poller } from '../../../library/downloads/poller.ts';
 import type { ImportStatus } from '../../../library/imports/status.ts';
 import { lanePositions, MAX_PAGE, shown, view } from '../../../helpers/queue.ts';
 
-export function queueRecentGet(db: Db, poller: Poller, importStatus: ImportStatus | undefined): RequestHandler {
+export function queueRecentGet(poller: Poller, importStatus: ImportStatus | undefined): RequestHandler {
+  const db = get();
   return (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), MAX_PAGE);
     const offset = Math.max(Number(req.query.offset) || 0, 0);

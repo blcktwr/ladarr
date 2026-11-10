@@ -1,9 +1,10 @@
 import type { Language, MediaType } from '@ladarr/shared/enums';
+import { loadConfig } from '@ladarr/shared/config';
 import { Low, Memory, type Adapter } from 'lowdb';
 import { TextFile } from 'lowdb/node';
 import { dirname, join } from 'node:path';
-import type { CompatCommand } from '../compatibility/common.ts';
-import type { SeerrRequest } from '../compatibility/seerr.ts';
+import type { CompatCommand } from '../proxy/common.ts';
+import type { SeerrRequest } from '../proxy/seerr.ts';
 import type { Job } from './jobs.ts';
 import type { Override, Title } from '../library/library.ts';
 import type { Indexer } from '../library/grab/indexers.ts';
@@ -327,13 +328,35 @@ class SplitJSONFile implements Adapter<Data> {
   }
 }
 
+// The process opens one database. Every request reads it with get().
+let db: Db | undefined;
+
 // lowdb switches to an in-memory adapter when NODE_ENV is "test".
-export async function openDb(file: string, queueFile = join(dirname(file), QUEUE_FILE)): Promise<Db> {
-  const adapter = process.env.NODE_ENV === 'test' ? new Memory<Data>() : new SplitJSONFile(file, queueFile);
-  const db = new Low<Data>(adapter, emptyData());
-  await db.read();
-  db.data = withDefaults(db.data);
+export async function open(file?: string, queueFile?: string): Promise<Db> {
+  let dbFile = file;
+  let queue = queueFile;
+  if (!dbFile) {
+    const config = loadConfig();
+    dbFile = config.dbFile;
+    queue ??= config.queueFile;
+  }
+  queue ??= join(dirname(dbFile), QUEUE_FILE);
+  const adapter = process.env.NODE_ENV === 'test' ? new Memory<Data>() : new SplitJSONFile(dbFile, queue);
+  const next = new Low<Data>(adapter, emptyData());
+  await next.read();
+  next.data = withDefaults(next.data);
+  db = next;
   return db;
+}
+
+export function get(): Db {
+  if (!db) throw new Error('The database is not open. Call open() first.');
+  return db;
+}
+
+// A test can point the singleton at a database that it made itself.
+export function set(value: Db) {
+  db = value;
 }
 
 // Every change in one tick, or during a running write, costs one more file write at most.

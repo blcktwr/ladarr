@@ -1,9 +1,10 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import { inside, refusal, validateNewRoot } from '../../../library/roots.ts';
 
 // A saved folder changes its path. The record keeps its id, so the defaults and the settings that name it stay valid.
-export function rootsUpdate(db: Db, { configDir }: { configDir?: string } = {}): RequestHandler<{ id: string }> {
+export function rootsUpdate({ configDir }: { configDir?: string } = {}): RequestHandler<{ id: string }> {
+  const db = get();
   return async (req, res) => {
     const root = db.data.roots[req.params.id];
     if (!root) return void res.status(404).json({ error: 'not_found' });

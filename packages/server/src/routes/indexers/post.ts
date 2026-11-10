@@ -1,9 +1,10 @@
+import { get } from '../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { savePush, summarize } from '../../library/grab/indexers.ts';
-import type { Db } from '../../core/db.ts';
 import { exists, invalidSetting, parseManual, setDelay } from '../../helpers/indexers.ts';
 
-export function indexersCreate(db: Db, { onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler {
+export function indexersCreate({ onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler {
+  const db = get();
   return async (req, res) => {
     const result = parseManual(req.body);
     if ('invalid' in result) return invalidSetting(res, result.invalid);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { openDb } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { createWorker } from '../../src/core/worker.ts';
 import { until } from '../helpers/test-pipeline.ts';
 
@@ -7,7 +7,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('worker drain', () => {
   const newWorker = async (handlers: Parameters<typeof createWorker>[2], graceMs = 2_000) => {
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     const worker = createWorker(db, async () => {}, handlers, { tickMs: 10, graceMs });
     worker.start();
     return { db, worker };

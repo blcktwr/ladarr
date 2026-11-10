@@ -1,6 +1,6 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import type { Finder } from '../../../library/grab/finder.ts';
-import type { Db } from '../../../core/db.ts';
 import { deprioritize, prioritize, type EnqueueInput, type Job } from '../../../core/jobs.ts';
 import type { Clients } from '../../../library/downloads/client-api.ts';
 import type { Poller } from '../../../library/downloads/poller.ts';
@@ -9,7 +9,8 @@ import { addedByApp, isActive, queueKey, type Queue, type QueueEntry } from '../
 import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts';
 import { bySeasonNumber, label, lanePositions, shown } from '../../../helpers/queue.ts';
 
-export function queueActionsPost(db: Db, queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
+export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
+  const db = get();
   type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'clear' | 'remove_torrent';
   const ACTIONS: Action[] = ['pause', 'resume', 'retry', 'priority', 'unpriority', 'clear', 'remove_torrent'];
 

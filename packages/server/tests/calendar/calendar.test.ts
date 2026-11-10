@@ -4,7 +4,7 @@ import { createApp } from '../../src/app.ts';
 import { libraryFilter } from '../../src/library/tools/filters.ts';
 import { buildIcal } from '../../src/library/calendar/calendar-feed.ts';
 import { addDays, calendarEvents, dayOf, isDay, MAX_EVENTS } from '../../src/library/calendar/calendar.ts';
-import { openDb, type Db } from '../../src/core/db.ts';
+import { open, type Db } from '../../src/core/db.ts';
 import type { Title } from '../../src/library/library.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
@@ -26,7 +26,7 @@ const show = (key: string, extra: Partial<Title> = {}) => {
 };
 
 async function dbWith(...titles: Title[]) {
-  const db = await openDb('unused.json');
+  const db = await open('unused.json');
   for (const item of titles) db.data.titles[item.key] = item;
   return db;
 }
@@ -335,9 +335,9 @@ describe('iCal feed', () => {
   });
 
   it('works under the URL base', async () => {
-    const db: Db = await openDb('unused.json');
+    const db: Db = await open('unused.json');
     db.data.calendarFeedToken = 'secret-token';
-    const server = createApp(db, { urlBase: '/ladarr' }).listen(0);
+    const server = createApp({ urlBase: '/ladarr' }).listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const status = async (path: string) => (await fetch(`${origin}${path}`)).status;

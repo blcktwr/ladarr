@@ -1,3 +1,4 @@
+import { get } from '../../core/db.ts';
 import type { SettingsSaved } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import type { Db, Settings } from '../../core/db.ts';
@@ -52,7 +53,8 @@ function parseChanges(db: Db, body: unknown): Partial<Settings> | { invalid: str
   return changes;
 }
 
-export function settingsPatch(db: Db): RequestHandler {
+export function settingsPatch(): RequestHandler {
+  const db = get();
   return async (req, res) => {
     const changes = parseChanges(db, req.body);
     if ('invalid' in changes) return void res.status(400).json({ error: 'invalid_setting', field: changes.invalid });

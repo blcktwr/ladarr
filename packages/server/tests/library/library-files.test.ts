@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import express from 'express';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { openDb, type Db } from '../../src/core/db.ts';
+import { open, type Db } from '../../src/core/db.ts';
 import { describeProbe, libraryFilesRouter } from '../../src/library/tools/files.ts';
 import type { ffprobeRaw } from '../../src/library/probe.ts';
 import { scanTitle } from '../../src/library/scan.ts';
@@ -45,7 +45,7 @@ beforeAll(async () => {
   mkdirSync(join(root, 'Show', 'Season 01'), { recursive: true });
   writeFileSync(join(root, 'Show', 'Season 01', 'Show.S01E01.mkv'), 'not a video');
   writeFileSync(join(root, 'Show', 'Season 01', 'Show.S01E02.mkv'), 'not a video either');
-  db = await openDb('unused.json');
+  db = await open('unused.json');
   db.data.roots = { tv: { id: 'tv', path: root, mediaType: 'tv', dev: statSync(root).dev } };
   db.data.titles['tv:1'] = title({ rootId: 'tv', folder: 'Show', episodes: [episode(1, 1), episode(1, 2)] });
   await scanTitle(db, 'tv:1');

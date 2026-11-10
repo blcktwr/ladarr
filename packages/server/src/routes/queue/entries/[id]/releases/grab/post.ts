@@ -1,14 +1,15 @@
+import { get } from '../../../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { REJECTION_TEXT } from '../../../../../../library/grab/decide.ts';
 import type { Finder } from '../../../../../../library/grab/finder.ts';
 import type { RawRelease } from '../../../../../../library/grab/torznab.ts';
-import type { Db } from '../../../../../../core/db.ts';
 import type { Queue } from '../../../../../../library/downloads/queue.ts';
 import { shown, titleOf } from '../../../../../../helpers/queue.ts';
 
 // A release of the last search that the user picks by hand after a no-match. The preferences are skipped, the
 // safety checks are not.
-export function queueEntryReleaseGrabPost(db: Db, queue: Queue, finder: Finder): RequestHandler<{ id: string }> {
+export function queueEntryReleaseGrabPost(queue: Queue, finder: Finder): RequestHandler<{ id: string }> {
+  const db = get();
   return (req, res) => {
     const entry = db.data.queue[req.params.id];
     const { indexerId, guid } = (req.body ?? {}) as { indexerId?: unknown; guid?: unknown };

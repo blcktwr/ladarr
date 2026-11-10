@@ -1,8 +1,8 @@
+import { get } from '../../../core/db.ts';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { RequestHandler } from 'express';
 import { addDays, calendarEvents, dayOf } from '../../../library/calendar/calendar.ts';
 import { buildIcal } from '../../../library/calendar/calendar-feed.ts';
-import type { Db } from '../../../core/db.ts';
 
 // The feed starts a month back and ends a year ahead.
 const PAST_DAYS = 30;
@@ -12,7 +12,8 @@ const digest = (value: string) => createHash('sha256').update(value).digest();
 
 // The feed has no session. The token in the query is the only credential, and the request log leaves the query out.
 // A wrong token and a feed that is off both answer 404, so a caller cannot tell them apart.
-export function calendarFeed(db: Db): RequestHandler {
+export function calendarFeed(): RequestHandler {
+  const db = get();
   return (req, res) => {
     const token = req.query.token;
     const expected = db.data.calendarFeedToken;

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
-import { openDb } from '../src/core/db.ts';
+import { open } from '../src/core/db.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'ladarr-web-'));
 let origin = '';
@@ -14,7 +14,8 @@ beforeAll(async () => {
   mkdirSync(join(dir, 'assets'));
   writeFileSync(join(dir, 'index.html'), '<html><head><base href="/" /></head><body>app</body></html>');
   writeFileSync(join(dir, 'assets', 'app.js'), 'console.log(1)');
-  const server = createApp(await openDb('unused.json'), { urlBase: '/ladarr', webDir: dir }).listen(0);
+  await open('unused.json');
+  const server = createApp({ urlBase: '/ladarr', webDir: dir }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   close = () => server.close();
@@ -26,7 +27,8 @@ afterAll(() => {
 
 describe('health', () => {
   it('reports a stalled worker with a 503', async () => {
-    const server = createApp(await openDb('unused.json'), { heartbeat: () => Date.now() - 60_000 }).listen(0);
+    await open('unused.json');
+    const server = createApp({ heartbeat: () => Date.now() - 60_000 }).listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
     const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/health`);
     server.close();

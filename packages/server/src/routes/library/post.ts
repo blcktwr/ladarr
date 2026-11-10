@@ -1,3 +1,4 @@
+import { get } from '../../core/db.ts';
 import type { AddMode } from '@ladarr/shared/enums';
 import type { RequestHandler } from 'express';
 import { explainProfile } from '../../library/grab/quality.ts';
@@ -11,7 +12,8 @@ import { changed, detail, isObject, seasonOverridesOf, summaryOf } from '../../h
 
 type Deps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job };
 
-export function libraryAdd(db: Db, { tmdb, events, enqueue }: Deps): RequestHandler {
+export function libraryAdd({ tmdb, events, enqueue }: Deps): RequestHandler {
+  const db = get();
   return async (req, res) => {
     if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
     const body = isObject(req.body) ? req.body : {};

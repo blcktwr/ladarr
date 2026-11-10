@@ -1,14 +1,15 @@
+import { get } from '../../../../core/db.ts';
 import { randomUUID } from 'node:crypto';
 import type { SearchPlan } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { upgradeResolutions } from '../../../../library/grab/upgrades.ts';
 import type { Finder } from '../../../../library/grab/finder.ts';
-import type { Db } from '../../../../core/db.ts';
 import { libraryFilter, libraryType, matchesType } from '../../../../library/tools/filters.ts';
 import type { Title } from '../../../../library/library.ts';
 import { isObject, MAX_KEYS, MAX_PLANS, plans, SAMPLE, startable, type Kind } from '../plans.ts';
 
-export function librarySearchPreview(db: Db, finder: Finder): RequestHandler {
+export function librarySearchPreview(finder: Finder): RequestHandler {
+  const db = get();
   return (req, res) => {
     const body = isObject(req.body) ? req.body : {};
     const kind: Kind = body.kind === 'upgrades' ? 'upgrades' : 'search';
@@ -30,7 +31,7 @@ export function librarySearchPreview(db: Db, finder: Finder): RequestHandler {
     // The chosen resolution must be one that the profile chain of a requested title defines above a file.
     if (upgrade && titles.length > 0 && !titles.some((title) => upgradeResolutions(db, title).includes(resolution as number))) return void res.status(409).json({ error: 'no_better_qualities' });
     const counted = titles
-      .map((title) => ({ title, targets: kind === 'upgrades' ? finder.upgradeCount(title, resolution as number) : startable(db, finder, title) }))
+      .map((title) => ({ title, targets: kind === 'upgrades' ? finder.upgradeCount(title, resolution as number) : startable(finder, title) }))
       .filter((item) => item.targets > 0)
       .sort((a, b) => a.title.meta.title.localeCompare(b.title.meta.title) || a.title.key.localeCompare(b.title.key));
     const targets = counted.reduce((sum, item) => sum + item.targets, 0);

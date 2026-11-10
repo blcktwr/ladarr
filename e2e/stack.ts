@@ -69,6 +69,8 @@ export async function startStack() {
         LADARR_TMDB_BASE_URL: tmdb.url,
         // The tests and the benchmark call the server without a URL base.
         LADARR_URL_BASE: '',
+        // The proxy ports are not part of this test stack. The tests that need them start the app directly.
+        LADARR_COMPAT_PORTS: '0',
         PATH: `${folders.bin}:${process.env.PATH}`,
       },
       stdio: ['ignore', 'pipe', 'pipe'],

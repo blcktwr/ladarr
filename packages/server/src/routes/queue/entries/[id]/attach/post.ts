@@ -1,6 +1,6 @@
+import { get } from '../../../../../core/db.ts';
 import type { AttachPreview } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../../../core/db.ts';
 import type { Clients } from '../../../../../library/downloads/client-api.ts';
 import { ClientError, type ClientHandle, type Torrent } from '../../../../../library/downloads/qbittorrent.ts';
 import type { Queue } from '../../../../../library/downloads/queue.ts';
@@ -10,7 +10,8 @@ import { attachRefusal, HASH, MAX_TARGETS } from '../../../../../helpers/queue-a
 import { label, shown } from '../../../../../helpers/queue.ts';
 
 // Attaches a torrent that is in the client already. The user confirms the owner and the title before anything changes.
-export function queueEntryAttachPost(db: Db, queue: Queue, clients: Clients): RequestHandler<{ id: string }> {
+export function queueEntryAttachPost(queue: Queue, clients: Clients): RequestHandler<{ id: string }> {
+  const db = get();
   return async (req, res) => {
     const entry = db.data.queue[req.params.id];
     const { hash: rawHash, ids, confirmOwner, confirmTitle, preview } = (req.body ?? {}) as { hash?: unknown; ids?: unknown; confirmOwner?: unknown; confirmTitle?: unknown; preview?: unknown };

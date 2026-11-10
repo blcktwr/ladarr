@@ -1,3 +1,4 @@
+import { get } from '../../core/db.ts';
 import type { SettingsResponse } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { QUALITY_TABLE_VERSION } from '../../library/grab/quality.ts';
@@ -15,7 +16,8 @@ function aliasLanguageOptions(db: Db): string[] {
   return [...codes].sort();
 }
 
-export function settingsGet(db: Db): RequestHandler {
+export function settingsGet(): RequestHandler {
+  const db = get();
   return (_req, res) => {
     res.json({
       settings: db.data.settings,

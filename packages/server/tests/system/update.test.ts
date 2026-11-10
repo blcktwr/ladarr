@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { openDb } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { installUpdate, latestRelease, UpdateError } from '../../src/system/update.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { until } from '../helpers/test-pipeline.ts';
@@ -215,7 +215,7 @@ describe('update route', () => {
 
   // The updater options join the app options with the implementation.
   async function start(options: UpdaterOptions = {}) {
-    app = await startTestApp(options as unknown as Parameters<typeof startTestApp>[0], await openDb('unused.json'));
+    app = await startTestApp(options as unknown as Parameters<typeof startTestApp>[0], await open('unused.json'));
   }
   afterEach(() => {
     vi.unstubAllGlobals();

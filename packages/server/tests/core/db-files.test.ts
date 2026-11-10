@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { emptyData, openDb, SCHEMA_VERSION, type Data } from '../../src/core/db.ts';
+import { emptyData, open, SCHEMA_VERSION, type Data } from '../../src/core/db.ts';
 import type { Job } from '../../src/core/jobs.ts';
 import type { QueueEntry } from '../../src/library/downloads/queue.ts';
 
@@ -76,7 +76,7 @@ describe('database files', () => {
     const file = join(dir, 'db.json');
     try {
       vi.stubEnv('NODE_ENV', 'production');
-      const db = await openDb(file);
+      const db = await open(file);
       seed(db.data);
       await db.write();
 
@@ -95,11 +95,11 @@ describe('database files', () => {
     const file = join(dir, 'db.json');
     try {
       vi.stubEnv('NODE_ENV', 'production');
-      const first = await openDb(file);
+      const first = await open(file);
       seed(first.data);
       await first.write();
 
-      const db = await openDb(file);
+      const db = await open(file);
       expect(db.data.queue[entry.id]).toEqual(entry);
       expect(db.data.jobs[job.id]).toEqual(job);
       expect(db.data.queueRev).toBe(7);
@@ -122,7 +122,7 @@ describe('database files', () => {
       writeFileSync(file, JSON.stringify(data));
 
       vi.stubEnv('NODE_ENV', 'production');
-      const db = await openDb(file);
+      const db = await open(file);
       expect(db.data.queue[entry.id]).toEqual(entry);
       expect(db.data.jobs[job.id]).toEqual(job);
       expect(db.data.queueRev).toBe(7);
@@ -151,7 +151,7 @@ describe('database files', () => {
       writeFileSync(join(dir, 'queue.json'), JSON.stringify(stale));
 
       vi.stubEnv('NODE_ENV', 'production');
-      const db = await openDb(file);
+      const db = await open(file);
       expect(db.data.queue[entry.id]).toEqual(entry);
       expect(db.data.jobs[job.id]).toEqual(job);
       expect(db.data.queueRev).toBe(7);
@@ -173,7 +173,7 @@ describe('database files', () => {
     try {
       writeFileSync(file, JSON.stringify({ ...emptyData(), schemaVersion: 99 }));
       vi.stubEnv('NODE_ENV', 'production');
-      const db = await openDb(file);
+      const db = await open(file);
       expect(db.data.schemaVersion).toBe(99);
     } finally {
       vi.unstubAllEnvs();
@@ -187,7 +187,7 @@ describe('database files', () => {
     try {
       writeFileSync(file, JSON.stringify({ ...emptyData(), schemaVersion: 1 }));
       vi.stubEnv('NODE_ENV', 'production');
-      const db = await openDb(file);
+      const db = await open(file);
       // SCHEMA_VERSION is the current version, so this test does not hardcode the next number.
       expect(db.data.schemaVersion).toBe(SCHEMA_VERSION);
     } finally {

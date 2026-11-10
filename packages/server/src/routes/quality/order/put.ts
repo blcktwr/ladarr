@@ -1,8 +1,10 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { profilesInOrder, type Db } from '../../../core/db.ts';
 
 // The order of the chain, the best profile first.
-export function qualityOrderPut(db: Db): RequestHandler {
+export function qualityOrderPut(): RequestHandler {
+  const db = get();
   return async (req, res) => {
     const ids = (req.body as { ids?: unknown } | null)?.ids;
     const known = Object.keys(db.data.profiles);

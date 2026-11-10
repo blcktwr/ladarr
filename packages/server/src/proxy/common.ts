@@ -1,5 +1,5 @@
 import type { MediaType } from '@ladarr/shared/enums';
-import type { Response } from 'express';
+import type { RequestHandler, Response } from 'express';
 import type { Services } from '../app.ts';
 import { profilesInOrder, type Db, type Root } from '../core/db.ts';
 import type { Events } from '../core/events.ts';
@@ -7,7 +7,7 @@ import type { EnqueueInput, Job } from '../core/jobs.ts';
 import type { Title } from '../library/library.ts';
 import { TmdbError, type TitleMeta, type Tmdb } from '../metadata/tmdb.ts';
 
-export type CompatDeps = { urlBase: string; tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job; services?: Services };
+export type CompatDeps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job; services?: Services };
 
 // A command that a caller sent. A search command lists the entries that it started and the search jobs of those entries.
 // The search ends when its jobs end, so a command that a restart interrupted still ends, and a later search of the same entry does not change it.
@@ -24,6 +24,9 @@ export type CompatCommand = {
 };
 
 export const notFound = (res: Response, detail: string) => void res.status(404).json({ message: 'NotFound', detail });
+
+// A path outside the prefix of a proxy port.
+export const notFoundPath = (path: string): RequestHandler => (_req, res) => void res.status(404).json({ message: 'NotFound', detail: `Use ${path}.` });
 export const notSupported = (res: Response, detail: string) => void res.status(501).json({ message: 'NotSupported', detail });
 export const refuse = (res: Response, errors: [property: string, message: string][]) =>
   void res.status(400).json(errors.map(([propertyName, errorMessage]) => ({ propertyName, errorMessage, severity: 'error' })));

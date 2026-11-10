@@ -1,14 +1,15 @@
+import { get } from '../../../core/db.ts';
 import { randomUUID } from 'node:crypto';
 import type { MigrationPreview } from '@ladarr/shared/types';
 import type { MigrationStatus } from '@ladarr/shared/enums';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import { buildPlan } from '../../../migration/migration.ts';
 import { mapProfile, readFromApi } from '../../../migration/migration-source.ts';
 import type { Tmdb } from '../../../metadata/tmdb.ts';
 import { MAX_PLANS, parseConnection, parseMappings, plans, uploads } from '../../../helpers/migration.ts';
 
-export function migrationPreview(db: Db, tmdb: Tmdb | undefined): RequestHandler {
+export function migrationPreview(tmdb: Tmdb | undefined): RequestHandler {
+  const db = get();
   return async (req, res) => {
     if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
     const mappings = parseMappings(req.body?.mappings);

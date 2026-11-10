@@ -5,7 +5,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BackupError, createBackup, isBackupName, listBackups, pruneBackups, readBackup } from '../../src/system/backup.ts';
 import { backupAutoHandler } from '../../src/jobs/backup-auto.ts';
-import { openDb, SCHEMA_VERSION } from '../../src/core/db.ts';
+import { open, SCHEMA_VERSION } from '../../src/core/db.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 
 let dir: string;
@@ -20,7 +20,7 @@ const fresh = () => {
 const DAY = 24 * 60 * 60_000;
 
 async function dbWithTitle() {
-  const db = await openDb('unused.json');
+  const db = await open('unused.json');
   db.data.owner = { passwordHash: 'hash', createdAt: 1 };
   db.data.sessions = { abc: { csrfToken: 'x', createdAt: 1, expiresAt: 2 } };
   db.data.apiKey = 'key';

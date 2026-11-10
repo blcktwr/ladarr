@@ -1,13 +1,14 @@
+import { get } from '../../../../../core/db.ts';
 import type { QueuePackFiles } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../../../core/db.ts';
 import type { Clients } from '../../../../../library/downloads/client-api.ts';
 import { ClientError } from '../../../../../library/downloads/qbittorrent.ts';
 import { sharingOf } from '../../../../../library/downloads/queue-api.ts';
 import { listDownloadFiles } from '../../../../../library/imports/importer.ts';
 import { label, shown } from '../../../../../helpers/queue.ts';
 
-export function queueEntryFilesGet(db: Db, clients: Clients): RequestHandler<{ id: string }> {
+export function queueEntryFilesGet(clients: Clients): RequestHandler<{ id: string }> {
+  const db = get();
   return async (req, res) => {
     const entry = db.data.queue[req.params.id];
     const handle = clients.get(entry?.clientId);

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { emptyData, openDb } from '../../src/core/db.ts';
+import { emptyData, open } from '../../src/core/db.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 
 let app: Awaited<ReturnType<typeof startTestApp>>;
@@ -48,7 +48,7 @@ describe('a database from an older version', () => {
       writeFileSync(join(dir, 'db.json'), JSON.stringify({ ...emptyData(), settings: { ...old, recoveryDays: 3 } }));
       // lowdb keeps the data in memory when it runs in a test. This test needs the file.
       vi.stubEnv('NODE_ENV', 'production');
-      const db = await openDb(join(dir, 'db.json'));
+      const db = await open(join(dir, 'db.json'));
       expect(db.data.settings).toMatchObject({ naming: emptyData().settings.naming });
       expect(db.data.settings).not.toHaveProperty('recoveryDays');
     } finally {

@@ -1,10 +1,11 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import type { Poller } from '../../../library/downloads/poller.ts';
 import { loadingTitleKeys, queueKey } from '../../../library/downloads/queue.ts';
 import { DAY_MS, itemJobs, jobLabel, shown } from '../../../helpers/queue.ts';
 
-export function queueSummaryGet(db: Db, poller: Poller): RequestHandler {
+export function queueSummaryGet(poller: Poller): RequestHandler {
+  const db = get();
   return (_req, res) => {
     // The titles of each stage. A series counts once for each stage that its episodes show, so its number of episodes
     // does not change the count of the menu.

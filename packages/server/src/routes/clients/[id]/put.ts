@@ -1,8 +1,9 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import { parse, view } from '../../../helpers/clients.ts';
 
-export function clientsUpdate(db: Db, { onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler<{ id: string }> {
+export function clientsUpdate({ onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler<{ id: string }> {
+  const db = get();
   return async (req, res) => {
     const config = db.data.downloadClients.find((item) => item.id === req.params.id);
     if (!config) return void res.status(404).json({ error: 'not_found' });

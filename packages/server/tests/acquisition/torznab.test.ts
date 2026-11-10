@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { emptyData, openDb, type Db } from '../../src/core/db.ts';
+import { emptyData, open, type Db } from '../../src/core/db.ts';
 import type { Indexer, IndexerPush } from '../../src/library/grab/indexers.ts';
 import { createLimiter } from '../../src/core/limiter.ts';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
@@ -123,7 +123,7 @@ async function fakeTracker(handler: (url: URL, res: import('node:http').ServerRe
 }
 
 async function setup(port: number, delaySeconds: number) {
-  const db: Db = await openDb('unused.json');
+  const db: Db = await open('unused.json');
   Object.assign(db.data, emptyData());
   const indexer = indexerAt(port, delaySeconds);
   db.data.indexers[1] = indexer;

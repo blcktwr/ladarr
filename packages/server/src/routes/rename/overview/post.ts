@@ -1,12 +1,13 @@
+import { get } from '../../../core/db.ts';
 import type { RenameOverview } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import { PlanError } from '../../../library/imports/plan.ts';
 import { planRename } from '../../../library/rename.ts';
 import { fail, isObject, templatesOf } from '../../../helpers/rename.ts';
 
 // The titles that new templates would change, with the count of files that change and the count that are blocked.
-export function renameOverview(db: Db): RequestHandler {
+export function renameOverview(): RequestHandler {
+  const db = get();
   return async (req, res) => {
     const body = isObject(req.body) ? req.body : {};
     const naming = templatesOf(db, body);

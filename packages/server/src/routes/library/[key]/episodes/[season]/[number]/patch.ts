@@ -1,10 +1,11 @@
+import { get } from '../../../../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../../../../core/db.ts';
 import type { Events } from '../../../../../../core/events.ts';
 import type { Title } from '../../../../../../library/library.ts';
 import { changed, detail, overrideOf } from '../../../../../../helpers/library.ts';
 
-export function libraryEpisodeUpdate(db: Db, { events }: { events: Events }): RequestHandler<{ key: string; season: string; number: string }> {
+export function libraryEpisodeUpdate({ events }: { events: Events }): RequestHandler<{ key: string; season: string; number: string }> {
+  const db = get();
   return async (req, res) => {
     const title: Title = res.locals.title;
     const override = overrideOf(req.body?.override);

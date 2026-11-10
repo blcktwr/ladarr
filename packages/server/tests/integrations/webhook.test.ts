@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { emptyData, openDb, type Db } from '../../src/core/db.ts';
+import { emptyData, open, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { enqueue as enqueueJob } from '../../src/core/jobs.ts';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
@@ -56,7 +56,7 @@ const eventsOf = (db: Db) => deliveriesOf(db).map((payload) => payload.event);
 
 // Events go to jobs, without a worker. One webhook for each event of the queue points at the destination.
 async function collect(destination: string | null = 'http://receiver.test/hook') {
-  const db = await openDb('unused.json');
+  const db = await open('unused.json');
   Object.assign(db.data, emptyData());
   if (destination) {
     db.data.webhooks = [
@@ -141,7 +141,7 @@ describe('events', () => {
   });
 
   it('never lets an error reach the move of the queue', async () => {
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     Object.assign(db.data, emptyData());
     db.data.webhooks = [{ id: 'hook', type: 'available', url: 'http://receiver.test/hook' }];
     const webhooks = createWebhooks({
@@ -168,7 +168,7 @@ describe('delivery', () => {
   async function deliver() {
     const receiver = await startReceiver();
     closers.push(receiver.close);
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     Object.assign(db.data, emptyData());
     db.data.webhooks = [{ id: 'hook', type: 'available', url: receiver.url }];
     db.data.titles['movie:2'] = movie();
@@ -276,7 +276,7 @@ describe('worker slots', () => {
     const receiver = await startReceiver();
     closers.push(receiver.close);
     receiver.state.respond = () => 'hang';
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     Object.assign(db.data, emptyData());
     db.data.webhooks = [{ id: 'hook', type: 'available', url: receiver.url }];
     const ran: string[] = [];
@@ -494,7 +494,7 @@ describe('old database', () => {
     // lowdb uses a memory adapter when NODE_ENV is "test".
     vi.stubEnv('NODE_ENV', 'production');
     closers.push(() => vi.unstubAllEnvs());
-    const db = await openDb(file);
+    const db = await open(file);
     expect(db.data.webhooks).toEqual([
       { id: expect.any(String), type: 'available', url: 'http://old.test/hook' },
       { id: expect.any(String), type: 'stuck', url: 'http://old.test/hook' },
@@ -509,7 +509,7 @@ describe('old database', () => {
     writeFileSync(file, JSON.stringify({ ...old, schemaVersion: 3 }));
     vi.stubEnv('NODE_ENV', 'production');
     closers.push(() => vi.unstubAllEnvs());
-    const db = await openDb(file);
+    const db = await open(file);
     expect(db.data.webhooks).toEqual([]);
   });
 });

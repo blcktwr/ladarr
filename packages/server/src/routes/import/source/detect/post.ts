@@ -1,8 +1,8 @@
+import { get } from '../../../../core/db.ts';
 import type { MediaType } from '@ladarr/shared/enums';
 import type { SourceFolder } from '@ladarr/shared/types';
 import { basename } from 'node:path';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../../core/db.ts';
 import type { Tmdb } from '../../../../metadata/tmdb.ts';
 import { biggestFirst, MAX_FILES, titleFromFile } from '../../../../library/imports/source.ts';
 import { guessTitle } from '../../../../library/tools/folders.ts';
@@ -12,7 +12,8 @@ import { parseEpisodes } from '../../../../library/parse.ts';
 import { fail } from '../../../../helpers/import-source.ts';
 
 // The folder, the title that its name suggests, and the TMDB results of that name.
-export function importSourceDetect(db: Db, { tmdb, configDir }: { tmdb?: Tmdb; configDir?: string } = {}): RequestHandler {
+export function importSourceDetect({ tmdb, configDir }: { tmdb?: Tmdb; configDir?: string } = {}): RequestHandler {
+  const db = get();
   return async (req, res) => {
     if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
     try {

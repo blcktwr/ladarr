@@ -1,10 +1,12 @@
 import type { MediaType } from '@ladarr/shared/enums';
-import { Router, type RequestHandler, type Response } from 'express';
+import express, { Router, type RequestHandler, type Response } from 'express';
 import { safeEqual } from '../core/auth.ts';
-import type { Db } from '../core/db.ts';
+import { get, type Db } from '../core/db.ts';
+import { onError } from '../core/errors.ts';
 import { isMonitored, seriesCounts, type Title } from '../library/library.ts';
 import { AddError, addTitle } from '../library/tools/add.ts';
 import { TmdbError } from '../metadata/tmdb.ts';
+import { restoreGate, type Restorer } from '../system/restore.ts';
 import { clock, firstProfileId, isObject, presentFile, type CompatDeps } from './common.ts';
 
 // The request that a caller of the Seerr API sent. The ID stays the same after a restart.
@@ -57,13 +59,14 @@ function pageOf(value: unknown) {
   return String(number);
 }
 
-export const seerrAuth =
-  (db: Db): RequestHandler =>
-  (req, res, next) => {
+export const seerrAuth = (): RequestHandler => {
+  const db = get();
+  return (req, res, next) => {
     const sent = req.get('x-api-key') ?? (typeof req.query.apikey === 'string' ? req.query.apikey : undefined);
     if (sent && db.data.apiKey && safeEqual(sent, db.data.apiKey)) return next();
     fail(res, 401, 'Unauthorized');
   };
+};
 
 export const seerrNotFound: RequestHandler = (_req, res) => fail(res, 404, 'Not found.');
 
@@ -576,7 +579,8 @@ function requestedSeasons(title: Title, list: number[]) {
   return list.length ? list : known.filter((season) => season !== 0);
 }
 
-export function seerrRouter(db: Db, deps: CompatDeps) {
+export function seerrRouter(deps: CompatDeps) {
+  const db = get();
   const router = Router();
 
   router.get('/status', (_req, res) => void res.json({ version: '3.5.1', commitTag: 'ladarr' }));
@@ -587,7 +591,7 @@ export function seerrRouter(db: Db, deps: CompatDeps) {
   router.post('/auth/jellyfin', unsupported('Use the API key.'));
   router.post('/auth/logout', (_req, res) => void res.json({}));
 
-  router.use(seerrAuth(db));
+  router.use(seerrAuth());
 
   router.get('/auth/me', (_req, res) => void res.json(userResource(db)));
 
@@ -804,4 +808,18 @@ export function seerrRouter(db: Db, deps: CompatDeps) {
 
   router.use(seerrNotFound);
   return router;
+}
+
+export type SeerrOptions = CompatDeps & { restorer?: Restorer };
+
+// The Seerr API on port 5055. A caller adds /api/v1, as with Seerr.
+export function seerr(options: SeerrOptions) {
+  const { restorer, ...deps } = options;
+  const app = express();
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '100kb' }));
+  if (restorer) app.use(restoreGate(restorer));
+  app.use('/api/v1', seerrRouter(deps), onError);
+  app.use((_req, res) => fail(res, 404, 'Use /api/v1.'));
+  return app;
 }

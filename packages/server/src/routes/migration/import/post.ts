@@ -1,13 +1,14 @@
+import { get } from '../../../core/db.ts';
 import { randomUUID } from 'node:crypto';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import type { EnqueueInput, Job } from '../../../core/jobs.ts';
 import { applyExisting } from '../../../migration/migration.ts';
 import { requestVerification } from '../../../library/verification.ts';
 import { plans, progress } from '../../../helpers/migration.ts';
 
 // Writes the ledger, and a job adds the titles. A restart keeps the rest of the work.
-export function migrationImport(db: Db, enqueue: (input: EnqueueInput) => Job): RequestHandler {
+export function migrationImport(enqueue: (input: EnqueueInput) => Job): RequestHandler {
+  const db = get();
   return (req, res) => {
     const plan = typeof req.body?.planId === 'string' ? plans.get(req.body.planId) : undefined;
     if (!plan) return void res.status(404).json({ error: 'plan_not_found' });

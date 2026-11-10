@@ -1,8 +1,9 @@
+import { get } from '../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { ownerOf } from '../../library/grab/blocklist.ts';
-import type { Db } from '../../core/db.ts';
 
-export function blocklistClear(db: Db): RequestHandler {
+export function blocklistClear(): RequestHandler {
+  const db = get();
   return async (req, res) => {
     const titleKey = typeof req.query.titleKey === 'string' ? req.query.titleKey : null;
     if (titleKey === null) {

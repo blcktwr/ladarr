@@ -1,10 +1,11 @@
+import { get } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { REJECTION_TEXT } from '../../../../library/grab/decide.ts';
 import type { Finder } from '../../../../library/grab/finder.ts';
-import type { Db } from '../../../../core/db.ts';
 import type { Queue } from '../../../../library/downloads/queue.ts';
 
-export function queueReleaseGrabPost(db: Db, queue: Queue, finder: Finder): RequestHandler {
+export function queueReleaseGrabPost(queue: Queue, finder: Finder): RequestHandler {
+  const db = get();
   return async (req, res) => {
     const { titleKey, season, number, indexerId, guid } = (req.body ?? {}) as Record<string, unknown>;
     if (typeof titleKey !== 'string' || typeof guid !== 'string' || typeof indexerId !== 'number' || !db.data.titles[titleKey]) return void res.status(400).json({ error: 'invalid_request' });

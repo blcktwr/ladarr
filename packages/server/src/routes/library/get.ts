@@ -1,11 +1,12 @@
+import { get } from '../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../core/db.ts';
 import { libraryFilter, libraryType, matchesType } from '../../library/tools/filters.ts';
 import { summarize } from '../../library/tools/api.ts';
 
 const MAX_PAGE = 100;
 
-export function libraryGet(db: Db): RequestHandler {
+export function libraryGet(): RequestHandler {
+  const db = get();
   return (req, res) => {
     const type = libraryType(req.query.type);
     const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';

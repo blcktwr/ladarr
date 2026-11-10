@@ -11,7 +11,7 @@ import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createBackup, listBackups, readBackup } from '../../src/system/backup.ts';
-import { emptyData, openDb, SCHEMA_VERSION, type Data } from '../../src/core/db.ts';
+import { emptyData, open, SCHEMA_VERSION, type Data } from '../../src/core/db.ts';
 import type { EnqueueInput } from '../../src/core/jobs.ts';
 import { createRestorer, MAX_UPLOAD_BYTES, restoreGate } from '../../src/system/restore.ts';
 import { startTestApp } from '../helpers/test-app.ts';
@@ -49,7 +49,7 @@ describe('restore through the API', () => {
   const start = async (pause?: () => Promise<boolean>) => {
     backupDir = fresh();
     worker = fakeWorker(pause);
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     app = await startTestApp({ backupDir, restorer: createRestorer({ db, dir: backupDir, worker }) }, db);
     return db;
   };
@@ -318,7 +318,7 @@ describe('restore through the API', () => {
 describe('requests that change data', () => {
   const setup = async (drainMs?: number) => {
     const backupDir = fresh();
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     const worker = fakeWorker();
     const restorer = createRestorer({ db, dir: backupDir, worker, drainMs });
     const { name } = await createBackup(db, backupDir, 'manual');
@@ -392,7 +392,7 @@ describe('the file on the disk', () => {
 
   it('fills a collection that an older backup lacks', async () => {
     const backupDir = fresh();
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     const old: Partial<Data> = { ...emptyData() };
     delete old.blocklist;
     const json = strToU8(JSON.stringify(old));
@@ -407,7 +407,7 @@ describe('the file on the disk', () => {
 
 describe('worker pause', () => {
   const newWorker = async (handlers: Parameters<typeof createWorker>[2], graceMs = 2_000) => {
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     const worker = createWorker(db, async () => {}, handlers, { tickMs: 10, graceMs });
     worker.start();
     return { db, worker };

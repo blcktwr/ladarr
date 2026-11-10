@@ -1,3 +1,4 @@
+import type { Server } from 'node:http';
 import { dirname } from 'node:path';
 import { loadConfig } from '@ladarr/shared/config';
 import { createApp } from './app.ts';
@@ -8,9 +9,13 @@ import { unfinishedImports } from './library/imports/importer.ts';
 import { createLimiter } from './core/limiter.ts';
 import { createPoller } from './library/downloads/poller.ts';
 import { createQueue } from './library/downloads/queue.ts';
+import { createRetry } from './library/downloads/queue-api.ts';
 import { createIndexerService } from './library/grab/torznab.ts';
-import { createSaver, openDb, SCHEMA_VERSION } from './core/db.ts';
+import { createSaver, get, open, SCHEMA_VERSION } from './core/db.ts';
 import { createEvents } from './core/events.ts';
+import { sonarr } from './proxy/sonarr.ts';
+import { radarr } from './proxy/radarr.ts';
+import { seerr } from './proxy/seerr.ts';
 import { closeLog, configureItemLogs, log, logToFile } from './core/log.ts';
 import { createRestorer } from './system/restore.ts';
 import { firstUnwritable } from './core/permissions.ts';
@@ -29,7 +34,8 @@ if (blocked) {
   process.exit(1);
 }
 logToFile(config.logFile);
-const db = await openDb(config.dbFile, config.queueFile);
+await open();
+const db = get();
 // An older version must not write to a file of a newer version. It could lose data that it does not know.
 if (db.data.schemaVersion > SCHEMA_VERSION) {
   console.error(`The data file ${config.dbFile} has schema version ${db.data.schemaVersion}. This version reads schema version ${SCHEMA_VERSION} at most. Start a newer version, or restore a backup from this version.`);
@@ -68,30 +74,55 @@ poller.start();
 for (const hash of unfinishedImports(db)) worker.enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
 
 const restorer = createRestorer({ db, dir: config.backupDir, worker });
+const services = { queue, finder, poller, clients, importStatus };
+const retries = createRetry({ db, queue, finder, enqueue: (input) => worker.enqueue(input) });
+const indexersChanged = () => {
+  retries.retryBlocked('no_indexers');
+  events.publish('indexers.changed');
+};
 
-const server = createApp(db, {
-  urlBase: config.urlBase,
-  events,
-  webDir: config.webDir,
-  heartbeat: () => worker.heartbeat,
-  tmdb,
-  configDir: config.configDir,
-  backupDir: config.backupDir,
-  restorer,
-  enqueue: worker.enqueue,
-  cancelJob: (id) => worker.cancel(id),
-  persist,
-  services: { queue, finder, poller, clients, importStatus },
-  indexers,
-  installUpdate: () => installUpdate(),
-  // The jobs stop before the files change. The ones that run finish first, so no import is cut in the middle.
-  pauseQueue: () => worker.drain(),
-  resumeQueue: () => worker.resume(),
-  // The files of the new version are in place. A clean stop saves the data, and Docker starts the process again.
-  restart: () => void shutdown('update'),
-}).listen(config.port, () => {
-  log.info('server listening', { port: config.port });
-});
+const servers: Server[] = [];
+function listen(app: ReturnType<typeof createApp>, port: number, name: string) {
+  const server = app.listen(port, () => log.info('server listening', { port, app: name }));
+  server.on('error', (error) => {
+    log.error('could not listen', { port, app: name, error });
+    void shutdown('listen');
+  });
+  servers.push(server);
+}
+
+listen(
+  createApp({
+    urlBase: config.urlBase,
+    events,
+    webDir: config.webDir,
+    heartbeat: () => worker.heartbeat,
+    tmdb,
+    configDir: config.configDir,
+    backupDir: config.backupDir,
+    restorer,
+    enqueue: worker.enqueue,
+    cancelJob: (id) => worker.cancel(id),
+    persist,
+    services,
+    indexers,
+    installUpdate: () => installUpdate(),
+    // The jobs stop before the files change. The ones that run finish first, so no import is cut in the middle.
+    pauseQueue: () => worker.drain(),
+    resumeQueue: () => worker.resume(),
+    // The files of the new version are in place. A clean stop saves the data, and Docker starts the process again.
+    restart: () => void shutdown('update'),
+  }),
+  config.port,
+  'ladarr',
+);
+
+if (config.proxy) {
+  const deps = { restorer, tmdb, events, enqueue: worker.enqueue, services };
+  listen(sonarr({ ...deps, onChange: indexersChanged }), 8989, 'sonarr');
+  listen(radarr({ ...deps, onChange: indexersChanged }), 7878, 'radarr');
+  listen(seerr(deps), 5055, 'seerr');
+}
 
 let stopping = false;
 async function shutdown(signal: string) {
@@ -100,8 +131,10 @@ async function shutdown(signal: string) {
   stopping = true;
   log.info('server stopping', { signal });
   try {
-    server.close();
-    server.closeAllConnections();
+    for (const server of servers) {
+      server.close();
+      server.closeAllConnections();
+    }
     poller.stop();
     limiter.stop();
     // The worker aborts its jobs, waits for them, and saves the database.

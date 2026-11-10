@@ -4,7 +4,7 @@ import { safeEqual } from '../core/auth.ts';
 import { isObject, notFound, notSupported, parseId, profiles, refuse, rootNumber, rootsOf, timespan, type CompatCommand, type CompatDeps } from './common.ts';
 import { radarrRoutes } from './radarr.ts';
 import { sonarrRoutes } from './sonarr.ts';
-import type { Db } from '../core/db.ts';
+import { get, type Db } from '../core/db.ts';
 import { APP_MEDIA, type IndexerApp } from '../library/grab/indexers.ts';
 import type { SearchPayload } from '../library/grab/finder.ts';
 import type { QueueEntry } from '../library/downloads/queue.ts';
@@ -14,13 +14,14 @@ const REFRESH = 'RefreshMonitoredDownloads';
 const SEARCH: Record<IndexerApp, string> = { radarr: 'MoviesSearch', sonarr: 'MissingEpisodeSearch' };
 
 // The adapters take the API key in the header X-Api-Key or in the query parameter apikey. Seerr uses the query parameter.
-export const adapterAuth =
-  (db: Db): RequestHandler =>
-  (req, res, next) => {
+export const adapterAuth = (): RequestHandler => {
+  const db = get();
+  return (req, res, next) => {
     const sent = req.get('x-api-key') ?? (typeof req.query.apikey === 'string' ? req.query.apikey : undefined);
     if (sent && db.data.apiKey && safeEqual(sent, db.data.apiKey)) return next();
     res.status(401).json({ message: 'Unauthorized', detail: 'The API key is missing or wrong. Send it in the X-Api-Key header or in the apikey query parameter.' });
   };
+};
 
 // The last handler of an adapter: any call that ladarr does not cover.
 export const unsupported: RequestHandler = (req, res) => notSupported(res, `${req.method} ${req.path} is not supported.`);
@@ -62,7 +63,8 @@ function commandResource(db: Db, command: CompatCommand) {
 
 const QUEUE_STAGES: QueueEntry['stage'][] = ['fetching', 'sending', 'downloading', 'validating', 'importing'];
 
-export function compatRouter(db: Db, app: IndexerApp, deps: CompatDeps) {
+export function compatRouter(app: IndexerApp, deps: CompatDeps) {
+  const db = get();
   const router = Router();
   const mediaType = APP_MEDIA[app];
 
@@ -180,6 +182,6 @@ export function compatRouter(db: Db, app: IndexerApp, deps: CompatDeps) {
     res.json(commandResource(db, command));
   });
 
-  router.use(app === 'radarr' ? radarrRoutes(db, deps) : sonarrRoutes(db, deps));
+  router.use(app === 'radarr' ? radarrRoutes(deps) : sonarrRoutes(deps));
   return router;
 }

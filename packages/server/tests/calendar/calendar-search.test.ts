@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { BULK_SEARCH_JOB } from '../../src/library/calendar/calendar-search.ts';
 import { librarySearchHandler } from '../../src/jobs/library-search.ts';
-import { openDb, type Db } from '../../src/core/db.ts';
+import { open, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { createFinder } from '../../src/library/grab/finder.ts';
 import { enqueue, type Job } from '../../src/core/jobs.ts';
@@ -14,7 +14,7 @@ const film = (id: number, extra: Partial<Title> = {}) => movie({ key: `movie:${i
 
 // The services without a worker, so the jobs stay in the database where the test can count them.
 async function setup(titles: Title[]) {
-  const db: Db = await openDb('unused.json');
+  const db: Db = await open('unused.json');
   for (const item of titles) db.data.titles[item.key] = item;
   const queue = createQueue(db, createEvents(), () => {});
   const finder = createFinder({ db, queue, indexers: {} as never, enqueue: (input) => enqueue(db, input) });

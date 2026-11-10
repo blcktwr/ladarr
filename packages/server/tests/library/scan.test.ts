@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { openDb, type Db } from '../../src/core/db.ts';
+import { open, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { availability, seriesCounts, type Episode, type Title } from '../../src/library/library.ts';
 import { scanTitle } from '../../src/library/scan.ts';
@@ -56,7 +56,7 @@ beforeEach(async () => {
   movies = join(dir, 'lib', 'movies');
   mkdirSync(tv, { recursive: true });
   mkdirSync(movies, { recursive: true });
-  db = await openDb('unused.json');
+  db = await open('unused.json');
   const dev = statSync(tv).dev;
   db.data.roots = { tv: { id: 'tv', path: tv, mediaType: 'tv', dev }, movies: { id: 'movies', path: movies, mediaType: 'movie', dev } };
 });

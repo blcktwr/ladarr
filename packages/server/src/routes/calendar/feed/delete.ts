@@ -1,7 +1,8 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 
-export function calendarFeedTokenDelete(db: Db): RequestHandler {
+export function calendarFeedTokenDelete(): RequestHandler {
+  const db = get();
   return async (_req, res) => {
     const previous = db.data.calendarFeedToken;
     db.data.calendarFeedToken = null;

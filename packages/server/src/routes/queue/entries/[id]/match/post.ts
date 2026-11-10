@@ -1,7 +1,7 @@
+import { get } from '../../../../../core/db.ts';
 import type { QueueMatchPreview } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import type { Finder } from '../../../../../library/grab/finder.ts';
-import type { Db } from '../../../../../core/db.ts';
 import type { EnqueueInput, Job } from '../../../../../core/jobs.ts';
 import type { Clients } from '../../../../../library/downloads/client-api.ts';
 import { ClientError } from '../../../../../library/downloads/qbittorrent.ts';
@@ -11,7 +11,8 @@ import { listDownloadFiles } from '../../../../../library/imports/importer.ts';
 import { label, shown } from '../../../../../helpers/queue.ts';
 
 // Matches a file of the download to the target, or to several episodes. The match stays through every retry.
-export function queueEntryMatchPost(db: Db, queue: Queue, finder: Finder, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler<{ id: string }> {
+export function queueEntryMatchPost(queue: Queue, finder: Finder, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler<{ id: string }> {
+  const db = get();
   const { retry } = createRetry({ db, queue, finder, enqueue });
   return async (req, res) => {
     const entry = db.data.queue[req.params.id];

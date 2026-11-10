@@ -1,10 +1,11 @@
+import { get } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { REJECTION_TEXT } from '../../../library/grab/decide.ts';
 import type { Finder } from '../../../library/grab/finder.ts';
-import type { Db } from '../../../core/db.ts';
 
 // The releases for a target, with the reason for each rejection.
-export function queueReleasesGet(db: Db, finder: Finder): RequestHandler {
+export function queueReleasesGet(finder: Finder): RequestHandler {
+  const db = get();
   return async (req, res) => {
     const titleKey = String(req.query.titleKey ?? '');
     const season = req.query.season === undefined ? undefined : Number(req.query.season);
