@@ -119,7 +119,6 @@ function LibraryList() {
                 { value: 'all', label: t('All') },
                 { value: 'movie', label: t('Movies') },
                 { value: 'tv', label: t('Series') },
-                { value: 'anime', label: t('Anime') },
               ]}
             />
           )}

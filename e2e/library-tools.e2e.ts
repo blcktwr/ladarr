@@ -97,9 +97,6 @@ test('the catalog shows the type of a title on its poster', async ({ page }) => 
     await page.reload();
     const anime = page.getByRole('main').getByRole('link', { name: 'Show Name 2020 Anime', exact: true });
     await expect(anime).toBeVisible();
-    await page.getByRole('tab', { name: 'Anime' }).click();
-    await expect(anime).toBeVisible();
-    await expect(page.getByRole('main').getByRole('link', { name: /Movie Name/ })).toHaveCount(0);
   } finally {
     const restored = await stack.call('PATCH', '/library/tv:1', { seriesType: 'standard' });
     if (restored.status >= 300) throw new Error(`PATCH /library/tv:1 answered ${restored.status}: ${JSON.stringify(restored.body)}`);
