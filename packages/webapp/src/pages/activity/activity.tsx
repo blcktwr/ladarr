@@ -124,10 +124,10 @@ function ImportChecks({ entry }: { entry: QueueEntryView }) {
   const planned = entry.stage === 'importing';
   const rank = importRank(entry);
   const steps = [
+    { label: 'The download is complete.', done: true },
     { label: 'The title and its library folder exist.', done: planned },
     { label: 'The library folder is available.', done: planned },
     { label: 'The download is in the client.', done: planned },
-    { label: 'The download is complete.', done: true },
     { label: 'The download folder is readable.', done: planned },
     { label: 'The download folder is inside the downloads folder.', done: planned },
     { label: 'The video files are found.', done: planned },
@@ -285,7 +285,8 @@ function downloadPercent(entry: QueueEntryView) {
 
 // One target. An episode keeps its indicator next to its name, above the fields of its file. The inspector of a movie
 // shows the indicator of its status and the reason that stops it above the progress of the work, under the name, then
-// the fields of its release. The label is off in the inspector of a movie, where the heading of the panel says the name.
+// the checks of the import, then the fields of its release. The label is off in the inspector of a movie, where the
+// heading of the panel says the name.
 // An episode of a series shows the percent of its download in its name.
 function EntryDetails({ entry, label = true, inline = false }: { entry: QueueEntryView; label?: boolean; inline?: boolean }) {
   const percent = inline ? downloadPercent(entry) : null;
@@ -309,11 +310,12 @@ function EntryDetails({ entry, label = true, inline = false }: { entry: QueueEnt
   return (
     <div className="grid gap-4 w-full min-w-0">
       {name}
-      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={Boolean(data) || checks}>
+      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={!checks && Boolean(data)}>
         <TransferProgress entry={entry} />
       </DetailStatus>
-      {data}
       <ImportChecks entry={entry} />
+      {checks && data && <Divider />}
+      {data}
     </div>
   );
 }
@@ -578,7 +580,9 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   return (
     <div className="grid min-w-0">
       <div className="grid gap-4">
-        {status ? <DetailStatus status={statusLabel(status)} icon={status} message={message} /> : <Text>—</Text>}
+        {status ? <DetailStatus status={statusLabel(status)} icon={status} message={message} divider={!importing} /> : <Text>—</Text>}
+        {importing && <ImportChecks entry={importing} />}
+        {importing && unique.length > 0 && <Divider />}
         {unique.length > 0 && (
           <div>
             {unique.length === 1 ? (
@@ -594,7 +598,6 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
             )}
           </div>
         )}
-        {importing && <ImportChecks entry={importing} />}
       </div>
       {(unique.length > 0 || importing) && (
         <div className="mt-6">
