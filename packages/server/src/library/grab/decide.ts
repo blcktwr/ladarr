@@ -47,8 +47,6 @@ export type Decision = {
   quality: string | null;
   // The size limits of that quality in the profile. Null when the profile does not take the quality.
   limits: SizeLimits | null;
-  // The minimum seeders of the indexer. Null when it has none.
-  minimumSeeders: number | null;
 };
 
 // The text for each code. It is the key of the web i18n, and it names the affected title in the user interface, so it has no title in it.
@@ -70,7 +68,6 @@ export const REJECTION_TEXT: Record<string, string> = {
   upgrade_needs_single: 'The release is for several episodes. It cannot replace the file of one episode.',
   already_downloading: 'This release is in the queue.',
   blocklisted: 'The release is on the blocklist.',
-  seeders_below_min: 'The release has fewer seeders than the indexer needs.',
   no_download_link: 'The release has no download link.',
   indexer_removed: 'The indexer of the release was removed.',
   quality_rejected: 'The quality is not good enough (for example a camera copy).',
@@ -165,7 +162,6 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   const app = want.title.mediaType === 'movie' ? 'radarr' : 'sonarr';
   const push = indexer?.push[app];
   if (!indexer || !push) reject('indexer_removed');
-  else if (!ctx.manual && release.seeders !== null && release.seeders < push.minimumSeeders) reject('seeders_below_min');
   if (!release.link && !release.magnet) reject('no_download_link');
   const hash = release.infoHash;
   if (ctx.blocked(release, hash)) reject('blocklisted');
@@ -195,7 +191,6 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
     hash,
     quality: qualityOf(parsed.source, parsed.resolution),
     limits: quality.limits,
-    minimumSeeders: push?.minimumSeeders ?? null,
   };
 }
 
@@ -276,8 +271,6 @@ export function explainDecision(decision: Decision, options: { profiles: Profile
         return decision.mibPerMinute === null || !decision.limits ? undefined : `${decision.mibPerMinute.toFixed(1)} MiB/min is below ${decision.limits.min}`;
       case 'size_above_max':
         return decision.mibPerMinute === null || !decision.limits ? undefined : `${decision.mibPerMinute.toFixed(1)} MiB/min is above ${decision.limits.max}`;
-      case 'seeders_below_min':
-        return `${release.seeders ?? 'no'} seeders; the indexer needs ${decision.minimumSeeders}`;
       case 'audio_unverified':
         return 'the release name has no audio language';
       case 'audio_language_missing':

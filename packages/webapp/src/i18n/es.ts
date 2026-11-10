@@ -848,7 +848,6 @@ export const es: Record<string, string> = {
   'The release is for several episodes. It cannot replace the file of one episode.': 'La versión es de varios episodios. No puede reemplazar el archivo de un episodio.',
   'This release is in the queue.': 'Esta versión ya está en la cola.',
   'The release is on the blocklist.': 'La versión está en la lista de bloqueo.',
-  'The release has fewer seeders than the indexer needs.': 'La versión tiene menos semillas de las que necesita el indexador.',
   'The indexer of the release was removed.': 'Se quitó el indexador de la versión.',
   'The quality is not good enough (for example a camera copy).': 'La calidad no es suficiente (por ejemplo, una copia de cámara).',
   'The quality of the release is not in any quality profile of the title.': 'La calidad de la versión no está en ningún perfil de calidad del título.',

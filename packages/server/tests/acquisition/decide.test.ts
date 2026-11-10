@@ -116,11 +116,7 @@ describe('policy', () => {
     expect(codes(name, { ...ep2, title: has }, { manual: true })).toEqual([]);
   });
 
-  it('rejects a release below the minimum seeders of the indexer, and a release with no link', () => {
-    const picky = indexer();
-    picky.push.sonarr!.minimumSeeders = 5;
-    expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, { indexers: { 1: picky } }, { seeders: 2 })).toEqual(['seeders_below_min']);
-    expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, { indexers: { 1: picky } }, { seeders: null })).toEqual([]);
+  it('rejects a release with no link', () => {
     expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, {}, { link: null })).toEqual(['no_download_link']);
     expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, { indexers: {} })).toEqual(['indexer_removed']);
   });
