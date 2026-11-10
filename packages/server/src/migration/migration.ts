@@ -133,9 +133,9 @@ export async function buildPlan(db: Db, tmdb: Tmdb, source: SourceData, mappings
     const episodes = item.episodes ?? [];
     const manualRelease = item.mediaType === 'movie' && item.minimumAvailability !== null && item.minimumAvailability !== 'released';
 
-    if (status === 'new' && tmdbId) {
+    if ((status === 'new' || status === 'pending') && tmdbId) {
       const defaultRoot = db.data.settings.defaultRoots[item.mediaType];
-      requests.set(ledgerKey, {
+      const built: LedgerEntry['request'] = {
         mediaType: item.mediaType,
         tmdbId,
         // A title outside the folders of ladarr goes to the default folder. Its path is not kept.
@@ -148,7 +148,9 @@ export async function buildPlan(db: Db, tmdb: Tmdb, source: SourceData, mappings
         downloads,
         sourceEpisodes: episodes,
         manualRelease,
-      });
+      };
+      // A title that waits from an earlier try keeps the choices of that try. A new import starts the job again.
+      requests.set(ledgerKey, status === 'pending' ? entry?.request ?? built : built);
     }
     // A re-import verifies a title that is in the library already. It also applies the source facts that the first
     // import did not read: the paused state, the season and episode monitoring, and the source folder.

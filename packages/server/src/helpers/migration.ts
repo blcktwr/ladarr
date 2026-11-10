@@ -17,7 +17,9 @@ export const uploads = new Map<string, SourceData>();
 
 export function progress(db: Db): MigrationProgress {
   const counts: MigrationProgress = { pending: 0, imported: 0, matched: 0, failed: 0 };
-  for (const entry of Object.values(db.data.ledger)) counts[entry.status]++;
+  const batch = db.data.migrationBatch;
+  // The ledger keeps the results of every import. The user watches the one that they started now.
+  if (batch) for (const entry of Object.values(db.data.ledger)) if (entry.batch === batch) counts[entry.status]++;
   return counts;
 }
 

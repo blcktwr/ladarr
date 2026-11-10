@@ -43,6 +43,8 @@ export type Settings = {
 // One title from a Sonarr or Radarr import. The ledger keeps the result, so a second import skips what is done.
 export type LedgerEntry = {
   status: 'pending' | 'imported' | 'matched' | 'failed';
+  // The import that wrote the entry. The status counts only the entries of the current import.
+  batch?: string;
   app: 'sonarr' | 'radarr';
   sourceId: number;
   title: string;
@@ -110,6 +112,8 @@ export type Data = {
   titles: Record<string, Title>;
   // Keyed by the namespace of the source and the ID in the source, for example "sonarr:1a2b3c4d:57".
   ledger: Record<string, LedgerEntry>;
+  // The ID of the import whose titles are going into the library now. The status counts only its entries.
+  migrationBatch: string | null;
   // The verification of each imported title, keyed by the title key. See library/verification.ts.
   verifications: Record<string, VerificationState>;
   files: Record<string, MediaFile>;
@@ -165,6 +169,7 @@ export const emptyData = (): Data => ({
   roots: {},
   titles: {},
   ledger: {},
+  migrationBatch: null,
   verifications: {},
   files: {},
   indexers: {},

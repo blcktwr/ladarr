@@ -15,7 +15,12 @@ export function migrationImportHandler({ db, tmdb, events, save, enqueue }: Migr
     concurrency: 1,
     run: async (_job, { signal }) => {
       let done = 0;
-      for (const entry of Object.values(db.data.ledger)) {
+      // The current import goes first, so its progress rises at once. A pending entry of an older import
+      // is still work, and the ledger keeps it.
+      const batch = db.data.migrationBatch;
+      const pending = Object.values(db.data.ledger).filter((entry) => entry.status === 'pending');
+      pending.sort((a, b) => Number(b.batch === batch) - Number(a.batch === batch));
+      for (const entry of pending) {
         if (entry.status !== 'pending') continue;
         signal.throwIfAborted();
         const { request } = entry;
