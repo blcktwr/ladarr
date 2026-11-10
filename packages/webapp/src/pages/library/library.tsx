@@ -41,7 +41,15 @@ const catalogTiles = 'mx-auto w-[calc(round(down,calc(100%+1.5rem),11.5rem)-1.5r
 function TitlePoster({ title, selected, onSelectedChange }: { title: TitleSummary; selected: boolean; onSelectedChange: (selected: boolean) => void }) {
   return (
     <RouterLink to={catalogPath(title.key)}>
-      <Thumbnail image={posterUrl(title.posterPath, 'w342') ?? ''} title={title.title} year={title.year ?? ''} type={contentType(title.mediaType, title.seriesType)} selected={selected} onSelectedChange={onSelectedChange} />
+      <Thumbnail
+        image={posterUrl(title.posterPath, 'w342') ?? ''}
+        title={title.title}
+        year={title.year ?? ''}
+        type={contentType(title.mediaType, title.seriesType)}
+        selected={selected}
+        onSelectedChange={onSelectedChange}
+        dimmed={title.mediaType === 'tv' && title.availability === 'waiting'}
+      />
     </RouterLink>
   );
 }

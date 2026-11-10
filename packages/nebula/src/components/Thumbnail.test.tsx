@@ -32,4 +32,10 @@ describe('Thumbnail', () => {
 
     expect(placeholder(container)).toBeTruthy();
   });
+
+  it('dims the thumbnail when dimmed is on', () => {
+    const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} dimmed />);
+
+    expect(container.querySelector('figure')!.className).toContain('opacity-40');
+  });
 });
