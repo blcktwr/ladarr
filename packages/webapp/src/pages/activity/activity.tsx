@@ -137,9 +137,6 @@ const sourceLabel = (source: string) => sourceLabels[source] ?? (source === 'unk
 // The quality of a release as a person reads it: its resolution and its source.
 const releaseQuality = (release: QueueRejectedRelease) => [release.resolution ? `${release.resolution}p` : null, sourceLabel(release.source)].filter(Boolean).join(' ');
 
-// The list shows the quality of the release above its name, so the reason does not repeat it.
-const QUALITY_NOT_IN_PROFILE = 'The quality of the release is not in any quality profile of the title.';
-
 // The releases that a search found and rejected, with the button that takes one by hand.
 function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; release: QueueRejectedRelease }[]; onDone: () => void }) {
   const [chosen, setChosen] = useState<{ entry: QueueEntryView; release: QueueRejectedRelease } | null>(null);
@@ -173,24 +170,18 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
           {items.map((item) => {
             const quality = releaseQuality(item.release);
             const size = formatBytes(item.release.sizeBytes);
-            const reasons = item.release.reasons.filter((reason) => reason !== QUALITY_NOT_IN_PROFILE);
             return (
-              <Row
-                key={`${item.release.indexerId}:${item.release.guid}`}
-                actions={
-                  item.release.grabbable ? (
-                    <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
-                      <Check />
-                    </Button>
-                  ) : undefined
-                }
-              >
-                <div className="grid gap-1 min-w-0">
-                  <Text variant="small">
-                    {quality} ({size})
-                  </Text>
-                  <Text>{item.release.title}</Text>
-                  {reasons.length > 0 && <Text variant="small">{reasons.map((reason) => t(reason)).join(' ')}</Text>}
+              <Row key={`${item.release.indexerId}:${item.release.guid}`}>
+                <div className="flex w-full min-w-0 items-start gap-3">
+                  <div className="grid min-w-0 flex-1 gap-1">
+                    <Text variant="small">
+                      {quality} ({size})
+                    </Text>
+                    <Text>{item.release.title}</Text>
+                  </div>
+                  <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
+                    <Check />
+                  </Button>
                 </div>
               </Row>
             );
@@ -199,9 +190,11 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
       </Section>
       {chosen && (
         <Modal open onOpenChange={(open) => !open && close()} title={t('Download this release?')}>
-          <p>
-            {releaseQuality(chosen.release)} · {formatBytes(chosen.release.sizeBytes)}
-          </p>
+          <div className="grid gap-1">
+            <Text variant="small">{releaseQuality(chosen.release)}</Text>
+            <Text>{chosen.release.title}</Text>
+            <Text variant="small">{formatBytes(chosen.release.sizeBytes)}</Text>
+          </div>
           {error && <Alert tone="danger">{error}</Alert>}
           <ModalActions>
             <Button variant="ghost" onClick={close}>
@@ -223,7 +216,7 @@ function TransferProgress({ entry }: { entry: QueueEntryView }) {
   if (percent === null || !entry.transfer) return null;
   return (
     <div className="grid gap-1">
-      <Progress value={percent} label={`${entry.label} · ${t('Download')}`} />
+      <Progress value={percent} label={`${entry.label} ${t('Download')}`} />
       <Text variant="small">{percent}%</Text>
     </div>
   );
@@ -655,7 +648,7 @@ function ConfirmAction({ preview, onCancel, onConfirm }: { preview: QueueActionP
       <ul>
         {preview.affected.slice(0, 20).map((item) => (
           <li key={item.id}>
-            {item.label} · {stageLabel(shownKey(item.key))}
+            {item.label} {stageLabel(shownKey(item.key))}
           </li>
         ))}
       </ul>

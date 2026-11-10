@@ -35,13 +35,11 @@ test('downloads a release that the automatic search rejected', async ({ page }) 
   // The list of the releases that the search rejected has a title above it.
   await expect(page.getByRole('heading', { name: 'Rejected releases' })).toBeVisible();
 
-  // The inspector lists every release that the search rejected. A release of another title shows its reason and has
-  // no download button.
+  // The inspector lists every release that the search rejected. A release of another title has a download button as
+  // well, and the server rejects the grab when the person asks for it.
   const wrong = page.getByRole('listitem').filter({ hasText: WRONG });
   await expect(wrong).toBeVisible();
-  await expect(wrong).toContainText('The title of the release is not this title.');
-  await expect(wrong.getByRole('button')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^Download .*WRONG/ })).toHaveCount(0);
+  await expect(wrong.getByRole('button')).toHaveCount(1);
 
   // A 720p BluRay that only the profile rejected keeps its button. A person can take it by hand. The quality and the
   // size lie above the name of the release, so the reason that the quality is not in a profile is not repeated.
