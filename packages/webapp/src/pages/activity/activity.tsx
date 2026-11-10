@@ -561,10 +561,8 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   const completed = group.reached.completed;
   const total = group.total;
   const status = overallKey(counts);
-  // The reason that most of the stuck targets share, for the line under the status.
-  const stuck = new Map<string, number>();
-  for (const entry of entries) if (entry.key === 'stuck' && entry.reason) stuck.set(entry.reason.message, (stuck.get(entry.reason.message) ?? 0) + 1);
-  const stuckReason = [...stuck].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  // The line under the status of a stuck season stays general: the reason of one target is not the reason of them all.
+  const stuck = entries.filter((entry) => entry.key === 'stuck').length;
   const toggle = (number: number) => setSeason((current) => (current === number ? null : number));
   // The releases of the series. A pack is one release. Several episodes can have their own.
   const releases = new Map<string, NonNullable<QueueEntryView['release']>>();
@@ -579,8 +577,8 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   const message =
     status === 'no_match'
       ? t('The indexers have releases, but none fits your selected qualities.')
-      : status === 'stuck' && stuckReason
-        ? t(stuckReason)
+      : status === 'stuck'
+        ? t('{count} / {total} episodes are stuck. Open seasons below.', { count: stuck, total })
         : t('{count} / {total} episodes', { count: completed, total });
   return (
     <div className="grid min-w-0">

@@ -635,6 +635,7 @@ export const es: Record<string, string> = {
   'Episodes of season {number}': 'Episodios de la temporada {number}',
   'Inspect {name}': 'Inspeccionar {name}',
   '{count} / {total} episodes': '{count} / {total} episodios',
+  '{count} / {total} episodes are stuck. Open seasons below.': '{count} / {total} episodios están atascados. Abre las temporadas de abajo.',
   'Episode {number}': 'Episodio {number}',
   'Priority {lane}': 'Prioridad {lane}',
   'Attempt {attempt}': 'Intento {attempt}',
