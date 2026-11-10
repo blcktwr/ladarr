@@ -5,7 +5,7 @@ import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, Paus
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
-import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal, Pagination, Pane, Panel, Progress, Row, Spinner, SubMenu, Table, Text, Thumbnail } from 'nebula';
+import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal, Pagination, Pane, Panel, Progress, Row, Section, Spinner, SubMenu, Table, Text, Thumbnail } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
 import { SeriesBlocklist } from './activity-blocklist.tsx';
@@ -137,6 +137,9 @@ const sourceLabel = (source: string) => sourceLabels[source] ?? (source === 'unk
 // The quality of a release as a person reads it: its resolution and its source.
 const releaseQuality = (release: QueueRejectedRelease) => [release.resolution ? `${release.resolution}p` : null, sourceLabel(release.source)].filter(Boolean).join(' ');
 
+// The list shows the quality of the release above its name, so the reason does not repeat it.
+const QUALITY_NOT_IN_PROFILE = 'The quality of the release is not in any quality profile of the title.';
+
 // The releases that a search found and rejected, with the button that takes one by hand.
 function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; release: QueueRejectedRelease }[]; onDone: () => void }) {
   const [chosen, setChosen] = useState<{ entry: QueueEntryView; release: QueueRejectedRelease } | null>(null);
@@ -165,32 +168,35 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
 
   return (
     <>
-      <List>
-        {items.map((item) => {
-          const quality = releaseQuality(item.release);
-          const size = formatBytes(item.release.sizeBytes);
-          return (
-            <Row
-              key={`${item.release.indexerId}:${item.release.guid}`}
-              actions={
-                item.release.grabbable ? (
-                  <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
-                    <Check />
-                  </Button>
-                ) : undefined
-              }
-            >
-              <div className="grid gap-1 min-w-0">
-                <Text variant="small">{item.release.title}</Text>
-                <Text variant="small">
-                  {quality} · {size}
-                </Text>
-                {item.release.reasons.length > 0 && <Text variant="small">{item.release.reasons.map((reason) => t(reason)).join(' ')}</Text>}
-              </div>
-            </Row>
-          );
-        })}
-      </List>
+      <Section title={t('Rejected releases')}>
+        <List>
+          {items.map((item) => {
+            const quality = releaseQuality(item.release);
+            const size = formatBytes(item.release.sizeBytes);
+            const reasons = item.release.reasons.filter((reason) => reason !== QUALITY_NOT_IN_PROFILE);
+            return (
+              <Row
+                key={`${item.release.indexerId}:${item.release.guid}`}
+                actions={
+                  item.release.grabbable ? (
+                    <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
+                      <Check />
+                    </Button>
+                  ) : undefined
+                }
+              >
+                <div className="grid gap-1 min-w-0">
+                  <Text variant="small">
+                    {quality} ({size})
+                  </Text>
+                  <Text>{item.release.title}</Text>
+                  {reasons.length > 0 && <Text variant="small">{reasons.map((reason) => t(reason)).join(' ')}</Text>}
+                </div>
+              </Row>
+            );
+          })}
+        </List>
+      </Section>
       {chosen && (
         <Modal open onOpenChange={(open) => !open && close()} title={t('Download this release?')}>
           <p>

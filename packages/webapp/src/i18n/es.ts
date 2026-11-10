@@ -507,6 +507,7 @@ export const es: Record<string, string> = {
   // Releases
   'This release cannot be taken: it breaks a safety check.': 'Esta versión no se puede tomar: incumple una comprobación de seguridad.',
   'Releases for {label}': 'Versiones de {label}',
+  'Rejected releases': 'Versiones rechazadas',
   'Search again': 'Buscar de nuevo',
   'The search did not complete.': 'La búsqueda no se completó.',
   '{answered} of {asked} indexers answered.': '{answered} de {asked} indexadores respondieron.',

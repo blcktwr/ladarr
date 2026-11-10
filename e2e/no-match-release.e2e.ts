@@ -32,6 +32,9 @@ test('downloads a release that the automatic search rejected', async ({ page }) 
   await page.getByRole('button', { name: 'Inspect Movie Name (2019)' }).click();
   await expect(page.getByRole('heading', { name: 'Movie Name (2019)' })).toBeVisible();
 
+  // The list of the releases that the search rejected has a title above it.
+  await expect(page.getByRole('heading', { name: 'Rejected releases' })).toBeVisible();
+
   // The inspector lists every release that the search rejected. A release of another title shows its reason and has
   // no download button.
   const wrong = page.getByRole('listitem').filter({ hasText: WRONG });
@@ -40,9 +43,12 @@ test('downloads a release that the automatic search rejected', async ({ page }) 
   await expect(wrong.getByRole('button')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Download .*WRONG/ })).toHaveCount(0);
 
-  // A 720p BluRay that only the profile rejected keeps its button. A person can take it by hand.
-  const releaseLine = page.getByText('720p').filter({ hasText: 'BluRay' }).first();
+  // A 720p BluRay that only the profile rejected keeps its button. A person can take it by hand. The quality and the
+  // size lie above the name of the release, so the reason that the quality is not in a profile is not repeated.
+  const releaseLine = page.getByText('720p BluRay (5.9 GiB)').first();
   await expect(releaseLine).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: RELEASE }).first()).toContainText(RELEASE);
+  await expect(page.getByText('The quality of the release is not in any quality profile of the title.')).toHaveCount(0);
   const download = page.getByRole('button', { name: /^Download 720p BluRay/ });
   await expect(download).toBeVisible();
   await download.click();
