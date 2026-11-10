@@ -43,6 +43,11 @@ const groupName = (group: QueueGroupRow) => `${group.title}${group.year ? ` (${g
 // The key of a row on the page: one group of episodes, or one movie.
 const rowKey = (row: QueueRow) => (row.kind === 'group' ? `group:${row.key}` : `entry:${row.id}`);
 
+// The episodes of a group, for the details and for the sections that read the same entries.
+function useGroupEntries(group: QueueGroupRow, filters: Filters) {
+  return useQuery<{ items: QueueEntryView[] }>({ queryKey: [groupKey(filters, group)], gcTime: 0, enabled: !group.pending });
+}
+
 // The name that the page shows for a row.
 const nameOf = (row: QueueRow) => (row.kind === 'group' ? groupName(row) : row.label);
 
@@ -231,6 +236,35 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
   );
 }
 
+// The rejected releases of a row, in their own container under its details.
+function RejectedPane({ items, onDone }: { items: { entry: QueueEntryView; release: QueueRejectedRelease }[]; onDone: () => void }) {
+  if (items.length === 0) return null;
+  return (
+    <Pane className="w-full">
+      <NoMatchReleases items={items} onDone={onDone} />
+    </Pane>
+  );
+}
+
+// The rejected releases of a movie. Only a target that found no match keeps them.
+function MovieRejected({ entry, refresh }: { entry: QueueEntryView; refresh: () => void }) {
+  const releases = entry.key === 'no_match' ? (entry.search?.rejected ?? []) : [];
+  return <RejectedPane items={releases.map((release) => ({ entry, release }))} onDone={refresh} />;
+}
+
+// The rejected releases of a series, one row for each release. Several episodes can have their own.
+function GroupRejected({ group, filters, refresh }: { group: QueueGroupRow; filters: Filters; refresh: () => void }) {
+  const { data } = useGroupEntries(group, filters);
+  const rejected = new Map<string, { entry: QueueEntryView; release: QueueRejectedRelease }>();
+  for (const entry of data?.items ?? []) {
+    for (const release of entry.search?.rejected ?? []) {
+      const key = `${release.indexerId}:${release.guid}`;
+      if (!rejected.has(key)) rejected.set(key, { entry, release });
+    }
+  }
+  return <RejectedPane items={[...rejected.values()]} onDone={refresh} />;
+}
+
 // The progress of a download: the part that is done.
 function TransferProgress({ entry }: { entry: QueueEntryView }) {
   const percent = downloadPercent(entry);
@@ -253,14 +287,13 @@ function downloadPercent(entry: QueueEntryView) {
 // shows the indicator of its status and the reason that stops it above the progress of the work, under the name, then
 // the fields of its release. The label is off in the inspector of a movie, where the heading of the panel says the name.
 // An episode of a series shows the percent of its download in its name.
-function EntryDetails({ entry, label = true, inline = false, showRejected = true, onDone = () => {} }: { entry: QueueEntryView; label?: boolean; inline?: boolean; showRejected?: boolean; onDone?: () => void }) {
+function EntryDetails({ entry, label = true, inline = false }: { entry: QueueEntryView; label?: boolean; inline?: boolean }) {
   const percent = inline ? downloadPercent(entry) : null;
   const data = !inline && entry.release ? <ReleaseDetails release={entry.release} /> : inline && entry.file ? <FileDetails file={entry.file} /> : null;
   const name = label && <Text>{percent === null ? entry.label : <>{entry.label} <strong>({percent}%)</strong></>}</Text>;
   const status = shownKey(entry.key);
   // The reason shows under the status of a movie. The list and the episodes keep the status and the hint.
   const reason = entry.reason ? t(entry.reason.message) : null;
-  const rejected = showRejected && entry.key === 'no_match' ? (entry.search?.rejected ?? []) : [];
   const checks = entry.stage === 'validating' || entry.stage === 'importing';
   if (inline) {
     return (
@@ -270,17 +303,15 @@ function EntryDetails({ entry, label = true, inline = false, showRejected = true
           <EntryStatus entry={entry} />
         </div>
         {data}
-        {rejected.length > 0 && <NoMatchReleases items={rejected.map((release) => ({ entry, release }))} onDone={onDone} />}
       </div>
     );
   }
   return (
     <div className="grid gap-4 w-full min-w-0">
       {name}
-      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={Boolean(data) || rejected.length > 0 || checks}>
+      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={Boolean(data) || checks}>
         <TransferProgress entry={entry} />
       </DetailStatus>
-      {rejected.length > 0 && <NoMatchReleases items={rejected.map((release) => ({ entry, release }))} onDone={onDone} />}
       {data}
       <ImportChecks entry={entry} />
     </div>
@@ -439,7 +470,7 @@ function EpisodeActions({ entry, run, refresh, openLogs }: { entry: QueueEntryVi
 const seasonColumns = [{ label: 'Season', hideLabel: true }, { label: 'Actions', hideLabel: true, align: 'end' as const }];
 
 // The episodes of a season, a page of them at a time.
-function SeasonEpisodes({ season, entries, run, refresh, openLogs, showRejected }: { season: number; entries: QueueEntryView[]; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; showRejected: boolean }) {
+function SeasonEpisodes({ season, entries, run, refresh, openLogs }: { season: number; entries: QueueEntryView[]; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void }) {
   const [page, setPage] = useState(1);
   const pages = Math.max(1, Math.ceil(entries.length / EPISODES));
   const current = Math.min(page, pages);
@@ -455,7 +486,7 @@ function SeasonEpisodes({ season, entries, run, refresh, openLogs, showRejected 
         rows={entries.slice((current - 1) * EPISODES, current * EPISODES).map((entry) => ({
           key: `entry:${entry.id}`,
           cells: [
-            <EntryDetails key="detail" entry={entry} inline showRejected={showRejected} onDone={refresh} />,
+            <EntryDetails key="detail" entry={entry} inline />,
             <EpisodeActions key="actions" entry={entry} run={run} refresh={refresh} openLogs={openLogs} />,
           ],
         }))}
@@ -501,7 +532,7 @@ function SeasonTable({ titleKey, entries, opened, onSeason, detail }: { titleKey
 // The inspector of a series: the progress of the whole series, and the seasons. A season opens its episodes under its row.
 function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueGroupRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void }) {
   const [season, setSeason] = useState<number | null>(null);
-  const { data, error, refetch } = useQuery<{ items: QueueEntryView[] }>({ queryKey: [groupKey(filters, group)], gcTime: 0, enabled: !group.pending });
+  const { data, error, refetch } = useGroupEntries(group, filters);
   const entries = data?.items;
   if (group.pending) {
     return (
@@ -532,14 +563,6 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   const releases = new Map<string, NonNullable<QueueEntryView['release']>>();
   for (const entry of entries) if (entry.release) releases.set(`${entry.release.title}|${entry.release.sizeBytes}`, entry.release);
   const unique = [...releases.values()];
-  // The releases that the last search found and rejected, one row for each release.
-  const rejected = new Map<string, { entry: QueueEntryView; release: QueueRejectedRelease }>();
-  for (const entry of entries) {
-    for (const release of entry.search?.rejected ?? []) {
-      const key = `${release.indexerId}:${release.guid}`;
-      if (!rejected.has(key)) rejected.set(key, { entry, release });
-    }
-  }
   const qualities = [...new Set(unique.flatMap((release) => (release.quality ? [release.quality] : [])))];
   // The target of the checklist: the one that is furthest behind in the import. A target that a reason stops comes
   // after the targets that move.
@@ -556,7 +579,6 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
     <div className="grid min-w-0">
       <div className="grid gap-4">
         {status ? <DetailStatus status={statusLabel(status)} icon={status} message={message} /> : <Text>—</Text>}
-        {status === 'no_match' && rejected.size > 0 && <NoMatchReleases items={[...rejected.values()]} onDone={refresh} />}
         {unique.length > 0 && (
           <div>
             {unique.length === 1 ? (
@@ -584,7 +606,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
         entries={entries}
         opened={season}
         onSeason={toggle}
-        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} run={run} refresh={refresh} openLogs={openLogs} showRejected={status !== 'no_match'} />}
+        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} run={run} refresh={refresh} openLogs={openLogs} />}
       />
     </div>
   );
@@ -594,7 +616,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
 function MovieDetail({ entry, refresh }: { entry: QueueEntryView; refresh: () => void }) {
   return (
     <div className="grid gap-3">
-      <EntryDetails entry={entry} label={false} onDone={refresh} />
+      <EntryDetails entry={entry} label={false} />
       {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
     </div>
   );
@@ -935,10 +957,15 @@ function QueueView() {
                 <Pane className="w-full">
                   <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onBack={back} backRef={backButton} />
                 </Pane>
-                {chosen.kind === 'group' && (
-                  <Pane className="w-full">
-                    <SeriesBlocklist titleKey={chosen.titleKey} />
-                  </Pane>
+                {chosen.kind === 'group' ? (
+                  <>
+                    <GroupRejected group={chosen} filters={filters} refresh={refresh} />
+                    <Pane className="w-full">
+                      <SeriesBlocklist titleKey={chosen.titleKey} />
+                    </Pane>
+                  </>
+                ) : (
+                  <MovieRejected entry={chosen} refresh={refresh} />
                 )}
               </>
             ) : (
