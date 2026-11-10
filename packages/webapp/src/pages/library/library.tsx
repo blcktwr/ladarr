@@ -1,5 +1,5 @@
 import type { LibraryType } from '@ladarr/shared/enums';
-import type { CastMember, EpisodeRef, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary } from '@ladarr/shared/types';
+import type { CastMember, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary } from '@ladarr/shared/types';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { ArrowLeft, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
@@ -17,13 +17,11 @@ import { StatusText } from '../../lib/status.tsx';
 import { useQueueNotice } from '../../lib/queue-notice.ts';
 import imdbLogo from '../../assets/imdb-logo.svg';
 import tmdbLogo from '../../assets/tmdb-logo.svg';
-import { BulkActions, episodeLabel, PlanDialog, useSelection } from './library-bulk.tsx';
+import { BulkActions, PlanDialog, useSelection } from './library-bulk.tsx';
 import { AddManuallyDialog, ImportBackupDialog } from './catalog-import.tsx';
-import { FilesDialog } from './library-files.tsx';
 import { UntitledFolders } from './library-folders.tsx';
 
 type Target = { titleKey: string; season?: number; number?: number };
-type Episode = EpisodeRef;
 
 const PAGE_SIZE = 48;
 // The title page keeps the margins of the app. The thumbnails lie on the page with no pane.
@@ -263,8 +261,8 @@ function EpisodeStatus({ episode }: { episode: EpisodeItem }) {
   return <StatusText small status={statusLabel('searching')} icon="searching" />;
 }
 
-// The table of the episodes of a season. A series in the library has a file for each episode that has one, and the actions of the episode. A series that is not in it shows the facts only.
-function EpisodeTable({ rows, loading = false, onFiles }: { rows?: EpisodeItem[]; loading?: boolean; onFiles?: (episode: Episode) => void }) {
+// The table of the episodes of a season. A series in the library shows the status of each episode. A series that is not in it shows the facts only.
+function EpisodeTable({ rows, loading = false, library = false }: { rows?: EpisodeItem[]; loading?: boolean; library?: boolean }) {
   const airDate = (date: string) => {
     const [year, month, day] = date.split('-');
     return `${day}/${month}/${year}`;
@@ -277,12 +275,7 @@ function EpisodeTable({ rows, loading = false, onFiles }: { rows?: EpisodeItem[]
         { label: '#', width: '6rem' },
         { label: t('Title'), width: '24rem' },
         { label: t('Air date'), width: '8rem' },
-        ...(onFiles
-          ? [
-              { label: t('Status'), width: '9rem' },
-              { label: t('File'), align: 'end' as const, hideLabel: true, width: '6rem' },
-            ]
-          : []),
+        ...(library ? [{ label: t('Status'), width: '9rem' }] : []),
       ]}
       rows={rows?.map((row, index) => ({
         key: `${row.season}x${row.number}`,
@@ -290,16 +283,7 @@ function EpisodeTable({ rows, loading = false, onFiles }: { rows?: EpisodeItem[]
           `${index + 1} (${row.number})`,
           row.name,
           row.airDate ? airDate(row.airDate) : t('Unknown'),
-          ...(onFiles
-            ? [
-                <EpisodeStatus key="status" episode={row} />,
-                row.hasFile && (
-                  <Button variant="ghost" aria-label={t('File of {episode}', { episode: episodeLabel([row]) })} onClick={() => onFiles({ season: row.season, number: row.number })}>
-                    {t('File')}
-                  </Button>
-                ),
-              ]
-            : []),
+          ...(library ? [<EpisodeStatus key="status" episode={row} />] : []),
         ],
       }))}
     />
@@ -307,14 +291,14 @@ function EpisodeTable({ rows, loading = false, onFiles }: { rows?: EpisodeItem[]
 }
 
 // The table of the episodes of a season of a series in the library.
-function LibrarySeason({ titleKey, season, onFiles }: { titleKey: string; season: number; onFiles: (episode: Episode) => void }) {
+function LibrarySeason({ titleKey, season }: { titleKey: string; season: number }) {
   const { data, error, refetch: reload } = useQuery<{ episodes: EpisodeRow[] }>({ queryKey: [`/library/${titleKey}/episodes?season=${season}`] });
   useLive('library.changed', () => void reload());
   useLive('queue.changed', () => void reload());
 
   if (error && !data) return <LoadFailed onRetry={reload} />;
   if (data && data.episodes.length === 0) return <EmptyState>{t('No episodes.')}</EmptyState>;
-  return <EpisodeTable rows={data?.episodes} loading={!data} onFiles={onFiles} />;
+  return <EpisodeTable rows={data?.episodes} loading={!data} library />;
 }
 
 // A season of the series in its own container. A click on the container opens and closes the table of episodes. The
@@ -353,7 +337,7 @@ const seasonSelected = (season: SeasonRow) => season.counts.eligible + season.co
 // Each season is a container that opens and closes. All of them start closed. The button on a container opens the
 // table of its episodes. A season that is not selected has a + that selects it, and a selected season has a trash that
 // removes it.
-function Seasons({ title, onFiles, onAddSeason, onRemoveSeason }: { title: TitleDetail; onFiles: (episode: Episode) => void; onAddSeason: (season: number) => void; onRemoveSeason: (season: number) => void }) {
+function Seasons({ title, onAddSeason, onRemoveSeason }: { title: TitleDetail; onAddSeason: (season: number) => void; onRemoveSeason: (season: number) => void }) {
   const [open, setOpen] = useState<Set<number> | null>(null);
   if (title.episodesLoadedAt === null) {
     return (
@@ -398,7 +382,7 @@ function Seasons({ title, onFiles, onAddSeason, onRemoveSeason }: { title: Title
           )
         }
       >
-        {expanded && <LibrarySeason titleKey={title.key} season={season.seasonNumber} onFiles={onFiles} />}
+        {expanded && <LibrarySeason titleKey={title.key} season={season.seasonNumber} />}
       </SeasonPane>
     );
   });
@@ -585,7 +569,6 @@ function TitleExtras({ mediaType, tmdbId }: { mediaType: string; tmdbId: string 
 function TitleView({ header, title, reload }: { header: TitleDetail | TitlePreview; title?: TitleDetail; reload: () => Promise<unknown> }) {
   const [message, setMessage] = useState('');
   const [plan, setPlan] = useState<{ request: PlanRequest; subject: string | null } | null>(null);
-  const [files, setFiles] = useState<{ episode?: Episode } | null>(null);
   const [adding, setAdding] = useState<{ season: number | null } | null>(null);
   // The title that the user added stays on the page while the job brings its facts. Its own control shows the wait.
   const [pendingAdd, setPendingAdd] = useState<{ kind: 'series'; season: number | null } | { kind: 'movie' } | null>(null);
@@ -675,9 +658,8 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
       <PlanDialog request={plan?.request ?? null} subject={plan?.subject} onClose={() => setPlan(null)} onDone={() => void reload()} />
       {series && (
         <>
-          {files && title && <FilesDialog key={files.episode ? episodeLabel([files.episode]) : 'title'} titleKey={title.key} episode={files.episode} onClose={() => setFiles(null)} />}
           <div className={`${pageWidth} grid gap-6`}>
-            {title && !addLoading ? <Seasons title={title} onFiles={(episode) => setFiles({ episode })} onAddSeason={(season) => void run(() => addSeason(title.key, season))} onRemoveSeason={(season) => setPlan({ request: { action: 'remove', keys: [title.key], season }, subject: seasonName(season) })} /> : <PreviewSeasons tmdbId={header.tmdbId} onAddSeason={(season) => setAdding({ season })} pending={addLoading && pendingAdd?.kind === 'series' ? pendingAdd : null} />}
+            {title && !addLoading ? <Seasons title={title} onAddSeason={(season) => void run(() => addSeason(title.key, season))} onRemoveSeason={(season) => setPlan({ request: { action: 'remove', keys: [title.key], season }, subject: seasonName(season) })} /> : <PreviewSeasons tmdbId={header.tmdbId} onAddSeason={(season) => setAdding({ season })} pending={addLoading && pendingAdd?.kind === 'series' ? pendingAdd : null} />}
           </div>
         </>
       )}
