@@ -14,7 +14,7 @@ export function authSetup(): RequestHandler {
     if (db.data.owner) {
       // The Back button of the setup returns to the password form while the setup is not complete.
       if (db.data.settings.setupCompleted) return void res.status(409).json({ error: 'setup_closed' });
-      const session = findSession(db, req);
+      const session = findSession(req);
       if (!session) return void res.status(409).json({ error: 'setup_closed' });
       if (!safeEqual(req.get('x-csrf-token') ?? '', session.csrfToken)) return void res.status(403).json({ error: 'invalid_csrf_token' });
       db.data.owner.passwordHash = passwordHash;
@@ -24,7 +24,7 @@ export function authSetup(): RequestHandler {
     db.data.owner = { passwordHash, createdAt: Date.now() };
     db.data.apiKey = newToken();
     try {
-      await startSession(db, req, res);
+      await startSession(req, res);
     } catch (err) {
       db.data.owner = null;
       db.data.apiKey = null;

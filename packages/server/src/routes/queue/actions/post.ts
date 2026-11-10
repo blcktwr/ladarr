@@ -60,7 +60,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     return [entry];
   }
 
-  const { retry } = createRetry({ db, queue, finder, enqueue });
+  const { retry } = createRetry({ queue, finder, enqueue });
 
   async function apply(action: Action, entries: QueueEntry[]) {
     const removed = new Set<string>();
@@ -95,12 +95,12 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
           break;
         case 'priority': {
           queue.setPriority(entry, true);
-          for (const job of jobsOf(entry)) prioritize(db, job.id);
+          for (const job of jobsOf(entry)) prioritize(job.id);
           break;
         }
         case 'unpriority': {
           queue.setPriority(entry, false);
-          for (const job of jobsOf(entry)) deprioritize(db, job.id);
+          for (const job of jobsOf(entry)) deprioritize(job.id);
           break;
         }
         case 'clear':

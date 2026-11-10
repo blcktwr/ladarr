@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { copyFile as fsCopyFile, link as fsLink, lstat, mkdir, readdir, realpath, rename as fsRename, rm, stat, statfs, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
-import type { Db, MediaFile } from '../../core/db.ts';
+import { get, type Db, type MediaFile } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
 import { enqueue as enqueueJob, JobError } from '../../core/jobs.ts';
 import type { Episode, Title } from '../library.ts';
@@ -540,7 +540,7 @@ export function createImporter({ db, queue, events, clients, save, probe = probe
       delete db.data.imports[journal.id];
       // The files are in, so a search only targets the episodes that have no file. A download import runs it too:
       // a pack can leave episodes without a file, and they must not wait for another action.
-      if (journal.searchOnFinish || !journal.sourceBase) enqueueJob(db, { type: 'queue.initial', payload: { key: journal.titleKey }, dedupeKey: `initial:${journal.titleKey}` });
+      if (journal.searchOnFinish || !journal.sourceBase) enqueueJob({ type: 'queue.initial', payload: { key: journal.titleKey }, dedupeKey: `initial:${journal.titleKey}` });
       await save();
       status?.finish(journal.id);
     }
@@ -578,7 +578,10 @@ export function createImporter({ db, queue, events, clients, save, probe = probe
 }
 
 // The IDs of the downloads that have an unfinished import, so a start of the server can finish them.
-export const unfinishedImports = (db: Db) => [...new Set(Object.values(db.data.imports).map((journal) => journal.hash))];
+export const unfinishedImports = () => {
+  const db = get();
+  return [...new Set(Object.values(db.data.imports).map((journal) => journal.hash))];
+};
 
 // The video files of a download, for the "Match file" choice. Returns nothing when the download is not reachable.
 export async function listDownloadFiles(handle: ClientHandle, hash: string): Promise<{ rel: string; sizeBytes: number }[] | undefined> {

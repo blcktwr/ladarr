@@ -156,10 +156,10 @@ type Options = { services?: Services; urlBase?: string; events?: Events; webDir?
 
 export function createApp({ services, urlBase = '', events = createEvents(), webDir, heartbeat, tmdb, configDir, backupDir, enqueue: enqueueInput, cancelJob, persist, restorer, indexers, installUpdate, pauseQueue, resumeQueue, restart }: Options = {}) {
   const db = get();
-  const enqueue = enqueueInput ?? ((input: EnqueueInput) => enqueueJob(db, input));
+  const enqueue = enqueueInput ?? ((input: EnqueueInput) => enqueueJob(input));
   const api = express.Router();
   // A change of the indexers or of the clients can lift the block of a target. The target goes on, and the pages read the new state.
-  const retries = services ? createRetry({ db, queue: services.queue, finder: services.finder, enqueue }) : undefined;
+  const retries = services ? createRetry({ queue: services.queue, finder: services.finder, enqueue }) : undefined;
   const setupChanged = (kind: 'indexers' | 'clients') => {
     retries?.retryBlocked(kind === 'indexers' ? 'no_indexers' : 'client_missing');
     events.publish(`${kind}.changed`);

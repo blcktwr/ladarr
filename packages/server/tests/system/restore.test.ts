@@ -11,7 +11,7 @@ import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createBackup, listBackups, readBackup } from '../../src/system/backup.ts';
-import { emptyData, open, SCHEMA_VERSION, type Data } from '../../src/core/db.ts';
+import { emptyData, open, SCHEMA_VERSION, set, type Data } from '../../src/core/db.ts';
 import type { EnqueueInput } from '../../src/core/jobs.ts';
 import { createRestorer, MAX_UPLOAD_BYTES, restoreGate } from '../../src/system/restore.ts';
 import { startTestApp } from '../helpers/test-app.ts';
@@ -50,7 +50,7 @@ describe('restore through the API', () => {
     backupDir = fresh();
     worker = fakeWorker(pause);
     const db = await open('unused.json');
-    app = await startTestApp({ backupDir, restorer: createRestorer({ db, dir: backupDir, worker }) }, db);
+    app = await startTestApp({ backupDir, restorer: createRestorer({ dir: backupDir, worker }) }, db);
     return db;
   };
   afterEach(() => app?.close());
@@ -320,7 +320,7 @@ describe('requests that change data', () => {
     const backupDir = fresh();
     const db = await open('unused.json');
     const worker = fakeWorker();
-    const restorer = createRestorer({ db, dir: backupDir, worker, drainMs });
+    const restorer = createRestorer({ dir: backupDir, worker, drainMs });
     const { name } = await createBackup(db, backupDir, 'manual');
     return { db, worker, restorer, name };
   };
@@ -367,10 +367,11 @@ describe('the file on the disk', () => {
     const backupDir = fresh();
     const file = join(fresh(), 'db.json');
     const db = new Low<Data>(new JSONFile<Data>(file), emptyData());
+    set(db);
     db.data.settings.region = 'FR';
     await db.write();
     const worker = fakeWorker();
-    const restorer = createRestorer({ db, dir: backupDir, worker });
+    const restorer = createRestorer({ dir: backupDir, worker });
     const { name } = await createBackup(db, backupDir, 'manual');
 
     db.data.settings.region = 'DE';
@@ -400,15 +401,15 @@ describe('the file on the disk', () => {
     const name = 'ladarr-manual-20200101T000000000Z.zip';
     writeFileSync(join(backupDir, name), zipSync({ 'manifest.json': strToU8(JSON.stringify(manifest)), 'db.json': json }));
 
-    await createRestorer({ db, dir: backupDir, worker: fakeWorker() }).restore(name);
+    await createRestorer({ dir: backupDir, worker: fakeWorker() }).restore(name);
     expect(db.data.blocklist).toEqual({});
   });
 });
 
 describe('worker pause', () => {
-  const newWorker = async (handlers: Parameters<typeof createWorker>[2], graceMs = 2_000) => {
+  const newWorker = async (handlers: Parameters<typeof createWorker>[1], graceMs = 2_000) => {
     const db = await open('unused.json');
-    const worker = createWorker(db, async () => {}, handlers, { tickMs: 10, graceMs });
+    const worker = createWorker(async () => {}, handlers, { tickMs: 10, graceMs });
     worker.start();
     return { db, worker };
   };
@@ -510,7 +511,7 @@ describe('restore with an interrupted import journal', () => {
     const saved = await readBackup(readFileSync(join(backupDir, name)));
     expect(Object.keys(saved.data.imports)).toHaveLength(1);
     expect(saved.data.queue[entry!.id]).toBeDefined();
-    const restorer = createRestorer({ db: pipe.db, dir: backupDir, worker: pipe.worker });
+    const restorer = createRestorer({ dir: backupDir, worker: pipe.worker });
     const finishLive = async () => {
       pipe!.worker.enqueue({ type: 'import.run', payload: { hash: hashOf(NAME) }, dedupeKey: `import:${hashOf(NAME)}` });
       await until(() => pipe!.db.data.queue[entry!.id]!.stage === 'available' && Object.keys(pipe!.db.data.imports).length === 0, 12_000);

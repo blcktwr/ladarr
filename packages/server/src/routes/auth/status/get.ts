@@ -6,7 +6,7 @@ import { findSession } from '../../../core/auth.ts';
 export function authStatus(): RequestHandler {
   const db = get();
   return (req, res) => {
-    const session = findSession(db, req);
+    const session = findSession(req);
     res.json({
       setupRequired: !db.data.owner,
       authenticated: Boolean(session),

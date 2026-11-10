@@ -28,11 +28,11 @@ export function metadataSweepHandler(db: Db): Handler {
       for (const title of Object.values(db.data.titles)) {
         // A title from an older version has no regions for its aliases. One refresh fills them.
         if (title.meta.aliasRegions === undefined) {
-          enqueue(db, refreshJob(title.key));
+          enqueue(refreshJob(title.key));
           continue;
         }
         const interval = isActive(db, title, now) ? ACTIVE_REFRESH_MS : IDLE_REFRESH_MS;
-        if (now - title.refreshedAt >= interval) enqueue(db, refreshJob(title.key));
+        if (now - title.refreshedAt >= interval) enqueue(refreshJob(title.key));
       }
     },
   };

@@ -13,7 +13,7 @@ export function metadataRefreshHandler({ db, tmdb, events }: { db: Db; tmdb: Tmd
   // for the retry of the job.
   function resumeInitialSearch(key: string) {
     const dedupeKey = `initial:${key}`;
-    if (Object.values(db.data.jobs).some((job) => job.dedupeKey === dedupeKey && job.state === 'waiting')) enqueue(db, { type: 'queue.initial', payload: { key }, dedupeKey });
+    if (Object.values(db.data.jobs).some((job) => job.dedupeKey === dedupeKey && job.state === 'waiting')) enqueue({ type: 'queue.initial', payload: { key }, dedupeKey });
   }
 
   async function refresh(key: string, signal: AbortSignal) {
@@ -53,11 +53,11 @@ export function metadataRefreshHandler({ db, tmdb, events }: { db: Db; tmdb: Tmd
     }
     // The files of a series are matched to episodes, so the scan waits for the episodes. A movie that entered the
     // queue first waits for its facts, because the scan matches its file by the name of the title.
-    if (current.mediaType === 'tv' && current.folder) enqueue(db, scanJob(key));
-    if (current.mediaType === 'movie' && firstMeta && current.folder) enqueue(db, scanJob(key));
+    if (current.mediaType === 'tv' && current.folder) enqueue(scanJob(key));
+    if (current.mediaType === 'movie' && firstMeta && current.folder) enqueue(scanJob(key));
     if (firstLoad || (current.mediaType === 'movie' && firstMeta)) resumeInitialSearch(key);
     // A verification that waited for the facts of the title starts now.
-    if (db.data.verifications[key]?.pending) enqueue(db, verifyJob(key));
+    if (db.data.verifications[key]?.pending) enqueue(verifyJob(key));
     events.publish('library.changed', { key });
   }
 

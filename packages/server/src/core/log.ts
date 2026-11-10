@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import pino from 'pino';
 import { createStream, type RotatingFileStream } from 'rotating-file-stream';
-import type { Db } from './db.ts';
+import { get, type Db } from './db.ts';
 import { outboundRequests } from './outbound.ts';
 
 const SECRET_KEY = /pass|secret|token|api[-_]?key|authorization|cookie/i;
@@ -165,7 +165,8 @@ export function logToFile(file: string, maxBytes = 1_000_000) {
 
 // The setting says whether a target in the queue keeps its whole log in a file of its own. The queue says which targets
 // are in it: a target that is available left the queue, so its file goes.
-export function configureItemLogs(db: Db) {
+export function configureItemLogs() {
+  const db = get();
   itemsOn = db.data.settings.keepQueueLogs !== false;
   inQueue = (itemId) => {
     const entry = db.data.queue[itemId];

@@ -1,6 +1,6 @@
 import type { Db } from '../../core/db.ts';
 import { randomUUID } from 'node:crypto';
-import { profilesFor } from '../../core/db.ts';
+import { get, profilesFor } from '../../core/db.ts';
 import { languageOfRegion } from '../../core/languages.ts';
 import { episodeEligibleAt } from '../../core/dates.ts';
 import { bestOf, decide, explainDecision, REJECTION_TEXT, rejectionSummary, topRejections, type Context, type Decision, type Want } from './decide.ts';
@@ -37,7 +37,6 @@ export type SearchResume = { phase: 'episode' | 'absolute'; entryId: string };
 export type SearchPayload = { titleKey: string; season: number | null; entryIds: string[]; fresh?: boolean; manual?: boolean; resume?: SearchResume };
 
 type Deps = {
-  db: Db;
   queue: Queue;
   indexers: IndexerService;
   enqueue: (input: EnqueueInput) => Job;
@@ -48,7 +47,8 @@ const present = (db: Db, fileId: string | null) => Boolean(fileId && db.data.fil
 // Ties the log line of a search to the requests that answered it, in the app log and in the request log.
 const newRequestId = () => `req-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 
-export function createFinder({ db, queue, indexers, enqueue, now = Date.now }: Deps) {
+export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps) {
+  const db = get();
   const cache = new Map<string, { at: number; releases: RawRelease[] }>();
   // Equal queries that run at the same time share one request.
   const inflight = new Map<string, { requestId: string; releases: Promise<RawRelease[]> }>();
@@ -139,7 +139,7 @@ export function createFinder({ db, queue, indexers, enqueue, now = Date.now }: D
       primary.payload = merged;
       primary.runAt = Math.min(primary.runAt, runAt);
       for (const job of duplicates) delete db.data.jobs[job.id];
-      if (entryIds.some((id) => db.data.queue[id]?.priority != null)) prioritize(db, primary.id);
+      if (entryIds.some((id) => db.data.queue[id]?.priority != null)) prioritize(primary.id);
       return primary;
     }
     if (!afterRun) {

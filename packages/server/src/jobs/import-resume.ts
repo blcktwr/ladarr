@@ -12,7 +12,7 @@ export function importResumeHandler(db: Db): Handler {
     concurrency: 1,
     every: RESUME_EVERY_MS,
     run: async () => {
-      for (const hash of unfinishedImports(db)) enqueueJob(db, { type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
+      for (const hash of unfinishedImports()) enqueueJob({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
     },
   };
 }

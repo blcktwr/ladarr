@@ -23,7 +23,7 @@ const body = (overrides: Record<string, unknown> = {}) => ({ name: 'Tracker', ty
 
 beforeAll(async () => {
   const db = await open('unused.json');
-  app = await startTestApp({ indexers: createIndexerService(db, createLimiter(db), { fetch: fake }) }, db);
+  app = await startTestApp({ indexers: createIndexerService(createLimiter(), { fetch: fake }) }, db);
 });
 afterAll(() => app.close());
 

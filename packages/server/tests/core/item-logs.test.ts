@@ -67,7 +67,7 @@ describe('item logs', () => {
     const file = join(folder(), 'ladarr.log');
     const db = await dbWith('tv:1:1x2');
     logToFile(file);
-    configureItemLogs(db);
+    configureItemLogs();
 
     const item = { ...fields('tv:1:1x2', 'tv', 'tv:1', 'Show', 'S01E02'), episode: 'Pilot' };
     catalog.info('search.started', 'Search started', item);
@@ -87,7 +87,7 @@ describe('item logs', () => {
     const file = join(folder(), 'ladarr.log');
     const db = await dbWith('movie:1');
     logToFile(file, 500);
-    configureItemLogs(db);
+    configureItemLogs();
 
     const movie = fields('movie:1', 'movie', 'movie:1', 'Movie', 'Movie');
     catalog.info('search.started', 'Search started', movie);
@@ -112,7 +112,7 @@ describe('item logs', () => {
     // The queue has one target of the title, and the title itself is not in the queue.
     const db = await dbWith('tv:1:1x2');
     logToFile(file);
-    configureItemLogs(db);
+    configureItemLogs();
 
     catalog.info('title.refreshed', 'Title refreshed', fields('tv:1', 'tv', 'tv:1', 'Show', 'Series'));
 
@@ -126,7 +126,7 @@ describe('item logs', () => {
     const file = join(folder(), 'ladarr.log');
     const db = await dbWith('movie:1');
     logToFile(file);
-    configureItemLogs(db);
+    configureItemLogs();
 
     log.info('Server started', { itemId: 'movie:1', itemType: 'movie' });
 
@@ -139,7 +139,7 @@ describe('item logs', () => {
     const file = join(folder(), 'ladarr.log');
     const db = await dbWith('movie:1');
     logToFile(file);
-    configureItemLogs(db);
+    configureItemLogs();
 
     const movie = fields('movie:1', 'movie', 'movie:1', 'Movie', 'Movie');
     catalog.info('search.started', 'Search started', movie);
@@ -163,14 +163,14 @@ describe('item logs', () => {
 
     // A run with the setting on leaves a folder that holds a file.
     logToFile(file);
-    configureItemLogs(db);
+    configureItemLogs();
     catalog.info('search.started', 'First', movie);
     await closeLog();
     expect(existsSync(join(dirname(file), 'items'))).toBe(true);
 
     db.data.settings.keepQueueLogs = false;
     logToFile(file);
-    configureItemLogs(db);
+    configureItemLogs();
     expect(existsSync(join(dirname(file), 'items'))).toBe(false);
 
     catalog.info('search.finished', 'Second', movie);
@@ -186,7 +186,7 @@ describe('item logs', () => {
     db.data.titles['tv:1'] = { key: 'tv:1', mediaType: 'tv', addedAt: 0 } as never;
     for (const id of ['tv:1:1x1', 'tv:1:1x2']) db.data.queue[id]!.titleKey = 'tv:1';
     logToFile(file);
-    configureItemLogs(db);
+    configureItemLogs();
 
     catalog.info('search', 'Series line', fields('tv:1', 'tv', 'tv:1', 'Show', 'Series'));
     catalog.info('search', 'First episode line', fields('tv:1:1x1', 'tv', 'tv:1', 'Show', 'S01E01'));
@@ -197,7 +197,7 @@ describe('item logs', () => {
     // title and of its targets.
     expect(existsSync(itemPath(file, 'tv:1'))).toBe(true);
     // A restart keeps the file of the title while its targets are in the queue.
-    configureItemLogs(db);
+    configureItemLogs();
     expect(existsSync(itemPath(file, 'tv:1'))).toBe(true);
     expect((await recentLogs(10, { itemId: 'tv:1', itemType: 'tv' })).map((line) => line.message)).toEqual(['Series line', 'First episode line', 'Second episode line']);
     // The log of one target keeps only the lines of that target.
@@ -208,8 +208,8 @@ describe('item logs', () => {
     const file = join(folder(), 'ladarr.log');
     const db = await dbWith('movie:1');
     logToFile(file);
-    configureItemLogs(db);
-    const queue = createQueue(db, createEvents(), () => {});
+    configureItemLogs();
+    const queue = createQueue(createEvents(), () => {});
 
     queue.move(db.data.queue['movie:1']!, { stage: 'searching' }, 'search started');
 
@@ -221,8 +221,8 @@ describe('item logs', () => {
     const file = join(folder(), 'ladarr.log');
     const db = await dbWith('movie:1', 'movie:2');
     logToFile(file);
-    configureItemLogs(db);
-    const queue = createQueue(db, createEvents(), () => {});
+    configureItemLogs();
+    const queue = createQueue(createEvents(), () => {});
 
     catalog.info('search.started', 'Search started', fields('movie:1', 'movie', 'movie:1', 'Movie', 'Movie'));
     catalog.info('search.started', 'Search started', fields('movie:2', 'movie', 'movie:2', 'Other movie', 'Movie'));
@@ -240,8 +240,8 @@ describe('item logs', () => {
     const file = join(folder(), 'ladarr.log');
     const db = await open('unused.json');
     logToFile(file);
-    configureItemLogs(db);
-    const queue = createQueue(db, createEvents(), () => {});
+    configureItemLogs();
+    const queue = createQueue(createEvents(), () => {});
 
     queue.ensure('tv:1', 1, 1);
     queue.ensure('tv:1', 1, 2);
@@ -262,7 +262,7 @@ describe('item logs', () => {
     const file = join(folder(), 'ladarr.log');
     const db = await dbWith('movie:1', 'movie:2');
     logToFile(file);
-    configureItemLogs(db);
+    configureItemLogs();
 
     catalog.info('search.started', 'Search started', fields('movie:1', 'movie', 'movie:1', 'Movie', 'Movie'));
     catalog.info('search.started', 'Search started', fields('movie:2', 'movie', 'movie:2', 'Other movie', 'Movie'));
@@ -272,7 +272,7 @@ describe('item logs', () => {
     // A restart reads the queue again, and the second target is not in it.
     delete db.data.queue['movie:2'];
     logToFile(file);
-    configureItemLogs(db);
+    configureItemLogs();
 
     expect(existsSync(itemPath(file, 'movie:1'))).toBe(true);
     expect(existsSync(itemPath(file, 'movie:2'))).toBe(false);
@@ -281,10 +281,10 @@ describe('item logs', () => {
   it('shows only the entries of the current record of an item', async () => {
     const file = join(folder(), 'ladarr.log');
     const db = await open('unused.json');
-    const queue = createQueue(db, createEvents(), () => {});
+    const queue = createQueue(createEvents(), () => {});
     queue.ensure('movie:1', null, null);
     logToFile(file);
-    configureItemLogs(db);
+    configureItemLogs();
 
     // A line that a record with the same ID left before the current one began.
     const old = { time: '2020-01-01T00:00:00.000Z', level: 'info', type: 'catalog', event: 'search', itemId: 'movie:1', itemType: 'movie', titleKey: 'movie:1', title: 'Movie', target: 'Movie', message: 'Old run' };

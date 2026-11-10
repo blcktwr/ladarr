@@ -33,7 +33,7 @@ export function authLogin(): RequestHandler {
       return void res.status(401).json({ error: 'invalid_credentials' });
     }
     failures.delete(key);
-    await startSession(db, req, res);
+    await startSession(req, res);
     res.json({ ok: true });
   };
 }

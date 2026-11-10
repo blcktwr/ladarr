@@ -1,5 +1,5 @@
 import type { ClientState } from '@ladarr/shared/enums';
-import type { Db } from '../../core/db.ts';
+import { get } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
 import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { catalog, itemFields, log } from '../../core/log.ts';
@@ -36,7 +36,6 @@ export type Transfer = {
 export type ClientStatus = { state: ClientState; lastOkAt: number | null };
 
 type Deps = {
-  db: Db;
   queue: Queue;
   events: Events;
   clients: Clients;
@@ -51,7 +50,8 @@ const GRACE_MS = 60_000;
 // One poll for each client that has a download, whatever the number of rows or browser tabs. The progress stays in memory:
 // it is replaceable, and the client reports it again after a restart. The client is read to see the part of each file, and
 // a download that finishes, appears, or fails, so one check each 10 seconds keeps the rows close to the client.
-export function createPoller({ db, queue, events, clients, enqueue, intervalMs = 10_000 }: Deps) {
+export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_000 }: Deps) {
+  const db = get();
   const transfers = new Map<string, Transfer>();
   const seen = new Set<string>();
   const status: ClientStatus = { state: 'unconfigured', lastOkAt: null };

@@ -1,7 +1,7 @@
 import type { WebhookTestResult } from '@ladarr/shared/types';
 import { randomUUID } from 'node:crypto';
 import type { MediaType, WebhookEventType } from '@ladarr/shared/enums';
-import type { Db } from './db.ts';
+import { get } from './db.ts';
 import type { EnqueueInput } from './jobs.ts';
 import { outboundFetch } from './http.ts';
 import { log } from './log.ts';
@@ -69,14 +69,14 @@ export async function send(url: string, event: WebhookEvent, { signal, timeoutMs
 }
 
 type Deps = {
-  db: Db;
   enqueue: (input: EnqueueInput) => unknown;
   now?: () => number;
 };
 
 // Makes the events and puts each one in a durable delivery job for each webhook of its type.
 // Nothing here waits for the network.
-export function createWebhooks({ db, enqueue, now = Date.now }: Deps) {
+export function createWebhooks({ enqueue, now = Date.now }: Deps) {
+  const db = get();
   function emit(type: WebhookEventType, fields: Parameters<typeof newEvent>[2]) {
     const targets = db.data.webhooks.filter((webhook) => webhook.type === type);
     if (!targets.length) return;

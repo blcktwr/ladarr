@@ -127,8 +127,8 @@ async function setup(port: number, delaySeconds: number) {
   Object.assign(db.data, emptyData());
   const indexer = indexerAt(port, delaySeconds);
   db.data.indexers[1] = indexer;
-  const limiter = createLimiter(db);
-  return { db, indexer, limiter, service: createIndexerService(db, limiter, { timeoutMs: 2_000 }) };
+  const limiter = createLimiter();
+  return { db, indexer, limiter, service: createIndexerService(limiter, { timeoutMs: 2_000 }) };
 }
 
 describe('limiter', () => {

@@ -247,7 +247,7 @@ describe('requests and summary', () => {
     api = await pipe.api();
     const series = title({ episodesLoadedAt: null, episodes: [] });
     pipe.db.data.titles[series.key] = series;
-    enqueue(pipe.db, { type: 'queue.initial', payload: { key: series.key }, dedupeKey: `initial:${series.key}` });
+    enqueue({ type: 'queue.initial', payload: { key: series.key }, dedupeKey: `initial:${series.key}` });
 
     // The series is one group that searches. It has no target yet, so it has no season and no episode row.
     const list = (await api.get('/queue')).body;
@@ -272,7 +272,7 @@ describe('requests and summary', () => {
     api = await pipe.api();
     const series = title({ episodesLoadedAt: null, episodes: [], paused: true });
     pipe.db.data.titles[series.key] = series;
-    enqueue(pipe.db, { type: 'queue.initial', payload: { key: series.key }, dedupeKey: `initial:${series.key}` });
+    enqueue({ type: 'queue.initial', payload: { key: series.key }, dedupeKey: `initial:${series.key}` });
     expect((await api.get('/queue')).body.items).toEqual([]);
   });
 
@@ -767,7 +767,7 @@ describe('jobs', () => {
   }
 
   const search = (entry: { titleKey: string; id: string }, runAt?: number) =>
-    enqueue(pipe!.db, { type: 'queue.search', payload: { titleKey: entry.titleKey, season: null, entryIds: [entry.id] }, runAt });
+    enqueue({ type: 'queue.search', payload: { titleKey: entry.titleKey, season: null, entryIds: [entry.id] }, runAt });
 
   const searchJobs = () => Object.values(pipe!.db.data.jobs).filter((job) => job.type === 'queue.search');
 
@@ -788,10 +788,10 @@ describe('jobs', () => {
     const { film, entry } = await start();
     const later = Date.now() + 60_000;
     const allowed = [
-      enqueue(pipe!.db, { type: 'queue.initial', payload: { key: film.key } }),
+      enqueue({ type: 'queue.initial', payload: { key: film.key } }),
       search(entry),
-      enqueue(pipe!.db, { type: 'queue.grab', payload: { entryIds: [entry.id] }, runAt: later }),
-      enqueue(pipe!.db, { type: 'import.run', payload: { hash: 'a' }, runAt: later }),
+      enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, runAt: later }),
+      enqueue({ type: 'import.run', payload: { hash: 'a' }, runAt: later }),
     ];
     // The worker holds one job of the item flow. The list shows it above the jobs that wait.
     const running = search(entry, later);
@@ -799,15 +799,15 @@ describe('jobs', () => {
     running.leaseOwner = 'test';
     running.leaseExpiresAt = Date.now() + 60_000;
     // A job outside the item flow stays out of the list, also when the worker holds it.
-    const otherRunning = enqueue(pipe!.db, { type: 'queue.rss', runAt: later });
+    const otherRunning = enqueue({ type: 'queue.rss', runAt: later });
     otherRunning.state = 'running';
     otherRunning.leaseOwner = 'test';
     otherRunning.leaseExpiresAt = Date.now() + 60_000;
     const others = [
       otherRunning,
-      enqueue(pipe!.db, { type: 'backup.auto', runAt: later }),
-      enqueue(pipe!.db, { type: 'test.wait', payload: { name: 'x' }, runAt: later }),
-      enqueue(pipe!.db, { type: 'metadata.sweep', runAt: later }),
+      enqueue({ type: 'backup.auto', runAt: later }),
+      enqueue({ type: 'test.wait', payload: { name: 'x' }, runAt: later }),
+      enqueue({ type: 'metadata.sweep', runAt: later }),
     ];
 
     const jobs = await api!.get('/queue/jobs');
@@ -844,7 +844,7 @@ describe('jobs', () => {
     api = await pipe.api();
     pipe.db.data.queuePaused = true;
     // The import jobs stay waiting while the queue is paused.
-    const waiting = (hash: string, runAt: number, priority = false) => enqueue(pipe!.db, { type: 'import.run', payload: { hash }, runAt, priority });
+    const waiting = (hash: string, runAt: number, priority = false) => enqueue({ type: 'import.run', payload: { hash }, runAt, priority });
 
     // The priority job starts before every waiting job of the normal lane, also when it is due later.
     const first = waiting('priority', 9_000, true);
@@ -924,7 +924,7 @@ describe('jobs', () => {
     await start();
     const next = Date.now() + 60_000;
     pipe!.db.data.indexers[1]!.nextRequestAt = next;
-    const job = enqueue(pipe!.db, { type: 'import.run', payload: { hash: 'a' } });
+    const job = enqueue({ type: 'import.run', payload: { hash: 'a' } });
 
     const item = (await api!.get('/queue/jobs')).body.items.find((row: { id: string }) => row.id === job.id);
     expect(item.eta).toBeLessThan(next);
@@ -935,7 +935,7 @@ describe('jobs', () => {
     const other = movie({ key: 'movie:3', tmdbId: 3, rootId: 'movie', manualRelease: true, meta: { ...film.meta, tmdbId: 3, title: 'Other Movie', originalTitle: 'Other Movie' } });
     pipe!.db.data.titles[other.key] = other;
     const second = pipe!.queue.ensure(other.key, null, null);
-    const job = enqueue(pipe!.db, { type: 'queue.search', payload: { titleKey: film.key, season: null, entryIds: [entry.id, second.id] } });
+    const job = enqueue({ type: 'queue.search', payload: { titleKey: film.key, season: null, entryIds: [entry.id, second.id] } });
 
     const item = (await api!.get('/queue/jobs')).body.items.find((row: { id: string }) => row.id === job.id);
     expect(item.label).toBe('Movie Name (2019)');
@@ -969,7 +969,7 @@ describe('jobs', () => {
   it('keeps a running job above the search job that waits for the next search', async () => {
     const { film, entry } = await startWaiting();
     // The running job is due after the waiting one, so only its state puts it first.
-    const running = enqueue(pipe!.db, { type: 'queue.search', payload: { titleKey: film.key, season: null, entryIds: [entry.id] }, runAt: entry.search!.nextAt! + 60_000 });
+    const running = enqueue({ type: 'queue.search', payload: { titleKey: film.key, season: null, entryIds: [entry.id] }, runAt: entry.search!.nextAt! + 60_000 });
     running.state = 'running';
     running.leaseOwner = 'test';
     running.leaseExpiresAt = Date.now() + 60_000;
@@ -983,7 +983,7 @@ describe('jobs', () => {
   it('marks a waiting job of a target as priority from the jobs list', async () => {
     const { entry } = await start();
     const job = search(entry);
-    const other = enqueue(pipe!.db, { type: 'queue.rss', runAt: Date.now() + 60_000 });
+    const other = enqueue({ type: 'queue.rss', runAt: Date.now() + 60_000 });
     const running = search(entry);
     running.state = 'running';
     running.leaseOwner = 'test';
@@ -999,7 +999,7 @@ describe('jobs', () => {
   it('runs a waiting job of a target now from the jobs list', async () => {
     const { entry } = await start();
     const job = search(entry, Date.now() + 60_000);
-    const other = enqueue(pipe!.db, { type: 'queue.rss', runAt: Date.now() + 60_000 });
+    const other = enqueue({ type: 'queue.rss', runAt: Date.now() + 60_000 });
     const running = search(entry, Date.now() + 60_000);
     running.state = 'running';
     running.leaseOwner = 'test';
@@ -1015,7 +1015,7 @@ describe('jobs', () => {
   it('removes a waiting job of a target from the jobs list', async () => {
     const { entry } = await start();
     const job = search(entry);
-    const other = enqueue(pipe!.db, { type: 'queue.rss', runAt: Date.now() + 60_000 });
+    const other = enqueue({ type: 'queue.rss', runAt: Date.now() + 60_000 });
     const running = search(entry);
     running.state = 'running';
     running.leaseOwner = 'test';

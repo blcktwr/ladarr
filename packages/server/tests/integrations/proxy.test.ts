@@ -32,7 +32,7 @@ async function listen(app: Express) {
 async function start() {
   pipe = await startPipeline();
   pipe.db.data.apiKey = 'key';
-  const services = { queue: pipe.queue, finder: pipe.finder, poller: pipe.poller, clients: createClients(pipe.db), importStatus: pipe.importStatus };
+  const services = { queue: pipe.queue, finder: pipe.finder, poller: pipe.poller, clients: createClients(), importStatus: pipe.importStatus };
   const { events, worker } = pipe;
   const deps = { events, enqueue: (input: EnqueueInput) => worker.enqueue(input), services };
   const sonarrUrl = await listen(sonarr(deps));

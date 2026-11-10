@@ -317,7 +317,7 @@ describe('safety', () => {
   });
 
   it('cancels the active downloads of a removed title and leaves the finished ones', () => {
-    const queue = createQueue(app.db, createEvents(), () => {});
+    const queue = createQueue(createEvents(), () => {});
     app.db.data.titles['tv:1'] = show();
     const active = queue.ensure('tv:1', 1, 1);
     queue.request(active, 'test');
@@ -516,13 +516,13 @@ describe('removal of one season', () => {
 
   it('removes the queue targets and the jobs of the season, and keeps the other seasons', async () => {
     await seedTwoSeasons();
-    const queue = createQueue(app.db, createEvents(), () => {});
+    const queue = createQueue(createEvents(), () => {});
     const first = queue.ensure('tv:1', 1, 1);
     queue.request(first, 'test');
     const second = queue.ensure('tv:1', 2, 1);
     queue.request(second, 'test');
-    const own = enqueue(app.db, { type: 'queue.search', payload: { titleKey: 'tv:1', season: 1, entryIds: [first.id] } });
-    const other = enqueue(app.db, { type: 'queue.search', payload: { titleKey: 'tv:1', season: 2, entryIds: [second.id] } });
+    const own = enqueue({ type: 'queue.search', payload: { titleKey: 'tv:1', season: 1, entryIds: [first.id] } });
+    const other = enqueue({ type: 'queue.search', payload: { titleKey: 'tv:1', season: 2, entryIds: [second.id] } });
 
     await apply((await preview({ action: 'remove', keys: ['tv:1'], season: 1 })).planId);
     expect(app.db.data.queue[first.id]).toBeUndefined();

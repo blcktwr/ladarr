@@ -38,7 +38,7 @@ async function sourceBackup() {
 // Starts the app inside the setup window: no owner and no session.
 async function start(db: Db, backupDir: string) {
   const worker = fakeWorker();
-  const server = createApp({ backupDir, restorer: createRestorer({ db, dir: backupDir, worker }) }).listen(0);
+  const server = createApp({ backupDir, restorer: createRestorer({ dir: backupDir, worker }) }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
   return {

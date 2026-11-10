@@ -1,6 +1,6 @@
 import type { QueueBranch, QueueStage } from '@ladarr/shared/enums';
 import type { EpisodeRef } from '@ladarr/shared/types';
-import type { Db } from '../../core/db.ts';
+import { get, type Db } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
 import { catalog, deleteItemLog, itemFields } from '../../core/log.ts';
 
@@ -168,7 +168,8 @@ export function addedByApp(db: Db, hash: string) {
 // `onMove` runs after each change of the stage or the branch, with the values from before the change.
 export type MoveHook = (entry: QueueEntry, before: { stage: Stage; branch: Branch | null; reason: Reason | null }) => void;
 
-export function createQueue(db: Db, events: Events, persist: () => void, onMove?: MoveHook) {
+export function createQueue(events: Events, persist: () => void, onMove?: MoveHook) {
+  const db = get();
   const changed = new Set<string>();
   let timer: NodeJS.Timeout | undefined;
 

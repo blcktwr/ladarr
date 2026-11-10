@@ -354,12 +354,12 @@ describe('library API', () => {
   it('starts a re-added series with an empty queue', async () => {
     const body = { mediaType: 'tv', tmdbId: 2000, add: 'future', seasonOverrides: { 1: 'monitored' } };
     expect((await app.post('/library', body)).status).toBe(201);
-    const queue = createQueue(app.db, createEvents(), () => {});
+    const queue = createQueue(createEvents(), () => {});
     const old = queue.ensure('tv:2000', 2, 1);
     queue.request(old, 'test');
     queue.endAttempt(old, 'cancelled');
     queue.move(old, { branch: 'cancelled', reason: null }, 'title removed');
-    const job = enqueue(app.db, { type: 'queue.search', payload: { titleKey: 'tv:2000', season: 2, entryIds: [old.id] }, dedupeKey: 'search:tv:2000:2:tv:2000:2x1' });
+    const job = enqueue({ type: 'queue.search', payload: { titleKey: 'tv:2000', season: 2, entryIds: [old.id] }, dedupeKey: 'search:tv:2000:2:tv:2000:2x1' });
 
     await app.del('/library/tv:2000');
     expect((await app.post('/library', body)).status).toBe(201);

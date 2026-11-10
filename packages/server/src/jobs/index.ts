@@ -1,4 +1,4 @@
-import type { Db } from '../core/db.ts';
+import { get } from '../core/db.ts';
 import type { Events } from '../core/events.ts';
 import type { EnqueueInput, Job } from '../core/jobs.ts';
 import type { Handler } from '../core/worker.ts';
@@ -26,7 +26,6 @@ import { queueSweepHandler } from './queue-sweep.ts';
 import { webhookDeliverHandler } from './webhook-deliver.ts';
 
 type Deps = {
-  db: Db;
   backupDir: string;
   events: Events;
   save: () => Promise<void>;
@@ -39,7 +38,8 @@ type Deps = {
   importStatus: ImportStatus;
 };
 
-export function jobHandlers({ db, backupDir, events, save, tmdb, enqueue, clients, queue, finder, indexers, importStatus }: Deps): Record<string, Handler> {
+export function jobHandlers({ backupDir, events, save, tmdb, enqueue, clients, queue, finder, indexers, importStatus }: Deps): Record<string, Handler> {
+  const db = get();
   return {
     'backup.auto': backupAutoHandler(db, backupDir),
     'library.scan': libraryScanHandler({ db, events }),

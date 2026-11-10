@@ -129,13 +129,13 @@ export async function startPipeline(options: Options = {}) {
     return originalPublish(type, data);
   };
   const save = async () => {};
-  const queue = createQueue(db, events, () => {});
-  const limiter = createLimiter(db);
-  const indexers = createIndexerService(db, limiter, { timeoutMs: 2_000 });
-  const clients = createClients(db);
+  const queue = createQueue(events, () => {});
+  const limiter = createLimiter();
+  const indexers = createIndexerService(limiter, { timeoutMs: 2_000 });
+  const clients = createClients();
   const importStatus = createImportStatus(events, { pollMs: options.copyPollMs ?? 20 });
   let real!: ReturnType<typeof createWorker>;
-  const finder = createFinder({ db, queue, indexers, enqueue: (input) => real.enqueue(input) });
+  const finder = createFinder({ queue, indexers, enqueue: (input) => real.enqueue(input) });
   const handlers = {
     'queue.search': queueSearchHandler(finder),
     'queue.grab': queueGrabHandler({ db, queue, finder, indexers, clients, save, reconcileMs: 20 }),
@@ -143,8 +143,8 @@ export async function startPipeline(options: Options = {}) {
     'import.resume': importResumeHandler(db),
     ...options.handlers?.({ db, events, queue, finder }),
   };
-  real = createWorker(db, save, handlers, { tickMs: 15 });
-  const poller = createPoller({ db, queue, events, clients, enqueue: (input) => real.enqueue(input), intervalMs: 20 });
+  real = createWorker(save, handlers, { tickMs: 15 });
+  const poller = createPoller({ queue, events, clients, enqueue: (input) => real.enqueue(input), intervalMs: 20 });
   real.start();
   poller.start();
 

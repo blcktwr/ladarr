@@ -59,7 +59,7 @@ export function settingsPatch(): RequestHandler {
     const changes = parseChanges(db, req.body);
     if ('invalid' in changes) return void res.status(400).json({ error: 'invalid_setting', field: changes.invalid });
     Object.assign(db.data.settings, changes);
-    if ('keepQueueLogs' in changes) configureItemLogs(db);
+    if ('keepQueueLogs' in changes) configureItemLogs();
     await db.write();
     res.json({ settings: db.data.settings } satisfies SettingsSaved);
   };

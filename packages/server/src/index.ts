@@ -42,7 +42,7 @@ if (db.data.schemaVersion > SCHEMA_VERSION) {
   process.exit(1);
 }
 // The log of each target in the queue has a file of its own, as the settings say.
-configureItemLogs(db);
+configureItemLogs();
 const events = createEvents();
 
 const tmdb = config.tmdbApiKey ? createTmdb({ apiKey: config.tmdbApiKey, baseUrl: config.tmdbBaseUrl }) : undefined;
@@ -50,32 +50,30 @@ if (!tmdb) log.warn('No TMDB key is in this build, so titles cannot be searched'
 // Not awaited: the server starts at once, and the status shows the result when it arrives.
 else void withOutboundRequests(() => tmdb.check().then(({ ok, code }) => ok || log.warn('TMDB check failed', { code })));
 
-const save = createSaver(db);
+const save = createSaver();
 const persist = () => void save().catch((error) => log.error('could not save the database', { error }));
-const clients = createClients(db);
+const clients = createClients();
 const webhooks = createWebhooks({
-  db,
   enqueue: (input) => worker.enqueue(input),
 });
-const queue = createQueue(db, events, persist, webhooks.onMove);
-const limiter = createLimiter(db, persist);
-const indexers = createIndexerService(db, limiter, {}, persist);
-const finder = createFinder({ db, queue, indexers, enqueue: (input) => worker.enqueue(input) });
-const poller = createPoller({ db, queue, events, clients, enqueue: (input) => worker.enqueue(input) });
+const queue = createQueue(events, persist, webhooks.onMove);
+const limiter = createLimiter(persist);
+const indexers = createIndexerService(limiter, {}, persist);
+const finder = createFinder({ queue, indexers, enqueue: (input) => worker.enqueue(input) });
+const poller = createPoller({ queue, events, clients, enqueue: (input) => worker.enqueue(input) });
 const importStatus = createImportStatus(events);
 const worker = createWorker(
-  db,
   save,
-  jobHandlers({ db, backupDir: config.backupDir, events, save, tmdb, enqueue: (input) => worker.enqueue(input), clients, queue, finder, indexers, importStatus }),
+  jobHandlers({ backupDir: config.backupDir, events, save, tmdb, enqueue: (input) => worker.enqueue(input), clients, queue, finder, indexers, importStatus }),
 );
 worker.start();
 poller.start();
 // An import that stopped in the middle runs again. Its journal says where to go on.
-for (const hash of unfinishedImports(db)) worker.enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
+for (const hash of unfinishedImports()) worker.enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
 
-const restorer = createRestorer({ db, dir: config.backupDir, worker });
+const restorer = createRestorer({ dir: config.backupDir, worker });
 const services = { queue, finder, poller, clients, importStatus };
-const retries = createRetry({ db, queue, finder, enqueue: (input) => worker.enqueue(input) });
+const retries = createRetry({ queue, finder, enqueue: (input) => worker.enqueue(input) });
 const indexersChanged = () => {
   retries.retryBlocked('no_indexers');
   events.publish('indexers.changed');

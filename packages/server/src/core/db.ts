@@ -360,7 +360,8 @@ export function set(value: Db) {
 }
 
 // Every change in one tick, or during a running write, costs one more file write at most.
-export function createSaver(db: Db) {
+export function createSaver() {
+  const db = get();
   let running: Promise<void> | undefined;
   let dirty = false;
   const run = async () => {

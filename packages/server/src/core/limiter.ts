@@ -1,11 +1,12 @@
-import type { Db } from './db.ts';
+import { get } from './db.ts';
 
 type Waiter = { urgent: boolean; resolve: () => void };
 
 // One limiter for all requests to an indexer: searches, RSS, .torrent downloads, and retries.
 // A request starts only after `delaySeconds` since the start of the request before it.
 // The limiter delays a request. It never drops one.
-export function createLimiter(db: Db, onChange: () => void = () => {}) {
+export function createLimiter(onChange: () => void = () => {}) {
+  const db = get();
   const queues = new Map<number, Waiter[]>();
   const timers = new Map<number, NodeJS.Timeout>();
 
