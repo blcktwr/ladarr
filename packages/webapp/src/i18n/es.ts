@@ -613,6 +613,7 @@ export const es: Record<string, string> = {
   'Release': 'Lanzamiento',
   'Releases': 'Lanzamientos',
   'Size': 'Tamaño',
+  'Comment': 'Comentario',
   'Indexer': 'Indexador',
   'No target fits these filters.': 'Ningún objetivo coincide con estos filtros.',
   'Nothing has finished yet.': 'Aún no ha finalizado nada.',

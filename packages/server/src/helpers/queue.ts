@@ -201,7 +201,7 @@ export function view(db: Db, poller: Poller, importStatus: ImportStatus | undefi
     attempt: entry.attempt,
     completedAt: entry.completedAt,
     clearedAt: entry.clearedAt,
-    release: entry.release ? { title: entry.release.title, indexer: entry.release.indexerName, sizeBytes: entry.release.sizeBytes, kind: entry.release.kind, manual: entry.release.manual, quality } : null,
+    release: entry.release ? { title: entry.release.title, indexer: entry.release.indexerName, sizeBytes: entry.release.sizeBytes, kind: entry.release.kind, manual: entry.release.manual, comment: entry.release.comment ?? null, quality } : null,
     file: fileOf(db, entry, title, transfer),
     // The client has a torrent for this target. An attached torrent is one that the user chose. ladarr did not add it.
     hasTorrent: Boolean(entry.transferHash),

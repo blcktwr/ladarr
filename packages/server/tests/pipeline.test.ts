@@ -75,6 +75,33 @@ describe('movie journey', () => {
   });
 });
 
+describe('release comment', () => {
+  const comment = 'A comment from the tracker';
+  const film = () => movie({ rootId: 'movie', meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
+
+  it('keeps the comment of the torrent file', async () => {
+    pipe = await startPipeline();
+    const item = film();
+    pipe.db.data.titles[item.key] = item;
+    pipe.tracker.state.items = [{ title: 'Movie.Name.2019.1080p.BluRay-GRP', size: 100 * 120 * MIB, comment }];
+
+    const [entry] = pipe.finder.requestSearch(item.key);
+    await until(() => entry!.stage === 'downloading');
+    expect(entry!.release?.comment).toBe(comment);
+  });
+
+  it('has no comment when the release comes without one', async () => {
+    pipe = await startPipeline();
+    const item = film();
+    pipe.db.data.titles[item.key] = item;
+    pipe.tracker.state.items = [{ title: 'Movie.Name.2019.1080p.BluRay-GRP', size: 100 * 120 * MIB }];
+
+    const [entry] = pipe.finder.requestSearch(item.key);
+    await until(() => entry!.stage === 'downloading');
+    expect(entry!.release?.comment).toBeUndefined();
+  });
+});
+
 describe('series journey', () => {
   const aired = (n: number) => episode(1, n, '2020-01-0' + n);
   const show = () => title({ rootId: 'tv', episodes: [aired(1), aired(2), aired(3)] });

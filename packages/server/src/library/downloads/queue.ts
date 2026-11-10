@@ -31,6 +31,8 @@ export type ReleaseRef = {
   kind: 'single' | 'multi' | 'pack';
   seeders: number | null;
   manual: boolean;
+  // The comment of the torrent file, when the indexer sent one. A magnet has none.
+  comment?: string;
   // The share limits that the indexer asked for when ladarr chose the release. Old entries lack it.
   seed?: { ratio: number | null; minutes: number | null } | null;
   // Set when the user attached a download that was in the client already. ladarr did not add it, and never removes it.

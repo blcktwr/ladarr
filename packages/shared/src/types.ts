@@ -469,7 +469,7 @@ export type QueueEntryView = {
   completedAt: number | null;
   clearedAt: number | null;
   // `quality` is the source and the resolution that the release name gives, for example "BluRay 1080p".
-  release: { title: string; indexer: string; sizeBytes: number; kind: 'single' | 'multi' | 'pack'; manual: boolean; quality: string | null } | null;
+  release: { title: string; indexer: string; sizeBytes: number; kind: 'single' | 'multi' | 'pack'; manual: boolean; quality: string | null; comment: string | null } | null;
   // The file of the target: the file of its open import, or its record in the library.
   file: { name: string; sizeBytes: number } | null;
   search: QueueSearch | null;

@@ -6,7 +6,7 @@ import type { Clients } from '../downloads/client-api.ts';
 import { ClientError, type Torrent } from '../downloads/qbittorrent.ts';
 import { addedByApp, type Queue, type QueueEntry } from '../downloads/queue.ts';
 import { isSample, isVideoFile, parseEpisodes, titleNumbers } from '../parse.ts';
-import { infoHashOf, magnetHash, torrentFiles } from './torrent.ts';
+import { infoHashOf, magnetHash, torrentComment, torrentFiles } from './torrent.ts';
 import { IndexerError, type IndexerService } from './torznab.ts';
 
 export type GrabberDeps = {
@@ -136,6 +136,10 @@ export function createGrabber({ db, queue, finder, indexers, clients, save, reco
     if ('magnet' in source) {
       hash = magnetHash(source.magnet) ?? null;
       if (!hash) return finder.fallback(entries, 'invalid_magnet');
+    } else {
+      // The comment can only come from the file of the release. A magnet has no file to read.
+      const comment = torrentComment(source.torrent);
+      for (const entry of entries) if (entry.release) entry.release.comment = comment;
     }
 
     // The hash is saved before the add. After a crash, the entry still knows which torrent to look for.

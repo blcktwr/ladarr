@@ -29,13 +29,15 @@ import type { ProbeResult } from '../../src/library/probe.ts';
 import type { Handler } from '../../src/core/worker.ts';
 
 // A torrent with one file, or with the given files (paths inside the folder that has the name of the release).
-export const makeTorrent = (name: string, files?: string[]) => {
+export const makeTorrent = (name: string, files?: string[], comment?: string) => {
   const list = files ? `5:filesl${files.map((file) => `d6:lengthi1000e4:pathl${file.split('/').map((part) => `${part.length}:${part}`).join('')}ee`).join('')}e` : '6:lengthi1000e';
-  return Buffer.from(`d8:announce5:http:4:infod${list}4:name${name.length}:${name}12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAee`);
+  // The comment is a top-level key, outside the info dictionary, so the info hash does not change.
+  const commentPart = comment === undefined ? '' : `7:comment${Buffer.byteLength(comment, 'utf8')}:${comment}`;
+  return Buffer.from(`d8:announce5:http:${commentPart}4:infod${list}4:name${name.length}:${name}12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAee`);
 };
 export const hashOf = (name: string, files?: string[]) => infoHashOf(makeTorrent(name, files));
 
-export type FakeItem = { title: string; size: number; seeders?: number; category?: number; bad?: boolean; files?: string[] };
+export type FakeItem = { title: string; size: number; seeders?: number; category?: number; bad?: boolean; files?: string[]; comment?: string };
 
 const xmlEscape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
@@ -49,8 +51,9 @@ export async function startFakeTracker() {
     if (url.pathname.endsWith('/download')) {
       const file = url.searchParams.get('file')!;
       state.downloads.push(file);
-      if (state.items.find((item) => item.title === file)?.bad) return void res.end('<html>not a torrent</html>');
-      return void res.end(makeTorrent(file, state.items.find((item) => item.title === file)?.files));
+      const item = state.items.find((item) => item.title === file);
+      if (item?.bad) return void res.end('<html>not a torrent</html>');
+      return void res.end(makeTorrent(file, item?.files, item?.comment));
     }
     const t = url.searchParams.get('t');
     if (t === 'caps') {

@@ -10,10 +10,11 @@ import { Alert } from '../../components/alert.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
 import { SeriesBlocklist } from './activity-blocklist.tsx';
 import { MatchDialog } from './activity-match.tsx';
-import { LoadFailed, ModalActions, pageWidth } from '../../components/index.ts';
+import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
 import { catalogPath, formatBytes, posterUrl, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
+import { commentParts } from '../../lib/links.ts';
 import { useLive } from '../../lib/live.ts';
 import { StatusText } from '../../lib/status.tsx';
 
@@ -70,6 +71,24 @@ function EntryStatus({ entry }: { entry: QueueEntryView }) {
   return <StatusText small status={statusLabel(key)} icon={key} help={entry.reason ? t(entry.reason.message) : statusHelpText(entry.key)} />;
 }
 
+// The comment of a release can hold more than one link, with text beside it. Each link opens in a new tab, and the
+// line breaks of the comment stay.
+function CommentText({ text }: { text: string }) {
+  return (
+    <span className="whitespace-pre-wrap">
+      {commentParts(text).map((part, index) =>
+        typeof part === 'string' ? (
+          part
+        ) : (
+          <TextLink key={index} href={part.href}>
+            {part.text}
+          </TextLink>
+        ),
+      )}
+    </span>
+  );
+}
+
 // The release of a target: its name, its quality, and its size.
 function ReleaseDetails({ release }: { release: NonNullable<QueueEntryView['release']> }) {
   return (
@@ -78,6 +97,7 @@ function ReleaseDetails({ release }: { release: NonNullable<QueueEntryView['rele
         { label: t('Release'), value: release.title, wide: true },
         ...(release.quality ? [{ label: t('Quality'), value: release.quality }] : []),
         { label: t('Size'), value: formatBytes(release.sizeBytes) },
+        ...(release.comment ? [{ label: t('Comment'), value: <CommentText text={release.comment} />, wide: true }] : []),
       ]}
     />
   );

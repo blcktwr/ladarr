@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { infoHashOf, magnetHash } from '../../src/library/grab/torrent.ts';
+import { infoHashOf, magnetHash, torrentComment } from '../../src/library/grab/torrent.ts';
 
 describe('infoHashOf', () => {
   const info = Buffer.from('d6:lengthi1000e4:name4:file12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe');
@@ -17,6 +17,34 @@ describe('infoHashOf', () => {
   it('rejects data that is not a torrent', () => {
     for (const bad of ['', 'not a torrent', 'd8:announce3:abce', 'd4:infoi1ee', 'd4:info', 'd4:infod4:name99:shorte', `${'l'.repeat(100)}`]) {
       expect(() => infoHashOf(Buffer.from(bad))).toThrow('invalid torrent');
+    }
+  });
+});
+
+describe('torrentComment', () => {
+  const info = Buffer.from('d6:lengthi1000e4:name4:file12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe');
+  // A torrent whose top-level dictionary ends with the given key and value.
+  const torrent = (extra = '') => Buffer.concat([Buffer.from('d8:announce20:http://tracker/a?x=y4:info'), info, Buffer.from(`${extra}e`)]);
+
+  it('returns the comment of the torrent', () => {
+    expect(torrentComment(torrent('7:comment2:hi'))).toBe('hi');
+  });
+
+  it('returns nothing when the torrent has no comment', () => {
+    expect(torrentComment(torrent())).toBeUndefined();
+  });
+
+  it('returns nothing when the comment is not a string', () => {
+    expect(torrentComment(torrent('7:commenti42e'))).toBeUndefined();
+  });
+
+  it('returns nothing when the comment is empty', () => {
+    expect(torrentComment(torrent('7:comment0:'))).toBeUndefined();
+  });
+
+  it('rejects data that is not a torrent', () => {
+    for (const bad of ['', 'not a torrent', 'd8:announce3:abc', 'd4:info', 'i42e', 'd7:comment2:hi']) {
+      expect(() => torrentComment(Buffer.from(bad))).toThrow('invalid torrent');
     }
   });
 });
