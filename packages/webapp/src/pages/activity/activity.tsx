@@ -949,9 +949,8 @@ function QueueView() {
             {/* The page control lies under the pane, so the table keeps the whole pane and the control is not part of its container. */}
             {pages > 1 && <Pagination aria-label={t('Pages')} page={page + 1} count={pages} onPageChange={(next) => setPage(next - 1)} />}
           </div>
-          {/* The inspector stays at the side of the list while the page scrolls, so a click on a row that lies low
-              shows its detail with no scroll to the top. A tall detail scrolls inside the pane. */}
-          <div className={`grid gap-6 min-w-0 min-[800px]:sticky min-[800px]:top-6 min-[800px]:max-h-[calc(100dvh-3rem)] min-[800px]:overflow-y-auto ${open ? '' : 'max-[800px]:hidden'}`}>
+          {/* The inspector takes the height of its content. A tall detail grows down the page, and the pane has no scroll. */}
+          <div className={`grid gap-6 min-w-0 ${open ? '' : 'max-[800px]:hidden'}`}>
             {chosen ? (
               <>
                 <Pane className="w-full">
