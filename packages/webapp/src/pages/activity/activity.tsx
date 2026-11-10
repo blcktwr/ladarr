@@ -553,8 +553,10 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   }
   const counts: Record<string, number> = {};
   for (const entry of entries) counts[entry.key] = (counts[entry.key] ?? 0) + 1;
-  const total = entries.length;
-  const available = counts.available ?? 0;
+  // The count covers the whole series, not only the episodes that the filter shows. An episode that finished its
+  // download counts in validating, importing, and available.
+  const completed = group.reached.completed;
+  const total = group.total;
   const status = overallKey(counts);
   // The reason that most of the stuck targets share, for the line under the status.
   const stuck = new Map<string, number>();
@@ -576,7 +578,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
       ? t('The indexers have releases, but none fits your selected qualities.')
       : status === 'stuck' && stuckReason
         ? t(stuckReason)
-        : t('{count} / {total} episodes', { count: available, total });
+        : t('{count} / {total} episodes', { count: completed, total });
   return (
     <div className="grid min-w-0">
       <div className="grid gap-4">
