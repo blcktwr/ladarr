@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Thumbnail } from '../index.ts';
 
@@ -17,15 +17,19 @@ describe('Thumbnail', () => {
     expect(placeholder(container)).toBeTruthy();
   });
 
-  it('renders no placeholder when it has an image', () => {
+  it('renders the placeholder while the image loads, and no placeholder after it loads', () => {
     const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} />);
+
+    expect(placeholder(container)).toBeTruthy();
+
+    fireEvent.load(container.querySelector('img[src="/dune.jpg"]')!);
 
     expect(placeholder(container)).toBeNull();
   });
 
-  it('renders no placeholder while it loads', () => {
+  it('renders the placeholder while it loads', () => {
     const { container } = render(<Thumbnail loading title="Dune" year={2021} />);
 
-    expect(placeholder(container)).toBeNull();
+    expect(placeholder(container)).toBeTruthy();
   });
 });
