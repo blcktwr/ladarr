@@ -4,7 +4,7 @@ import { defaultProfiles, defaultSizes, type Profile } from '../../src/library/g
 import { episode, indexer, movie, NOW, release, title } from '../helpers/test-fixtures.ts';
 import { emptyData } from '../../src/core/db.ts';
 
-const settings = { ...emptyData().settings, timeZone: 'UTC' };
+const settings = { ...emptyData().settings };
 const ctx = (extra: Partial<Context> = {}): Context => ({
   settings,
   quality: emptyData(),

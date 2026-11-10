@@ -80,7 +80,11 @@ const indexersChanged = () => {
 
 const servers: Server[] = [];
 function listen(app: ReturnType<typeof createApp>, port: number, name: string) {
-  const server = app.listen(port, () => log.info('server listening', { port, app: name }));
+  const server = app.listen(port, () => {
+    log.info('server listening', { port, app: name });
+    // The log is a file, so the console shows where each app answers.
+    console.log(`${name[0]!.toUpperCase()}${name.slice(1)}  http://localhost:${port}${name === 'ladarr' ? config.urlBase : ''}`);
+  });
   server.on('error', (error) => {
     log.error('could not listen', { port, app: name, error });
     void shutdown('listen');

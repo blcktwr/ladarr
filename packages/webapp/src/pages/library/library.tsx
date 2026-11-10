@@ -591,11 +591,28 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
 
   // A series asks which seasons to download first, so it adds with a modal. The notice waits for the alerts of the
   // app to come back when the modal closes.
-  async function addedSeries() {
-    const season = adding?.season ?? null;
+  async function addedSeries(season: number | null) {
     queueNotice(1);
     setPendingAdd({ kind: 'series', season });
     await added();
+  }
+
+  // A series with one season has nothing to choose, so it adds at once.
+  async function addOneSeason(season: number) {
+    setMessage('');
+    setPendingAdd({ kind: 'series', season });
+    try {
+      await api('/library', { method: 'POST', body: seriesBody(header, [season]) });
+      await addedSeries(season);
+    } catch (err) {
+      setPendingAdd(null);
+      setMessage(describeError(err));
+    }
+  }
+
+  function startAdd(season: number | null) {
+    if (oneSeason === null) setAdding({ season });
+    else void addOneSeason(oneSeason);
   }
 
   // A movie adds without the modal, and its Add waits for the facts that the queue job brings.
@@ -612,6 +629,11 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
   }
 
   const series = header.mediaType === 'tv';
+  // The seasons of a series that is not in the library decide whether the Add needs the modal.
+  const seasons = useQuery<SeriesEpisodes>({ queryKey: [`/search/tv/${header.tmdbId}/seasons`], enabled: series && !title });
+  const seasonList = seasonOrder((seasons.data?.seasons ?? []).filter((season) => season.episodes.length > 0));
+  // A series with one season has nothing to choose, so the Add adds it at once.
+  const oneSeason = !title && seasonList.length === 1 ? seasonList[0]!.seasonNumber : null;
   // Search looks for what is missing, and Upgrade replaces a file that the library has. A series that lacks some episodes can need both.
   const hasFile = title ? (series ? (title.counts?.available ?? 0) > 0 : title.availability === 'available') : false;
   // A title that was searched has a target in the queue, so it has no Search of its own.
@@ -631,7 +653,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
         mediaType={header.mediaType}
         tmdbId={header.tmdbId}
         controls={
-          pendingAdd && addLoading && (pendingAdd.kind === 'movie' || pendingAdd.season === null) ? (
+          pendingAdd && addLoading && (pendingAdd.kind === 'movie' || pendingAdd.season === null || oneSeason !== null) ? (
             <Button pending>{t('Add')}</Button>
           ) : title ? (
             <Actions>
@@ -648,7 +670,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
               </Button>
             </Actions>
           ) : series ? (
-            <Button onClick={() => setAdding({ season: null })}>{t('Add')}</Button>
+            <Button onClick={() => startAdd(null)}>{t('Add')}</Button>
           ) : (
             <AddMovie result={header} onAdded={addedMovie} />
           )
@@ -659,11 +681,11 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
       {series && (
         <>
           <div className={`${pageWidth} grid gap-6`}>
-            {title && !addLoading ? <Seasons title={title} onAddSeason={(season) => void run(() => addSeason(title.key, season))} onRemoveSeason={(season) => setPlan({ request: { action: 'remove', keys: [title.key], season }, subject: seasonName(season) })} /> : <PreviewSeasons tmdbId={header.tmdbId} onAddSeason={(season) => setAdding({ season })} pending={addLoading && pendingAdd?.kind === 'series' ? pendingAdd : null} />}
+            {title && !addLoading ? <Seasons title={title} onAddSeason={(season) => void run(() => addSeason(title.key, season))} onRemoveSeason={(season) => setPlan({ request: { action: 'remove', keys: [title.key], season }, subject: seasonName(season) })} /> : <PreviewSeasons tmdbId={header.tmdbId} onAddSeason={startAdd} pending={addLoading && pendingAdd?.kind === 'series' ? pendingAdd : null} />}
           </div>
         </>
       )}
-      {!title && series && adding && <AddSeries result={header} season={adding.season} onClose={() => setAdding(null)} onAdded={addedSeries} />}
+      {!title && series && adding && <AddSeries result={header} season={adding.season} onClose={() => setAdding(null)} onAdded={() => addedSeries(adding.season)} />}
       <TitleExtras mediaType={header.mediaType} tmdbId={String(header.tmdbId)} />
     </>
   );
@@ -680,29 +702,29 @@ function SeasonChoice({ tmdbId, chosen, onChange }: { tmdbId: number; chosen: Se
   const all = seasons.every((season) => chosen.has(season.seasonNumber));
   const chooseAll = (
     <Checkbox
-      aria-label={t('All seasons')}
+      label={t('All seasons')}
       checked={all}
       onCheckedChange={(on) => onChange(on ? new Set(seasons.map((season) => season.seasonNumber)) : new Set())}
     />
   );
+  const choose = (season: number, on: boolean) => {
+    const next = new Set(chosen);
+    if (on) next.add(season);
+    else next.delete(season);
+    onChange(next);
+  };
   return (
     <Table
       aria-label={t('Seasons')}
-      columns={[{ label: chooseAll, width: '3.5rem' }, { label: t('Season') }, { label: t('# of episodes') }]}
+      columns={[{ label: chooseAll }, { label: t('# of episodes') }]}
       rows={seasons.map((season) => ({
         key: String(season.seasonNumber),
         cells: [
           <Checkbox
-            aria-label={seasonName(season.seasonNumber)}
+            label={seasonName(season.seasonNumber)}
             checked={chosen.has(season.seasonNumber)}
-            onCheckedChange={(on) => {
-              const next = new Set(chosen);
-              if (on) next.add(season.seasonNumber);
-              else next.delete(season.seasonNumber);
-              onChange(next);
-            }}
+            onCheckedChange={(on) => choose(season.seasonNumber, on)}
           />,
-          seasonName(season.seasonNumber),
           season.episodes.length,
         ],
       }))}
@@ -744,6 +766,15 @@ function AddMovie({ result, onAdded }: { result: Pick<TitlePreview, 'mediaType' 
   );
 }
 
+// The body of the add of a series: each season that the user chose is monitored, and the ones that air later follow the setting.
+const seriesBody = (result: Pick<TitlePreview, 'mediaType' | 'tmdbId' | 'title' | 'year' | 'posterPath'>, seasons: number[]) => ({
+  mediaType: result.mediaType,
+  tmdbId: result.tmdbId,
+  add: 'future',
+  summary: { title: result.title, year: result.year, posterPath: result.posterPath },
+  ...(seasons.length ? { seasonOverrides: Object.fromEntries(seasons.map((choice) => [choice, 'monitored'])) } : {}),
+});
+
 // Add on a series asks which seasons to download first; with no season, the ones that air later are monitored. The
 // season that a season pane started stays chosen.
 function AddSeries({ result, season, onClose, onAdded }: { result: Pick<TitlePreview, 'mediaType' | 'tmdbId' | 'seriesType' | 'title' | 'year' | 'posterPath'>; season: number | null; onClose: () => void; onAdded: () => Promise<unknown> }) {
@@ -755,18 +786,7 @@ function AddSeries({ result, season, onClose, onAdded }: { result: Pick<TitlePre
     setPending(true);
     setError('');
     try {
-      const seasons = [...chosen];
-      const summary = { title: result.title, year: result.year, posterPath: result.posterPath };
-      await api('/library', {
-        method: 'POST',
-        body: {
-          mediaType: result.mediaType,
-          tmdbId: result.tmdbId,
-          add: 'future',
-          summary,
-          ...(seasons.length ? { seasonOverrides: Object.fromEntries(seasons.map((choice) => [choice, 'monitored'])) } : {}),
-        },
-      });
+      await api('/library', { method: 'POST', body: seriesBody(result, [...chosen]) });
       await onAdded();
     } catch (err) {
       setError(describeError(err));

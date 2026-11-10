@@ -76,7 +76,7 @@ export type TitleSummary = {
   availability: Availability;
   // Series only.
   counts: EpisodeCounts | null;
-  // Movies only. The time of the first digital or physical release in the region, or null.
+  // Movies only. The time of the first digital or physical release in any region, or null.
   eligibleAt: number | null;
 };
 
@@ -251,8 +251,6 @@ export type ProfileData = QualityProfile;
 
 export type SettingsData = {
   setupCompleted: boolean;
-  region: string;
-  timeZone: string;
   language: Language;
   theme: 'dark' | 'light';
   defaultRoots: { movie: string | null; tv: string | null };
@@ -678,7 +676,7 @@ export type CalendarEvent = {
   season: number | null;
   number: number | null;
   episodeName: string | null;
-  // The date in the configured time zone, as YYYY-MM-DD.
+  // The date in UTC, as YYYY-MM-DD.
   day: string;
   // The instant of the release when its date has a time. Null when the date has no time.
   at: number | null;
@@ -695,7 +693,6 @@ export type CalendarResponse = {
   from: string;
   to: string;
   today: string;
-  timeZone: string;
   events: CalendarEvent[];
   undated: CalendarUndated[];
   truncated: boolean;

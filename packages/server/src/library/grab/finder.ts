@@ -57,15 +57,15 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
   // --- What ladarr wants -------------------------------------------------------------------
 
   const aired = (episode: Episode) => {
-    const at = episodeEligibleAt(episode.airDate, db.data.settings.timeZone);
+    const at = episodeEligibleAt(episode.airDate);
     return at !== null && at <= now();
   };
 
-  const wantedEpisode = (title: Title, episode: Episode) => !title.paused && isMonitored(title, episode, db.data.settings) && aired(episode) && !present(episode.fileId);
+  const wantedEpisode = (title: Title, episode: Episode) => !title.paused && isMonitored(title, episode) && aired(episode) && !present(episode.fileId);
 
   function wantedMovie(title: Title) {
     if (title.paused || present(title.fileId)) return false;
-    const at = movieEligibleAt(title, db.data.settings);
+    const at = movieEligibleAt(title);
     return title.manualRelease || (at !== null && at <= now());
   }
 
@@ -175,7 +175,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     };
 
     if (title.mediaType === 'movie') {
-      if (wantedMovie(title)) {
+      if (manual || wantedMovie(title)) {
         const entry = open(null, null);
         if (entry) started.push(entry);
       }
@@ -679,7 +679,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     // An episode in the recent window keeps its individual query. The season query covers an older season only.
     const recentEpisode = (entry: QueueEntry) => {
       const episode = title.episodes.find((item) => item.season === entry.season && item.number === entry.number);
-      const at = episodeEligibleAt(episode?.airDate ?? null, db.data.settings.timeZone);
+      const at = episodeEligibleAt(episode?.airDate ?? null);
       return at !== null && at <= now() && now() - at < recentAirMs;
     };
     const noteSkipped = (entry: QueueEntry) => {

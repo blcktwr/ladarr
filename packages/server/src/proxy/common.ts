@@ -68,7 +68,7 @@ export function timespan(totalSeconds: number) {
   return days ? `${days}.${time}` : time;
 }
 
-export const clock = () => ({ now: Date.now(), timeZone: db.data.settings.timeZone, region: db.data.settings.region, files: db.data.files });
+export const clock = () => ({ now: Date.now(), files: db.data.files });
 
 export const hasFiles = (title: Title) => Boolean(title.fileId) || title.episodes.some((episode) => episode.fileId);
 

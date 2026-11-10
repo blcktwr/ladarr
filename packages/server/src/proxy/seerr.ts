@@ -105,7 +105,7 @@ function seasonMonitored(title: Title, season: number) {
   const choice = title.seasonOverrides[season];
   if (choice) return choice === 'monitored';
   const episodes = title.episodes.filter((episode) => episode.season === season);
-  if (episodes.length) return episodes.some((episode) => isMonitored(title, episode, db.data.settings));
+  if (episodes.length) return episodes.some((episode) => isMonitored(title, episode));
   return season !== 0 && title.policy === 'all';
 }
 

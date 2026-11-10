@@ -335,24 +335,37 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   app.use(`${urlBase}/api/v1`, seerrWrongPath(urlBase));
   app.use(`${urlBase}/api`, api, onError);
 
-  // The adapters for the indexer manager and Seerr. They use the API key and the shapes of Sonarr and Radarr.
-  for (const name of ['sonarr', 'radarr'] as const) {
-    app.use(
-      `${urlBase}/${name}/api/v3`,
-      adapter(name, {
-        urlBase: `${urlBase}/${name}`,
-        restorer,
-        onChange: () => setupChanged('indexers'),
-        tmdb,
-        events,
-        enqueue,
-        services,
-      }),
-      onError,
-    );
-    // Any other path under the adapter name gets a JSON answer. The page fallback below would answer with HTML.
-    app.use(`${urlBase}/${name}`, wrongPath(urlBase));
-  }
+  // The adapters for the indexer manager. They use the API key and the shapes of Sonarr and Radarr.
+  app.use(
+    `${urlBase}/sonarr/api/v3`,
+    adapter('sonarr', {
+      urlBase: `${urlBase}/sonarr`,
+      restorer,
+      onChange: () => setupChanged('indexers'),
+      tmdb,
+      events,
+      enqueue,
+      services,
+    }),
+    onError,
+  );
+  // Any other path under the adapter name gets a JSON answer. The page fallback below would answer with HTML.
+  app.use(`${urlBase}/sonarr`, wrongPath(urlBase));
+
+  app.use(
+    `${urlBase}/radarr/api/v3`,
+    adapter('radarr', {
+      urlBase: `${urlBase}/radarr`,
+      restorer,
+      onChange: () => setupChanged('indexers'),
+      tmdb,
+      events,
+      enqueue,
+      services,
+    }),
+    onError,
+  );
+  app.use(`${urlBase}/radarr`, wrongPath(urlBase));
 
   const seerr = express.Router();
   seerr.use(express.json({ limit: '100kb' }));

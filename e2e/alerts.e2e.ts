@@ -12,7 +12,6 @@ test.beforeAll(async () => {
   for (const [method, path, body] of [
     ['POST', '/roots', { path: stack.folders.movies, mediaType: 'movie' }],
     ['POST', '/roots', { path: stack.folders.tv, mediaType: 'tv' }],
-    ['PATCH', '/settings', { region: 'US', timeZone: 'UTC' }],
     ['POST', '/settings/complete-setup', {}],
     ['POST', '/backups', {}],
   ] as const) {
@@ -89,7 +88,7 @@ test('shows the same alert in a new tab', async ({ page, context }) => {
 
 test('the alerts wait while a modal is open', async ({ page, context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
-  await page.goto(`${URL_BASE}/catalog/tv/1`);
+  await page.goto(`${URL_BASE}/catalog/tv/3`);
   const notices = page.getByRole('region', { name: 'Notifications' });
 
   await expect(notices.getByText('No download client is set.')).toBeVisible();
@@ -111,23 +110,6 @@ test('the alerts wait while a modal is open', async ({ page, context }) => {
   await expect(notices.getByText('No download client is set.')).toHaveCount(0);
 });
 
-test('the notice of an add shows in front of the problems of the app', async ({ page, context }) => {
-  await context.addCookies([{ ...cookie, url: URL_BASE }]);
-  await page.goto(`${URL_BASE}/catalog/tv/1`);
-  const notices = page.getByRole('region', { name: 'Notifications' });
-
-  // The app has its problems already. The user adds a series, which asks for its seasons in a modal.
-  await page.getByRole('button', { name: 'Add', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Add new series' });
-  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
-
-  // The modal closes before the notice, so the problems that come back do not hide it.
-  await expect(notices.getByText('Added to the queue')).toBeVisible();
-  // The problems come back when the modal closes, and the notice stays in front of them.
-  await page.waitForTimeout(1000);
-  await expect(notices.getByText('Added to the queue')).toBeVisible();
-});
-
 test('the notice of a removal shows in front of the problems of the app', async ({ page, context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
   const added = await stack.call('POST', '/library', { mediaType: 'tv', tmdbId: 3, add: 'paused' });
@@ -140,4 +122,21 @@ test('the notice of a removal shows in front of the problems of the app', async 
   await page.getByRole('alertdialog', { name: 'Remove 1 title?' }).getByRole('button', { name: 'Remove', exact: true }).click();
   // The removal ends in a modal too, so its notice must stay in front of the problems that come back.
   await expect(notices.getByText('Two Seasons removed from the library')).toBeVisible();
+});
+
+test('the notice of an add shows in front of the problems of the app', async ({ page, context }) => {
+  await context.addCookies([{ ...cookie, url: URL_BASE }]);
+  await page.goto(`${URL_BASE}/catalog/tv/3`);
+  const notices = page.getByRole('region', { name: 'Notifications' });
+
+  // The app has its problems already. The user adds a series, which asks for its seasons in a modal.
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add new series' });
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+
+  // The modal closes before the notice, so the problems that come back do not hide it.
+  await expect(notices.getByText('Added to the queue')).toBeVisible();
+  // The problems come back when the modal closes, and the notice stays in front of them.
+  await page.waitForTimeout(1000);
+  await expect(notices.getByText('Added to the queue')).toBeVisible();
 });

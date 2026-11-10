@@ -42,10 +42,9 @@ describe('dates', () => {
     expect(addDays('2024-12-31', 1)).toBe('2025-01-01');
   });
 
-  it('shows the day of an instant in the time zone', () => {
-    const at = Date.UTC(2024, 5, 1, 22);
-    expect(dayOf(at, 'Asia/Tokyo')).toBe('2024-06-02');
-    expect(dayOf(at, 'America/Los_Angeles')).toBe('2024-06-01');
+  it('shows the day of an instant in UTC', () => {
+    expect(dayOf(Date.UTC(2024, 5, 1, 23, 59))).toBe('2024-06-01');
+    expect(dayOf(Date.UTC(2024, 5, 2, 0, 0))).toBe('2024-06-02');
   });
 });
 
@@ -96,7 +95,7 @@ describe('calendar events', () => {
     expect(ids()).toEqual(['movie:2', 'tv:1:1x1']);
   });
 
-  it('uses the digital or physical date of the region, and leaves other movies without a position', async () => {
+  it('uses the earliest digital or physical date in any region, and leaves other movies without a position', async () => {
     const db = await dbWith(
       film('movie:1', [digital('2024-06-10T00:00:00.000Z'), { region: 'US', kind: 'physical', date: '2024-06-05T00:00:00.000Z' }, { region: 'US', kind: 'theatrical', date: '2024-01-01T00:00:00.000Z' }]),
       film('movie:2', [{ region: 'US', kind: 'theatrical', date: '2024-06-10T00:00:00.000Z' }]),
@@ -104,29 +103,24 @@ describe('calendar events', () => {
       film('movie:4', []),
     );
     const { events, undated } = calendarEvents(all, NOW);
-    expect(events.map((e) => [e.id, e.day])).toEqual([['movie:1', '2024-06-05']]);
-    expect(undated.map((u) => u.titleKey)).toEqual(['movie:2', 'movie:3', 'movie:4']);
+    expect(events.map((e) => [e.id, e.day])).toEqual([
+      ['movie:1', '2024-06-05'],
+      ['movie:3', '2024-06-10'],
+    ]);
+    expect(undated.map((u) => u.titleKey)).toEqual(['movie:2', 'movie:4']);
   });
 
-  it('keeps a date without a time on its day in any time zone, and moves a release with a time to the local day', async () => {
-    const db = await dbWith(film('movie:1', [digital('2024-06-01T00:00:00.000Z')]), film('movie:2', [digital('2024-06-01T22:00:00.000Z')]));
-    for (const [timeZone, expected] of [['UTC', ['2024-06-01', '2024-06-01']], ['Pacific/Auckland', ['2024-06-01', '2024-06-02']], ['America/Los_Angeles', ['2024-06-01', '2024-06-01']]] as const) {
-      db.data.settings.timeZone = timeZone;
-      const events = calendarEvents(all, NOW).events;
-      expect(events.map((e) => e.day)).toEqual(expected);
-      expect(events.map((e) => e.at)).toEqual([null, Date.UTC(2024, 5, 1, 22)]);
-    }
+  it('keeps a date without a time on its day, and a release with a time on its UTC day', async () => {
+    await dbWith(film('movie:1', [digital('2024-06-01T00:00:00.000Z')]), film('movie:2', [digital('2024-06-01T22:00:00.000Z')]));
+    const events = calendarEvents(all, NOW).events;
+    expect(events.map((e) => e.day)).toEqual(['2024-06-01', '2024-06-01']);
+    expect(events.map((e) => e.at)).toEqual([null, Date.UTC(2024, 5, 1, 22)]);
   });
 
-  it('shows an episode as released at the end of its date in the time zone', async () => {
-    const db = await dbWith(show('tv:1', { episodes: [episode(1, 1, '2024-06-15')] }));
-    // 2024-06-15 12:00 UTC is the end of the date in Auckland but not in Los Angeles.
-    const state = (timeZone: string) => {
-      db.data.settings.timeZone = timeZone;
-      return calendarEvents(all, NOW).events[0]!.availability;
-    };
-    expect(state('Pacific/Auckland')).toBe('missing');
-    expect(state('America/Los_Angeles')).toBe('waiting');
+  it('shows an episode as released at the end of its date', async () => {
+    await dbWith(show('tv:1', { episodes: [episode(1, 1, '2024-06-14'), episode(1, 2, '2024-06-15')] }));
+    // 2024-06-15 12:00 UTC is before the end of the date of episode 2.
+    expect(calendarEvents(all, NOW).events.map((e) => e.availability)).toEqual(['missing', 'waiting']);
   });
 
   it('shows a file as available and a missing file as missing', async () => {
@@ -179,14 +173,13 @@ describe('calendar API', () => {
   let app: Awaited<ReturnType<typeof startTestApp>>;
   afterEach(() => app.close());
 
-  it('answers with the month of today in the time zone by default', async () => {
+  it('answers with the month of today by default', async () => {
     app = await startTestApp();
-    app.db.data.settings.timeZone = 'Asia/Tokyo';
-    const today = dayOf(Date.now(), 'Asia/Tokyo');
+    const today = dayOf(Date.now());
     app.db.data.titles['tv:1'] = show('tv:1', { episodes: [episode(1, 1, today), episode(1, 2, '1999-01-01')] });
     const { status, body } = await app.get('/calendar');
     expect(status).toBe(200);
-    expect(body).toMatchObject({ from: `${today.slice(0, 8)}01`, today, timeZone: 'Asia/Tokyo', truncated: false });
+    expect(body).toMatchObject({ from: `${today.slice(0, 8)}01`, today, truncated: false });
     expect(body.to >= today).toBe(true);
     expect(body.to.slice(0, 7)).toBe(today.slice(0, 7));
     expect(body.events.map((e: { id: string }) => e.id)).toEqual(['tv:1:1x1']);
@@ -261,7 +254,7 @@ describe('iCal feed', () => {
 
   async function withEvents() {
     app = await startTestApp();
-    const today = dayOf(Date.now(), 'UTC');
+    const today = dayOf(Date.now());
     app.db.data.titles['tv:1'] = show('tv:1', { episodes: [episode(1, 1, addDays(today, 3), { name: 'A, B; C' }), episode(1, 2, addDays(today, 4), { override: 'unmonitored' }), episode(1, 3, null)] });
     app.db.data.titles['movie:2'] = film('movie:2', [digital(`${addDays(today, 5)}T22:00:00.000Z`)]);
     app.db.data.titles['movie:3'] = film('movie:3', [digital(`${addDays(today, 6)}T00:00:00.000Z`)]);
@@ -316,7 +309,7 @@ describe('iCal feed', () => {
 
   it('does not cut the feed at the limit of the JSON answer', async () => {
     await withEvents();
-    const today = dayOf(Date.now(), 'UTC');
+    const today = dayOf(Date.now());
     app.db.data.titles['tv:9'] = show('tv:9', { episodes: Array.from({ length: MAX_EVENTS + 1 }, (_, n) => episode(1, n + 1, addDays(today, 2))) });
     const { token } = (await app.post('/calendar/feed')).body;
     const text = await (await feed(token)).text();

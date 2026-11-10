@@ -18,6 +18,12 @@ describe('parseRelease', () => {
     ['Movie.Name.2021.HDCAM.x264-GRP', { title: 'Movie Name', year: 2021, source: 'cam', resolution: null }],
     ['Movie.Name.2021.1080p.HDTS-GRP', { source: 'telesync' }],
     ['Movie.Name.2021.4K.UHD.BluRay-GRP', { resolution: 2160, source: 'bluray' }],
+    ['Movie.Name.2020.1080p.BluRay.REMUX.DTS-HD.MA-GRP', { title: 'Movie Name', year: 2020, resolution: 1080, source: 'remux' }],
+    ['Movie.Name.2020.2160p.BluRay.REMUX-GRP', { resolution: 2160, source: 'remux' }],
+    ['Show.Name.S01E02.1080p.Raw.HD-GRP', { title: 'Show Name', resolution: 1080, source: 'rawhd' }],
+    ['Show.Name.S01E02.480p.SDTV.XviD-GRP', { resolution: 480, source: 'sdtv' }],
+    ['Show.Name.S01E02.480p.PDTV.XviD-GRP', { resolution: 480, source: 'sdtv' }],
+    ['The.Remux.2020.1080p.WEB-DL-GRP', { title: 'The Remux', year: 2020, source: 'webdl' }],
     ['[SubGroup] Anime Name - 05 [1080p]', { group: 'SubGroup', title: 'Anime Name - 05', resolution: 1080 }],
     ['Movie.Name.2018', { title: 'Movie Name', year: 2018, source: 'unknown', resolution: null }],
     // A word of the title that looks like a source marker stays in the title.

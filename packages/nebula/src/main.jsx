@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
-import { ActionMenu, Activity, alert, Alerts, Backdrop, Background, Badge, Button, Checkbox, Confirm, Details, Divider, Dropdown, EmptyState, Field, Form, Gallery, Hint, List, Loading, Modal, Navbar, Pagination, Pane, Panel, Progress, Row, SearchField, Section, SideMenu, Spinner, SubMenu, Switch, Table, TagInput, Text, Thumbnail } from './index.ts';
+import { ActionMenu, Activity, alert, Alerts, Backdrop, Background, Badge, Button, Checkbox, Confirm, Details, Divider, Dropdown, EmptyState, Field, Form, Gallery, Hint, List, Loading, Modal, Navbar, Pagination, Pane, Panel, Progress, Row, SearchField, Section, SideMenu, Slider, Spinner, SubMenu, Switch, Table, TagInput, Text, Thumbnail } from './index.ts';
 import { BlockedIcon, DownloadIcon, ImportingIcon, PausedIcon, SearchingIcon, ValidatingIcon, WaitingIcon } from './index.ts';
 import { Play, Plus, SlidersHorizontal } from 'lucide-react';
 
@@ -132,6 +132,20 @@ const ProgressSample = () => (
     </div>
   </Pane>
 );
+
+const SliderSample = () => {
+  const [value, setValue] = useState(42);
+  const [range, setRange] = useState([15, 60, 150]);
+  return (
+    <Pane>
+      <div className="grid gap-4 w-full max-w-80">
+        <Slider label="Value" value={value} onValueChange={setValue} />
+        <Slider label={['Minimum', 'Preferred', 'Maximum']} value={range} stagger={20} formatValue={amount => String(amount)} onValueChange={setRange} />
+        <Slider label="Disabled" value={20} disabled onValueChange={() => {}} />
+      </div>
+    </Pane>
+  );
+};
 
 const ThumbnailSample = () => {
   const [first, setFirst] = useState(false);
@@ -302,6 +316,12 @@ const Sheet = () => {
                 <Field label="Label" hideLabel placeholder="Placeholder" />
                 <Field label="Label" placeholder="Placeholder" width="sm" />
               </div>
+              <div className={`${grid} grid-cols-[repeat(3,max-content)] items-start`}>
+                <span>Small size</span><span>Small size, error</span><span>Small size, suffix</span>
+                <Field label="Label" size="sm" placeholder="Placeholder" />
+                <Field label="Label" size="sm" placeholder="Placeholder" error="Error message" />
+                <Field label="Label" size="sm" placeholder="Placeholder" suffix="ms" />
+              </div>
             </Pane>
           </section>
           <section className={wide}>
@@ -335,6 +355,10 @@ const Sheet = () => {
           <section className={card}>
             <h1 className={h1}>Progress</h1>
             <ProgressSample />
+          </section>
+          <section className={card}>
+            <h1 className={h1}>Slider</h1>
+            <SliderSample />
           </section>
           <section className={wide}>
             <h1 className={h1}>Indicators</h1>

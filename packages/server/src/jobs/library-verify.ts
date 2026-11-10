@@ -21,13 +21,13 @@ const episodeKey = (season: number, number: number) => `${season}x${number}`;
 
 // The source monitors each episode. The season of the source is only the fallback. A difference becomes an override,
 // and an agreement removes an old override, so the source decides the state of the episode it knows.
-function applyEpisodes(title: Title, state: VerificationState, timeZone: string) {
+function applyEpisodes(title: Title, state: VerificationState) {
   for (const source of state.episodes) {
     const episode = title.episodes.find((item) => item.season === source.season && item.number === source.number);
     if (!episode) continue;
     if (!episode.airDate && source.airDateUtc) episode.airDate = source.airDateUtc;
     episode.override = null;
-    const natural = isMonitored(title, episode, { timeZone });
+    const natural = isMonitored(title, episode);
     episode.override = natural === source.monitored ? null : source.monitored ? 'monitored' : 'unmonitored';
   }
 }
@@ -48,7 +48,7 @@ export function libraryVerifyHandler({ queue, clients, finder, events }: Deps): 
     if (title.mediaType === 'movie' && title.metaLoadedAt === null) throw new JobError('outage', 'The metadata is not loaded yet.');
     signal.throwIfAborted();
 
-    applyEpisodes(title, state, db.data.settings.timeZone);
+    applyEpisodes(title, state);
 
     // The folder decides which targets already have a file. The scan must run before the client is read.
     const scan = await scanTitle(key);
@@ -102,7 +102,7 @@ export function libraryVerifyHandler({ queue, clients, finder, events }: Deps): 
         } else {
           if (title.paused) continue;
           const episode = title.episodes.find((item) => episodeKey(item.season, item.number) === episodeOf);
-          if (!episode || !isMonitored(title, episode, db.data.settings) || present(episode.fileId)) continue;
+          if (!episode || !isMonitored(title, episode) || present(episode.fileId)) continue;
           target = queue.ensure(key, episode.season, episode.number);
         }
         // A target that already works with this torrent keeps its work.

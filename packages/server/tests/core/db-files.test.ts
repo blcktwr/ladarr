@@ -67,7 +67,7 @@ const seed = (data: Data) => {
   data.queuePaused = true;
   data.jobSeq = 3;
   data.prioritySeq = 2;
-  data.settings.region = 'DE';
+  data.settings.naming.movie = 'DE';
 };
 
 describe('database files', () => {
@@ -81,7 +81,7 @@ describe('database files', () => {
       await db.write();
 
       const data = readJson(file);
-      expect(data.settings.region).toBe('DE');
+      expect(data.settings.naming.movie).toBe('DE');
       for (const key of queueKeys) expect(data).not.toHaveProperty(key);
       expect(readJson(join(dir, 'queue.json'))).toEqual(queueWork);
     } finally {
@@ -106,7 +106,7 @@ describe('database files', () => {
       expect(db.data.queuePaused).toBe(true);
       expect(db.data.jobSeq).toBe(3);
       expect(db.data.prioritySeq).toBe(2);
-      expect(db.data.settings.region).toBe('DE');
+      expect(db.data.settings.naming.movie).toBe('DE');
     } finally {
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });
@@ -155,7 +155,7 @@ describe('database files', () => {
       expect(db.data.queue[entry.id]).toEqual(entry);
       expect(db.data.jobs[job.id]).toEqual(job);
       expect(db.data.queueRev).toBe(7);
-      expect(db.data.settings.region).toBe('DE');
+      expect(db.data.settings.naming.movie).toBe('DE');
 
       await db.write();
       const config = readJson(file);

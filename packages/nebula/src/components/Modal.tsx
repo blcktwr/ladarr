@@ -9,7 +9,7 @@ import { Button } from './Button.tsx';
 // The veil and the pane of a modal, and its widths. Each width stays 1rem inside each edge of a narrow screen. Confirm uses them too.
 export const veil = 'fixed inset-0 bg-veil backdrop-blur-[2px] transition-opacity duration-200 ease-stone data-starting-style:opacity-0 data-ending-style:opacity-0 motion-reduce:transition-none';
 export const popup = `${modalSurface} fixed top-1/2 left-1/2 -translate-1/2 box-border max-h-[calc(100dvh-2rem)] overflow-hidden outline-none transition-[opacity,scale] duration-200 ease-stone data-starting-style:opacity-0 data-starting-style:scale-95 data-ending-style:opacity-0 data-ending-style:scale-95 motion-reduce:transition-none`;
-export const widths = { md: 'w-[min(36rem,calc(100vw-2rem))]', lg: 'w-[min(52rem,calc(100vw-2rem))]', xl: 'w-[min(68rem,calc(100vw-2rem))]' };
+export const widths = { md: 'w-[min(36rem,calc(100vw-2rem))]', lg: 'w-[min(52rem,calc(100vw-2rem))]', xl: 'w-[min(62rem,calc(100vw-2rem))]' };
 
 type ModalProps = Omit<Dialog.Root.Props, 'children' | 'modal'> & {
   // The button that opens the modal. Without it, open and onOpenChange control the modal.
@@ -17,7 +17,7 @@ type ModalProps = Omit<Dialog.Root.Props, 'children' | 'modal'> & {
   title: string;
   // A row of buttons at the end. To close the modal from a button, set open to false in onClick.
   actions?: ReactNode;
-  // md (the default) is 36rem. lg is 52rem, such as for a list with rows of buttons. xl is 68rem.
+  // md (the default) is 36rem. lg is 52rem, such as for a list with rows of buttons. xl is 62rem.
   width?: keyof typeof widths;
   children?: ReactNode;
 };

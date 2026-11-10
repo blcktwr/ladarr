@@ -40,7 +40,7 @@ function Status({ event }: { event: CalendarEvent }) {
 }
 
 function Events({ data }: { data: CalendarResponse }) {
-  const time = (event: CalendarEvent) => (event.at === null ? '' : ` ${new Date(event.at).toLocaleTimeString(getLanguage(), { timeZone: data.timeZone, hour: '2-digit', minute: '2-digit' })}`);
+  const time = (event: CalendarEvent) => (event.at === null ? '' : ` ${new Date(event.at).toLocaleTimeString(getLanguage(), { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' })}`);
   if (data.events.length === 0) return <EmptyState>{t('Nothing is scheduled.')}</EmptyState>;
   return (
     <List>

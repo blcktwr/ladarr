@@ -138,11 +138,16 @@
   --color-slab: #222526;
   /* The stone under the content of a page, where fields lie. It differs from a field and from the page, so that neither gets lost. */
   --color-pane: #303132;
+  /* The row of a table that is open. It is one color, so the first column of the row covers the cells that scroll under it. */
+  --color-row-open: #1f2021;
   /* The veil over the content while it loads, and over the whole app while a modal is open. */
   --color-veil: rgb(4 4 4 / 55%);
   /* The flat stone of a field, a checkbox and a switch. */
   --color-field: #222526;
   --color-field-hover: #2a2e2f;
+  /* The stone of a small field, such as a value in a row. It differs from a field, so it shows on a recess. */
+  --color-field-small: #34383a;
+  --color-field-small-hover: #3c4142;
   --color-fog: #949f9f;
   --color-ink: #d4dada;
   --color-ink-strong: #eef2f1;
@@ -235,9 +240,12 @@
     --color-edge: #c4cbcb;
     --color-slab: #fbfcfc;
     --color-pane: #fbfcfc;
+    --color-row-open: #e4e5e5;
     --color-veil: rgb(245 246 246 / 55%);
     --color-field: #e3e7e7;
     --color-field-hover: #eaeded;
+    --color-field-small: #dfe4e4;
+    --color-field-small-hover: #d6dcdc;
     --color-fog: #5d6969;
     --color-ink: #273030;
     --color-ink-strong: #0c1010;

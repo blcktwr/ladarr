@@ -14,7 +14,7 @@ let tv: string;
 let movies: string;
 let db: Db;
 
-const clock = () => ({ now: Date.now(), timeZone: 'UTC', region: 'US', files: db.data.files });
+const clock = () => ({ now: Date.now(), files: db.data.files });
 const write = (path: string, bytes = 10) => {
   mkdirSync(join(path, '..'), { recursive: true });
   writeFileSync(path, Buffer.alloc(bytes));

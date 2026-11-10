@@ -30,7 +30,6 @@ export function libraryFilter(value: unknown): FilterResult {
     const keys = attentionKeys();
     return { test: (title) => keys.has(title.key) };
   }
-  const { timeZone, region } = db.data.settings;
-  const clock = { now: Date.now(), timeZone, region, files: db.data.files };
+  const clock = { now: Date.now(), files: db.data.files };
   return { test: (title) => availability(title, clock) === filter };
 }

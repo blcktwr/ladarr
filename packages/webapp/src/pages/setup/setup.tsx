@@ -2,7 +2,7 @@ import type { SetupData } from '@ladarr/shared/types';
 import { useEffect, useId, useState } from 'react';
 import { Button, Field, Form, Modal, Pane, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
-import { api, ApiError } from '../../lib/api.ts';
+import { api } from '../../lib/api.ts';
 import { describeError } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { Migration } from '../settings/migration.tsx';
@@ -10,11 +10,7 @@ import { useAuth } from '../auth/auth.tsx';
 import { SetupConnections } from './setup-checks.tsx';
 import logo from '../../assets/logo.svg';
 
-// The browser knows the region and the time zone of the user.
-const detectedRegion = () => navigator.language.split('-')[1]?.toUpperCase() ?? 'US';
-const detectedTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-type Errors = Partial<Record<'movie' | 'tv' | 'region' | 'timeZone' | 'form', string>>;
+type Errors = Partial<Record<'movie' | 'tv' | 'form', string>>;
 
 // The password view unmounts the setup. This flag sends the person back to the folders after it, not to the last step.
 let showFoldersAfterAccess = false;
@@ -27,8 +23,6 @@ export function Setup({ data, onDone }: { data: SetupData; onDone: () => void })
   // The roots of this run are not in the props until the data loads again, so the form remembers what it saved.
   const [savedNow, setSavedNow] = useState<Set<'movie' | 'tv'>>(new Set());
   const isSaved = (type: 'movie' | 'tv') => Boolean(saved(type)) || savedNow.has(type);
-  const region = settings.setupCompleted ? settings.region : detectedRegion();
-  const [timeZone, setTimeZone] = useState(settings.setupCompleted ? settings.timeZone : detectedTimeZone());
   const [paths, setPaths] = useState({ movie: saved('movie')?.path ?? '', tv: saved('tv')?.path ?? '' });
   const [errors, setErrors] = useState<Errors>({});
   const [pending, setPending] = useState(false);
@@ -65,14 +59,6 @@ export function Setup({ data, onDone }: { data: SetupData; onDone: () => void })
         }
       }
       if (Object.keys(found).length) return;
-      try {
-        await api('/settings', { method: 'PATCH', body: { region: region.trim().toUpperCase(), timeZone: timeZone.trim() } });
-      } catch (err) {
-        const field = err instanceof ApiError ? err.body.field : undefined;
-        if (field === 'region' || field === 'timeZone') found[field] = field === 'region' ? t('Enter a region code of 2 letters, for example US.') : t('Enter a time zone such as America/New_York.');
-        else found.form = describeError(err);
-        return;
-      }
       setCheckConnections(true);
     } catch (err) {
       found.form = describeError(err);
@@ -130,17 +116,6 @@ export function Setup({ data, onDone }: { data: SetupData; onDone: () => void })
         <Form id={formId} onSubmit={submit}>
           {folder('movie', t('Movies folder'))}
           {folder('tv', t('Series folder'))}
-          <Field
-            width="full"
-            label={t('Time zone')}
-            aria-required="true"
-            error={errors.timeZone}
-            value={timeZone}
-            onValueChange={(value) => {
-              setTimeZone(value);
-              setErrors({ ...errors, timeZone: undefined });
-            }}
-          />
         </Form>
       </Pane>
       <div className="flex w-[min(28rem,calc(100%-40px))] items-center justify-between">

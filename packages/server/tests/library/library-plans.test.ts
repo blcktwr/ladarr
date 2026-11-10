@@ -236,7 +236,7 @@ describe('safety', () => {
     expect(kept.episodes.map((e) => e.fileId)).toEqual([null, null, 'linked']);
     expect(Object.keys(app.db.data.files)).toEqual(['linked']);
     expect(readFileSync(join(dir, 'outside', 'Show.S01E03.mkv'), 'utf8')).toBe('outside data');
-    expect(seriesCounts(kept, { now: Date.now(), timeZone: 'UTC', files: app.db.data.files })).toMatchObject({ available: 1 });
+    expect(seriesCounts(kept, { now: Date.now(), files: app.db.data.files })).toMatchObject({ available: 1 });
   });
 
   it('keeps every record when a file cannot be deleted', async () => {
@@ -376,7 +376,7 @@ describe('delete files and keep the title', () => {
     const kept = app.db.data.titles['tv:1']!;
     expect(kept.episodes.map((e) => Boolean(e.fileId))).toEqual([false, true, false]);
     expect(app.db.data.files[fileId]).toBeUndefined();
-    expect(seriesCounts(kept, { now: Date.now(), timeZone: 'UTC', files: app.db.data.files })).toMatchObject({ eligible: 3, available: 1 });
+    expect(seriesCounts(kept, { now: Date.now(), files: app.db.data.files })).toMatchObject({ eligible: 3, available: 1 });
     expect(existsSync(join(tv, 'Show', 'Season 01', 'Show.S01E01.mkv'))).toBe(false);
     expect(existsSync(join(tv, 'Show', 'Season 01', 'Show.S01E01.en.srt'))).toBe(true);
   });

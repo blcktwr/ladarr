@@ -27,7 +27,7 @@ function upgradeFiles(title: Title): UpgradeFile[] {
     files.push({ title, season, number, file, resolution });
   };
   if (title.mediaType === 'movie') add(title.fileId, null, null);
-  else for (const episode of title.episodes) if (isMonitored(title, episode, db.data.settings)) add(episode.fileId, episode.season, episode.number);
+  else for (const episode of title.episodes) if (isMonitored(title, episode)) add(episode.fileId, episode.season, episode.number);
   return files;
 }
 

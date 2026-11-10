@@ -23,7 +23,7 @@ const samples: Sample[] = [
   { name: 'movie WEB-DL 1080p, 7 GiB', preset: 'p1080', release: release('webdl', 1080, 7), runtime: MOVIE, expected: [] },
   { name: 'movie WEB-DL 1080p, 1 GiB is a low-bitrate copy', preset: 'p1080', release: release('webdl', 1080, 1), runtime: MOVIE, expected: ['size_below_min'] },
   { name: 'movie WEB-DL 1080p, 40 GiB is too large', preset: 'p1080', release: release('webdl', 1080, 40), runtime: MOVIE, expected: ['size_above_max'] },
-  { name: 'movie BluRay 1080p remux, 30 GiB', preset: 'p1080', release: release('bluray', 1080, 30), runtime: MOVIE, expected: [] },
+  { name: 'movie BluRay 1080p, 30 GiB', preset: 'p1080', release: release('bluray', 1080, 30), runtime: MOVIE, expected: [] },
   { name: 'movie BluRay 1080p, 4 GiB is a small encode', preset: 'p1080', release: release('bluray', 1080, 4), runtime: MOVIE, expected: ['size_below_min'] },
   { name: 'movie CAM', preset: 'p1080', release: release('cam', 1080, 3), runtime: MOVIE, expected: ['quality_rejected'] },
   { name: 'movie telesync', preset: 'p1080', release: release('telesync', 1080, 3), runtime: MOVIE, expected: ['quality_rejected'] },
@@ -42,8 +42,8 @@ describe('preset samples', () => {
 });
 
 describe('quality table', () => {
-  it('has version 2', () => {
-    expect(QUALITY_TABLE_VERSION).toBe(2);
+  it('has version 3', () => {
+    expect(QUALITY_TABLE_VERSION).toBe(3);
   });
 
   it('keeps minimum below preferred below maximum where the table sets all three', () => {
@@ -67,7 +67,12 @@ describe('quality table', () => {
 
   it('reads the quality of a release from its source and resolution', () => {
     expect(qualityOf('webdl', 1080)).toBe('webdl-1080');
-    expect(qualityOf('bluray', 576)).toBe('bluray-480');
+    expect(qualityOf('bluray', 576)).toBe('bluray-576');
+    expect(qualityOf('sdtv', 480)).toBe('sdtv-480');
+    expect(qualityOf('rawhd', 1080)).toBe('rawhd-1080');
+    expect(qualityOf('remux', 2160)).toBe('remux-2160');
+    expect(qualityOf('hdtv', 480)).toBeNull();
+    expect(qualityOf('remux', 720)).toBeNull();
     expect(qualityOf('dvd', null)).toBe('dvd');
     expect(qualityOf('webdl', null)).toBeNull();
     expect(qualityOf('webdl', 1440)).toBeNull();

@@ -13,7 +13,7 @@ const DONE_STATUSES = ['Ended', 'Canceled', 'Released'];
 function isActive(title: Title, now: number) {
   if (title.paused) return false;
   if (title.mediaType === 'movie') {
-    const at = movieEligibleAt(title, db.data.settings);
+    const at = movieEligibleAt(title);
     if (at === null || at > now) return true;
   }
   return !DONE_STATUSES.includes(title.meta.status);

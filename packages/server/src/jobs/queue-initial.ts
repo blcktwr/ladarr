@@ -28,7 +28,7 @@ export function queueInitialHandler({ queue, finder }: { queue: Queue; finder: F
       // A title with nothing to search leaves the queue. The page learns it from this message.
       await withTitleLock(key, async () => {
         if (!finder.requestSearch(title.key, { reason: 'title added' }).length) {
-          catalog.info('empty', 'No target to search: no episode is due', titleFields(title));
+          catalog.info('empty', title.mediaType === 'movie' ? 'No target to search: the movie has no release date' : 'No target to search: no episode is due', titleFields(title));
           queue.notify();
         }
       });

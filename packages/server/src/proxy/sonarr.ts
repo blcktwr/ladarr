@@ -17,7 +17,7 @@ function seasonMonitored(title: Title, season: number) {
   const chosen = title.seasonOverrides[season];
   if (chosen) return chosen === 'monitored';
   const episodes = title.episodes.filter((episode) => episode.season === season);
-  if (episodes.length) return episodes.some((episode) => isMonitored(title, episode, db.data.settings));
+  if (episodes.length) return episodes.some((episode) => isMonitored(title, episode));
   return season !== 0 && title.policy === 'all';
 }
 
@@ -109,7 +109,7 @@ function episodeResource(title: Title, episode: Episode) {
     title: episode.name,
     airDate: episode.airDate ?? undefined,
     hasFile: Boolean(presentFile(episode.fileId)),
-    monitored: isMonitored(title, episode, db.data.settings),
+    monitored: isMonitored(title, episode),
   };
 }
 

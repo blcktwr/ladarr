@@ -18,7 +18,7 @@ export function calendarFeed(): RequestHandler {
     const expected = db.data.calendarFeedToken;
     if (!expected || typeof token !== 'string' || !timingSafeEqual(digest(token), digest(expected))) return void res.status(404).json({ error: 'not_found' });
     const now = Date.now();
-    const today = dayOf(now, db.data.settings.timeZone);
+    const today = dayOf(now);
     const { events } = calendarEvents({ from: addDays(today, -PAST_DAYS), to: addDays(today, FUTURE_DAYS), monitored: true, limit: Infinity }, now);
     res.type('text/calendar; charset=utf-8').send(buildIcal(events, now));
   };

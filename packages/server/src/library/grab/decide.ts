@@ -85,9 +85,9 @@ export function titleMatches(parsedTitle: string, title: Title) {
   return wanted !== '' && alias(title).includes(wanted);
 }
 
-const episodeAired = (title: Title, episode: Episode, ctx: Pick<Context, 'settings' | 'now'>) => {
-  const at = episodeEligibleAt(episode.airDate, ctx.settings.timeZone);
-  return at !== null && at <= ctx.now;
+const episodeAired = (episode: Episode, now: number) => {
+  const at = episodeEligibleAt(episode.airDate);
+  return at !== null && at <= now;
 };
 
 export function decide(release: RawRelease, want: Want, ctx: Context): Decision {
@@ -136,7 +136,7 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
       const inSeason = title.episodes.filter((episode) => episode.season === want.season);
       covers = inSeason.map((episode) => ({ season: episode.season, number: episode.number }));
       // A pack must not bring back an episode that the user has, or one that the user did not ask for.
-      const unwanted = inSeason.some((episode) => episodeAired(title, episode, ctx) && (!isMonitored(title, episode, ctx.settings) || ctx.hasFile(episode)));
+      const unwanted = inSeason.some((episode) => episodeAired(episode, ctx.now) && (!isMonitored(title, episode) || ctx.hasFile(episode)));
       if (unwanted && !ctx.manual) reject('pack_has_unwanted_episodes');
       if (!inSeason.length) reject('wrong_season');
     }

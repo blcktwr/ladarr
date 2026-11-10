@@ -20,14 +20,11 @@ import type { WebhookState } from './webhook.ts';
 
 // Change this number when a new version cannot read the file of an old one, or the other way round.
 // Version 2 keeps the queue work in queue.json, so an older version must not open the new db.json.
-// Version 4 keeps the webhooks in a list, so an older version must not open the new db.json.
-export const SCHEMA_VERSION = 4;
+// Version 5 removes the region and the time zone from the settings.
+export const SCHEMA_VERSION = 5;
 
 export type Settings = {
   setupCompleted: boolean;
-  // ISO 3166-1 region for movie release dates, and the IANA time zone for date-only air dates.
-  region: string;
-  timeZone: string;
   // The language of the interface. The server sends no text in it.
   language: Language;
   // The colors of the interface.
@@ -155,8 +152,6 @@ export const emptyData = (): Data => ({
   prioritySeq: 0,
   settings: {
     setupCompleted: false,
-    region: 'US',
-    timeZone: 'UTC',
     language: 'en',
     theme: 'dark',
     defaultRoots: { movie: null, tv: null },
@@ -215,7 +210,10 @@ type OneClient = { url: string; username: string; password: string; downloadPath
 // A file from an older version can lack a collection that a newer version added.
 export function withDefaults(data: Data): Data {
   const empty = emptyData();
-  const loaded = { ...empty.settings, ...data.settings } as Settings & { maxAliases?: number; aliasLanguages?: string[] | null; upgrades?: { enabled: boolean; stopAt: string }; defaultPreset?: string; recentDays?: number; recoveryDays?: number };
+  const loaded = { ...empty.settings, ...data.settings } as Settings & { maxAliases?: number; aliasLanguages?: string[] | null; upgrades?: { enabled: boolean; stopAt: string }; defaultPreset?: string; recentDays?: number; recoveryDays?: number; region?: string; timeZone?: string };
+  // The movie release region and the time zone are gone from the settings.
+  delete loaded.region;
+  delete loaded.timeZone;
   // An older file has the number of aliases. The search asks for every alias now.
   delete loaded.maxAliases;
   // The languages of the aliases are a choice of each indexer now.
@@ -248,6 +246,8 @@ export function withDefaults(data: Data): Data {
     settings,
     profiles,
     profileOrder,
+    // A quality that a newer version added gets the default sizes.
+    qualitySizes: { ...defaultSizes(), ...(data.qualitySizes ?? {}) },
     webhooks,
     seerr,
   };

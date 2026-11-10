@@ -16,27 +16,11 @@ function Failure({ message }: { message: string }) {
   return <Alert tone="danger">{message}</Alert>;
 }
 
-// The browser lists the IANA time zones. UTC and the saved zone are always in the list.
-const zones = (current: string) => [...new Set(['UTC', current, ...Intl.supportedValuesOf('timeZone')])].sort();
-
 const joinPath = (base: string, name: string) => `${base.replace(/\/$/, '')}/${name}`;
 
-function RegionCard({ data, reload }: { data: SettingsResponse; reload: () => void }) {
+function GeneralCard({ data, reload }: { data: SettingsResponse; reload: () => void }) {
   const { settings } = data;
-  const [timeZone, setTimeZone] = useState(settings.timeZone);
   const [message, setMessage] = useState('');
-
-  async function save(next: string) {
-    setTimeZone(next);
-    setMessage('');
-    try {
-      await api('/settings', { method: 'PATCH', body: { timeZone: next } });
-      reload();
-    } catch (err) {
-      setTimeZone(settings.timeZone);
-      setMessage(describeError(err));
-    }
-  }
 
   async function saveSetting(body: { language: string } | { theme: string }) {
     setMessage('');
@@ -54,7 +38,6 @@ function RegionCard({ data, reload }: { data: SettingsResponse; reload: () => vo
       <div className="flex flex-wrap items-start justify-between gap-4 w-full">
         <Dropdown label={t('Language')} value={settings.language} options={Object.entries(languages).map(([value, label]) => ({ value, label }))} onValueChange={(value) => void saveSetting({ language: value as string })} />
         <Dropdown label={t('Theme')} value={settings.theme} options={[{ value: 'dark', label: t('Dark') }, { value: 'light', label: t('Light') }]} onValueChange={(value) => void saveSetting({ theme: value as string })} />
-        <Dropdown label={t('Time zone')} value={timeZone} options={zones(settings.timeZone).map((value) => ({ value }))} onValueChange={(value) => void save(value as string)} />
       </div>
     </>
   );
@@ -183,5 +166,5 @@ function FoldersCard({ defaults }: { defaults: SettingsData['defaultRoots'] }) {
   return <FoldersForm roots={data.roots} defaults={defaults} reload={reload} />;
 }
 
-export const RegionSettings = () => <WithSettings>{(data, reload) => <RegionCard data={data} reload={reload} />}</WithSettings>;
+export const GeneralSettings = () => <WithSettings>{(data, reload) => <GeneralCard data={data} reload={reload} />}</WithSettings>;
 export const FolderSettings = () => <WithSettings>{(data) => <FoldersCard defaults={data.settings.defaultRoots} />}</WithSettings>;

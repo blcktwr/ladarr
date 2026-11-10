@@ -38,18 +38,12 @@ const section = (page: Page, name: string) => page.getByRole('link', { name, exa
 // The queue status at the end of the navbar is the link to Activity. Its text changes with the queue.
 const openActivity = (page: Page) => page.locator('a[href$="/activity"]').click();
 
-async function addFromSearch(page: Page, query: string, heading: string, seasons = false) {
+async function addFromSearch(page: Page, query: string, heading: string) {
   const box = page.getByRole('searchbox', { name: 'Search', exact: true });
   await box.fill(query);
   await box.press('Enter');
   await page.getByRole('main').getByRole('link', { name: query }).getByText(query, { exact: true }).click();
   await page.getByRole('button', { name: 'Add', exact: true }).click();
-  // A series asks which seasons to download first. The test wants all of them.
-  if (seasons) {
-    const dialog = page.getByRole('dialog', { name: 'Add new series' });
-    await dialog.getByRole('checkbox', { name: 'All seasons' }).click();
-    await dialog.getByRole('button', { name: 'Add', exact: true }).click();
-  }
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Added to the queue')).toBeVisible();
   await expect(page.getByRole('heading', { name: heading })).toBeVisible();
   // The page of the title has its action buttons when the title is in the catalog.
@@ -346,17 +340,17 @@ test('movie: add, search, download, restart, import', async ({ page }) => {
 
 test('the + of a season opens the add with that season', async ({ page }) => {
   await signIn(page);
-  await page.goto(`${URL_BASE}/catalog/tv/1`);
-  await page.getByRole('button', { name: 'Add Season 1' }).click();
+  await page.goto(`${URL_BASE}/catalog/tv/3`);
+  await page.getByRole('button', { name: 'Add Season 2' }).click();
   const dialog = page.getByRole('dialog', { name: 'Add new series' });
-  await expect(dialog.getByRole('checkbox', { name: 'Season 1' })).toBeChecked();
+  await expect(dialog.getByRole('checkbox', { name: 'Season 2' })).toBeChecked();
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toHaveCount(0);
 });
 
 test('series: add, season pack, crash, import', async ({ page }) => {
   await signIn(page);
-  await addFromSearch(page, 'Show Name', 'Show Name (2020)', true);
+  await addFromSearch(page, 'Show Name', 'Show Name (2020)');
 
   await openActivity(page);
   const groupRow = page.locator('[data-row="group:tv:1:1"]');

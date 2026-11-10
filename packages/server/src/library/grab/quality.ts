@@ -1,10 +1,10 @@
 import type { QualityProfile, SizeLimits } from '@ladarr/shared/types';
 
-// Version 2 of the quality table. Change the version when a number of the table or the list of qualities changes.
+// Version 3 of the quality table. Change the version when a number of the table or the list of qualities changes.
 // docs/quality-presets.md explains the rules.
-export const QUALITY_TABLE_VERSION = 2;
+export const QUALITY_TABLE_VERSION = 3;
 
-export type Source = 'webdl' | 'webrip' | 'bluray' | 'hdtv' | 'dvd';
+export type Source = 'webdl' | 'webrip' | 'bluray' | 'remux' | 'rawhd' | 'hdtv' | 'sdtv' | 'dvd';
 export type ReleaseSource = Source | 'cam' | 'telesync' | 'unknown';
 
 export type { SizeLimits };
@@ -12,15 +12,22 @@ export type { SizeLimits };
 // A quality is a source with a resolution. A DVD has no resolution.
 export type Quality = { id: string; label: string; source: Source; resolution: number | null };
 
-const SOURCE_LABEL: Record<Source, string> = { webdl: 'WEB-DL', webrip: 'WEBRip', bluray: 'BluRay', hdtv: 'HDTV', dvd: 'DVD' };
+const SOURCE_LABEL: Record<Source, string> = { webdl: 'WEB-DL', webrip: 'WEBRip', bluray: 'BluRay', remux: 'BluRay Remux', rawhd: 'Raw-HD', hdtv: 'HDTV', sdtv: 'SDTV', dvd: 'DVD' };
 const RESOLUTIONS = [480, 720, 1080, 2160];
 
-// The lowest quality first.
+const qualitiesOf = (source: Source, resolutions: number[]): Quality[] =>
+  resolutions.map((resolution) => ({ id: `${source}-${resolution}`, label: `${SOURCE_LABEL[source]} ${resolution}p`, source, resolution }));
+
+// The lowest quality first. The list is the one of Sonarr, with DVD at the bottom.
 export const QUALITIES: Quality[] = [
   { id: 'dvd', label: 'DVD', source: 'dvd', resolution: null },
-  ...(['hdtv', 'webdl', 'webrip', 'bluray'] as const).flatMap((source) =>
-    RESOLUTIONS.map((resolution) => ({ id: `${source}-${resolution}`, label: `${SOURCE_LABEL[source]} ${resolution}p`, source, resolution })),
-  ),
+  ...qualitiesOf('sdtv', [480]),
+  ...qualitiesOf('hdtv', [720, 1080, 2160]),
+  ...qualitiesOf('rawhd', [1080]),
+  ...qualitiesOf('webdl', RESOLUTIONS),
+  ...qualitiesOf('webrip', RESOLUTIONS),
+  ...qualitiesOf('bluray', [480, 576, 720, 1080, 2160]),
+  ...qualitiesOf('remux', [1080, 2160]),
 ];
 const QUALITY_IDS = new Set(QUALITIES.map((quality) => quality.id));
 export const isQualityId = (value: unknown): value is string => typeof value === 'string' && QUALITY_IDS.has(value);
@@ -56,8 +63,6 @@ export function defaultProfiles(): Record<string, Profile> {
 // The rank of a quality in a profile. A lower rank is better. -1 means that the profile does not take it.
 export const rankOf = (profile: Profile, quality: string) => profile.items.findIndex((group) => group.includes(quality));
 
-const BUCKETS: Record<number, number> = { 480: 480, 576: 480, 720: 720, 1080: 1080, 2160: 2160 };
-
 // The rank of a profile in the chain. A group of a lower profile is worse than every group of a higher one.
 export const RANK_STRIDE = 1000;
 
@@ -80,11 +85,13 @@ export function explainProfile(profile: Profile) {
   };
 }
 
+const QUALITY_BY_SOURCE_RESOLUTION = new Map(QUALITIES.map((quality) => [`${quality.source}:${quality.resolution}`, quality.id]));
+
 // The quality of a release, or null when its source or its resolution is not on the list.
 export function qualityOf(source: ReleaseSource, resolution: number | null): string | null {
   if (source === 'dvd') return 'dvd';
-  if (!(['webdl', 'webrip', 'bluray', 'hdtv'] as string[]).includes(source) || resolution === null || !(resolution in BUCKETS)) return null;
-  return `${source}-${BUCKETS[resolution]}`;
+  if (resolution === null) return null;
+  return QUALITY_BY_SOURCE_RESOLUTION.get(`${source}:${resolution}`) ?? null;
 }
 
 // The rank of a file in a profile. A file with a known source and no resolution gets the best rank of that source in the profile.

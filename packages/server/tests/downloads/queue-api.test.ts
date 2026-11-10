@@ -38,6 +38,18 @@ describe('requests and summary', () => {
     expect((await api!.post('/queue/search', { titleKey: film.key })).body.started).toEqual([]);
   });
 
+  it('lets the user search a movie that waits for its release', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const film = movie({ rootId: 'movie', manualRelease: false, meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'theatrical', date: '2019-01-01T00:00:00.000Z' }] } });
+    pipe.db.data.titles[film.key] = film;
+    expect(pipe.finder.requestSearch(film.key)).toEqual([]);
+
+    const started = await api.post('/queue/search', { titleKey: film.key });
+    expect(started.status).toBe(202);
+    expect(started.body.started).toEqual([film.key]);
+  });
+
   it('names the quality of the release of an entry', async () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });

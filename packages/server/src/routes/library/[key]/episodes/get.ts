@@ -15,7 +15,7 @@ export function libraryEpisodes(): RequestHandler<{ key: string }> {
     const episodes: EpisodeRow[] = title.episodes
       .filter((episode) => episode.season === season)
       .map((episode) => {
-        const airs = episodeEligibleAt(episode.airDate, at.timeZone);
+        const airs = episodeEligibleAt(episode.airDate);
         const entry = db.data.queue[entryId(title.key, episode.season, episode.number)];
         return {
           season: episode.season,
@@ -23,7 +23,7 @@ export function libraryEpisodes(): RequestHandler<{ key: string }> {
           name: episode.name,
           airDate: episode.airDate,
           runtime: episode.runtime,
-          monitored: isMonitored(title, episode, at),
+          monitored: isMonitored(title, episode),
           override: episode.override,
           aired: airs !== null && airs <= at.now,
           hasFile: Boolean(episode.fileId && !at.files[episode.fileId]?.missing),

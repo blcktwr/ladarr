@@ -31,6 +31,8 @@ describe('settings', () => {
     expect(body.settings).toMatchObject({ setupCompleted: false, audio: null, keepQueueLogs: true });
     expect(body.settings).not.toHaveProperty('upgrades');
     expect(body.settings).not.toHaveProperty('defaultPreset');
+    expect(body.settings).not.toHaveProperty('region');
+    expect(body.settings).not.toHaveProperty('timeZone');
     expect(body.settings).not.toHaveProperty('maxAliases');
     expect(body.settings).not.toHaveProperty('recentDays');
     expect(body.presets).toEqual([
@@ -62,7 +64,7 @@ describe('settings', () => {
   });
 
   it('saves valid changes', async () => {
-    const changes = { region: 'AR', timeZone: 'America/Argentina/Buenos_Aires', language: 'es', theme: 'light', audio: { language: 'es', strict: true }, keepQueueLogs: false };
+    const changes = { language: 'es', theme: 'light', audio: { language: 'es', strict: true }, keepQueueLogs: false };
     expect((await app.patch('/settings', changes)).status).toBe(200);
     expect((await app.get('/settings')).body.settings).toMatchObject(changes);
     expect((await app.patch('/settings', { audio: null })).body.settings.audio).toBeNull();
@@ -70,8 +72,8 @@ describe('settings', () => {
   });
 
   it.each([
-    [{ region: 'ar' }, 'region'],
-    [{ timeZone: 'Mars/Base' }, 'timeZone'],
+    [{ region: 'AR' }, 'region'],
+    [{ timeZone: 'UTC' }, 'timeZone'],
     [{ language: 'fr' }, 'language'],
     [{ theme: 'blue' }, 'theme'],
     [{ defaultPreset: 'p1080' }, 'defaultPreset'],

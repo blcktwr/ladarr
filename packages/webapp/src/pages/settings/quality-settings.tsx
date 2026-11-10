@@ -1,8 +1,8 @@
 import type { ProfileData, QualityResponse, QualityRow, SizeLimits } from '@ladarr/shared/types';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, Plus } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { ActionMenu, Actions, Badge, Button, Checkbox, Confirm, Field, Hint, Modal, Section, Table } from 'nebula';
+import { ActionMenu, Actions, Badge, Button, Checkbox, Confirm, Field, Hint, Modal, Section, Table, Text } from 'nebula';
 import { Alert, ModalActions } from '../../components/index.ts';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { api } from '../../lib/api.ts';
@@ -42,21 +42,59 @@ function remove(slots: Slot[], index: number) {
   return next;
 }
 
+// The size limits of a quality, in MiB per minute of video. A limit belongs to the quality, so every profile that takes the quality uses the same one.
+type Sizes = { min: string; preferred: string; max: string };
+
+const toSizes = ({ min, preferred, max }: SizeLimits): Sizes => ({
+  min: String(min),
+  preferred: preferred === null ? '' : String(preferred),
+  max: max === null ? '' : String(max),
+});
+
+const toSizesOf = (qualities: QualityRow[]) => Object.fromEntries(qualities.map((quality) => [quality.id, toSizes(quality.sizes)]));
+
+// The three limits in order, or null. An empty preferred or max limit is not checked.
+function parseSizes({ min, preferred, max }: Sizes): SizeLimits | null {
+  const low = min.trim() === '' ? null : Number(min);
+  const mid = preferred.trim() === '' ? null : Number(preferred);
+  const high = max.trim() === '' ? null : Number(max);
+  const ordered =
+    low !== null && Number.isFinite(low) && low >= 0 &&
+    (mid === null || (Number.isFinite(mid) && mid >= low)) &&
+    (high === null || (Number.isFinite(high) && high >= (mid ?? low)));
+  return ordered ? { min: low, preferred: mid, max: high } : null;
+}
+
+// The three limits, in the order of the rows under an expanded resolution.
+const LIMITS = [
+  { key: 'min', label: 'Minimum', name: 'Minimum for {name}' },
+  { key: 'preferred', label: 'Preferred', name: 'Preferred for {name}' },
+  { key: 'max', label: 'Maximum', name: 'Maximum for {name}' },
+] as const;
+
 function ProfileModal({ profile, qualities, open, onOpenChange, onSaved }: { profile?: ProfileData; qualities: QualityRow[]; open: boolean; onOpenChange: (open: boolean) => void; onSaved: () => Promise<unknown> }) {
   const [draft, setDraft] = useState(() => toDraft(profile));
+  const [sizes, setSizes] = useState<Record<string, Sizes>>(() => toSizesOf(qualities));
+  const [expanded, setExpanded] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const { slots } = draft;
   const groups = toItems(slots);
   const ranks = slots.map((slot, index) => groups.findIndex((group) => group.includes(slot.id)) + 1 || index + 1);
   const set = (changes: Partial<Draft>) => setDraft({ ...draft, ...changes });
+  const setSize = (id: string, next: Sizes) => setSizes({ ...sizes, [id]: next });
+  const current = (quality: QualityRow) => sizes[quality.id] ?? toSizes(quality.sizes);
   // The table has a column for each source, the best first, and a row for each resolution, the highest first. A quality with no resolution, such as a DVD, goes in the lowest row.
   const resolutions = [...new Set(qualities.flatMap((quality) => quality.resolution ?? []))].sort((a, b) => b - a);
   const sources = [...new Set([...qualities].reverse().map((quality) => quality.source))];
   const sourceName = (source: string) => {
+    // The column of a remux is narrow, so its header drops "BluRay": the column next to it is BluRay.
+    if (source === 'remux') return 'Remux';
     const quality = qualities.find((candidate) => candidate.source === source)!;
     return quality.resolution ? quality.label.replace(` ${quality.resolution}p`, '') : quality.label;
   };
+  const qualityAt = (source: string, resolution: number) =>
+    qualities.find((candidate) => candidate.source === source && (candidate.resolution ?? resolutions.at(-1)) === resolution);
   const toggle = (id: string) => {
     const index = slots.findIndex((slot) => slot.id === id);
     set({ slots: index < 0 ? [...slots, { id, same: false }] : remove(slots, index) });
@@ -66,17 +104,28 @@ function ProfileModal({ profile, qualities, open, onOpenChange, onSaved }: { pro
   useEffect(() => {
     if (!open) return;
     setDraft(toDraft(profile));
+    setSizes(toSizesOf(qualities));
+    setExpanded(null);
     setError('');
   }, [open]);
 
   async function save() {
     if (!draft.name.trim()) return setError(t('Enter a name.'));
     if (!slots.length) return setError(t('Allow at least one quality.'));
+    const changed: { id: string; sizes: SizeLimits }[] = [];
+    for (const id of groups.flat()) {
+      const quality = qualities.find((candidate) => candidate.id === id);
+      if (!quality) continue;
+      const next = parseSizes(sizes[id] ?? toSizes(quality.sizes));
+      if (!next) return setError(t('The sizes are not in order. The minimum is the smallest, then the preferred size, then the maximum.'));
+      if (next.min !== quality.sizes.min || next.preferred !== quality.sizes.preferred || next.max !== quality.sizes.max) changed.push({ id, sizes: next });
+    }
     setPending(true);
     setError('');
     try {
       const body = { name: draft.name.trim(), items: groups };
       await api<{ profile: ProfileData }>(profile ? `/quality/profiles/${profile.id}` : '/quality/profiles', { method: profile ? 'PUT' : 'POST', body });
+      for (const { id, sizes: limits } of changed) await api(`/quality/sizes/${id}`, { method: 'PUT', body: limits });
       onOpenChange(false);
       await onSaved();
     } catch (err) {
@@ -98,120 +147,90 @@ function ProfileModal({ profile, qualities, open, onOpenChange, onSaved }: { pro
       <Section title={t('Qualities')}>
         <Table
           aria-label={t('Qualities')}
-          columns={[{ label: t('Resolution') }, ...sources.map((source) => ({ label: sourceName(source) }))]}
-          rows={resolutions.map((resolution) => ({
-            key: String(resolution),
-            cells: [
-              <div className="flex items-center gap-1">
-                {resolution}p
-                {RESOLUTION_INFO[resolution] && <Hint label={t('About {resolution}p', { resolution })}>{t(RESOLUTION_INFO[resolution])}</Hint>}
-              </div>,
-              ...sources.map((source) => {
-                const quality = qualities.find((candidate) => candidate.source === source && (candidate.resolution ?? resolutions.at(-1)) === resolution);
-                if (!quality) return null;
-                const index = slots.findIndex((slot) => slot.id === quality.id);
-                return (
-                  <div className="flex items-center gap-2">
-                    <Checkbox aria-label={quality.label} checked={index >= 0} onCheckedChange={() => toggle(quality.id)} />
-                    {/* The slot keeps its width without a rank, so the columns do not move when a quality is checked. */}
-                    <div className="w-10">{index >= 0 && <Badge>{ranks[index]}</Badge>}</div>
+          stickyFirst
+          minWidth="62rem"
+          columns={[
+            {
+              label: (
+                <div className="grid">
+                  <span>{t('Resolution')}</span>
+                  <Text variant="small">(MiB/min)</Text>
+                </div>
+              ),
+              width: '10rem',
+            },
+            ...sources.map((source) => ({ label: sourceName(source), width: '6.5rem' })),
+          ]}
+          rows={resolutions.map((resolution) => {
+            const rowQualities = sources
+              .map((source) => qualityAt(source, resolution))
+              .filter((quality): quality is QualityRow => quality !== undefined);
+            const open = expanded === resolution && rowQualities.length > 0;
+            return {
+              key: String(resolution),
+              active: open,
+              cells: [
+                <div className="grid">
+                  <div className="flex h-12 items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      iconOnly
+                      disabled={!rowQualities.length}
+                      aria-label={open ? t('Hide bitrates for {resolution}p', { resolution }) : t('Show bitrates for {resolution}p', { resolution })}
+                      onClick={() => setExpanded(open ? null : resolution)}
+                    >
+                      {open ? <ChevronDown /> : <ChevronRight />}
+                    </Button>
+                    {resolution}p
+                    {RESOLUTION_INFO[resolution] && <Hint label={t('About {resolution}p', { resolution })}>{t(RESOLUTION_INFO[resolution])}</Hint>}
                   </div>
-                );
-              }),
-            ],
-          }))}
+                  {open && (
+                    <div className="mt-3 grid gap-2.5">
+                      {LIMITS.map((limit) => (
+                        <div key={limit.key} className="flex h-7 items-center justify-end">
+                          <Text variant="small">{t(limit.label)}</Text>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>,
+                ...sources.map((source) => {
+                  const quality = qualityAt(source, resolution);
+                  if (!quality) return null;
+                  const index = slots.findIndex((slot) => slot.id === quality.id);
+                  return (
+                    <div className="grid">
+                      <div className="flex h-12 items-center gap-1">
+                        <Checkbox aria-label={quality.label} checked={index >= 0} onCheckedChange={() => toggle(quality.id)} />
+                        {index >= 0 && <Badge>{ranks[index]}</Badge>}
+                      </div>
+                      {open && (
+                        <div className="mt-3 grid gap-2.5">
+                          {LIMITS.map((limit) => (
+                            <Field
+                              key={limit.key}
+                              size="sm"
+                              hideLabel
+                              width="xs"
+                              label={t(limit.name, { name: quality.label })}
+                              type="number"
+                              min="0"
+                              step="any"
+                              placeholder={limit.key === 'min' ? undefined : '∞'}
+                              value={current(quality)[limit.key]}
+                              onValueChange={(text) => setSize(quality.id, { ...current(quality), [limit.key]: text })}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }),
+              ],
+            };
+          })}
         />
       </Section>
-      <ModalActions>
-        <Button pending={pending} onClick={save}>
-          {t('Save')}
-        </Button>
-      </ModalActions>
-    </Modal>
-  );
-}
-
-type Sizes = { min: string; preferred: string; max: string };
-
-const toSizes = ({ min, preferred, max }: SizeLimits): Sizes => ({
-  min: String(min),
-  preferred: preferred === null ? '' : String(preferred),
-  max: max === null ? '' : String(max),
-});
-
-// The three limits in order, or null. An empty preferred or max limit is not checked.
-function parseSizes({ min, preferred, max }: Sizes): SizeLimits | null {
-  const low = min.trim() === '' ? null : Number(min);
-  const mid = preferred.trim() === '' ? null : Number(preferred);
-  const high = max.trim() === '' ? null : Number(max);
-  const ordered =
-    low !== null && Number.isFinite(low) && low >= 0 &&
-    (mid === null || (Number.isFinite(mid) && mid >= low)) &&
-    (high === null || (Number.isFinite(high) && high >= (mid ?? low)));
-  return ordered ? { min: low, preferred: mid, max: high } : null;
-}
-
-// The size limits of the qualities of a profile, in MiB per minute of video. A limit belongs to the quality, so every profile that takes the quality uses the same one.
-function BitratesModal({ profile, qualities, open, onOpenChange, onSaved }: { profile: ProfileData; qualities: QualityRow[]; open: boolean; onOpenChange: (open: boolean) => void; onSaved: () => Promise<unknown> }) {
-  const ids = profile.items.flat();
-  const rows = ids.flatMap((id) => {
-    const quality = qualities.find((candidate) => candidate.id === id);
-    return quality ? [quality] : [];
-  });
-  const initial = () => Object.fromEntries(rows.map((quality) => [quality.id, toSizes(quality.sizes)]));
-  const [values, setValues] = useState<Record<string, Sizes>>(initial);
-  const [error, setError] = useState('');
-  const [pending, setPending] = useState(false);
-
-  // The modal opens with the saved limits, not with what an earlier try left in the form.
-  useEffect(() => {
-    if (!open) return;
-    setValues(initial());
-    setError('');
-  }, [open]);
-
-  const set = (id: string, sizes: Sizes) => setValues({ ...values, [id]: sizes });
-
-  async function save() {
-    const changed: { id: string; sizes: SizeLimits }[] = [];
-    for (const quality of rows) {
-      const sizes = parseSizes(values[quality.id]!);
-      if (!sizes) return setError(t('The sizes are not in order. The minimum is the smallest, then the preferred size, then the maximum.'));
-      if (sizes.min !== quality.sizes.min || sizes.preferred !== quality.sizes.preferred || sizes.max !== quality.sizes.max) changed.push({ id: quality.id, sizes });
-    }
-    if (!changed.length) return onOpenChange(false);
-    setPending(true);
-    setError('');
-    try {
-      for (const { id, sizes } of changed) await api(`/quality/sizes/${id}`, { method: 'PUT', body: sizes });
-      onOpenChange(false);
-      await onSaved();
-    } catch (err) {
-      setError(describeError(err));
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <Modal open={open} onOpenChange={onOpenChange} title={t('Bitrates')} width="lg">
-      {error && <Alert tone="danger">{error}</Alert>}
-      <Table
-        aria-label={t('Bitrates')}
-        columns={[{ label: t('Quality') }, { label: t('Minimum') }, { label: t('Preferred') }, { label: t('Maximum') }]}
-        rows={rows.map((quality) => {
-          const sizes = values[quality.id]!;
-          return {
-            key: quality.id,
-            cells: [
-              quality.label,
-              <Field hideLabel label={t('Minimum for {name}', { name: quality.label })} type="number" min="0" step="any" width="sm" suffix="MiB/min" value={sizes.min} onValueChange={(min) => set(quality.id, { ...sizes, min })} />,
-              <Field hideLabel label={t('Preferred for {name}', { name: quality.label })} type="number" min="0" step="any" width="sm" suffix="MiB/min" value={sizes.preferred} onValueChange={(preferred) => set(quality.id, { ...sizes, preferred })} />,
-              <Field hideLabel label={t('Maximum for {name}', { name: quality.label })} type="number" min="0" step="any" width="sm" suffix="MiB/min" value={sizes.max} onValueChange={(max) => set(quality.id, { ...sizes, max })} />,
-            ],
-          };
-        })}
-      />
       <ModalActions>
         <Button pending={pending} onClick={save}>
           {t('Save')}
@@ -228,8 +247,6 @@ export function Qualities() {
   // The modal of the profile stays on its last profile while it closes, so the close keeps its title.
   const [editing, setEditing] = useState<ProfileData | null>(null);
   const [editOpen, setEditOpen] = useState(false);
-  const [bitrates, setBitrates] = useState<ProfileData | null>(null);
-  const [bitratesOpen, setBitratesOpen] = useState(false);
   const [deleting, setDeleting] = useState<ProfileData | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const profiles = data?.profiles ?? [];
@@ -311,7 +328,6 @@ export function Qualities() {
                     label={t('Actions for {name}', { name: profile.name })}
                     items={[
                       { label: t('Edit'), onClick: () => { setEditing(profile); setEditOpen(true); } },
-                      { label: t('Bitrates'), onClick: () => { setBitrates(profile); setBitratesOpen(true); } },
                       { label: t('Delete'), danger: true, onClick: () => { setDeleting(profile); setDeleteOpen(true); } },
                     ]}
                   />
@@ -322,7 +338,6 @@ export function Qualities() {
         />
       )}
       <ProfileModal profile={editing ?? undefined} qualities={qualities} open={editOpen} onOpenChange={setEditOpen} onSaved={refresh} />
-      {bitrates && <BitratesModal profile={bitrates} qualities={qualities} open={bitratesOpen} onOpenChange={setBitratesOpen} onSaved={refresh} />}
       {deleting && (
         <Confirm
           open={deleteOpen}

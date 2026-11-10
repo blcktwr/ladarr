@@ -295,6 +295,62 @@ test('the quality profiles are an ordered priority chain', async ({ page }) => {
   await expect(moveDown('2160p')).toBeDisabled();
 });
 
+test('the bitrates of a resolution are in the dialog of the profile', async ({ page }) => {
+  await page.goto(`${URL_BASE}/settings`);
+  await page.getByRole('tab', { name: 'Quality' }).click();
+  await page.getByRole('button', { name: 'Actions for 1080p' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Bitrates' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Edit 1080p' });
+  await dialog.getByRole('button', { name: 'Show bitrates for 1080p' }).click();
+  const minimum = dialog.getByRole('spinbutton', { name: 'Minimum for WEB-DL 1080p' });
+  await expect(minimum).toHaveValue('15');
+  await minimum.fill('15.1');
+  await expect(minimum).toHaveValue('15.1');
+
+  try {
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(async () => (await stack.call('GET', '/quality')).body.qualities.find((quality: { id: string }) => quality.id === 'webdl-1080').sizes.min).toBe(15.1);
+  } finally {
+    // A size belongs to the quality, not to the profile, so the test puts the defaults back for the next tests.
+    await stack.call('PUT', '/quality/sizes/webdl-1080', { min: 15, preferred: 60, max: 150 });
+  }
+});
+
+test('the table of the profile scrolls sideways under its first column', async ({ page }) => {
+  // A narrow window makes the table wider than the dialog, so it scrolls sideways.
+  await page.setViewportSize({ width: 800, height: 900 });
+  await page.goto(`${URL_BASE}/settings`);
+  await page.getByRole('tab', { name: 'Quality' }).click();
+  await page.getByRole('button', { name: 'Actions for 1080p' }).click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Edit 1080p' });
+  const table = dialog.getByRole('table', { name: 'Qualities' });
+  const header = (name: string) => table.getByRole('columnheader', { name, exact: true });
+  // The header of the first column holds the unit, so its name has more than "Resolution".
+  const resolutionHeader = table.getByRole('columnheader', { name: /^Resolution/ });
+  await expect(resolutionHeader).toBeVisible();
+  for (const name of ['Remux', 'BluRay', 'WEBRip', 'WEB-DL', 'Raw-HD', 'HDTV', 'SDTV', 'DVD']) {
+    await expect(header(name)).toBeVisible();
+  }
+  await expect(table.getByRole('row').filter({ hasText: '576p' })).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Show bitrates for 1080p' }).click();
+  // The table is wider than the dialog, so it scrolls sideways. The first column stays at the left edge.
+  const resolutionBefore = (await resolutionHeader.boundingBox())!.x;
+  const sourceBefore = (await header('Remux').boundingBox())!.x;
+  await table.evaluate((element) => { (element.parentElement as HTMLElement).scrollLeft = 400; });
+  await page.waitForTimeout(200);
+  const resolutionAfter = (await resolutionHeader.boundingBox())!.x;
+  const sourceAfter = (await header('Remux').boundingBox())!.x;
+  expect(Math.abs(resolutionAfter - resolutionBefore)).toBeLessThanOrEqual(1);
+  expect(sourceBefore - sourceAfter).toBeGreaterThan(100);
+  await expect(table.getByRole('row').filter({ hasText: '1080p' })).toBeVisible();
+});
+
 test('the General tab changes the language of the interface', async ({ page }) => {
   await page.goto(`${URL_BASE}/settings`);
   await page.getByRole('combobox', { name: 'Language', exact: true }).click();
