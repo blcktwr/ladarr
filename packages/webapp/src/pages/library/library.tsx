@@ -31,8 +31,12 @@ const PAGE_SIZE = 48;
 const column = `grid gap-8 ${pageWidth}`;
 // The catalog has the margins of the app.
 const catalog = 'grid gap-8 p-6';
-// The title and the thumbnails of the catalog share a centered column, and their content aligns at its left edge.
+// The title of the catalog has a centered column, and its content aligns at its left edge.
 const catalogColumn = 'mx-auto w-[min(1200px,calc(100%-40px))]';
+// The thumbnails of the catalog span the window. The column is as wide as the columns of thumbnails that fit in it,
+// so the room that a column does not fill goes in equal parts to each side (10rem per thumbnail and 1.5rem between
+// them).
+const catalogTiles = 'mx-auto w-[calc(round(down,calc(100%+1.5rem),11.5rem)-1.5rem)]';
 
 function TitlePoster({ title, selected, onSelectedChange }: { title: TitleSummary; selected: boolean; onSelectedChange: (selected: boolean) => void }) {
   return (
@@ -92,7 +96,7 @@ function LibraryList() {
         <div className={catalogColumn}>
           <Text variant="title">{t('Catalog')}</Text>
         </div>
-        <div className={catalogColumn}>
+        <div className={catalogTiles}>
           <LoadingGallery />
         </div>
       </div>
@@ -139,7 +143,7 @@ function LibraryList() {
       {items.length === 0 ? (
         <EmptyState>{view !== 'all' ? t('No titles match this filter.') : type === 'all' ? t('Your catalog is empty. Search for a title to add it.') : t('No titles of this type.')}</EmptyState>
       ) : (
-        <div className={catalogColumn}>
+        <div className={catalogTiles}>
           <Gallery>
             {items.map((title) => (
               <Actions key={title.key}>
