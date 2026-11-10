@@ -166,27 +166,28 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
   return (
     <>
       <Section title={t('Rejected releases')}>
-        <List>
-          {items.map((item) => {
+        <Table
+          aria-label={t('Rejected releases')}
+          columns={[{ label: t('Release'), hideLabel: true }, { label: t('Actions'), align: 'end', hideLabel: true }]}
+          rows={items.map((item) => {
             const quality = releaseQuality(item.release);
             const size = formatBytes(item.release.sizeBytes);
-            return (
-              <Row key={`${item.release.indexerId}:${item.release.guid}`}>
-                <div className="flex w-full min-w-0 items-start gap-3">
-                  <div className="grid min-w-0 flex-1 gap-1">
-                    <Text variant="small">
-                      {quality} ({size})
-                    </Text>
-                    <Text>{item.release.title}</Text>
-                  </div>
-                  <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
-                    <Check />
-                  </Button>
-                </div>
-              </Row>
-            );
+            return {
+              key: `${item.release.indexerId}:${item.release.guid}`,
+              cells: [
+                <div className="grid gap-1">
+                  <Text variant="small">
+                    {quality} ({size})
+                  </Text>
+                  <Text>{item.release.title}</Text>
+                </div>,
+                <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
+                  <Check />
+                </Button>,
+              ],
+            };
           })}
-        </List>
+        />
       </Section>
       {chosen && (
         <Modal open onOpenChange={(open) => !open && close()} title={t('Download this release?')}>
