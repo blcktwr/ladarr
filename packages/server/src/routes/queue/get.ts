@@ -1,14 +1,15 @@
+import { get } from '../../core/db.ts';
 import type { QueuePage, QueueRow } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../core/db.ts';
 import type { Poller } from '../../library/downloads/poller.ts';
 import { isActive, loadingTitleKeys, queueKey, type QueueEntry } from '../../library/downloads/queue.ts';
 import type { ImportStatus } from '../../library/imports/status.ts';
 import { filtersOf, lanePositions, matches, MAX_PAGE, progressOf, reachedOf, shown, STAGE_RANK, titleOf, view } from '../../helpers/queue.ts';
 
-// One page of rows: a group for each series, and one row for each movie. Rows with the most advanced progress come
-// first, and ties keep the order of creation. A row leaves the list when its targets are all available.
-export function queueGet(db: Db, poller: Poller, importStatus: ImportStatus | undefined): RequestHandler {
+// One page of rows: one row for each season of a series, and one row for each movie. Rows with the most advanced
+// progress come first, and ties keep the order of creation. A row leaves the list when its targets are all available.
+export function queueGet(poller: Poller, importStatus: ImportStatus | undefined): RequestHandler {
+  const db = get();
   return (req, res) => {
     const f = filtersOf(req.query);
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), MAX_PAGE);
@@ -29,7 +30,7 @@ export function queueGet(db: Db, poller: Poller, importStatus: ImportStatus | un
     const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number; download: number; ready: boolean; searching: boolean }>();
     for (const entry of all) {
       if (!shown(db, entry) || (!f.cleared && entry.clearedAt)) continue;
-      const key = entry.season === null ? entry.id : entry.titleKey;
+      const key = entry.season === null ? entry.id : `${entry.titleKey}:${entry.season}`;
       const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY, download: -1, ready: false, searching: false };
       group.entries.push(entry);
       if (matches(db, entry, f)) group.matching++;
@@ -90,7 +91,7 @@ export function queueGet(db: Db, poller: Poller, importStatus: ImportStatus | un
         title: title.meta.title,
         year: title.meta.year,
         posterPath: title.meta.posterPath,
-        season: null,
+        season: first.season,
         total: group.entries.length,
         reached: reachedOf(group.entries),
         matching: group.matching,

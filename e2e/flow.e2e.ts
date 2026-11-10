@@ -359,14 +359,14 @@ test('series: add, season pack, crash, import', async ({ page }) => {
   await addFromSearch(page, 'Show Name', 'Show Name (2020)', true);
 
   await openActivity(page);
-  const groupRow = page.locator('[data-row="group:tv:1"]');
-  const groupMenu = page.getByRole('button', { name: 'Actions for Show Name (2020)' });
-  // The row of the series shows its status. The movie of the test before comes first, so the user selects the series.
+  const groupRow = page.locator('[data-row="group:tv:1:1"]');
+  const groupMenu = page.getByRole('button', { name: 'Actions for Show Name (2020) Season 1' });
+  // The row of the season shows its status. The movie of the test before comes first, so the user selects the season.
   await expect(groupRow).toContainText('Downloading');
-  await page.getByRole('button', { name: 'Inspect Show Name (2020)' }).click();
+  await page.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
   await expect(groupMenu).toBeVisible();
   // The poster and the name of the master row open the page of the title.
-  await groupRow.getByRole('link', { name: 'Show Name (2020)' }).click();
+  await groupRow.getByRole('link', { name: 'Show Name (2020) Season 1' }).click();
   await expect(page.getByRole('heading', { name: 'Show Name (2020)' })).toBeVisible();
   await openActivity(page);
   // One pack, one transfer, three targets.
@@ -379,7 +379,7 @@ test('series: add, season pack, crash, import', async ({ page }) => {
   await page.reload();
   // The page selects the first row, so the user selects the series. Its seasons are in the inspector, and the series
   // shows the status of its episodes.
-  await page.getByRole('button', { name: 'Inspect Show Name (2020)' }).click();
+  await page.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
   await expect(page.locator('[data-row="season:tv:1|1"]')).toBeVisible();
   await expect(groupRow).toContainText('Downloading');
   // A click on the button of the season opens its episodes in the inspector.

@@ -178,14 +178,14 @@ describe('requests and summary', () => {
     const list = (await api.get('/queue?stage=searching')).body;
     expect(list.total).toBe(2);
     expect(list.items.map((item: { key: string; counts: Record<string, number> }) => [item.key, item.counts])).toEqual([
-      ['tv:2', { fetching: 1 }],
-      ['tv:1', { searching: 1 }],
+      ['tv:2:1', { fetching: 1 }],
+      ['tv:1:1', { searching: 1 }],
     ]);
     // Fetching has no tab of its own.
     expect((await api.get('/queue?stage=fetching')).body.total).toBe(0);
   });
 
-  it('shows a series as one group, with the episodes of every season as lazy children', async () => {
+  it('shows each season of a series as its own group, with its episodes as lazy children', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
     const series = title({ rootId: 'tv', episodes: [aired(1), aired(2), episode(2, 1, '2020-02-01')] });
@@ -194,23 +194,52 @@ describe('requests and summary', () => {
     await until(() => pipe!.queue.get('tv:1:2x1')!.branch === 'waiting' && pipe!.queue.get('tv:1:1x2')!.branch === 'waiting');
 
     const list = (await api.get('/queue')).body;
-    expect(list.total).toBe(1);
-    expect(list.items.map((i: { kind: string; season: number | null; total: number; reached: { imported: number } }) => [i.kind, i.season, i.total, i.reached.imported])).toEqual([['group', null, 3, 0]]);
-    expect(list.items[0].counts).toEqual({ not_found: 3 });
-    // The summary counts the series, not its episodes: three targets in the same stage are one series.
+    expect(list.total).toBe(2);
+    expect(list.items.map((i: { kind: string; key: string; season: number | null; total: number; reached: { imported: number } }) => [i.kind, i.key, i.season, i.total, i.reached.imported])).toEqual([
+      ['group', 'tv:1:1', 1, 2, 0],
+      ['group', 'tv:1:2', 2, 1, 0],
+    ]);
+    expect(list.items.map((i: { counts: Record<string, number> }) => i.counts)).toEqual([{ not_found: 2 }, { not_found: 1 }]);
+    // The summary counts the series, not its seasons: every target of the series waits for its next search.
     expect((await api.get('/queue/summary')).body.counts).toEqual({ not_found: 1 });
     const children = (await api.get('/queue/groups/tv:1')).body.items;
     expect(children.map((c: { label: string }) => c.label)).toEqual(['Show Name S01E01', 'Show Name S01E02', 'Show Name S02E01']);
     expect(children[0].reason.message).toContain('Not found in any indexers');
     expect(children[0].search).toMatchObject({ result: 'no_results' });
+    // The group of a season reads the episodes of that season only.
+    const season2 = (await api.get('/queue/groups/tv:1?season=2')).body.items;
+    expect(season2.map((c: { label: string }) => c.label)).toEqual(['Show Name S02E01']);
 
     // Filters. A target that waits for its next search is in Waiting, also when the search found nothing.
-    expect((await api.get('/queue?stage=queued')).body.total).toBe(1);
+    expect((await api.get('/queue?stage=queued')).body.total).toBe(2);
     expect((await api.get('/queue?stage=searching')).body.total).toBe(0);
     expect((await api.get('/queue?stage=not_found')).body.total).toBe(0);
     expect((await api.get('/queue?stage=waiting&type=movie')).body.total).toBe(0);
-    expect((await api.get('/queue?q=show')).body.total).toBe(1);
+    expect((await api.get('/queue?q=show')).body.total).toBe(2);
     expect((await api.get('/queue?q=other')).body.total).toBe(0);
+  });
+
+  it('gives each season of a series its own slot in the stage that it reached', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const series = title({ rootId: 'tv', episodes: [aired(1), episode(2, 1, '2020-02-01')] });
+    pipe.db.data.titles[series.key] = series;
+    const first = pipe.queue.ensure(series.key, 1, 1);
+    const second = pipe.queue.ensure(series.key, 2, 1);
+    pipe.queue.request(first, 'test');
+    pipe.queue.request(second, 'test');
+    pipe.queue.move(first, { stage: 'fetching', branch: null, reason: null }, 'test');
+    pipe.queue.move(second, { stage: 'importing' }, 'test');
+
+    // The season that fetches its release shows in Searching, and the season that imports shows in Importing.
+    const searching = (await api.get('/queue?stage=searching')).body;
+    expect(searching.items.map((item: { key: string; season: number | null; counts: Record<string, number> }) => [item.key, item.season, item.counts])).toEqual([['tv:1:1', 1, { fetching: 1 }]]);
+    const importing = (await api.get('/queue?stage=importing')).body;
+    expect(importing.items.map((item: { key: string; season: number | null; counts: Record<string, number> }) => [item.key, item.season, item.counts])).toEqual([['tv:1:2', 2, { importing: 1 }]]);
+    // Both seasons are rows of the list, also when the same series has one in each stage.
+    expect((await api.get('/queue')).body.items.map((item: { key: string }) => item.key)).toEqual(['tv:1:2', 'tv:1:1']);
+    // The summary counts the series once for each stage that its seasons show.
+    expect((await api.get('/queue/summary')).body.counts).toEqual({ fetching: 1, importing: 1 });
   });
 
   it('shows a series as searching from the add, before its episodes load', async () => {
@@ -317,7 +346,7 @@ describe('requests and summary', () => {
 });
 
 describe('order', () => {
-  // The rows of the default view, as "movie:11" for a movie and "group:tv:1" for a series.
+  // The rows of the default view, as "movie:11" for a movie and "group:tv:1:1" for a season of a series.
   const rows = async () => (await api!.get('/queue')).body.items.map((row: { kind: string; id: string; key: string }) => (row.kind === 'group' ? `group:${row.key}` : row.id));
 
   // A target of the queue at the place in time of the test, before its first move.
@@ -391,7 +420,7 @@ describe('order', () => {
     pipe.queue.move(target('movie:12', 3_000), { stage: 'validating' }, 'test');
 
     // The group is at Downloading: above the search and below the validation.
-    expect(await rows()).toEqual(['movie:12', 'group:tv:1', 'movie:11']);
+    expect(await rows()).toEqual(['movie:12', 'group:tv:1:1', 'movie:11']);
   });
 
   it('does not let the number of episodes decide the order of two series that tie', async () => {
@@ -405,7 +434,7 @@ describe('order', () => {
     for (let number = 1; number <= 2; number++) pipe.queue.move(target('tv:1', 2_000 + number, 1, number), { stage: 'downloading' }, 'test');
 
     // Both series are at Downloading, so the one that came first goes first.
-    expect(await rows()).toEqual(['group:tv:2', 'group:tv:1']);
+    expect(await rows()).toEqual(['group:tv:2:1', 'group:tv:1:1']);
   });
 
   it('puts the movie that has more of its download above the one that was created earlier', async () => {
@@ -479,7 +508,7 @@ describe('order', () => {
 
     // The first series came first and has the episode that is further, but the second series goes first: its
     // slowest downloading episode has more of its file than the slowest one of the first series.
-    expect(await rows()).toEqual(['group:tv:1', 'group:tv:2']);
+    expect(await rows()).toEqual(['group:tv:1:1', 'group:tv:2:1']);
   });
 
   it('leaves finished rows out of the list and keeps the group', async () => {
@@ -499,7 +528,7 @@ describe('order', () => {
     pipe.queue.move(target('tv:1', 3_001, 1, 2), { stage: 'downloading' }, 'test');
 
     const list = (await api.get('/queue')).body;
-    expect(list.items.map((row: { kind: string; key: string }) => [row.kind, row.key])).toEqual([['group', 'tv:1']]);
+    expect(list.items.map((row: { kind: string; key: string }) => [row.kind, row.key])).toEqual([['group', 'tv:1:1']]);
     expect(list.items[0].reached.imported).toBe(1);
 
     // The entry of a finished target still answers.
@@ -544,7 +573,7 @@ describe('order', () => {
     pipe.queue.move(target('tv:1', 2_001, 1, 2), { branch: 'waiting' }, 'test');
     pipe.queue.move(target('movie:12', 3_000), { stage: 'downloading' }, 'test');
 
-    expect(await rows()).toEqual(['movie:12', 'group:tv:1', 'movie:11']);
+    expect(await rows()).toEqual(['movie:12', 'group:tv:1:1', 'movie:11']);
   });
 });
 

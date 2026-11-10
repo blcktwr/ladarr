@@ -501,7 +501,7 @@ export type QueueGroupRow = {
   title: string;
   year: number | null;
   posterPath: string | null;
-  // A group covers every season of the series, so it has no season.
+  // A group is one season of a series, and a series that waits for its episodes has no season.
   season: number | null;
   total: number;
   reached: QueueReached;

@@ -11,7 +11,7 @@ import { JobsPanel } from './activity-jobs.tsx';
 import { SeriesBlocklist } from './activity-blocklist.tsx';
 import { MatchDialog } from './activity-match.tsx';
 import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
-import { catalogPath, formatBytes, posterUrl, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
+import { catalogPath, formatBytes, groupName, posterUrl, seasonName, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
 import { commentParts } from '../../lib/links.ts';
@@ -36,9 +36,11 @@ const query = (f: Filters) => {
   return params;
 };
 const pageKey = (f: Filters, page: number) => `/queue?${query(f)}&limit=${PAGE}&offset=${page * PAGE}`;
-const groupKey = (f: Filters, group: QueueGroupRow) => `/queue/groups/${group.titleKey}?${query(f)}`;
-
-const groupName = (group: QueueGroupRow) => `${group.title}${group.year ? ` (${group.year})` : ''}`;
+const groupKey = (f: Filters, group: QueueGroupRow) => {
+  const params = query(f);
+  if (group.season !== null) params.set('season', String(group.season));
+  return `/queue/groups/${group.titleKey}?${params}`;
+};
 
 // The key of a row on the page: one group of episodes, or one movie.
 const rowKey = (row: QueueRow) => (row.kind === 'group' ? `group:${row.key}` : `entry:${row.id}`);
@@ -437,8 +439,6 @@ function GroupLine({ group }: { group: QueueGroupRow }) {
   const key = overallKey(group.counts);
   return key ? <StatusText small status={statusLabel(key)} icon={key} /> : <Text variant="small">—</Text>;
 }
-
-const seasonName = (season: number) => (season === 0 ? t('Specials') : t('Season {number}', { number: season }));
 
 // The menu of a series in the inspector. A series whose episodes are loading has no target to act on yet.
 function groupMenu(group: QueueGroupRow, openLogs: (group: QueueGroupRow) => void) {

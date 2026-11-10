@@ -48,7 +48,7 @@ test('keeps the queue on a failed action and a failed refresh', async ({ page })
 test('shows the part of a download that the client reports, without a reload', async ({ page }) => {
   test.setTimeout(240_000);
   await page.goto(`${URL_BASE}/activity`);
-  await page.getByRole('button', { name: 'Inspect Show Name (2020)' }).click();
+  await page.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
   await page.getByRole('button', { name: 'Show episodes of Season 1' }).click();
   const table = page.getByRole('table', { name: 'Episodes of season 1' });
   await expect(table).toBeVisible();
@@ -65,14 +65,14 @@ test('shows the part of a download that the client reports, without a reload', a
 
 test('shows the selected title in the inspector', async ({ page }) => {
   await page.goto(`${URL_BASE}/activity`);
-  const seriesRow = page.locator('[data-row="group:tv:1"]');
+  const seriesRow = page.locator('[data-row="group:tv:1:1"]');
   const movieRow = page.locator('[data-row="entry:movie:2"]');
-  const inspectSeries = page.getByRole('button', { name: 'Inspect Show Name (2020)' });
+  const inspectSeries = page.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' });
   const inspectMovie = page.getByRole('button', { name: 'Inspect Movie Name (2019)' });
 
   // The first row is selected when the page opens, so the inspector shows the series and its seasons.
   await expect(seriesRow).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Show Name (2020)' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Show Name (2020) Season 1' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Seasons' })).toBeVisible();
   await expect(inspectSeries).toHaveAttribute('aria-pressed', 'true');
   await expect(inspectMovie).toHaveAttribute('aria-pressed', 'false');

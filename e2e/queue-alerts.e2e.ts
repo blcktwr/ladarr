@@ -58,7 +58,7 @@ test('shows the status on the series and on each episode', async ({ page, contex
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
   await page.goto(`${URL_BASE}/activity`);
   // The row of the series holds the status of its episodes.
-  await expect(page.locator('[data-row="group:tv:1"]')).toContainText('Sending');
+  await expect(page.locator('[data-row="group:tv:1:1"]')).toContainText('Sending');
   // A click on the row of the season opens its episodes under the table, and a second click closes them.
   const season = page.locator('[data-row="season:tv:1|1"]');
   await season.click();
