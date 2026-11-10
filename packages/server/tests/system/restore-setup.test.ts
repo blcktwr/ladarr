@@ -31,7 +31,7 @@ async function sourceBackup() {
   db.data.settings.region = 'FR';
   db.data.blocklist = { a: { title: 'Blocked', reason: 'bad', at: 1 } };
   const sourceDir = fresh();
-  const { name } = await createBackup(db, sourceDir, 'manual');
+  const { name } = await createBackup(sourceDir, 'manual');
   return readFileSync(join(sourceDir, name));
 }
 

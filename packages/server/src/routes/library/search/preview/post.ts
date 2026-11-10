@@ -1,4 +1,4 @@
-import { get } from '../../../../core/db.ts';
+import { db } from '../../../../core/db.ts';
 import { randomUUID } from 'node:crypto';
 import type { SearchPlan } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
@@ -9,7 +9,6 @@ import type { Title } from '../../../../library/library.ts';
 import { isObject, MAX_KEYS, MAX_PLANS, plans, SAMPLE, startable, type Kind } from '../plans.ts';
 
 export function librarySearchPreview(finder: Finder): RequestHandler {
-  const db = get();
   return (req, res) => {
     const body = isObject(req.body) ? req.body : {};
     const kind: Kind = body.kind === 'upgrades' ? 'upgrades' : 'search';
@@ -22,14 +21,14 @@ export function librarySearchPreview(finder: Finder): RequestHandler {
       if (!Array.isArray(body.keys) || body.keys.length > MAX_KEYS || !body.keys.every((key) => typeof key === 'string')) return void res.status(400).json({ error: 'invalid_selection' });
       titles = [...new Set<string>(body.keys)].flatMap((key) => db.data.titles[key] ?? []);
     } else {
-      const filter = libraryFilter(db, body.filter);
+      const filter = libraryFilter(body.filter);
       if ('error' in filter) return void res.status(400).json({ error: filter.error });
       const type = libraryType(body.type);
       titles = Object.values(db.data.titles).filter((title) => matchesType(title, type) && filter.test(title));
     }
 
     // The chosen resolution must be one that the profile chain of a requested title defines above a file.
-    if (upgrade && titles.length > 0 && !titles.some((title) => upgradeResolutions(db, title).includes(resolution as number))) return void res.status(409).json({ error: 'no_better_qualities' });
+    if (upgrade && titles.length > 0 && !titles.some((title) => upgradeResolutions(title).includes(resolution as number))) return void res.status(409).json({ error: 'no_better_qualities' });
     const counted = titles
       .map((title) => ({ title, targets: kind === 'upgrades' ? finder.upgradeCount(title, resolution as number) : startable(finder, title) }))
       .filter((item) => item.targets > 0)

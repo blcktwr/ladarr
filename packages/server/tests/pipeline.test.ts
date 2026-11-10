@@ -528,7 +528,7 @@ describe('item logs', () => {
 
 describe('paused queue', () => {
   it('adds the target to the queue, and searches only after the resume', async () => {
-    pipe = await startPipeline({ handlers: ({ db, queue, finder }) => ({ 'queue.initial': queueInitialHandler({ db, queue, finder }) }) });
+    pipe = await startPipeline({ handlers: ({ db, queue, finder }) => ({ 'queue.initial': queueInitialHandler({ queue, finder }) }) });
     const film = movie({ rootId: 'movie', manualRelease: true });
     pipe.db.data.titles[film.key] = film;
     pipe.tracker.state.items = [{ title: 'Movie.Name.2019.1080p.BluRay-GRP', size: 100 * 120 * MIB }];

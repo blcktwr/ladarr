@@ -1,4 +1,4 @@
-import { get } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import type { RequestHandler } from 'express';
 import type { MediaType, Tmdb } from '../../metadata/tmdb.ts';
 import { inLibrary, notFoundAsEmpty, oldestFirst } from '../../helpers/search.ts';
@@ -7,8 +7,7 @@ const MAX_QUERY = 200;
 
 // Finds titles by name, or by `tmdb:<id>` with a media type, or by `tvdb:<id>` for a series.
 export function searchGet(tmdb: Tmdb | undefined): RequestHandler {
-  const db = get();
-  const map = inLibrary(db);
+  const map = inLibrary();
   return async (req, res) => {
     if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
     const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';

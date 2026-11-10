@@ -1,9 +1,8 @@
-import { get } from '../../../../core/db.ts';
+import { db } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { parseProfile } from '../../../../helpers/quality.ts';
 
 export function qualityProfileUpdate(): RequestHandler<{ id: string }> {
-  const db = get();
   return async (req, res) => {
     const current = db.data.profiles[req.params.id];
     if (!current || !Object.hasOwn(db.data.profiles, req.params.id)) return void res.status(404).json({ error: 'not_found' });

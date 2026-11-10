@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { copyFile as fsCopyFile, link as fsLink, lstat, mkdir, readdir, realpath, rename as fsRename, rm, stat, statfs, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
-import { get, type Db, type MediaFile } from '../../core/db.ts';
+import { type Db, type MediaFile, db } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
 import { enqueue as enqueueJob, JobError } from '../../core/jobs.ts';
 import type { Episode, Title } from '../library.ts';
@@ -54,7 +54,6 @@ const STEP_LOG: Record<JournalStep['state'], { event: string; message: string }>
 };
 
 type Deps = {
-  db: Db;
   queue: Queue;
   events: Events;
   clients: Clients;
@@ -122,13 +121,13 @@ export async function listVideos(base: string, { skipHidden = false }: { skipHid
   return found;
 }
 
-export function createImporter({ db, queue, events, clients, save, probe = probeFile, status, fs = {}, afterStep, now = Date.now }: Deps) {
+export function createImporter({ queue, events, clients, save, probe = probeFile, status, fs = {}, afterStep, now = Date.now }: Deps) {
   const ops: Fs = { link: fs.link ?? fsLink, copyFile: fs.copyFile ?? fsCopyFile, rename: fs.rename ?? fsRename };
 
   const entriesOf = (ids: string[]) => ids.map((id) => queue.get(id)).filter((entry): entry is QueueEntry => Boolean(entry));
   const block = (entries: QueueEntry[], code: string, detail?: string) => {
     for (const entry of entries) {
-      catalog.warn('import_blocked', `Import blocked: ${code}${detail ? ` (${detail})` : ''}`, itemFields(db, entry), { code, detail: detail ?? null });
+      catalog.warn('import_blocked', `Import blocked: ${code}${detail ? ` (${detail})` : ''}`, itemFields(entry), { code, detail: detail ?? null });
       queue.endAttempt(entry, 'failed', code);
       queue.move(entry, { reason: { code, ...(detail ? { detail } : {}) } }, 'import blocked', code);
     }
@@ -138,7 +137,7 @@ export function createImporter({ db, queue, events, clients, save, probe = probe
   // the pack does not wait for a user action or a later verification.
   const uncovered = (entries: QueueEntry[]) => {
     for (const entry of entries) {
-      catalog.warn('import_uncovered', 'The download does not cover this episode. The search starts again.', itemFields(db, entry), { code: 'file_not_found' });
+      catalog.warn('import_uncovered', 'The download does not cover this episode. The search starts again.', itemFields(entry), { code: 'file_not_found' });
       queue.endAttempt(entry, 'failed', 'file_not_found');
       entry.release = null;
       entry.transferHash = null;
@@ -270,8 +269,8 @@ export function createImporter({ db, queue, events, clients, save, probe = probe
     db.data.imports[journal.id] = journal;
     for (const step of steps) {
       for (const entry of entriesOf(step.entryIds)) {
-        catalog.info('import_started', `Import started with ${steps.length} ${steps.length === 1 ? 'file' : 'files'}`, itemFields(db, entry), { files: steps.length, hash });
-        catalog.info('import_planned', STEP_LOG.planned.message, itemFields(db, entry), {
+        catalog.info('import_started', `Import started with ${steps.length} ${steps.length === 1 ? 'file' : 'files'}`, itemFields(entry), { files: steps.length, hash });
+        catalog.info('import_planned', STEP_LOG.planned.message, itemFields(entry), {
           state: step.state,
           source: step.source,
           dest: step.dest,
@@ -362,7 +361,7 @@ export function createImporter({ db, queue, events, clients, save, probe = probe
       if (!(entry.stage === 'queued' || entry.stage === 'searching' || ((entry.stage === 'validating' || entry.stage === 'importing') && entry.reason !== null))) continue;
       queue.endAttempt(entry, 'imported', 'imported by hand');
       entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };
-      catalog.info('import_completed', `Import completed by hand: ${step.dest}`, itemFields(db, entry), { path: step.dest, method: step.method, validation: step.validation, manual: true });
+      catalog.info('import_completed', `Import completed by hand: ${step.dest}`, itemFields(entry), { path: step.dest, method: step.method, validation: step.validation, manual: true });
       queue.move(entry, { stage: 'available', branch: null, reason: null }, 'imported by hand', step.method ?? undefined);
     }
   }
@@ -401,7 +400,7 @@ export function createImporter({ db, queue, events, clients, save, probe = probe
     if (journal.sourceBase) settleQueue(title, step);
     for (const entry of entriesOf(step.entryIds)) {
       entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };
-      catalog.info('import_completed', `Import completed: ${step.dest}`, itemFields(db, entry), { path: step.dest, method: step.method, validation: step.validation });
+      catalog.info('import_completed', `Import completed: ${step.dest}`, itemFields(entry), { path: step.dest, method: step.method, validation: step.validation });
       queue.endAttempt(entry, 'imported');
       queue.move(entry, { stage: 'available', branch: null, reason: null }, 'imported', step.method ?? undefined);
     }
@@ -469,7 +468,7 @@ export function createImporter({ db, queue, events, clients, save, probe = probe
       const info = STEP_LOG[step.state];
       for (const entry of entriesOf(step.entryIds)) {
         queue.touch(entry);
-        catalog.info(info.event, info.message, itemFields(db, entry), {
+        catalog.info(info.event, info.message, itemFields(entry), {
           state: step.state,
           source: step.source,
           dest: step.dest,
@@ -531,7 +530,7 @@ export function createImporter({ db, queue, events, clients, save, probe = probe
           status?.problem(journal.id, step.source, problem.code, problem.message === problem.code ? undefined : problem.message);
           const affected = entriesOf(step.entryIds);
           if (affected.length) {
-            for (const entry of affected) catalog.warn('import_failed', `Import failed: ${problem.code} (${step.source})`, itemFields(db, entry), { code: problem.code, state: step.state, file: step.source, dest: step.dest });
+            for (const entry of affected) catalog.warn('import_failed', `Import failed: ${problem.code} (${step.source})`, itemFields(entry), { code: problem.code, state: step.state, file: step.source, dest: step.dest });
           } else log.warn('import step failed', { code: problem.code, state: step.state });
         } else throw error;
       }
@@ -579,7 +578,6 @@ export function createImporter({ db, queue, events, clients, save, probe = probe
 
 // The IDs of the downloads that have an unfinished import, so a start of the server can finish them.
 export const unfinishedImports = () => {
-  const db = get();
   return [...new Set(Object.values(db.data.imports).map((journal) => journal.hash))];
 };
 

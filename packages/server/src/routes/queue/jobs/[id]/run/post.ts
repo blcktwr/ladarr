@@ -1,10 +1,9 @@
-import { get } from '../../../../../core/db.ts';
+import { db } from '../../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { isItemJob } from '../../../../../helpers/queue.ts';
 
 // A job of the item flow starts now, instead of waiting for its time. A paused queue still holds it.
 export function queueJobRunPost(persist: () => void = () => {}): RequestHandler<{ id: string }> {
-  const db = get();
   return (req, res) => {
     const job = db.data.jobs[req.params.id];
     if (!job || !isItemJob(job)) return void res.status(404).json({ error: 'not_found' });

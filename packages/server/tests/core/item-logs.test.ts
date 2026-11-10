@@ -251,7 +251,7 @@ describe('item logs', () => {
     expect(existsSync(itemPath(file, 'tv:1:1x2'))).toBe(true);
     expect(existsSync(itemPath(file, 'movie:2'))).toBe(true);
 
-    dropTitle(db, 'tv:1', queue);
+    dropTitle('tv:1', queue);
     expect(existsSync(itemPath(file, 'tv:1:1x1'))).toBe(false);
     expect(existsSync(itemPath(file, 'tv:1:1x2'))).toBe(false);
     // The logs of another title stay.

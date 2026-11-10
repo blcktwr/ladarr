@@ -1,5 +1,5 @@
 import type { ClientState } from '@ladarr/shared/enums';
-import { get } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import { ClientError, createQbittorrent, type ClientConfig, type ClientHandle } from './qbittorrent.ts';
 
 // The clients that are on. A change of the settings makes the connection of that client again.
@@ -11,7 +11,6 @@ export type Clients = {
 };
 
 export function createClients(fetchImpl?: typeof fetch): Clients {
-  const db = get();
   const handles = new Map<string, { key: string; handle: ClientHandle }>();
   const all = () => {
     const list = db.data.downloadClients

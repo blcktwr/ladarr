@@ -1,4 +1,4 @@
-import { get } from '../../../core/db.ts';
+import { db } from '../../../core/db.ts';
 import { randomUUID } from 'node:crypto';
 import type { RequestHandler } from 'express';
 import type { EnqueueInput, Job } from '../../../core/jobs.ts';
@@ -8,7 +8,6 @@ import { plans, progress } from '../../../helpers/migration.ts';
 
 // Writes the ledger, and a job adds the titles. A restart keeps the rest of the work.
 export function migrationImport(enqueue: (input: EnqueueInput) => Job): RequestHandler {
-  const db = get();
   return (req, res) => {
     const plan = typeof req.body?.planId === 'string' ? plans.get(req.body.planId) : undefined;
     if (!plan) return void res.status(404).json({ error: 'plan_not_found' });
@@ -41,13 +40,13 @@ export function migrationImport(enqueue: (input: EnqueueInput) => Job): RequestH
       // A title that is in the library already has no request. Its verification runs now, with the new facts of the source.
       const current = plan.existing.get(row.ledgerKey);
       if (!current) continue;
-      applyExisting(db, current);
-      requestVerification(db, enqueue, current.key, { downloads: current.downloads, episodes: current.episodes });
+      applyExisting(current);
+      requestVerification(enqueue, current.key, { downloads: current.downloads, episodes: current.episodes });
       verified++;
     }
     if (queued || resumed) enqueue({ type: 'migration.import', dedupeKey: 'migration.import' });
     // The plan is spent. A new preview shows what is left.
     plans.delete(req.body.planId);
-    res.status(202).json({ queued, verified, ...progress(db) });
+    res.status(202).json({ queued, verified, ...progress() });
   };
 }

@@ -321,7 +321,7 @@ describe('requests that change data', () => {
     const db = await open('unused.json');
     const worker = fakeWorker();
     const restorer = createRestorer({ dir: backupDir, worker, drainMs });
-    const { name } = await createBackup(db, backupDir, 'manual');
+    const { name } = await createBackup(backupDir, 'manual');
     return { db, worker, restorer, name };
   };
   const response = () => new EventEmitter() as unknown as Response;
@@ -372,7 +372,7 @@ describe('the file on the disk', () => {
     await db.write();
     const worker = fakeWorker();
     const restorer = createRestorer({ dir: backupDir, worker });
-    const { name } = await createBackup(db, backupDir, 'manual');
+    const { name } = await createBackup(backupDir, 'manual');
 
     db.data.settings.region = 'DE';
     await db.write();
@@ -506,7 +506,7 @@ describe('restore with an interrupted import journal', () => {
 
     beforeBackup?.(pipe.db.data);
     const backupDir = fresh();
-    const { name } = await createBackup(pipe.db, backupDir, 'manual');
+    const { name } = await createBackup(backupDir, 'manual');
     // The backup holds the queue entry and the journal, because it holds the database.
     const saved = await readBackup(readFileSync(join(backupDir, name)));
     expect(Object.keys(saved.data.imports)).toHaveLength(1);

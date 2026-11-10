@@ -52,7 +52,7 @@ describe('dates', () => {
 describe('calendar events', () => {
   it('puts episodes on their air date and keeps unknown dates outside', async () => {
     const db = await dbWith(show('tv:1', { episodes: [episode(1, 1, '2024-06-10'), episode(1, 2, '2024-06-17'), episode(1, 3, null), episode(1, 4, null), episode(1, 5, '2025-06-01')] }));
-    const { events, undated } = calendarEvents(db, { from: '2024-06-01', to: '2024-06-30', monitored: true }, NOW);
+    const { events, undated } = calendarEvents({ from: '2024-06-01', to: '2024-06-30', monitored: true }, NOW);
     expect(events.map((e) => [e.id, e.day, e.at, e.episodeName])).toEqual([
       ['tv:1:1x1', '2024-06-10', null, 'Episode 1'],
       ['tv:1:1x2', '2024-06-17', null, 'Episode 2'],
@@ -62,7 +62,7 @@ describe('calendar events', () => {
 
   it('includes both ends of the range and nothing outside it', async () => {
     const db = await dbWith(show('tv:1', { episodes: [episode(1, 1, '2024-05-31'), episode(1, 2, '2024-06-01'), episode(1, 3, '2024-06-30'), episode(1, 4, '2024-07-01')] }));
-    const days = calendarEvents(db, { from: '2024-06-01', to: '2024-06-30', monitored: true }, NOW).events.map((e) => e.day);
+    const days = calendarEvents({ from: '2024-06-01', to: '2024-06-30', monitored: true }, NOW).events.map((e) => e.day);
     expect(days).toEqual(['2024-06-01', '2024-06-30']);
   });
 
@@ -73,12 +73,12 @@ describe('calendar events', () => {
       film('movie:3', [digital('2024-06-12T00:00:00.000Z')], { paused: true }),
     );
     const range = { from: '2024-06-01', to: '2024-06-30' };
-    expect(calendarEvents(db, { ...range, monitored: true }, NOW).events.map((e) => [e.id, e.paused])).toEqual([
+    expect(calendarEvents({ ...range, monitored: true }, NOW).events.map((e) => [e.id, e.paused])).toEqual([
       ['tv:2:1x1', true],
       ['movie:3', true],
       ['tv:1:1x2', false],
     ]);
-    expect(calendarEvents(db, { ...range, monitored: false }, NOW).events.map((e) => [e.id, e.monitored])).toEqual([
+    expect(calendarEvents({ ...range, monitored: false }, NOW).events.map((e) => [e.id, e.monitored])).toEqual([
       ['tv:1:1x1', false],
       ['tv:2:1x1', true],
       ['movie:3', true],
@@ -90,7 +90,7 @@ describe('calendar events', () => {
 
   it('filters by media type', async () => {
     const db = await dbWith(show('tv:1', { episodes: [episode(1, 1, '2024-06-10')] }), film('movie:2', [digital('2024-06-10T00:00:00.000Z')]));
-    const ids = (type?: 'movie' | 'tv') => calendarEvents(db, { ...all, type }, NOW).events.map((e) => e.id);
+    const ids = (type?: 'movie' | 'tv') => calendarEvents({ ...all, type }, NOW).events.map((e) => e.id);
     expect(ids('movie')).toEqual(['movie:2']);
     expect(ids('tv')).toEqual(['tv:1:1x1']);
     expect(ids()).toEqual(['movie:2', 'tv:1:1x1']);
@@ -103,7 +103,7 @@ describe('calendar events', () => {
       film('movie:3', [digital('2024-06-10T00:00:00.000Z', 'FR')]),
       film('movie:4', []),
     );
-    const { events, undated } = calendarEvents(db, all, NOW);
+    const { events, undated } = calendarEvents(all, NOW);
     expect(events.map((e) => [e.id, e.day])).toEqual([['movie:1', '2024-06-05']]);
     expect(undated.map((u) => u.titleKey)).toEqual(['movie:2', 'movie:3', 'movie:4']);
   });
@@ -112,7 +112,7 @@ describe('calendar events', () => {
     const db = await dbWith(film('movie:1', [digital('2024-06-01T00:00:00.000Z')]), film('movie:2', [digital('2024-06-01T22:00:00.000Z')]));
     for (const [timeZone, expected] of [['UTC', ['2024-06-01', '2024-06-01']], ['Pacific/Auckland', ['2024-06-01', '2024-06-02']], ['America/Los_Angeles', ['2024-06-01', '2024-06-01']]] as const) {
       db.data.settings.timeZone = timeZone;
-      const events = calendarEvents(db, all, NOW).events;
+      const events = calendarEvents(all, NOW).events;
       expect(events.map((e) => e.day)).toEqual(expected);
       expect(events.map((e) => e.at)).toEqual([null, Date.UTC(2024, 5, 1, 22)]);
     }
@@ -123,7 +123,7 @@ describe('calendar events', () => {
     // 2024-06-15 12:00 UTC is the end of the date in Auckland but not in Los Angeles.
     const state = (timeZone: string) => {
       db.data.settings.timeZone = timeZone;
-      return calendarEvents(db, all, NOW).events[0]!.availability;
+      return calendarEvents(all, NOW).events[0]!.availability;
     };
     expect(state('Pacific/Auckland')).toBe('missing');
     expect(state('America/Los_Angeles')).toBe('waiting');
@@ -133,7 +133,7 @@ describe('calendar events', () => {
     const db = await dbWith(show('tv:1', { episodes: [episode(1, 1, '2024-01-10', { fileId: 'f1' }), episode(1, 2, '2024-01-17', { fileId: 'gone' }), episode(1, 3, '2024-01-24')] }));
     db.data.files.f1 = { id: 'f1', titleKey: 'tv:1', path: 'a.mkv', sizeBytes: 1, mtimeMs: 1, episodes: [], missing: false, addedAt: 1 };
     db.data.files.gone = { ...db.data.files.f1, id: 'gone', missing: true };
-    expect(calendarEvents(db, all, NOW).events.map((e) => e.availability)).toEqual(['available', 'missing', 'missing']);
+    expect(calendarEvents(all, NOW).events.map((e) => e.availability)).toEqual(['available', 'missing', 'missing']);
   });
 
   it('agrees with the library filters', async () => {
@@ -152,9 +152,9 @@ describe('calendar events', () => {
     );
     db.data.files.f = { id: 'f', titleKey: 'x', path: 'a.mkv', sizeBytes: 1, mtimeMs: 1, episodes: [], missing: false, addedAt: 1 };
     const now = Date.now();
-    const { events } = calendarEvents(db, { from: '2000-01-01', to: '2999-12-31', monitored: false }, now);
+    const { events } = calendarEvents({ from: '2000-01-01', to: '2999-12-31', monitored: false }, now);
     // The filters use the clock of the server, so the test uses it too.
-    const filters = (key: string) => (['missing', 'waiting', 'available'] as const).filter((name) => (libraryFilter(db, name) as { test: (t: Title) => boolean }).test(db.data.titles[key]!));
+    const filters = (key: string) => (['missing', 'waiting', 'available'] as const).filter((name) => (libraryFilter(name) as { test: (t: Title) => boolean }).test(db.data.titles[key]!));
     for (const item of Object.values(db.data.titles)) {
       const mine = events.filter((e) => e.titleKey === item.key);
       expect(mine.some((e) => e.availability === 'missing'), `${item.key} missing`).toBe(filters(item.key).includes('missing'));
@@ -168,10 +168,10 @@ describe('calendar events', () => {
   it('cuts the answer at the limit and says so', async () => {
     const episodes = Array.from({ length: MAX_EVENTS + 1 }, (_, n) => episode(1, n + 1, '2024-06-10'));
     const db = await dbWith(show('tv:1', { episodes }));
-    const result = calendarEvents(db, all, NOW);
+    const result = calendarEvents(all, NOW);
     expect(result.events).toHaveLength(MAX_EVENTS);
     expect(result.truncated).toBe(true);
-    expect(calendarEvents(db, all, NOW).events[0]!.number).toBe(1);
+    expect(calendarEvents(all, NOW).events[0]!.number).toBe(1);
   });
 });
 

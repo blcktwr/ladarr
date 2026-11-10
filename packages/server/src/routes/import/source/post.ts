@@ -1,4 +1,4 @@
-import { get } from '../../../core/db.ts';
+import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import type { Events } from '../../../core/events.ts';
 import type { EnqueueInput, Job } from '../../../core/jobs.ts';
@@ -13,7 +13,6 @@ type Deps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job
 
 // The plan is made again here. The server does not trust the preview that the browser holds.
 export function importSourceStart({ tmdb, events, enqueue, status, configDir }: Deps): RequestHandler {
-  const db = get();
   return async (req, res) => {
     if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
     const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;
@@ -22,11 +21,11 @@ export function importSourceStart({ tmdb, events, enqueue, status, configDir }: 
       return void res.status(400).json({ error: 'invalid_title' });
     }
     try {
-      const prepared = await prepare(db, tmdb, configDir, { path: body.path, mediaType, tmdbId });
+      const prepared = await prepare(tmdb, configDir, { path: body.path, mediaType, tmdbId });
       if (!prepared.plan.steps.length) throw new PlanError('nothing_to_import');
-      if (titleBusy(db, prepared.title.key)) throw new PlanError('title_busy');
+      if (titleBusy(prepared.title.key)) throw new PlanError('title_busy');
       if (prepared.created) {
-        await addTitle({ db, tmdb, enqueue }, { mediaType, tmdbId, mode: 'all', seriesType: 'standard', preset: null, rootId: prepared.rootId, episodes: prepared.episodes });
+        await addTitle({ tmdb, enqueue }, { mediaType, tmdbId, mode: 'all', seriesType: 'standard', preset: null, rootId: prepared.rootId, episodes: prepared.episodes });
       } else if (prepared.fetched) {
         // The title had no episodes yet. The plan read them from TMDB, so the stored title takes them before the import.
         const stored = db.data.titles[prepared.title.key];
@@ -35,7 +34,7 @@ export function importSourceStart({ tmdb, events, enqueue, status, configDir }: 
           stored.episodesLoadedAt = Date.now();
         }
       }
-      const journal = await openJournal({ db, enqueue, status }, { kind: 'import', titleKey: prepared.title.key, sourceBase: prepared.plan.path, steps: prepared.plan.steps, linkOnly: true, searchOnFinish: true });
+      const journal = await openJournal({ enqueue, status }, { kind: 'import', titleKey: prepared.title.key, sourceBase: prepared.plan.path, steps: prepared.plan.steps, linkOnly: true, searchOnFinish: true });
       // The title is in the catalog now, before its files are in.
       events.publish('library.changed', { key: prepared.title.key });
       res.status(202).json({ titleKey: prepared.title.key, created: prepared.created, id: journal.id, total: prepared.plan.steps.length });

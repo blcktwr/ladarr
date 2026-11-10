@@ -1,9 +1,8 @@
-import { get } from '../../../core/db.ts';
+import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 
 // The downloads of a client that is gone stay in the queue. The poller marks their numbers as old, as it does for a client that is off.
 export function clientsDelete({ onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler<{ id: string }> {
-  const db = get();
   return async (req, res) => {
     const index = db.data.downloadClients.findIndex((item) => item.id === req.params.id);
     if (index < 0) return void res.status(404).json({ error: 'not_found' });

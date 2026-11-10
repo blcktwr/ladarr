@@ -1,4 +1,4 @@
-import { get } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import type { BlocklistRow } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { BLOCK_REASONS, idOf, ownerOf } from '../../library/grab/blocklist.ts';
@@ -6,7 +6,6 @@ import { BLOCK_REASONS, idOf, ownerOf } from '../../library/grab/blocklist.ts';
 const MAX_PAGE = 200;
 
 export function blocklistGet(): RequestHandler {
-  const db = get();
   return (req, res) => {
     const limit = Math.min(Math.max(Math.trunc(Number(req.query.limit)) || 50, 1), MAX_PAGE);
     const offset = Math.max(Math.trunc(Number(req.query.offset)) || 0, 0);

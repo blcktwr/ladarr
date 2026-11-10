@@ -19,6 +19,7 @@ export async function startTestApp(options: Parameters<typeof createApp>[0] = {}
   const { csrfToken } = await (await fetch(`${base}/auth/status`, { headers: { cookie } })).json();
 
   async function call(method: string, path: string, body?: unknown) {
+    set(db);
     const res = await fetch(`${base}${path}`, {
       method,
       headers: { cookie, 'x-csrf-token': csrfToken, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },

@@ -138,9 +138,9 @@ export async function startPipeline(options: Options = {}) {
   const finder = createFinder({ queue, indexers, enqueue: (input) => real.enqueue(input) });
   const handlers = {
     'queue.search': queueSearchHandler(finder),
-    'queue.grab': queueGrabHandler({ db, queue, finder, indexers, clients, save, reconcileMs: 20 }),
-    'import.run': importRunHandler({ db, queue, events, clients, save, probe: options.probe ?? (async () => ({ ok: true, durationSeconds: 2700, container: 'matroska', videoCodec: 'h264', audioLanguages: ['eng'] })), afterStep: options.afterStep, fs: options.fs, status: importStatus }),
-    'import.resume': importResumeHandler(db),
+    'queue.grab': queueGrabHandler({ queue, finder, indexers, clients, save, reconcileMs: 20 }),
+    'import.run': importRunHandler({ queue, events, clients, save, probe: options.probe ?? (async () => ({ ok: true, durationSeconds: 2700, container: 'matroska', videoCodec: 'h264', audioLanguages: ['eng'] })), afterStep: options.afterStep, fs: options.fs, status: importStatus }),
+    'import.resume': importResumeHandler(),
     ...options.handlers?.({ db, events, queue, finder }),
   };
   real = createWorker(save, handlers, { tickMs: 15 });

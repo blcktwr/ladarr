@@ -29,7 +29,7 @@ const hasFfmpeg = (() => {
 
 // Serves the router without the sign-in, with a probe that the test controls.
 async function serve(probe: typeof ffprobeRaw) {
-  const server = express().use('/library', libraryFilesRouter(db, { probe })).listen(0);
+  const server = express().use('/library', libraryFilesRouter({ probe })).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/library`;
   const get = async (path: string) => {
@@ -48,7 +48,7 @@ beforeAll(async () => {
   db = await open('unused.json');
   db.data.roots = { tv: { id: 'tv', path: root, mediaType: 'tv', dev: statSync(root).dev } };
   db.data.titles['tv:1'] = title({ rootId: 'tv', folder: 'Show', episodes: [episode(1, 1), episode(1, 2)] });
-  await scanTitle(db, 'tv:1');
+  await scanTitle('tv:1');
   app = await startTestApp({}, db);
 });
 afterAll(() => {
@@ -232,7 +232,7 @@ describe.skipIf(!hasFfmpeg)('with the real ffprobe', () => {
     execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=duration=1:size=64x48:rate=10', '-f', 'lavfi', '-i', 'sine=duration=1', '-c:v', 'mpeg4', '-c:a', 'aac', '-metadata:s:a:0', 'language=eng', '-shortest', movie]);
     writeFileSync(join(root, 'Real', 'Real.S01E02.mkv'), 'plain text');
     db.data.titles['tv:7'] = title({ key: 'tv:7', tmdbId: 7, rootId: 'tv', folder: 'Real', episodes: [episode(1, 1), episode(1, 2)] });
-    await scanTitle(db, 'tv:7');
+    await scanTitle('tv:7');
     const good = await app.get(`/library/tv:7/files/${db.data.titles['tv:7']!.episodes[0]!.fileId}`);
     expect(good.body.details).toMatchObject({ state: 'ok', video: { codec: 'mpeg4', width: 64, height: 48, frameRate: 10 }, audio: [{ codec: 'aac', language: 'eng' }], subtitles: [] });
     expect(good.body.details.durationSeconds).toBeGreaterThan(0.9);

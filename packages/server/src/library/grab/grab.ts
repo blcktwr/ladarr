@@ -1,4 +1,4 @@
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import { JobError } from '../../core/jobs.ts';
 import { catalog, itemFields } from '../../core/log.ts';
 import type { Finder } from './finder.ts';
@@ -10,7 +10,6 @@ import { infoHashOf, magnetHash, torrentComment, torrentFiles } from './torrent.
 import { IndexerError, type IndexerService } from './torznab.ts';
 
 export type GrabberDeps = {
-  db: Db;
   queue: Queue;
   finder: Finder;
   indexers: IndexerService;
@@ -30,7 +29,7 @@ export function reasonOf(error: unknown) {
 }
 
 // Sends the chosen release to the client. Each step can be repeated: a restart or a retry reads the client first.
-export function createGrabber({ db, queue, finder, indexers, clients, save, reconcileMs = 1_000 }: GrabberDeps): (entries: QueueEntry[], signal: AbortSignal) => Promise<void> {
+export function createGrabber({ queue, finder, indexers, clients, save, reconcileMs = 1_000 }: GrabberDeps): (entries: QueueEntry[], signal: AbortSignal) => Promise<void> {
   // The entries of a pack that the file list of the torrent does not cover. The check is the same as the check of the import.
   function missingFromPack(entries: QueueEntry[], torrent: Buffer) {
     let files: ReturnType<typeof torrentFiles>;
@@ -66,7 +65,7 @@ export function createGrabber({ db, queue, finder, indexers, clients, save, reco
     const connection = leader.clientId ? clients.get(leader.clientId) : clients.next();
     if (!connection) {
       for (const entry of entries) {
-        catalog.warn('download_no_client', `No download client is available for "${ref.title}"`, itemFields(db, entry), { release: ref.title });
+        catalog.warn('download_no_client', `No download client is available for "${ref.title}"`, itemFields(entry), { release: ref.title });
         // The release stops before the request, so the entry keeps the stage of the fetch and its release for the retry.
         queue.move(entry, { reason: { code: 'client_missing' } }, 'no download client');
       }
@@ -86,15 +85,15 @@ export function createGrabber({ db, queue, finder, indexers, clients, save, reco
         entry.transferHash = found.hash;
         entry.clientId = connection.id;
         if (entry.release) entry.release.infoHash = found.hash;
-        catalog.info('download_added', `${connection.config.name} added "${found.name}"`, itemFields(db, entry), { client: connection.config.name, hash: found.hash, name: found.name });
+        catalog.info('download_added', `${connection.config.name} added "${found.name}"`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
         queue.move(entry, { stage: 'downloading', branch: null, reason: null }, 'client accepted', found.name);
       }
     };
     // A torrent in the client that ladarr did not add is the user's. ladarr does not take it over.
-    const owned = (found: Torrent) => addedByApp(db, found.hash);
+    const owned = (found: Torrent) => addedByApp(found.hash);
     const unowned = () => {
       for (const entry of entries) {
-        catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(db, entry), { client: connection.config.name, hash: entry.transferHash ?? ref.infoHash });
+        catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: entry.transferHash ?? ref.infoHash });
         queue.move(entry, { reason: { code: 'torrent_exists' } }, 'torrent is in the client already');
       }
     };
@@ -157,7 +156,7 @@ export function createGrabber({ db, queue, finder, indexers, clients, save, reco
     for (const entry of entries) queue.move(entry, { stage: 'sending', branch: null, reason: null }, 'sending to the client', ref.title);
     try {
       for (const entry of entries) {
-        catalog.info('download_started', `Sending "${ref.title}" to ${connection.config.name}`, itemFields(db, entry), {
+        catalog.info('download_started', `Sending "${ref.title}" to ${connection.config.name}`, itemFields(entry), {
           client: connection.config.name,
           hash,
           release: ref.title,

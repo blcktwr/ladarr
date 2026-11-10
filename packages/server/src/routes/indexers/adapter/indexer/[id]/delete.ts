@@ -1,11 +1,10 @@
-import { get } from '../../../../../core/db.ts';
+import { db } from '../../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { removePush, type IndexerApp } from '../../../../../library/grab/indexers.ts';
 
 export function indexerDelete(app: IndexerApp, { onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler<{ id: string }> {
-  const db = get();
   return async (req, res) => {
-    if (!removePush(db, app, Number(req.params.id))) return void res.status(404).json({ message: 'NotFound' });
+    if (!removePush(app, Number(req.params.id))) return void res.status(404).json({ message: 'NotFound' });
     await db.write();
     onChange();
     res.json({});

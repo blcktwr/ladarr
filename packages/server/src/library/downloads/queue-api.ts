@@ -1,15 +1,14 @@
 import type { Finder } from '../grab/finder.ts';
-import { get, type Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { isActive, type Queue, type QueueEntry } from './queue.ts';
 
 // The active targets that point at the same torrent.
-export const sharingOf = (db: Db, entry: QueueEntry) => (entry.transferHash ? Object.values(db.data.queue).filter((other) => other.transferHash === entry.transferHash && isActive(other)) : [entry]);
+export const sharingOf = (entry: QueueEntry) => (entry.transferHash ? Object.values(db.data.queue).filter((other) => other.transferHash === entry.transferHash && isActive(other)) : [entry]);
 
 // A new search, or a new send, for a target that waits for the user.
 export function createRetry({ queue, finder, enqueue }: { queue: Queue; finder: Finder; enqueue: (input: EnqueueInput) => Job }) {
-  const db = get();
-  const sharing = (entry: QueueEntry) => sharingOf(db, entry);
+  const sharing = (entry: QueueEntry) => sharingOf(entry);
 
   function reset(entry: QueueEntry, cause: string) {
     queue.endAttempt(entry, 'failed', cause);

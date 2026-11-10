@@ -1,4 +1,4 @@
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import { enqueue } from '../core/jobs.ts';
 import { movieEligibleAt, type Title } from '../library/library.ts';
 import { refreshJob } from '../library/metadata.ts';
@@ -10,7 +10,7 @@ const SWEEP_EVERY_MS = 60 * 60_000;
 const DONE_STATUSES = ['Ended', 'Canceled', 'Released'];
 
 // A title changes more while it is not finished. A movie that waits for a digital release is not finished either.
-function isActive(db: Db, title: Title, now: number) {
+function isActive(title: Title, now: number) {
   if (title.paused) return false;
   if (title.mediaType === 'movie') {
     const at = movieEligibleAt(title, db.data.settings);
@@ -19,7 +19,7 @@ function isActive(db: Db, title: Title, now: number) {
   return !DONE_STATUSES.includes(title.meta.status);
 }
 
-export function metadataSweepHandler(db: Db): Handler {
+export function metadataSweepHandler(): Handler {
   return {
     every: SWEEP_EVERY_MS,
     // Finds the titles that are due. Jobs with the same key merge, so a slow TMDB does not build a backlog.
@@ -31,7 +31,7 @@ export function metadataSweepHandler(db: Db): Handler {
           enqueue(refreshJob(title.key));
           continue;
         }
-        const interval = isActive(db, title, now) ? ACTIVE_REFRESH_MS : IDLE_REFRESH_MS;
+        const interval = isActive(title, now) ? ACTIVE_REFRESH_MS : IDLE_REFRESH_MS;
         if (now - title.refreshedAt >= interval) enqueue(refreshJob(title.key));
       }
     },

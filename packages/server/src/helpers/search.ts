@@ -1,6 +1,6 @@
 import type { SearchResult } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import { titleKey } from '../library/library.ts';
 import { TmdbError, type Tmdb } from '../metadata/tmdb.ts';
 
@@ -9,7 +9,7 @@ export const oldestFirst = (results: SearchResult[]) =>
   [...results].sort((a, b) => (a.year ?? Number.MAX_SAFE_INTEGER) - (b.year ?? Number.MAX_SAFE_INTEGER));
 
 // Marks the results that are in the library already.
-export function inLibrary(db: Db) {
+export function inLibrary() {
   return (results: SearchResult[]): SearchResult[] =>
     results.map(({ mediaType, tmdbId, title, year, overview, posterPath, originalLanguage }) => {
       const library = db.data.titles[titleKey(mediaType, tmdbId)];

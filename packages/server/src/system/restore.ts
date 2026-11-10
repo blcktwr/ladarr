@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RequestHandler, Response } from 'express';
 import { BackupError, createBackup, readBackup } from './backup.ts';
-import { get, withDefaults } from '../core/db.ts';
+import { db, withDefaults } from '../core/db.ts';
 import { unfinishedImports } from '../library/imports/importer.ts';
 import type { EnqueueInput } from '../core/jobs.ts';
 import { log } from '../core/log.ts';
@@ -21,7 +21,6 @@ type Worker = { pause: () => Promise<boolean>; resume: () => void; enqueue: (inp
 // Replaces the data of the running server with the data of a backup, without a restart.
 // shortcut: the restore runs in the process that serves the requests. A restart in a safe way needs a supervisor, and ladarr has none.
 export function createRestorer({ dir, worker, drainMs = 10_000 }: { dir: string; worker: Worker; drainMs?: number }) {
-  const db = get();
   let restoring = false;
   // The requests that change data and have no answer yet. One of them can wait for TMDB and write after the swap.
   const active = new Set<Response>();
@@ -53,7 +52,7 @@ export function createRestorer({ dir, worker, drainMs = 10_000 }: { dir: string;
       paused = true;
       if (!(await worker.pause())) throw new RestoreError('worker_busy');
       // The jobs are stopped, so this copy holds every change that was made.
-      const safety = await createBackup(db, dir, 'safety');
+      const safety = await createBackup(dir, 'safety');
 
       const previous = db.data;
       db.data = next;

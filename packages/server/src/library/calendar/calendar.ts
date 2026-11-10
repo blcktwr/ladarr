@@ -1,6 +1,6 @@
 import type { CalendarEvent, CalendarUndated } from '@ladarr/shared/types';
 import type { MediaType } from '@ladarr/shared/enums';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import { episodeEligibleAt, isDateOnly, releaseInstant } from '../../core/dates.ts';
 import { availability, isMonitored, movieEligibleAt, type Title } from '../library.ts';
 
@@ -33,7 +33,7 @@ function movieRelease(title: Title, { region, timeZone }: { region: string; time
 
 // The dated targets in a range of days, and the titles that have no date.
 // Monitoring follows the episode, the season, and the policy of the title, like the library. A movie has no choice to make. Paused is a separate flag.
-export function calendarEvents(db: Db, { from, to, type, monitored, limit = MAX_EVENTS }: CalendarQuery, now = Date.now()) {
+export function calendarEvents({ from, to, type, monitored, limit = MAX_EVENTS }: CalendarQuery, now = Date.now()) {
   const { timeZone, region } = db.data.settings;
   const clock = { now, timeZone, region, files: db.data.files };
   const hasFile = (fileId: string | null) => Boolean(fileId && db.data.files[fileId] && !db.data.files[fileId]!.missing);

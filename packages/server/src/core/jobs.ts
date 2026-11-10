@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { get } from './db.ts';
+import { db } from './db.ts';
 
 export type ErrorKind = 'invalid_input' | 'outage' | 'uncertain';
 
@@ -49,7 +49,6 @@ const held = (job: Job | undefined, token: string): job is Job => job?.state ===
 
 // shortcut: dedupe and claim scan every job. Fine for thousands of jobs, so index by key if it is not.
 export function enqueue(input: EnqueueInput): Job {
-  const db = get();
   const { jobs } = db.data;
   const runAt = input.runAt ?? Date.now();
   if (input.dedupeKey) {
@@ -93,7 +92,6 @@ function precedes(a: Job, b: Job) {
 
 // The check and the change run in one synchronous step, so two callers never get the same job.
 export function claim(now: number, leaseMs: number, canStart: (job: Job) => boolean = () => true) {
-  const db = get();
   let best: Job | undefined;
   for (const job of Object.values(db.data.jobs)) {
     if (job.state !== 'waiting' || job.runAt > now || !canStart(job)) continue;
@@ -109,7 +107,6 @@ export function claim(now: number, leaseMs: number, canStart: (job: Job) => bool
 
 // Only a lease that has expired is recovered. A job that keeps losing its lease runs out of attempts.
 export function recoverExpired(now: number, maxAttempts: (type: string) => number) {
-  const db = get();
   let recovered = 0;
   for (const job of Object.values(db.data.jobs)) {
     if (job.state !== 'running' || job.leaseExpiresAt! > now) continue;
@@ -128,7 +125,6 @@ export function recoverExpired(now: number, maxAttempts: (type: string) => numbe
 }
 
 export function renew(id: string, token: string, now: number, leaseMs: number) {
-  const db = get();
   const job = db.data.jobs[id];
   if (!held(job, token)) return false;
   job.leaseExpiresAt = now + leaseMs;
@@ -136,7 +132,6 @@ export function renew(id: string, token: string, now: number, leaseMs: number) {
 }
 
 export function complete(id: string, token: string) {
-  const db = get();
   if (!held(db.data.jobs[id], token)) return false;
   delete db.data.jobs[id];
   return true;
@@ -144,7 +139,6 @@ export function complete(id: string, token: string) {
 
 // Gives the job back after a stop. The interrupted try does not count as an attempt.
 export function release(id: string, token: string) {
-  const db = get();
   const job = db.data.jobs[id];
   if (!held(job, token)) return false;
   job.state = 'waiting';
@@ -155,7 +149,6 @@ export function release(id: string, token: string) {
 }
 
 export function fail(id: string, token: string, error: unknown, now: number, maxAttempts: number) {
-  const db = get();
   const job = db.data.jobs[id];
   if (!held(job, token)) return;
   const kind = error instanceof JobError ? error.kind : 'outage';
@@ -173,20 +166,17 @@ export function fail(id: string, token: string, error: unknown, now: number, max
 }
 
 export function prioritize(id: string) {
-  const db = get();
   const job = db.data.jobs[id];
   if (job && job.priority === null) job.priority = db.data.prioritySeq++;
 }
 
 // The job goes back to its place in the normal lane, because that lane orders by due time.
 export function deprioritize(id: string) {
-  const db = get();
   const job = db.data.jobs[id];
   if (job) job.priority = null;
 }
 
 function pruneFailed() {
-  const db = get();
   const failed = Object.values(db.data.jobs).filter((job) => job.state === 'failed');
   for (const job of failed.sort((a, b) => b.seq - a.seq).slice(KEPT_FAILED)) delete db.data.jobs[job.id];
 }

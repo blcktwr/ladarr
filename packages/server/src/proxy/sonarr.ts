@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import express, { Router } from 'express';
-import { get, type Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import { onError } from '../core/errors.ts';
 import { candidate, clock, firstProfileId, hasFiles, isObject, noTmdb, notFound, notFoundPath, notSupported, parseId, presentFile, profileId, readOptions, readPlacement, refuse, tmdbProblem, type CompatDeps } from './common.ts';
 import { adapter, type AdapterOptions } from './indexer.ts';
@@ -13,7 +13,7 @@ import { TmdbError, type TitleMeta, type Tmdb } from '../metadata/tmdb.ts';
 const visible = (title: Title) => title.mediaType === 'tv' && title.meta.tvdbId !== null;
 
 // A season is monitored when the user chose it, or when its episodes are. Before the episodes load, the policy decides.
-function seasonMonitored(db: Db, title: Title, season: number) {
+function seasonMonitored(title: Title, season: number) {
   const chosen = title.seasonOverrides[season];
   if (chosen) return chosen === 'monitored';
   const episodes = title.episodes.filter((episode) => episode.season === season);
@@ -21,18 +21,18 @@ function seasonMonitored(db: Db, title: Title, season: number) {
   return season !== 0 && title.policy === 'all';
 }
 
-function seasonStatistics(db: Db, title: Title, season: number) {
+function seasonStatistics(title: Title, season: number) {
   const episodes = title.episodes.filter((episode) => episode.season === season);
   const files = new Map<string, number>();
   let withFile = 0;
   for (const episode of episodes) {
-    const file = presentFile(db, episode.fileId);
+    const file = presentFile(episode.fileId);
     if (!file) continue;
     withFile++;
     files.set(file.id, file.sizeBytes);
   }
   const total = title.episodesLoadedAt ? episodes.length : (title.meta.seasons.find((item) => item.seasonNumber === season)?.episodeCount ?? 0);
-  const { eligible, available } = seriesCounts(title, clock(db), (episode) => episode.season === season);
+  const { eligible, available } = seriesCounts(title, clock(), (episode) => episode.season === season);
   // Like Sonarr: the monitored episodes that have aired, and the episodes that have a file.
   const counted = eligible + (withFile - available);
   return {
@@ -45,13 +45,13 @@ function seasonStatistics(db: Db, title: Title, season: number) {
 }
 
 // A series in the shape of Sonarr. The ID is the TMDB ID, and a series that is not in the library has ID 0.
-export function seriesResource(db: Db, title: Title, inLibrary: boolean) {
+export function seriesResource(title: Title, inLibrary: boolean) {
   const { meta } = title;
   const root = db.data.roots[title.rootId];
   const seasons = meta.seasons.map((season) => ({
     seasonNumber: season.seasonNumber,
-    monitored: inLibrary && seasonMonitored(db, title, season.seasonNumber),
-    ...(inLibrary ? { statistics: seasonStatistics(db, title, season.seasonNumber) } : {}),
+    monitored: inLibrary && seasonMonitored(title, season.seasonNumber),
+    ...(inLibrary ? { statistics: seasonStatistics(title, season.seasonNumber) } : {}),
   }));
   const totals = seasons.reduce(
     (sum, season) => ({
@@ -87,7 +87,7 @@ export function seriesResource(db: Db, title: Title, inLibrary: boolean) {
       ? {
           rootFolderPath: root.path,
           path: join(root.path, title.folder ?? folderName(title)),
-          qualityProfileId: profileId(title.preset ?? firstProfileId(db)),
+          qualityProfileId: profileId(title.preset ?? firstProfileId()),
           added: new Date(title.addedAt).toISOString(),
           statistics: {
             seasonCount: meta.seasons.filter((season) => season.seasonNumber > 0).length,
@@ -100,7 +100,7 @@ export function seriesResource(db: Db, title: Title, inLibrary: boolean) {
 }
 
 // The Sonarr ID of an episode is its TMDB episode ID. It is not a TVDB ID, and the resource has no tvdbId field.
-function episodeResource(db: Db, title: Title, episode: Episode) {
+function episodeResource(title: Title, episode: Episode) {
   return {
     id: episode.tmdbId,
     seriesId: title.tmdbId,
@@ -108,7 +108,7 @@ function episodeResource(db: Db, title: Title, episode: Episode) {
     episodeNumber: episode.number,
     title: episode.name,
     airDate: episode.airDate ?? undefined,
-    hasFile: Boolean(presentFile(db, episode.fileId)),
+    hasFile: Boolean(presentFile(episode.fileId)),
     monitored: isMonitored(title, episode, db.data.settings),
   };
 }
@@ -126,16 +126,16 @@ function readSeasons(value: unknown, known: TitleMeta['seasons']): SeasonChoice[
 }
 
 // A choice is saved only when it differs from what the policy gives now. A season that follows the policy keeps following it.
-function applySeasons(db: Db, title: Title, seasons: SeasonChoice[]) {
+function applySeasons(title: Title, seasons: SeasonChoice[]) {
   for (const { seasonNumber, monitored } of seasons) {
-    if (seasonMonitored(db, title, seasonNumber) !== monitored) title.seasonOverrides[seasonNumber] = monitored ? 'monitored' : 'unmonitored';
+    if (seasonMonitored(title, seasonNumber) !== monitored) title.seasonOverrides[seasonNumber] = monitored ? 'monitored' : 'unmonitored';
   }
 }
 
 type Found = { title: Title } | { meta: TitleMeta } | { count: number };
 
 // The series of a TVDB ID: the library first, then TMDB. More than one TMDB series with the ID is not a match.
-async function findSeries(db: Db, tmdb: Tmdb, tvdbId: number): Promise<Found> {
+async function findSeries(tmdb: Tmdb, tvdbId: number): Promise<Found> {
   const known = Object.values(db.data.titles).find((title) => title.mediaType === 'tv' && title.meta.tvdbId === tvdbId);
   if (known) return { title: known };
   const found = await tmdb.findSeriesByTvdb(tvdbId).catch((error: unknown) => {
@@ -148,7 +148,6 @@ async function findSeries(db: Db, tmdb: Tmdb, tvdbId: number): Promise<Found> {
 }
 
 export function sonarrRoutes(deps: CompatDeps) {
-  const db = get();
   const router = Router();
   const own = (id: number | undefined) => {
     const title = id === undefined ? undefined : db.data.titles[`tv:${id}`];
@@ -159,7 +158,7 @@ export function sonarrRoutes(deps: CompatDeps) {
     const wanted = req.query.tvdbId === undefined ? undefined : parseId(req.query.tvdbId);
     if (req.query.tvdbId !== undefined && wanted === undefined) return void res.json([]);
     const titles = Object.values(db.data.titles).filter((title) => visible(title) && (wanted === undefined || title.meta.tvdbId === wanted));
-    res.json(titles.map((title) => seriesResource(db, title, true)));
+    res.json(titles.map((title) => seriesResource(title, true)));
   });
 
   router.get('/series/lookup', async (req, res) => {
@@ -167,9 +166,9 @@ export function sonarrRoutes(deps: CompatDeps) {
     if (!match) return notSupported(res, 'Use the term tvdb:<ID> to look up a series.');
     if (!deps.tmdb) return noTmdb(res);
     try {
-      const found = await findSeries(db, deps.tmdb, Number(match[1]));
-      if ('title' in found) return void res.json([seriesResource(db, found.title, true)]);
-      if ('meta' in found) return void res.json([seriesResource(db, candidate(found.meta), false)]);
+      const found = await findSeries(deps.tmdb, Number(match[1]));
+      if ('title' in found) return void res.json([seriesResource(found.title, true)]);
+      if ('meta' in found) return void res.json([seriesResource(candidate(found.meta), false)]);
       if (found.count > 1) return void res.status(409).json({ message: 'Conflict', detail: 'More than one TMDB series has this TVDB ID.' });
       res.json([]);
     } catch (error) {
@@ -180,7 +179,7 @@ export function sonarrRoutes(deps: CompatDeps) {
   router.get('/series/:id', (req, res) => {
     const title = own(parseId(req.params.id));
     if (!title) return notFound(res, 'No series has this ID.');
-    res.json(seriesResource(db, title, true));
+    res.json(seriesResource(title, true));
   });
 
   router.post('/series', async (req, res) => {
@@ -189,7 +188,7 @@ export function sonarrRoutes(deps: CompatDeps) {
     const errors: [string, string][] = [];
     const tvdbId = body.tvdbId;
     if (typeof tvdbId !== 'number' || !Number.isInteger(tvdbId) || tvdbId < 1) errors.push(['tvdbId', 'The TVDB ID must be a whole number from 1.']);
-    const placement = readPlacement(db, 'tv', body);
+    const placement = readPlacement('tv', body);
     if ('errors' in placement) errors.push(...placement.errors);
     const options = readOptions(body, ['searchForMissingEpisodes', 'ignoreEpisodesWithFiles']);
     if ('errors' in options) errors.push(...options.errors);
@@ -200,14 +199,14 @@ export function sonarrRoutes(deps: CompatDeps) {
 
     let title: Title;
     try {
-      const found = await findSeries(db, deps.tmdb, tvdbId as number);
+      const found = await findSeries(deps.tmdb, tvdbId as number);
       if ('title' in found) return refuse(res, [['tvdbId', 'This series has already been added.']]);
       if (!('meta' in found)) return refuse(res, [['tvdbId', found.count ? 'More than one TMDB series has this TVDB ID.' : 'TMDB has no series with this TVDB ID.']]);
       const seasons = readSeasons(body.seasons, found.meta.seasons);
       if (typeof seasons === 'string') return refuse(res, [['seasons', seasons]]);
       const { preset, root, monitored } = placement as Exclude<typeof placement, { errors: unknown }>;
-      ({ title } = await addTitle({ db, tmdb: deps.tmdb, enqueue: deps.enqueue }, { mediaType: 'tv', tmdbId: found.meta.tmdbId, mode: monitored ? 'all' : 'paused', seriesType: seriesType as 'standard' | 'anime', preset, rootId: root.id }));
-      applySeasons(db, title, seasons);
+      ({ title } = await addTitle({ tmdb: deps.tmdb, enqueue: deps.enqueue }, { mediaType: 'tv', tmdbId: found.meta.tmdbId, mode: monitored ? 'all' : 'paused', seriesType: seriesType as 'standard' | 'anime', preset, rootId: root.id }));
+      applySeasons(title, seasons);
       if ((options as { search: boolean }).search && monitored) deps.enqueue({ type: 'queue.initial', payload: { key: title.key }, dedupeKey: `initial:${title.key}` });
     } catch (error) {
       if (error instanceof AddError) return refuse(res, [['tvdbId', 'This series has already been added.']]);
@@ -215,7 +214,7 @@ export function sonarrRoutes(deps: CompatDeps) {
     }
     await db.write();
     deps.events.publish('library.changed', { key: title.key });
-    res.status(201).json(seriesResource(db, title, true));
+    res.status(201).json(seriesResource(title, true));
   });
 
   // Seerr sends the whole series that the lookup gave, with its changes. ladarr reads the fields that it can change.
@@ -224,7 +223,7 @@ export function sonarrRoutes(deps: CompatDeps) {
     const body = isObject(req.body) ? req.body : {};
     const title = own(typeof body.id === 'number' ? body.id : undefined);
     if (!title) return notFound(res, 'No series has this ID.');
-    const placement = readPlacement(db, 'tv', body);
+    const placement = readPlacement('tv', body);
     if ('errors' in placement) return refuse(res, placement.errors);
     const seasons = readSeasons(body.seasons, title.meta.seasons);
     if (typeof seasons === 'string') return refuse(res, [['seasons', seasons]]);
@@ -235,10 +234,10 @@ export function sonarrRoutes(deps: CompatDeps) {
     title.preset = placement.preset;
     title.paused = !placement.monitored;
     title.seriesType = seriesType;
-    applySeasons(db, title, seasons);
+    applySeasons(title, seasons);
     await db.write();
     deps.events.publish('library.changed', { key: title.key });
-    res.status(202).json(seriesResource(db, title, true));
+    res.status(202).json(seriesResource(title, true));
   });
 
   // ladarr removes the record only. Sonarr callers ask to delete the files too, so ladarr refuses the call.
@@ -247,7 +246,7 @@ export function sonarrRoutes(deps: CompatDeps) {
   router.get('/episode', (req, res) => {
     const title = own(parseId(req.query.seriesId));
     if (!title) return notFound(res, 'No series has this ID.');
-    res.json(title.episodes.map((episode) => episodeResource(db, title, episode)));
+    res.json(title.episodes.map((episode) => episodeResource(title, episode)));
   });
 
   router.put('/episode/monitor', async (req, res) => {
@@ -267,7 +266,7 @@ export function sonarrRoutes(deps: CompatDeps) {
     }
     await db.write();
     for (const title of changed) deps.events.publish('library.changed', { key: title.key });
-    res.status(202).json(episodeIds.map((id) => episodeResource(db, byId.get(id)!.title, byId.get(id)!.episode)));
+    res.status(202).json(episodeIds.map((id) => episodeResource(byId.get(id)!.title, byId.get(id)!.episode)));
   });
 
   return router;

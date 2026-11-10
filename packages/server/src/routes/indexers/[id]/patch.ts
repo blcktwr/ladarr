@@ -1,10 +1,9 @@
-import { get } from '../../../core/db.ts';
+import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { MAX_DELAY_SECONDS, isLanguageList, summarize } from '../../../library/grab/indexers.ts';
 import { invalidSetting, setDelay } from '../../../helpers/indexers.ts';
 
 export function indexersPatch(): RequestHandler<{ id: string }> {
-  const db = get();
   return async (req, res) => {
     const indexer = db.data.indexers[Number(req.params.id)];
     if (!indexer) return void res.status(404).json({ error: 'not_found' });

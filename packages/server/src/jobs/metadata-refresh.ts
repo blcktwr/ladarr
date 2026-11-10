@@ -1,4 +1,4 @@
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import type { Events } from '../core/events.ts';
 import { enqueue } from '../core/jobs.ts';
 import { catalog, titleFields } from '../core/log.ts';
@@ -8,7 +8,7 @@ import { verifyJob } from '../library/verification.ts';
 import type { EpisodeMeta, Tmdb } from '../metadata/tmdb.ts';
 import type { Handler } from '../core/worker.ts';
 
-export function metadataRefreshHandler({ db, tmdb, events }: { db: Db; tmdb: Tmdb; events: Events }): Handler {
+export function metadataRefreshHandler({ tmdb, events }: { tmdb: Tmdb; events: Events }): Handler {
   // The first search of a title waits for the episodes. It starts at once when they arrive, so its row does not wait
   // for the retry of the job.
   function resumeInitialSearch(key: string) {

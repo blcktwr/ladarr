@@ -1,4 +1,4 @@
-import { get } from '../../../../core/db.ts';
+import { db } from '../../../../core/db.ts';
 import type { EpisodeRow } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { episodeEligibleAt } from '../../../../core/dates.ts';
@@ -7,12 +7,11 @@ import { clock } from '../../../../library/tools/api.ts';
 import { isMonitored, type Title } from '../../../../library/library.ts';
 
 export function libraryEpisodes(): RequestHandler<{ key: string }> {
-  const db = get();
   return (req, res) => {
     const title: Title = res.locals.title;
     const season = Number(req.query.season);
     if (title.mediaType !== 'tv' || !Number.isInteger(season) || season < 0) return void res.status(400).json({ error: 'invalid_season' });
-    const at = clock(db);
+    const at = clock();
     const episodes: EpisodeRow[] = title.episodes
       .filter((episode) => episode.season === season)
       .map((episode) => {

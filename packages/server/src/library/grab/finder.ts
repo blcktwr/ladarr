@@ -1,6 +1,5 @@
-import type { Db } from '../../core/db.ts';
+import { type Db, db, profilesFor } from '../../core/db.ts';
 import { randomUUID } from 'node:crypto';
-import { get, profilesFor } from '../../core/db.ts';
 import { languageOfRegion } from '../../core/languages.ts';
 import { episodeEligibleAt } from '../../core/dates.ts';
 import { bestOf, decide, explainDecision, REJECTION_TEXT, rejectionSummary, topRejections, type Context, type Decision, type Want } from './decide.ts';
@@ -43,12 +42,11 @@ type Deps = {
   now?: () => number;
 };
 
-const present = (db: Db, fileId: string | null) => Boolean(fileId && db.data.files[fileId] && !db.data.files[fileId]!.missing);
+const present = (fileId: string | null) => Boolean(fileId && db.data.files[fileId] && !db.data.files[fileId]!.missing);
 // Ties the log line of a search to the requests that answered it, in the app log and in the request log.
 const newRequestId = () => `req-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 
 export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps) {
-  const db = get();
   const cache = new Map<string, { at: number; releases: RawRelease[] }>();
   // Equal queries that run at the same time share one request.
   const inflight = new Map<string, { requestId: string; releases: Promise<RawRelease[]> }>();
@@ -63,10 +61,10 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     return at !== null && at <= now();
   };
 
-  const wantedEpisode = (title: Title, episode: Episode) => !title.paused && isMonitored(title, episode, db.data.settings) && aired(episode) && !present(db, episode.fileId);
+  const wantedEpisode = (title: Title, episode: Episode) => !title.paused && isMonitored(title, episode, db.data.settings) && aired(episode) && !present(episode.fileId);
 
   function wantedMovie(title: Title) {
-    if (title.paused || present(db, title.fileId)) return false;
+    if (title.paused || present(title.fileId)) return false;
     const at = movieEligibleAt(title, db.data.settings);
     return title.manualRelease || (at !== null && at <= now());
   }
@@ -80,8 +78,8 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       indexers: db.data.indexers,
       blocked: (release, hash) => Boolean((hash && db.data.blocklist[hash]) || db.data.blocklist[`${release.indexerId}:${release.guid}`]),
       downloading: (hash) => hashes.has(hash),
-      hasFile: (episode) => present(db, episode.fileId),
-      hasMovieFile: (title) => present(db, title.fileId),
+      hasFile: (episode) => present(episode.fileId),
+      hasMovieFile: (title) => present(title.fileId),
       now: now(),
       manual,
     };
@@ -211,7 +209,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
 
   // The indexers that can answer: the indexer manager pushed them for this media type, ladarr uses them, they allow automatic search, and they are not in a backoff.
   function usableIndexers(title: Title, interactive = false) {
-    return indexersFor(db, title.mediaType).filter((indexer) => {
+    return indexersFor(title.mediaType).filter((indexer) => {
       const push = indexer.push[app(title)]!;
       return !notUsedReason(indexer, app(title)) && (interactive ? push.enableInteractiveSearch : push.enableAutomaticSearch) && categoriesOf(indexer, title).length > 0;
     });
@@ -291,7 +289,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     // of that episode.
     const note = (level: 'info' | 'warn', event: string, message: string, fields: Record<string, unknown>) => {
       if (scope.kind === 'season') catalog[level](event, message, titleFields(title), { ...fields, season: scope.season, episodes: entries.length, covers: entries.map((entry) => entry.id), ...(name.alias ? { languages: name.languages } : {}) });
-      else for (const entry of entries) catalog[level](event, message, itemFields(db, entry), { ...fields, ...(name.alias ? { languages: name.languages } : {}) });
+      else for (const entry of entries) catalog[level](event, message, itemFields(entry), { ...fields, ...(name.alias ? { languages: name.languages } : {}) });
     };
     const state: SearchState = entries[0]?.search ?? { at: now(), indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null, rejected: [] };
     const report = (patch: (search: SearchState) => void) => {
@@ -301,7 +299,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
         queue.touch(entry);
       }
     };
-    const skipped = indexersFor(db, title.mediaType).filter((indexer) => !usable.includes(indexer));
+    const skipped = indexersFor(title.mediaType).filter((indexer) => !usable.includes(indexer));
     report((search) => {
       for (const indexer of list) {
         if (!search.indexers.some((item) => item.id === indexer.id)) search.indexers.push({ id: indexer.id, name: indexer.push[app(title)]!.name, state: 'waiting', count: null });
@@ -411,8 +409,8 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       const code = asked === 0 ? 'no_indexers' : answered === 0 ? 'indexers_failed' : decisions.length ? 'all_rejected' : 'no_results';
       const rejections = topRejections(decisions);
       // An upgrade that finds nothing is not a missing title. The file stays, and the target is available.
-      if (present(db, fileOf(title, entry))) {
-        catalog.info('finished', 'No better release: the current file stays', itemFields(db, entry), { result: 'no_better_release', profiles: shownProfiles });
+      if (present(fileOf(title, entry))) {
+        catalog.info('finished', 'No better release: the current file stays', itemFields(entry), { result: 'no_better_release', profiles: shownProfiles });
         queue.endAttempt(entry, 'failed', 'no_better_release');
         queue.move(entry, { stage: 'available', branch: null, reason: null }, 'no better release');
         continue;
@@ -461,7 +459,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       const summary = rejectionSummary(decisions);
       const count = `${decisions.length} ${decisions.length === 1 ? 'release' : 'releases'}`;
       const message = code === 'all_rejected' ? `No release selected: ${count}, all rejected` : (RESULT_MESSAGE[code] ?? `No release found: ${code}`);
-      catalog.info('finished', message, itemFields(db, entry), {
+      catalog.info('finished', message, itemFields(entry), {
         result: code,
         asked,
         answered,
@@ -510,7 +508,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       entry.search && Object.assign(entry.search, { result: 'grabbed', accepted: 1 });
       const attempt = entry.attempts.at(-1);
       if (attempt) attempt.release = release.title;
-      catalog.info('release_chosen', `Chose "${release.title}" from ${ref.indexerName}`, itemFields(db, entry), {
+      catalog.info('release_chosen', `Chose "${release.title}" from ${ref.indexerName}`, itemFields(entry), {
         ...explained,
         kind: ref.kind,
         manual,
@@ -649,7 +647,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
             const own = closestOf(decisions.get(entry.id) ?? []);
             const ownAccepted = own.filter((decision) => decision.accepted).length;
             const ownReasons = rejectionSummary(own.filter((decision) => !decision.accepted));
-            catalog.info('search', `${label} for S${pad(entry.season!)}E${pad(entry.number!)}: ${resultsOf(own.length)}, ${ownAccepted} matched quality${partial}`, itemFields(db, entry), {
+            catalog.info('search', `${label} for S${pad(entry.season!)}E${pad(entry.number!)}: ${resultsOf(own.length)}, ${ownAccepted} matched quality${partial}`, itemFields(entry), {
               ...provenance,
               source: 'season',
               scope: `S${pad(scope.season)}`,
@@ -664,7 +662,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
           const own = closestOf(decisions.get(entry.id) ?? []);
           const ownAccepted = own.filter((decision) => decision.accepted).length;
           const ownReasons = rejectionSummary(own.filter((decision) => !decision.accepted));
-          catalog.info('search', `${label}: ${resultsOf(result.releases.length)}, ${ownAccepted} matched quality${partial}`, itemFields(db, entry), {
+          catalog.info('search', `${label}: ${resultsOf(result.releases.length)}, ${ownAccepted} matched quality${partial}`, itemFields(entry), {
             ...provenance,
             source: 'episode',
             season: entry.season,
@@ -685,7 +683,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       return at !== null && at <= now() && now() - at < recentAirMs;
     };
     const noteSkipped = (entry: QueueEntry) => {
-      catalog.info('search', 'Search episode skipped: the episode is too old to be a recent episode, so only the season search ran.', itemFields(db, entry), {
+      catalog.info('search', 'Search episode skipped: the episode is too old to be a recent episode, so only the season search ran.', itemFields(entry), {
         source: 'episode',
         skipped: true,
         reason: 'outside_recent_window',
@@ -703,7 +701,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       const nextAt = now() + SEARCH_CONTINUE_MS;
       for (const entry of remaining) {
         Object.assign(entry.search!, { result: 'deferred', accepted: 0, nextAt });
-        catalog.info('search_deferred', 'Search deferred: request budget reached. The search continues in the next run.', itemFields(db, entry), {
+        catalog.info('search_deferred', 'Search deferred: request budget reached. The search continues in the next run.', itemFields(entry), {
           result: 'deferred',
           nextSearchAt: new Date(nextAt).toISOString(),
           run: runId,
@@ -841,7 +839,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
   // True while the target is still a target of the same upgrade search. The settings, the monitoring, and the file can
   // change while the indexers answer, so a caller asks again just before it takes a release.
   const stillUpgrade = (title: Title, season: number | null, number: number | null, resolution: number) =>
-    db.data.titles[title.key] === title && manualUpgradeTargets(db, title, resolution).some((target) => target.season === season && target.number === number);
+    db.data.titles[title.key] === title && manualUpgradeTargets(title, resolution).some((target) => target.season === season && target.number === number);
 
   // A file is a target for an upgrade search when no entry of it is in the journey.
   const upgradeFree = (target: { title: Title; season: number | null; number: number | null }) => {
@@ -868,7 +866,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
   }
 
   // The files that a search of one resolution covers: no indexer to ask, or a file in the journey, gives none.
-  const upgradeFiles = (title: Title, resolution: number) => (usableIndexers(title).length > 0 ? manualUpgradeTargets(db, title, resolution).filter(upgradeFree) : []);
+  const upgradeFiles = (title: Title, resolution: number) => (usableIndexers(title).length > 0 ? manualUpgradeTargets(title, resolution).filter(upgradeFree) : []);
 
   // The user asks for an upgrade of a title to one resolution. Each file below it is searched now.
   async function upgradeTitle(key: string, signal: AbortSignal, resolution: number) {
@@ -964,7 +962,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       if (!isActive(entry) || entry.branch === 'paused' || entry.branch === 'cancelled') continue;
       if (!entry.reason || !REPAIR.has(entry.reason.code)) continue;
       if (t - entry.stageSince < REPAIR_MS) continue;
-      catalog.info('repair', `The import stopped on ${entry.reason.code}. The search starts again.`, itemFields(db, entry), { code: entry.reason.code });
+      catalog.info('repair', `The import stopped on ${entry.reason.code}. The search starts again.`, itemFields(entry), { code: entry.reason.code });
       queue.endAttempt(entry, 'failed', 'verification repair');
       queue.startAttempt(entry, 'verification repair');
       entry.release = null;
@@ -1104,7 +1102,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
   function fallback(entries: QueueEntry[], cause: string) {
     const again: QueueEntry[] = [];
     for (const entry of entries) {
-      catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: ${cause}`, itemFields(db, entry), { code: cause, release: entry.release?.title ?? null });
+      catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: ${cause}`, itemFields(entry), { code: cause, release: entry.release?.title ?? null });
       if (entry.release) block(entry.release, cause, entry.titleKey, entry.season);
       queue.endAttempt(entry, 'failed', cause);
       entry.release = null;

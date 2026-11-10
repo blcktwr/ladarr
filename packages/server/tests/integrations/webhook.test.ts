@@ -171,7 +171,7 @@ describe('delivery', () => {
     Object.assign(db.data, emptyData());
     db.data.webhooks = [{ id: 'hook', type: 'available', url: receiver.url }];
     db.data.titles['movie:2'] = movie();
-    const worker = createWorker(async () => {}, webhookDeliverHandler({ db, timeoutMs: 300 }), { tickMs: 15 });
+    const worker = createWorker(async () => {}, webhookDeliverHandler({ timeoutMs: 300 }), { tickMs: 15 });
     worker.start();
     closers.push(() => worker.stop());
     const webhooks = createWebhooks({ enqueue: (input) => worker.enqueue(input), now: () => NOW });
@@ -280,7 +280,7 @@ describe('worker slots', () => {
     db.data.webhooks = [{ id: 'hook', type: 'available', url: receiver.url }];
     const ran: string[] = [];
     // Two slots in all. Without separate slots, the two deliveries would take both.
-    const worker = createWorker(async () => {}, { ...webhookDeliverHandler({ db, timeoutMs: 60_000 }), work: { run: async () => void ran.push('done') } }, { tickMs: 15, concurrency: 2 });
+    const worker = createWorker(async () => {}, { ...webhookDeliverHandler({ timeoutMs: 60_000 }), work: { run: async () => void ran.push('done') } }, { tickMs: 15, concurrency: 2 });
     worker.start();
     closers.push(() => worker.stop());
     const webhooks = createWebhooks({ enqueue: (input) => worker.enqueue(input) });
@@ -304,7 +304,7 @@ describe('import with a receiver outage', () => {
     pipe.db.data.webhooks = [{ id: 'hook', type: 'available', url: receiver.url }];
 
     // The webhook jobs run in their own worker, so the worker of the pipeline needs no change.
-    const hookWorker = createWorker(async () => {}, webhookDeliverHandler({ db: pipe.db, timeoutMs: 60_000 }), { tickMs: 15 });
+    const hookWorker = createWorker(async () => {}, webhookDeliverHandler({ timeoutMs: 60_000 }), { tickMs: 15 });
     hookWorker.start();
     closers.push(() => hookWorker.stop());
     const webhooks = createWebhooks({ enqueue: (input) => hookWorker.enqueue(input) });
@@ -355,7 +355,7 @@ describe('redaction', () => {
     failing.state.respond = () => 500;
     const app = await startTestApp();
     closers.push(app.close);
-    const worker = createWorker(async () => {}, webhookDeliverHandler({ db: app.db, timeoutMs: 300 }), { tickMs: 15 });
+    const worker = createWorker(async () => {}, webhookDeliverHandler({ timeoutMs: 300 }), { tickMs: 15 });
     worker.start();
     closers.push(() => worker.stop());
 
@@ -449,7 +449,7 @@ describe('API', () => {
     old.state.respond = () => 503;
     const next = await startReceiver();
     closers.push(next.close);
-    const worker = createWorker(async () => {}, webhookDeliverHandler({ db: app.db }), { tickMs: 15 });
+    const worker = createWorker(async () => {}, webhookDeliverHandler({}), { tickMs: 15 });
     worker.start();
     closers.push(() => worker.stop());
     const webhooks = createWebhooks({ enqueue: (input) => worker.enqueue(input) });

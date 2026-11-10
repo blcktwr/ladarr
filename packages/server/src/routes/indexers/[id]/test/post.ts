@@ -1,4 +1,4 @@
-import { get } from '../../../../core/db.ts';
+import { db } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { identity, isObject } from '../../../../library/grab/indexers.ts';
 import type { IndexerService } from '../../../../library/grab/torznab.ts';
@@ -6,7 +6,6 @@ import { draft, invalidSetting, parseManual, probe } from '../../../../helpers/i
 
 // Tests the saved indexer, or the settings of the body when it has some, before the user saves them.
 export function indexerTestSaved(service: IndexerService): RequestHandler<{ id: string }> {
-  const db = get();
   return async (req, res) => {
     const indexer = db.data.indexers[Number(req.params.id)];
     if (!indexer) return void res.status(404).json({ error: 'not_found' });

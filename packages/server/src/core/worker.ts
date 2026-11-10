@@ -1,5 +1,5 @@
 import { claim, complete, enqueue, fail, recoverExpired, release, renew, type EnqueueInput, type Job } from './jobs.ts';
-import { get } from './db.ts';
+import { db } from './db.ts';
 import { log } from './log.ts';
 import { withOutboundRequests } from './outbound.ts';
 
@@ -27,7 +27,6 @@ export function createWorker(
   handlers: Record<string, Handler>,
   { tickMs = 1_000, leaseMs = 60_000, concurrency = 4, graceMs = 10_000 }: Options = {},
 ) {
-  const db = get();
   const inflight = new Map<string, { job: Job; token: string; controller: AbortController; done: Promise<void> }>();
   let stopping = false;
   let paused = false;

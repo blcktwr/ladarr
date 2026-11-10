@@ -201,7 +201,7 @@ describe('library API', () => {
     const tmdb = createTmdb({ apiKey: 'k', fetch: fakeFetch, baseUrl: 'https://tmdb.test/3', spacingMs: 0, ttlMs: 0 });
     const events = createEvents();
     app = await startTestApp({ tmdb, events });
-    const handler = metadataRefreshHandler({ db: app.db, tmdb, events });
+    const handler = metadataRefreshHandler({ tmdb, events });
     refresh = (key) => handler.run({ payload: { key } } as never, { signal: new AbortController().signal });
   });
   afterAll(() => {

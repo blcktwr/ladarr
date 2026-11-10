@@ -13,10 +13,10 @@ import {
   type Parsed,
 } from '../library/grab/indexers.ts';
 import { IndexerError, type IndexerService } from '../library/grab/torznab.ts';
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 
 export const invalidSetting = (res: Response, field: string) => void res.status(400).json({ error: 'invalid_setting', field });
-export const exists = (db: Db, parsed: Parsed, id?: number) =>
+export const exists = (parsed: Parsed, id?: number) =>
   Object.values(db.data.indexers).some((item) => item.id !== id && identity(item.baseUrl, item.apiPath) === identity(parsed.baseUrl, parsed.apiPath));
 
 // The form of Settings. An indexer that the user adds serves both apps, with the standard Torznab categories for series, anime, and movies.

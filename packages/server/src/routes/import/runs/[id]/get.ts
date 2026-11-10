@@ -1,10 +1,9 @@
-import { get } from '../../../../core/db.ts';
+import { db } from '../../../../core/db.ts';
 import type { RunView } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import type { ImportStatus } from '../../../../library/imports/status.ts';
 
 export function importRunGet(status: ImportStatus): RequestHandler<{ id: string }> {
-  const db = get();
   return (req, res) => {
     const journal = db.data.imports[req.params.id];
     const run = status.run(req.params.id) ?? (journal ? { id: journal.id, kind: journal.kind ?? 'import', titleKey: journal.titleKey, total: journal.steps.length, done: 0, problems: [], finished: false, startedAt: journal.createdAt } : undefined);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { decide, type Context, type Want } from '../../src/library/grab/decide.ts';
-import { emptyData, type Db, type MediaFile } from '../../src/core/db.ts';
+import { emptyData, set, type Db, type MediaFile } from '../../src/core/db.ts';
 import { episode, indexer, movie, NOW, release, title } from '../helpers/test-fixtures.ts';
 import { manualUpgradeTargets, upgradeResolutions } from '../../src/library/grab/upgrades.ts';
 import type { Profile } from '../../src/library/grab/quality.ts';
@@ -18,28 +18,30 @@ const dbWith = (profiles: Profile[], files: Partial<MediaFile>[] = []) => {
   files.forEach((file, i) => {
     data.files[`f${i}`] = { id: `f${i}`, titleKey: 'x', path: `Show/Season 01/Show - S01E0${i + 1}.mkv`, sizeBytes: 1, mtimeMs: 1, episodes: [{ season: 1, number: i + 1 }], missing: false, addedAt: 1, ...file };
   });
-  return { data } as Db;
+  const db = { data } as Db;
+  set(db);
+  return db;
 };
 
 describe('the resolutions that an upgrade can reach', () => {
   it('lists the resolutions of the chain that are above a file, in ascending order', () => {
     const db = dbWith(chain(2160, 1080), [{ source: 'webdl', resolution: 720 }]);
-    expect(upgradeResolutions(db, movie({ fileId: 'f0' }))).toEqual([1080, 2160]);
+    expect(upgradeResolutions(movie({ fileId: 'f0' }))).toEqual([1080, 2160]);
   });
 
   it('lists only the levels that the chain defines, and the nearest one alone', () => {
     const db = dbWith(chain(720), [{ source: 'webdl', resolution: 480 }]);
-    expect(upgradeResolutions(db, movie({ fileId: 'f0' }))).toEqual([720]);
+    expect(upgradeResolutions(movie({ fileId: 'f0' }))).toEqual([720]);
   });
 
   it('gives no resolution when the chain does not go above the file', () => {
     const db = dbWith(chain(1080), [{ source: 'webdl', resolution: 1080 }]);
-    expect(upgradeResolutions(db, movie({ fileId: 'f0' }))).toEqual([]);
+    expect(upgradeResolutions(movie({ fileId: 'f0' }))).toEqual([]);
   });
 
   it('reads the resolution from the file name when the file has no source', () => {
     const db = dbWith(chain(1080, 2160), [{ path: 'Movie Name (2019) 720p BluRay.mkv' }]);
-    expect(upgradeResolutions(db, movie({ fileId: 'f0' }))).toEqual([1080, 2160]);
+    expect(upgradeResolutions(movie({ fileId: 'f0' }))).toEqual([1080, 2160]);
   });
 
   it('skips a file with no known resolution, a missing file, and a file for several episodes', () => {
@@ -48,17 +50,17 @@ describe('the resolutions that an upgrade can reach', () => {
       { source: 'webdl', resolution: 720, missing: true },
       { source: 'webdl', resolution: 720, episodes: [{ season: 1, number: 1 }, { season: 1, number: 2 }] },
     ]);
-    expect(upgradeResolutions(db, movie({ fileId: 'f0' }))).toEqual([]);
-    expect(upgradeResolutions(db, movie({ fileId: 'f1' }))).toEqual([]);
-    expect(upgradeResolutions(db, movie({ fileId: 'f2' }))).toEqual([]);
-    expect(upgradeResolutions(db, movie({ fileId: 'nope' }))).toEqual([]);
+    expect(upgradeResolutions(movie({ fileId: 'f0' }))).toEqual([]);
+    expect(upgradeResolutions(movie({ fileId: 'f1' }))).toEqual([]);
+    expect(upgradeResolutions(movie({ fileId: 'f2' }))).toEqual([]);
+    expect(upgradeResolutions(movie({ fileId: 'nope' }))).toEqual([]);
   });
 
   it('skips an unmonitored episode, and gives none for a paused title', () => {
     const db = dbWith(chain(1080, 2160), [{ source: 'webdl', resolution: 720 }]);
     const show = title({ episodes: [episode(1, 1, '2020-01-01', { fileId: 'f0', override: 'unmonitored' })] });
-    expect(upgradeResolutions(db, show)).toEqual([]);
-    expect(upgradeResolutions(db, { ...show, paused: true })).toEqual([]);
+    expect(upgradeResolutions(show)).toEqual([]);
+    expect(upgradeResolutions({ ...show, paused: true })).toEqual([]);
   });
 });
 
@@ -66,7 +68,7 @@ describe('the files of a manual upgrade', () => {
   it('finds the files below the chosen resolution and gives their resolution', () => {
     const db = dbWith(chain(1080, 2160), [{ source: 'webdl', resolution: 720 }, { source: 'webdl', resolution: 1080 }]);
     const show = title({ episodes: [episode(1, 1, '2020-01-01', { fileId: 'f0' }), episode(1, 2, '2020-01-01', { fileId: 'f1' })] });
-    const targets = manualUpgradeTargets(db, show, 1080);
+    const targets = manualUpgradeTargets(show, 1080);
     expect(targets).toHaveLength(1);
     expect(targets[0]).toMatchObject({ title: show, season: 1, number: 1, resolution: 720 });
     expect(targets[0]!.file.id).toBe('f0');
@@ -74,16 +76,16 @@ describe('the files of a manual upgrade', () => {
 
   it('takes the movie file of a movie', () => {
     const db = dbWith(chain(1080, 2160), [{ source: 'webdl', resolution: 720 }]);
-    const targets = manualUpgradeTargets(db, movie({ fileId: 'f0' }), 2160);
+    const targets = manualUpgradeTargets(movie({ fileId: 'f0' }), 2160);
     expect(targets).toHaveLength(1);
     expect(targets[0]).toMatchObject({ season: null, number: null, resolution: 720 });
   });
 
   it('gives no target for a resolution that the chain cannot reach', () => {
     const db = dbWith(chain(1080, 2160), [{ source: 'webdl', resolution: 720 }]);
-    expect(manualUpgradeTargets(db, movie({ fileId: 'f0' }), 720)).toEqual([]);
-    expect(manualUpgradeTargets(db, movie({ fileId: 'f0' }), 1440)).toEqual([]);
-    expect(manualUpgradeTargets(db, movie({ fileId: 'f0' }), 2160)).toHaveLength(1);
+    expect(manualUpgradeTargets(movie({ fileId: 'f0' }), 720)).toEqual([]);
+    expect(manualUpgradeTargets(movie({ fileId: 'f0' }), 1440)).toEqual([]);
+    expect(manualUpgradeTargets(movie({ fileId: 'f0' }), 2160)).toHaveLength(1);
   });
 
   it('skips a file with no known resolution, a missing file, a file for several episodes, and a file with no record', () => {
@@ -92,24 +94,24 @@ describe('the files of a manual upgrade', () => {
       { source: 'webdl', resolution: 720, missing: true },
       { source: 'webdl', resolution: 720, episodes: [{ season: 1, number: 1 }, { season: 1, number: 2 }] },
     ]);
-    expect(manualUpgradeTargets(db, movie({ fileId: 'f0' }), 1080)).toEqual([]);
-    expect(manualUpgradeTargets(db, movie({ fileId: 'f1' }), 1080)).toEqual([]);
-    expect(manualUpgradeTargets(db, movie({ fileId: 'f2' }), 1080)).toEqual([]);
-    expect(manualUpgradeTargets(db, movie({ fileId: 'nope' }), 1080)).toEqual([]);
+    expect(manualUpgradeTargets(movie({ fileId: 'f0' }), 1080)).toEqual([]);
+    expect(manualUpgradeTargets(movie({ fileId: 'f1' }), 1080)).toEqual([]);
+    expect(manualUpgradeTargets(movie({ fileId: 'f2' }), 1080)).toEqual([]);
+    expect(manualUpgradeTargets(movie({ fileId: 'nope' }), 1080)).toEqual([]);
   });
 
   it('reads the resolution from the file name when the file has no source', () => {
     const db = dbWith(chain(1080, 2160), [{ path: 'Movie Name (2019) 720p BluRay.mkv' }]);
-    expect(manualUpgradeTargets(db, movie({ fileId: 'f0' }), 1080)).toMatchObject([{ season: null, number: null, resolution: 720 }]);
+    expect(manualUpgradeTargets(movie({ fileId: 'f0' }), 1080)).toMatchObject([{ season: null, number: null, resolution: 720 }]);
   });
 
   it('takes a monitored episode only, and none for a paused title', () => {
     const db = dbWith(chain(1080, 2160), [{ source: 'webdl', resolution: 720 }]);
     const show = title({ episodes: [episode(1, 1, '2020-01-01', { fileId: 'f0', override: 'unmonitored' })] });
-    expect(manualUpgradeTargets(db, show, 1080)).toEqual([]);
+    expect(manualUpgradeTargets(show, 1080)).toEqual([]);
     const monitored = title({ episodes: [episode(1, 1, '2020-01-01', { fileId: 'f0' })] });
-    expect(manualUpgradeTargets(db, monitored, 1080)).toHaveLength(1);
-    expect(manualUpgradeTargets(db, { ...monitored, paused: true }, 1080)).toEqual([]);
+    expect(manualUpgradeTargets(monitored, 1080)).toHaveLength(1);
+    expect(manualUpgradeTargets({ ...monitored, paused: true }, 1080)).toEqual([]);
   });
 });
 

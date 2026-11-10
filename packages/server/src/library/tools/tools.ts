@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { get } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
 import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { libraryFilesRouter } from './files.ts';
@@ -13,8 +13,7 @@ type Deps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job
 // The file details, the bulk actions, and the folders without a title. Mount it before the library router,
 // because the names "folders" and "plans" would otherwise match the title key there.
 export function libraryToolsRouter(deps: Deps) {
-  const db = get();
   const router = Router();
-  router.use(libraryFoldersRouter(db, deps), libraryPlansRouter(db, deps), libraryFilesRouter(db));
+  router.use(libraryFoldersRouter(deps), libraryPlansRouter(deps), libraryFilesRouter());
   return router;
 }

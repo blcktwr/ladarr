@@ -1,11 +1,10 @@
-import { get } from '../../../core/db.ts';
+import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import type { Poller } from '../../../library/downloads/poller.ts';
 import { loadingTitleKeys, queueKey } from '../../../library/downloads/queue.ts';
 import { DAY_MS, itemJobs, jobLabel, shown } from '../../../helpers/queue.ts';
 
 export function queueSummaryGet(poller: Poller): RequestHandler {
-  const db = get();
   return (_req, res) => {
     // The titles of each stage. A series counts once for each stage that its episodes show, so its number of episodes
     // does not change the count of the menu.
@@ -19,7 +18,7 @@ export function queueSummaryGet(poller: Poller): RequestHandler {
       titles.set(key, found);
     };
     for (const entry of Object.values(db.data.queue)) {
-      if (!shown(db, entry) || entry.clearedAt) continue;
+      if (!shown(entry) || entry.clearedAt) continue;
       targets++;
       add(queueKey(entry), entry.titleKey);
       // A target that can still move has no branch and no reason. One with a reason waits for the person.
@@ -28,7 +27,7 @@ export function queueSummaryGet(poller: Poller): RequestHandler {
       else working[entry.stage] = (working[entry.stage] ?? 0) + 1;
     }
     // A series that waits for its episodes counts as one target that searches.
-    for (const key of loadingTitleKeys(db)) {
+    for (const key of loadingTitleKeys()) {
       targets++;
       add('searching', key);
       working.searching = (working.searching ?? 0) + 1;
@@ -37,7 +36,7 @@ export function queueSummaryGet(poller: Poller): RequestHandler {
     for (const [key, found] of titles) counts[key] = found.size;
     const transfers = poller.transfers().filter((t) => !t.complete);
     const since = Date.now() - DAY_MS;
-    const current = itemJobs(db).find((job) => job.state === 'running');
+    const current = itemJobs().find((job) => job.state === 'running');
     res.json({
       cursor: db.data.queueRev,
       counts,
@@ -52,7 +51,7 @@ export function queueSummaryGet(poller: Poller): RequestHandler {
       client: poller.status(),
       hasClient: db.data.downloadClients.some((client) => client.enabled),
       indexers: Object.keys(db.data.indexers).length,
-      currentJob: current ? { type: current.type, label: jobLabel(db, current) } : null,
+      currentJob: current ? { type: current.type, label: jobLabel(current) } : null,
     });
   };
 }

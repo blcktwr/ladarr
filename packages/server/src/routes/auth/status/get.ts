@@ -1,10 +1,9 @@
-import { get } from '../../../core/db.ts';
+import { db } from '../../../core/db.ts';
 import type { AuthStatus } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { findSession } from '../../../core/auth.ts';
 
 export function authStatus(): RequestHandler {
-  const db = get();
   return (req, res) => {
     const session = findSession(req);
     res.json({

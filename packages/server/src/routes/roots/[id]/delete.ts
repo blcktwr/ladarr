@@ -1,9 +1,8 @@
-import { get } from '../../../core/db.ts';
+import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 
 // The record goes away. The folder and its files stay where they are.
 export function rootsDelete(): RequestHandler<{ id: string }> {
-  const db = get();
   return async (req, res) => {
     const root = db.data.roots[req.params.id];
     if (!root) return void res.status(404).json({ error: 'not_found' });

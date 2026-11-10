@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
-import type { Db, Root } from '../../core/db.ts';
+import { type Db, type Root, db } from '../../core/db.ts';
 import type { ImportStatus } from './status.ts';
 import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import type { ImportJournal, JournalStep } from './importer.ts';
@@ -17,7 +17,7 @@ export class PlanError extends Error {
 export const keyOf = (episode: { season: number; number: number }) => `${episode.season}x${episode.number}`;
 
 // A title with an open journal can not take a second one. Two journals could write the same name.
-export const titleBusy = (db: Db, titleKey: string) => Object.values(db.data.imports).some((journal) => journal.titleKey === titleKey);
+export const titleBusy = (titleKey: string) => Object.values(db.data.imports).some((journal) => journal.titleKey === titleKey);
 
 // A read-only look at the root. It writes nothing, so a preview changes nothing.
 // The device number must be the one that the user accepted, or the root may be another disk.
@@ -28,14 +28,14 @@ export async function readableRoot(root: Root | undefined): Promise<string> {
 }
 
 // The file of the library for a target, when the file is on the disk.
-export const presentFile = (db: Db, id: string | null) => {
+export const presentFile = (id: string | null) => {
   const file = id ? db.data.files[id] : undefined;
   return file && !file.missing ? file : undefined;
 };
 
 // Saves the journal, and asks the worker to run it. The hash of the journal is the key of the job.
 export async function openJournal(
-  { db, enqueue, status }: { db: Db; enqueue: (input: EnqueueInput) => Job; status: ImportStatus },
+  { enqueue, status }: { enqueue: (input: EnqueueInput) => Job; status: ImportStatus },
   input: { kind: 'import' | 'rename'; titleKey: string; sourceBase: string; steps: JournalStep[]; linkOnly?: true; searchOnFinish?: true },
 ) {
   const id = randomUUID();

@@ -1,5 +1,5 @@
 import type { LibraryFilter, LibraryType } from '@ladarr/shared/enums';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import { availability, type Title } from '../library.ts';
 
 export const LIBRARY_FILTERS: readonly LibraryFilter[] = ['missing', 'waiting', 'attention', 'available'];
@@ -11,7 +11,7 @@ export const libraryType = (value: unknown): LibraryType | undefined => (value =
 export const matchesType = (title: Title, type: LibraryType | undefined) => !type || (type === 'anime' ? title.mediaType === 'tv' && title.seriesType === 'anime' : title.mediaType === type);
 
 // The titles that have a target that waits on a problem. Activity counts the same entries.
-function attentionKeys(db: Db) {
+function attentionKeys() {
   const keys = new Set<string>();
   for (const entry of Object.values(db.data.queue)) {
     if (entry.branch === null && entry.reason !== null && entry.attempt > 0 && !entry.clearedAt) keys.add(entry.titleKey);
@@ -22,12 +22,12 @@ function attentionKeys(db: Db) {
 export type FilterResult = { test: (title: Title) => boolean } | { error: 'invalid_filter' };
 
 // Turns the `filter` value of a request into a test for one title. No value passes every title.
-export function libraryFilter(db: Db, value: unknown): FilterResult {
+export function libraryFilter(value: unknown): FilterResult {
   if (value === undefined) return { test: () => true };
   if (typeof value !== 'string' || !LIBRARY_FILTERS.includes(value as LibraryFilter)) return { error: 'invalid_filter' };
   const filter = value as LibraryFilter;
   if (filter === 'attention') {
-    const keys = attentionKeys(db);
+    const keys = attentionKeys();
     return { test: (title) => keys.has(title.key) };
   }
   const { timeZone, region } = db.data.settings;

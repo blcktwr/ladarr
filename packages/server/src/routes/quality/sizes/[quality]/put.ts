@@ -1,10 +1,9 @@
-import { get } from '../../../../core/db.ts';
+import { db } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { isQualityId, type SizeLimits } from '../../../../library/grab/quality.ts';
 import { isLimit, isObject } from '../../../../helpers/quality.ts';
 
 export function qualitySizesPut(): RequestHandler<{ quality: string }> {
-  const db = get();
   return async (req, res) => {
     const id = req.params.quality;
     if (!isQualityId(id)) return void res.status(404).json({ error: 'not_found' });

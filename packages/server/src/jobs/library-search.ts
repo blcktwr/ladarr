@@ -1,4 +1,4 @@
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import type { EnqueueInput, Job } from '../core/jobs.ts';
 import type { Finder } from '../library/grab/finder.ts';
 import { BULK_SEARCH_JOB, type BulkSearchPayload } from '../library/calendar/calendar-search.ts';
@@ -14,9 +14,9 @@ const UPGRADE_BATCH_TARGETS = 10;
 const MAX_BACKLOG = 50;
 const BACKLOG_WAIT_MS = 30_000;
 
-type Deps = { db: Db; finder: Finder; enqueue: (input: EnqueueInput) => Job };
+type Deps = { finder: Finder; enqueue: (input: EnqueueInput) => Job };
 
-export function librarySearchHandler({ db, finder, enqueue }: Deps): Handler {
+export function librarySearchHandler({ finder, enqueue }: Deps): Handler {
   return {
     concurrency: 1,
     run: async (job, { signal }) => {

@@ -2,7 +2,7 @@ import { readdir, realpath, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import type { UntitledFolder } from '@ladarr/shared/types';
 import { Router } from 'express';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
 import { inside, listFiles } from '../imports/folder-files.ts';
 import type { EnqueueInput, Job } from '../../core/jobs.ts';
@@ -38,7 +38,7 @@ export function guessTitle(folder: string): { title: string; year: number | null
   return { title: text.replace(/\s+/g, ' ').trim() || folder, year };
 }
 
-export function libraryFoldersRouter(db: Db, { tmdb, events, enqueue }: Deps) {
+export function libraryFoldersRouter({ tmdb, events, enqueue }: Deps) {
   const router = Router();
   // A folder that an add is about to use. This keeps two requests from giving one folder to two titles.
   const adopting = new Set<string>();
@@ -109,7 +109,7 @@ export function libraryFoldersRouter(db: Db, { tmdb, events, enqueue }: Deps) {
         enqueue(scanJob(key));
       } else {
         // A series starts with Future episodes. The old episodes that the folder lacks do not start downloads.
-        await addTitle({ db, tmdb, enqueue }, { mediaType: root.mediaType, tmdbId, mode: root.mediaType === 'tv' ? 'future' : 'all', seriesType: 'standard', preset: null, rootId: root.id, folder });
+        await addTitle({ tmdb, enqueue }, { mediaType: root.mediaType, tmdbId, mode: root.mediaType === 'tv' ? 'future' : 'all', seriesType: 'standard', preset: null, rootId: root.id, folder });
       }
       await db.write();
       events.publish('library.changed', { key });

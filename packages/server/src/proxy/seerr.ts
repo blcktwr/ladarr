@@ -1,7 +1,7 @@
 import type { MediaType } from '@ladarr/shared/enums';
 import express, { Router, type RequestHandler, type Response } from 'express';
 import { safeEqual } from '../core/auth.ts';
-import { get, type Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import { onError } from '../core/errors.ts';
 import { isMonitored, seriesCounts, type Title } from '../library/library.ts';
 import { AddError, addTitle } from '../library/tools/add.ts';
@@ -60,7 +60,6 @@ function pageOf(value: unknown) {
 }
 
 export const seerrAuth = (): RequestHandler => {
-  const db = get();
   return (req, res, next) => {
     const sent = req.get('x-api-key') ?? (typeof req.query.apikey === 'string' ? req.query.apikey : undefined);
     if (sent && db.data.apiKey && safeEqual(sent, db.data.apiKey)) return next();
@@ -75,34 +74,34 @@ export const seerrWrongPath =
   (_req, res) =>
     fail(res, 404, `Use ${urlBase}/seerr/api/v1.`);
 
-function titleOf(db: Db, mediaType: MediaType, tmdbId: number) {
+function titleOf(mediaType: MediaType, tmdbId: number) {
   return db.data.titles[`${mediaType}:${tmdbId}`];
 }
 
-function activeQueue(db: Db, key: string) {
+function activeQueue(key: string) {
   return Object.values(db.data.queue).some((entry) => entry.titleKey === key && ACTIVE_STAGES.has(entry.stage) && entry.branch !== 'cancelled');
 }
 
-function requestsFor(db: Db, mediaType: MediaType, tmdbId: number) {
+function requestsFor(mediaType: MediaType, tmdbId: number) {
   return Object.values(db.data.seerr.requests)
     .filter((request) => request.mediaType === mediaType && request.tmdbId === tmdbId)
     .sort((a, b) => a.id - b.id);
 }
 
-function mediaStatus(db: Db, title: Title, requested: boolean) {
+function mediaStatus(title: Title, requested: boolean) {
   if (title.mediaType === 'movie') {
-    if (presentFile(db, title.fileId)) return AVAILABLE;
-    if (title.paused && !activeQueue(db, title.key) && !requested) return UNKNOWN;
+    if (presentFile(title.fileId)) return AVAILABLE;
+    if (title.paused && !activeQueue(title.key) && !requested) return UNKNOWN;
     return PROCESSING;
   }
-  const counts = seriesCounts(title, clock(db));
+  const counts = seriesCounts(title, clock());
   if (counts.eligible > 0 && counts.available >= counts.eligible) return AVAILABLE;
   if (counts.available > 0) return PARTIAL;
-  if (title.paused && !activeQueue(db, title.key) && !requested) return UNKNOWN;
+  if (title.paused && !activeQueue(title.key) && !requested) return UNKNOWN;
   return PROCESSING;
 }
 
-function seasonMonitored(db: Db, title: Title, season: number) {
+function seasonMonitored(title: Title, season: number) {
   const choice = title.seasonOverrides[season];
   if (choice) return choice === 'monitored';
   const episodes = title.episodes.filter((episode) => episode.season === season);
@@ -110,16 +109,16 @@ function seasonMonitored(db: Db, title: Title, season: number) {
   return season !== 0 && title.policy === 'all';
 }
 
-function seasonStatus(db: Db, title: Title, season: number) {
+function seasonStatus(title: Title, season: number) {
   const episodes = title.episodes.filter((episode) => episode.season === season);
   const total = episodes.length || title.meta.seasons.find((item) => item.seasonNumber === season)?.episodeCount || 0;
-  const withFile = episodes.filter((episode) => presentFile(db, episode.fileId)).length;
+  const withFile = episodes.filter((episode) => presentFile(episode.fileId)).length;
   if (total > 0 && withFile >= total) return AVAILABLE;
   if (withFile > 0) return PARTIAL;
-  return seasonMonitored(db, title, season) ? PROCESSING : UNKNOWN;
+  return seasonMonitored(title, season) ? PROCESSING : UNKNOWN;
 }
 
-function seasonRows(db: Db, title: Title) {
+function seasonRows(title: Title) {
   const known = title.meta.seasons.length ? title.meta.seasons : [...new Map(title.episodes.map((episode) => [episode.season, episode])).values()].map((episode) => ({ seasonNumber: episode.season, episodeCount: 0, airDate: null }));
   return known.map((season) => ({
     seasonNumber: season.seasonNumber,
@@ -128,12 +127,12 @@ function seasonRows(db: Db, title: Title) {
     name: '',
     overview: '',
     posterPath: null,
-    status: seasonStatus(db, title, season.seasonNumber),
+    status: seasonStatus(title, season.seasonNumber),
     status4k: UNKNOWN,
   }));
 }
 
-function userResource(db: Db) {
+function userResource() {
   const createdAt = db.data.owner?.createdAt ?? Date.now();
   return {
     id: 1,
@@ -147,50 +146,50 @@ function userResource(db: Db) {
   };
 }
 
-function mediaInfo(db: Db, mediaType: MediaType, tmdbId: number, withRequests = true): Record<string, unknown> {
-  const title = titleOf(db, mediaType, tmdbId);
-  const requests = requestsFor(db, mediaType, tmdbId);
-  const status = title ? mediaStatus(db, title, requests.length > 0) : UNKNOWN;
+function mediaInfo(mediaType: MediaType, tmdbId: number, withRequests = true): Record<string, unknown> {
+  const title = titleOf(mediaType, tmdbId);
+  const requests = requestsFor(mediaType, tmdbId);
+  const status = title ? mediaStatus(title, requests.length > 0) : UNKNOWN;
   return {
     id: tmdbId,
     tmdbId,
     tvdbId: title?.meta.tvdbId ?? null,
     status,
-    ...(mediaType === 'tv' ? { seasons: title ? seasonRows(db, title) : [] } : {}),
-    ...(withRequests ? { requests: requests.map((request) => requestResource(db, request, false)) } : {}),
+    ...(mediaType === 'tv' ? { seasons: title ? seasonRows(title) : [] } : {}),
+    ...(withRequests ? { requests: requests.map((request) => requestResource(request, false)) } : {}),
     createdAt: title ? iso(title.addedAt) : null,
     updatedAt: title ? iso(title.refreshedAt || title.addedAt) : null,
     jellyfinMediaId: null,
   };
 }
 
-function requestStatus(db: Db, request: SeerrRequest) {
-  const title = titleOf(db, request.mediaType, request.tmdbId);
+function requestStatus(request: SeerrRequest) {
+  const title = titleOf(request.mediaType, request.tmdbId);
   if (!title) return 3;
-  return mediaStatus(db, title, true) === AVAILABLE ? 5 : 2;
+  return mediaStatus(title, true) === AVAILABLE ? 5 : 2;
 }
 
-function requestSeasonStatus(db: Db, request: SeerrRequest, season: number) {
-  const title = titleOf(db, request.mediaType, request.tmdbId);
+function requestSeasonStatus(request: SeerrRequest, season: number) {
+  const title = titleOf(request.mediaType, request.tmdbId);
   if (!title) return 3;
-  return seasonStatus(db, title, season) === AVAILABLE ? 5 : 2;
+  return seasonStatus(title, season) === AVAILABLE ? 5 : 2;
 }
 
-function requestResource(db: Db, request: SeerrRequest, withMedia = true): Record<string, unknown> {
+function requestResource(request: SeerrRequest, withMedia = true): Record<string, unknown> {
   return {
     id: request.id,
-    status: requestStatus(db, request),
-    ...(withMedia ? { media: mediaInfo(db, request.mediaType, request.tmdbId, false) } : {}),
+    status: requestStatus(request),
+    ...(withMedia ? { media: mediaInfo(request.mediaType, request.tmdbId, false) } : {}),
     createdAt: iso(request.createdAt),
     updatedAt: iso(request.updatedAt),
-    requestedBy: userResource(db),
+    requestedBy: userResource(),
     modifiedBy: null,
     is4k: false,
     serverid: 0,
     profileid: 0,
     rootFolder: '',
     type: request.mediaType,
-    ...(request.mediaType === 'tv' ? { seasons: request.seasons.map((season) => ({ seasonNumber: season, status: requestSeasonStatus(db, request, season), status4k: UNKNOWN })) } : {}),
+    ...(request.mediaType === 'tv' ? { seasons: request.seasons.map((season) => ({ seasonNumber: season, status: requestSeasonStatus(request, season), status4k: UNKNOWN })) } : {}),
   };
 }
 
@@ -329,7 +328,7 @@ function seasonOf(value: unknown) {
   };
 }
 
-function movieResult(db: Db, item: Record<string, unknown>) {
+function movieResult(item: Record<string, unknown>) {
   const id = numberValue(item.id);
   return {
     id,
@@ -347,11 +346,11 @@ function movieResult(db: Db, item: Record<string, unknown>) {
     releaseDate: textValue(item.release_date),
     adult: Boolean(item.adult),
     video: Boolean(item.video),
-    mediaInfo: mediaInfo(db, 'movie', id),
+    mediaInfo: mediaInfo('movie', id),
   };
 }
 
-function tvResult(db: Db, item: Record<string, unknown>) {
+function tvResult(item: Record<string, unknown>) {
   const id = numberValue(item.id);
   return {
     id,
@@ -368,21 +367,21 @@ function tvResult(db: Db, item: Record<string, unknown>) {
     originalName: textValue(item.original_name),
     originCountry: list(item.origin_country).filter((country): country is string => typeof country === 'string'),
     firstAirDate: textValue(item.first_air_date),
-    mediaInfo: mediaInfo(db, 'tv', id),
+    mediaInfo: mediaInfo('tv', id),
   };
 }
 
-function personResult(db: Db, item: Record<string, unknown>): Record<string, unknown> {
+function personResult(item: Record<string, unknown>): Record<string, unknown> {
   return {
     id: numberValue(item.id),
     profilePath: textOrNull(item.profile_path),
     adult: Boolean(item.adult),
     mediaType: 'person',
-    knownFor: list(item.known_for).flatMap((known) => (isObject(known) ? [resultItem(db, known)] : [])),
+    knownFor: list(item.known_for).flatMap((known) => (isObject(known) ? [resultItem(known)] : [])),
   };
 }
 
-function personCreditOf(db: Db, item: unknown) {
+function personCreditOf(item: unknown) {
   if (!isObject(item)) return {};
   const mediaType = textValue(item.media_type);
   const id = numberValue(item.id);
@@ -412,11 +411,11 @@ function personCreditOf(db: Db, item: unknown) {
     ...(item.character !== undefined ? { character: textValue(item.character) } : {}),
     ...(item.department !== undefined ? { department: textValue(item.department) } : {}),
     ...(item.job !== undefined ? { job: textValue(item.job) } : {}),
-    ...(mediaType === 'movie' || mediaType === 'tv' ? { mediaInfo: mediaInfo(db, mediaType, id) } : {}),
+    ...(mediaType === 'movie' || mediaType === 'tv' ? { mediaInfo: mediaInfo(mediaType, id) } : {}),
   };
 }
 
-function movieDetailsOf(db: Db, raw: Record<string, unknown>) {
+function movieDetailsOf(raw: Record<string, unknown>) {
   const id = numberValue(raw.id);
   return {
     id,
@@ -447,17 +446,17 @@ function movieDetailsOf(db: Db, raw: Record<string, unknown>) {
     voteCount: numberValue(raw.vote_count),
     credits: { cast: detailCastOf(isObject(raw.credits) ? raw.credits.cast : undefined), crew: detailCrewOf(isObject(raw.credits) ? raw.credits.crew : undefined) },
     externalIds: externalIdsOf(raw.external_ids),
-    mediaInfo: mediaInfo(db, 'movie', id),
+    mediaInfo: mediaInfo('movie', id),
   };
 }
 
-function tvDetailsOf(db: Db, raw: Record<string, unknown>) {
+function tvDetailsOf(raw: Record<string, unknown>) {
   const id = numberValue(raw.id);
   const seasons = list(raw.seasons).flatMap((season) => {
     const mapped = seasonOf(season);
     return mapped ? [mapped] : [];
   });
-  const info = mediaInfo(db, 'tv', id);
+  const info = mediaInfo('tv', id);
   if (Array.isArray(info.seasons) && info.seasons.length === 0) info.seasons = seasons;
   return {
     id,
@@ -494,22 +493,22 @@ function tvDetailsOf(db: Db, raw: Record<string, unknown>) {
   };
 }
 
-function resultItem(db: Db, item: unknown, fallbackType?: MediaType): unknown {
+function resultItem(item: unknown, fallbackType?: MediaType): unknown {
   if (!isObject(item)) return item;
   const mediaType = textValue(item.media_type) || fallbackType;
-  if (mediaType === 'movie') return movieResult(db, item);
-  if (mediaType === 'tv') return tvResult(db, item);
-  if (mediaType === 'person') return personResult(db, item);
+  if (mediaType === 'movie') return movieResult(item);
+  if (mediaType === 'tv') return tvResult(item);
+  if (mediaType === 'person') return personResult(item);
   return item;
 }
 
-function pageResource(db: Db, raw: unknown, fallbackType?: MediaType) {
+function pageResource(raw: unknown, fallbackType?: MediaType) {
   const data = isObject(raw) ? raw : {};
   return {
     page: typeof data.page === 'number' ? data.page : 1,
     totalPages: typeof data.total_pages === 'number' ? data.total_pages : 1,
     totalResults: typeof data.total_results === 'number' ? data.total_results : 0,
-    results: list(data.results).map((item) => resultItem(db, item, fallbackType)),
+    results: list(data.results).map((item) => resultItem(item, fallbackType)),
   };
 }
 
@@ -559,7 +558,7 @@ function readSeasonList(value: unknown) {
   return value as number[];
 }
 
-function rootOf(db: Db, mediaType: MediaType) {
+function rootOf(mediaType: MediaType) {
   const id = db.data.settings.defaultRoots[mediaType];
   if (id && db.data.roots[id]?.mediaType === mediaType) return db.data.roots[id];
   return Object.values(db.data.roots).find((root) => root.mediaType === mediaType);
@@ -580,7 +579,6 @@ function requestedSeasons(title: Title, list: number[]) {
 }
 
 export function seerrRouter(deps: CompatDeps) {
-  const db = get();
   const router = Router();
 
   router.get('/status', (_req, res) => void res.json({ version: '3.5.1', commitTag: 'ladarr' }));
@@ -593,14 +591,14 @@ export function seerrRouter(deps: CompatDeps) {
 
   router.use(seerrAuth());
 
-  router.get('/auth/me', (_req, res) => void res.json(userResource(db)));
+  router.get('/auth/me', (_req, res) => void res.json(userResource()));
 
   router.get('/search', async (req, res) => {
     const query = typeof req.query.query === 'string' ? req.query.query : undefined;
     if (!query) return fail(res, 400, 'The query is missing.');
     if (!deps.tmdb) return tmdbMissing(res);
     try {
-      res.json(pageResource(db, await deps.tmdb.searchPage(query, Number(pageOf(req.query.page)), languageOf(req.query))));
+      res.json(pageResource(await deps.tmdb.searchPage(query, Number(pageOf(req.query.page)), languageOf(req.query))));
     } catch (error) {
       tmdbFailure(res, error);
     }
@@ -610,7 +608,7 @@ export function seerrRouter(deps: CompatDeps) {
     if (!deps.tmdb) return tmdbMissing(res);
     try {
       const params = discoverParams(req.query as Record<string, unknown>, mediaType);
-      res.json(pageResource(db, await deps.tmdb.discover(mediaType, params), mediaType));
+      res.json(pageResource(await deps.tmdb.discover(mediaType, params), mediaType));
     } catch (error) {
       tmdbFailure(res, error);
     }
@@ -622,7 +620,7 @@ export function seerrRouter(deps: CompatDeps) {
   router.get('/discover/trending', async (req, res) => {
     if (!deps.tmdb) return tmdbMissing(res);
     try {
-      res.json(pageResource(db, await deps.tmdb.trending('all', 'day', Number(pageOf(req.query.page)), languageOf(req.query))));
+      res.json(pageResource(await deps.tmdb.trending('all', 'day', Number(pageOf(req.query.page)), languageOf(req.query))));
     } catch (error) {
       tmdbFailure(res, error);
     }
@@ -633,7 +631,7 @@ export function seerrRouter(deps: CompatDeps) {
     try {
       const params = discoverParams(req.query as Record<string, unknown>, 'movie');
       params['primary_release_date.gte'] = new Date().toISOString().slice(0, 10);
-      res.json(pageResource(db, await deps.tmdb.discover('movie', params), 'movie'));
+      res.json(pageResource(await deps.tmdb.discover('movie', params), 'movie'));
     } catch (error) {
       tmdbFailure(res, error);
     }
@@ -644,7 +642,7 @@ export function seerrRouter(deps: CompatDeps) {
     try {
       const params = discoverParams(req.query as Record<string, unknown>, 'tv');
       params['first_air_date.gte'] = new Date().toISOString().slice(0, 10);
-      res.json(pageResource(db, await deps.tmdb.discover('tv', params), 'tv'));
+      res.json(pageResource(await deps.tmdb.discover('tv', params), 'tv'));
     } catch (error) {
       tmdbFailure(res, error);
     }
@@ -679,7 +677,7 @@ export function seerrRouter(deps: CompatDeps) {
     try {
       const raw = await deps.tmdb.detailsRaw(mediaType, id, languageOf(req.query));
       if (!isObject(raw)) return fail(res, 503, 'TMDB is not available.');
-      res.json(mediaType === 'movie' ? movieDetailsOf(db, raw) : tvDetailsOf(db, raw));
+      res.json(mediaType === 'movie' ? movieDetailsOf(raw) : tvDetailsOf(raw));
     } catch (error) {
       tmdbFailure(res, error);
     }
@@ -698,7 +696,7 @@ export function seerrRouter(deps: CompatDeps) {
       const page = Number(pageOf(req.query.page));
       const language = languageOf(req.query);
       const raw = kind === 'similar' ? await deps.tmdb.similar(mediaType, id, page, language) : await deps.tmdb.recommendationsPage(mediaType, id, page, language);
-      res.json(pageResource(db, raw, mediaType));
+      res.json(pageResource(raw, mediaType));
     } catch (error) {
       tmdbFailure(res, error);
     }
@@ -716,7 +714,7 @@ export function seerrRouter(deps: CompatDeps) {
     try {
       const raw = await deps.tmdb.personCredits(id, languageOf(req.query));
       const data = isObject(raw) ? raw : {};
-      res.json({ id, cast: list(data.cast).map((item) => personCreditOf(db, item)), crew: list(data.crew).map((item) => personCreditOf(db, item)) });
+      res.json({ id, cast: list(data.cast).map((item) => personCreditOf(item)), crew: list(data.crew).map((item) => personCreditOf(item)) });
     } catch (error) {
       tmdbFailure(res, error);
     }
@@ -724,7 +722,7 @@ export function seerrRouter(deps: CompatDeps) {
 
   router.get('/request', (_req, res) => {
     const records = Object.values(db.data.seerr.requests).sort((a, b) => b.id - a.id);
-    res.json({ pageInfo: { page: 1, pages: 1, results: records.length }, results: records.map((record) => requestResource(db, record)) });
+    res.json({ pageInfo: { page: 1, pages: 1, results: records.length }, results: records.map((record) => requestResource(record)) });
   });
 
   router.post('/request', async (req, res) => {
@@ -750,15 +748,15 @@ export function seerrRouter(deps: CompatDeps) {
         if (error instanceof TmdbError && error.code === 'not_found') return fail(res, 400, 'The media does not exist.');
         return tmdbFailure(res, error);
       }
-      const root = rootOf(db, mediaType);
+      const root = rootOf(mediaType);
       if (!root) return fail(res, 400, 'No root folder is set for this media type.');
       const requested = mediaType === 'tv' ? (seasons.length ? seasons : meta.seasons.map((season) => season.seasonNumber).filter((season) => season !== 0)) : [];
       const overrides: Title['seasonOverrides'] = {};
       for (const season of meta.seasons) overrides[season.seasonNumber] = requested.includes(season.seasonNumber) ? 'monitored' : 'unmonitored';
       try {
         ({ title } = await addTitle(
-          { db, tmdb: deps.tmdb, enqueue: deps.enqueue },
-          { mediaType, tmdbId: tmdbId as number, mode: 'all', seriesType: 'standard', preset: firstProfileId(db), rootId: root.id, seasonOverrides: overrides, meta },
+          { tmdb: deps.tmdb, enqueue: deps.enqueue },
+          { mediaType, tmdbId: tmdbId as number, mode: 'all', seriesType: 'standard', preset: firstProfileId(), rootId: root.id, seasonOverrides: overrides, meta },
         ));
       } catch (error) {
         if (error instanceof AddError) title = db.data.titles[key];
@@ -776,10 +774,10 @@ export function seerrRouter(deps: CompatDeps) {
 
     let complete = false;
     if (mediaType === 'tv') {
-      complete = requested.length > 0 && requested.every((season) => seasonStatus(db, title!, season) === AVAILABLE);
+      complete = requested.length > 0 && requested.every((season) => seasonStatus(title!, season) === AVAILABLE);
       if (!complete) title.paused = false;
     } else {
-      complete = Boolean(presentFile(db, title.fileId));
+      complete = Boolean(presentFile(title.fileId));
       if (!complete) title.paused = false;
     }
 
@@ -787,7 +785,7 @@ export function seerrRouter(deps: CompatDeps) {
       deps.services.finder.requestSearch(title.key, { reason: 'requested in Seerr', fresh: true });
     }
 
-    const existing = requestsFor(db, mediaType, tmdbId as number)[0];
+    const existing = requestsFor(mediaType, tmdbId as number)[0];
     const now = Date.now();
     let record: SeerrRequest;
     if (existing) {
@@ -800,7 +798,7 @@ export function seerrRouter(deps: CompatDeps) {
     }
     await db.write();
     deps.events.publish('library.changed', { key });
-    res.status(201).json(requestResource(db, record));
+    res.status(201).json(requestResource(record));
   });
 
   router.put('/request/:id', unsupported('A request cannot be updated.'));

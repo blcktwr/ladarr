@@ -1,7 +1,7 @@
 import type { MediaType } from '@ladarr/shared/enums';
 import type { RequestHandler, Response } from 'express';
 import type { Services } from '../app.ts';
-import { profilesInOrder, type Db, type Root } from '../core/db.ts';
+import { type Root, db, profilesInOrder } from '../core/db.ts';
 import type { Events } from '../core/events.ts';
 import type { EnqueueInput, Job } from '../core/jobs.ts';
 import type { Title } from '../library/library.ts';
@@ -45,10 +45,10 @@ export const parseId = (text: unknown) => (typeof text === 'string' && /^[1-9]\d
 // The two profiles of version 1 are the numbers 1 and 2. A profile that the user makes has a number as its ID.
 const SEED_NUMBER: Record<string, number> = { p1080: 1, p2160: 2 };
 export const profileId = (id: string) => SEED_NUMBER[id] ?? Number(id);
-export const presetOf = (db: Db, number: unknown) => (Number.isInteger(number) ? profilesInOrder(db.data).map((profile) => profile.id).find((id) => profileId(id) === number) : undefined);
-export const profiles = (db: Db) => profilesInOrder(db.data).map((profile) => ({ id: profileId(profile.id), name: profile.name }));
+export const presetOf = (number: unknown) => (Number.isInteger(number) ? profilesInOrder(db.data).map((profile) => profile.id).find((id) => profileId(id) === number) : undefined);
+export const profiles = () => profilesInOrder(db.data).map((profile) => ({ id: profileId(profile.id), name: profile.name }));
 // The profile that a title without a profile of its own uses: the first one of the chain.
-export const firstProfileId = (db: Db) => profilesInOrder(db.data)[0]!.id;
+export const firstProfileId = () => profilesInOrder(db.data)[0]!.id;
 
 // Roots have text IDs. A caller needs a number, so the number comes from the text and stays the same.
 export function rootNumber(id: string) {
@@ -57,8 +57,8 @@ export function rootNumber(id: string) {
   return ((hash >>> 0) % 2147483646) + 1;
 }
 const trimmed = (path: string) => path.replace(/\/+$/, '') || '/';
-export const rootsOf = (db: Db, mediaType: MediaType) => Object.values(db.data.roots).filter((root) => root.mediaType === mediaType);
-export const findRoot = (db: Db, mediaType: MediaType, path: unknown) => (typeof path === 'string' ? rootsOf(db, mediaType).find((root) => trimmed(root.path) === trimmed(path)) : undefined);
+export const rootsOf = (mediaType: MediaType) => Object.values(db.data.roots).filter((root) => root.mediaType === mediaType);
+export const findRoot = (mediaType: MediaType, path: unknown) => (typeof path === 'string' ? rootsOf(mediaType).find((root) => trimmed(root.path) === trimmed(path)) : undefined);
 
 // A time span in the text form of Sonarr and Radarr: "hh:mm:ss", or "d.hh:mm:ss" from one day.
 export function timespan(totalSeconds: number) {
@@ -68,11 +68,11 @@ export function timespan(totalSeconds: number) {
   return days ? `${days}.${time}` : time;
 }
 
-export const clock = (db: Db) => ({ now: Date.now(), timeZone: db.data.settings.timeZone, region: db.data.settings.region, files: db.data.files });
+export const clock = () => ({ now: Date.now(), timeZone: db.data.settings.timeZone, region: db.data.settings.region, files: db.data.files });
 
 export const hasFiles = (title: Title) => Boolean(title.fileId) || title.episodes.some((episode) => episode.fileId);
 
-export function presentFile(db: Db, fileId: string | null) {
+export function presentFile(fileId: string | null) {
   const file = fileId ? db.data.files[fileId] : undefined;
   return file && !file.missing ? file : undefined;
 }
@@ -105,11 +105,11 @@ export function candidate(meta: TitleMeta): Title {
 export type Placement = { preset: string; root: Root; monitored: boolean };
 
 // The fields that Seerr sends to place a title: profile, root folder, monitored, and tags.
-export function readPlacement(db: Db, mediaType: MediaType, body: Record<string, unknown>): Placement | { errors: [string, string][] } {
+export function readPlacement(mediaType: MediaType, body: Record<string, unknown>): Placement | { errors: [string, string][] } {
   const errors: [string, string][] = [];
-  const preset = presetOf(db, body.qualityProfileId ?? body.profileId);
+  const preset = presetOf(body.qualityProfileId ?? body.profileId);
   if (!preset) errors.push(['qualityProfileId', 'No quality profile has this ID.']);
-  const root = findRoot(db, mediaType, body.rootFolderPath);
+  const root = findRoot(mediaType, body.rootFolderPath);
   if (!root) errors.push(['rootFolderPath', 'No root folder has this path.']);
   if (body.monitored !== undefined && typeof body.monitored !== 'boolean') errors.push(['monitored', 'The value must be true or false.']);
   if (body.tags !== undefined && (!Array.isArray(body.tags) || body.tags.length)) errors.push(['tags', 'Tags are not supported. Send an empty list.']);

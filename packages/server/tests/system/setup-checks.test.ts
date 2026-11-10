@@ -12,11 +12,11 @@ beforeAll(async () => {
 
 describe('setup checks', () => {
   it('reports no client and no indexer on a new install', async () => {
-    expect(await setupChecks(db)).toEqual({ client: { state: 'unconfigured' }, indexers: { series: 0, movies: 0 } });
+    expect(await setupChecks()).toEqual({ client: { state: 'unconfigured' }, indexers: { series: 0, movies: 0 } });
   });
 
   it.each(['ok', 'rejected', 'unreachable'] as const)('reports the answer of the client check: %s', async (state) => {
-    expect(await setupChecks(db, async () => state)).toMatchObject({ client: { state } });
+    expect(await setupChecks(async () => state)).toMatchObject({ client: { state } });
   });
 
   it('counts the indexers that the indexer manager pushed for each app', async () => {
@@ -24,9 +24,9 @@ describe('setup checks', () => {
     const seriesOnly = indexer({ id: 2, push: { sonarr: both.push.sonarr } });
     const moviesOnly = indexer({ id: 3, push: { radarr: both.push.radarr } });
     db.data.indexers = { 1: both, 2: seriesOnly, 3: moviesOnly };
-    expect((await setupChecks(db)).indexers).toEqual({ series: 2, movies: 2 });
+    expect((await setupChecks()).indexers).toEqual({ series: 2, movies: 2 });
     db.data.indexers = { 2: seriesOnly };
-    expect((await setupChecks(db)).indexers).toEqual({ series: 1, movies: 0 });
+    expect((await setupChecks()).indexers).toEqual({ series: 1, movies: 0 });
   });
 
   it('answers on the route after the sign-in, and without a client when the services are not there', async () => {

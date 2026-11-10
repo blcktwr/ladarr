@@ -1,4 +1,4 @@
-import { get } from './db.ts';
+import { db } from './db.ts';
 
 type Waiter = { urgent: boolean; resolve: () => void };
 
@@ -6,7 +6,6 @@ type Waiter = { urgent: boolean; resolve: () => void };
 // A request starts only after `delaySeconds` since the start of the request before it.
 // The limiter delays a request. It never drops one.
 export function createLimiter(onChange: () => void = () => {}) {
-  const db = get();
   const queues = new Map<number, Waiter[]>();
   const timers = new Map<number, NodeJS.Timeout>();
 

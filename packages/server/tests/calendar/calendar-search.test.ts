@@ -18,7 +18,7 @@ async function setup(titles: Title[]) {
   for (const item of titles) db.data.titles[item.key] = item;
   const queue = createQueue(createEvents(), () => {});
   const finder = createFinder({ queue, indexers: {} as never, enqueue: (input) => enqueue(input) });
-  const handler = librarySearchHandler({ db, finder, enqueue: (input) => enqueue(input) });
+  const handler = librarySearchHandler({ finder, enqueue: (input) => enqueue(input) });
   const jobs = (type: string) => Object.values(db.data.jobs).filter((job) => job.type === type);
   const run = (payload: unknown, signal = new AbortController().signal, job?: Job) => handler.run({ ...job, payload } as Job, { signal });
   return { db, queue, finder, jobs, run };
@@ -195,7 +195,7 @@ describe('selection API', () => {
     const { planId } = (await api!.post('/library/search/preview', { filter: 'missing' })).body;
     await api!.post('/library/search', { planId });
     const job = Object.values(db.data.jobs).find((item) => item.type === BULK_SEARCH_JOB)!;
-    const handler = librarySearchHandler({ db, finder: pipe!.finder, enqueue: (input) => enqueue(input) });
+    const handler = librarySearchHandler({ finder: pipe!.finder, enqueue: (input) => enqueue(input) });
     await handler.run(job, { signal: new AbortController().signal });
     expect(Object.keys(db.data.queue).sort()).toEqual(['movie:1', 'movie:5', 'tv:4:1x1', 'tv:4:1x2']);
   });

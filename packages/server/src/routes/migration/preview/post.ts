@@ -1,4 +1,4 @@
-import { get } from '../../../core/db.ts';
+import { db } from '../../../core/db.ts';
 import { randomUUID } from 'node:crypto';
 import type { MigrationPreview } from '@ladarr/shared/types';
 import type { MigrationStatus } from '@ladarr/shared/enums';
@@ -9,7 +9,6 @@ import type { Tmdb } from '../../../metadata/tmdb.ts';
 import { MAX_PLANS, parseConnection, parseMappings, plans, uploads } from '../../../helpers/migration.ts';
 
 export function migrationPreview(tmdb: Tmdb | undefined): RequestHandler {
-  const db = get();
   return async (req, res) => {
     if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
     const mappings = parseMappings(req.body?.mappings);
@@ -20,7 +19,7 @@ export function migrationPreview(tmdb: Tmdb | undefined): RequestHandler {
 
     const source = backupId ? uploads.get(backupId) : await readFromApi(connection!);
     if (!source) return void res.status(404).json({ error: 'backup_not_found' });
-    const plan = await buildPlan(db, tmdb, source, mappings);
+    const plan = await buildPlan(tmdb, source, mappings);
     const planId = randomUUID();
     plans.set(planId, { ...plan, info: { app: source.app, version: source.version } });
     while (plans.size > MAX_PLANS) plans.delete(plans.keys().next().value!);

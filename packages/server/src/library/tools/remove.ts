@@ -1,6 +1,6 @@
 import { lstat, readdir, realpath, rmdir, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import type { Job } from '../../core/jobs.ts';
 import { deleteItemLog } from '../../core/log.ts';
 import { clearBlocklist } from '../grab/blocklist.ts';
@@ -11,8 +11,8 @@ import { isActive, type Queue } from '../downloads/queue.ts';
 // Removes the title, its file records, its targets, their logs, and its jobs. The files on the disk stay where they are.
 // `cancelJob` stops a job that runs now. Without it, the record goes and a running handler ends at its next check.
 // The caller saves the database.
-export function dropTitle(db: Db, key: string, queue?: Queue, cancelJob?: (id: string) => void) {
-  clearBlocklist(db, key);
+export function dropTitle(key: string, queue?: Queue, cancelJob?: (id: string) => void) {
+  clearBlocklist(key);
   const entries = Object.values(db.data.queue).filter((entry) => entry.titleKey === key);
   const ids = new Set(entries.map((entry) => entry.id));
   // A search of a series holds the title key, and the jobs of one target hold its ID. The dedupe key also finds a
@@ -50,8 +50,8 @@ export function dropTitle(db: Db, key: string, queue?: Queue, cancelJob?: (id: s
 // Removes one season of a series, its targets, their logs, and its jobs. The title, the other seasons, and the files on
 // the disk stay where they are. The caller clears the choices of the episodes and saves the database.
 // `cancelJob` stops a job that runs now. Without it, the record goes and a running handler ends at its next check.
-export function dropSeason(db: Db, key: string, season: number, queue?: Queue, cancelJob?: (id: string) => void) {
-  clearBlocklist(db, key, season);
+export function dropSeason(key: string, season: number, queue?: Queue, cancelJob?: (id: string) => void) {
+  clearBlocklist(key, season);
   const entries = Object.values(db.data.queue).filter((entry) => entry.titleKey === key && entry.season === season);
   const ids = new Set(entries.map((entry) => entry.id));
   // A search of a season holds the title key and the season. The jobs of one target hold its ID.
@@ -84,7 +84,7 @@ const versions = new Map<string, number>();
 export const filesVersion = (key: string) => versions.get(key) ?? 0;
 
 // Removes a file record and every link to it. The title keeps its other files.
-export function forgetFile(db: Db, title: Title, fileId: string) {
+export function forgetFile(title: Title, fileId: string) {
   versions.set(title.key, filesVersion(title.key) + 1);
   delete db.data.files[fileId];
   if (title.fileId === fileId) title.fileId = null;

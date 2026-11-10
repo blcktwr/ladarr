@@ -1,4 +1,4 @@
-import { get } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import type { QueuePage, QueueRow } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import type { Poller } from '../../library/downloads/poller.ts';
@@ -9,18 +9,17 @@ import { filtersOf, lanePositions, matches, MAX_PAGE, progressOf, reachedOf, sho
 // One page of rows: one row for each season of a series, and one row for each movie. Rows with the most advanced
 // progress come first, and ties keep the order of creation. A row leaves the list when its targets are all available.
 export function queueGet(poller: Poller, importStatus: ImportStatus | undefined): RequestHandler {
-  const db = get();
   return (req, res) => {
     const f = filtersOf(req.query);
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), MAX_PAGE);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
-    const lane = lanePositions(db);
+    const lane = lanePositions();
     const all = Object.values(db.data.queue);
     const cursor = db.data.queueRev;
 
     if (f.priority) {
-      const rows = all.filter((entry) => matches(db, entry, f)).sort((a, b) => a.priority! - b.priority!);
-      return void res.json({ cursor, total: rows.length, items: rows.slice(offset, offset + limit).map((entry) => ({ kind: 'entry', ...view(db, poller, importStatus, entry, lane) })) });
+      const rows = all.filter((entry) => matches(entry, f)).sort((a, b) => a.priority! - b.priority!);
+      return void res.json({ cursor, total: rows.length, items: rows.slice(offset, offset + limit).map((entry) => ({ kind: 'entry', ...view(poller, importStatus, entry, lane) })) });
     }
 
     // Counts of a group cover all its entries in the view. A filter picks the groups that have a matching entry.
@@ -29,11 +28,11 @@ export function queueGet(poller: Poller, importStatus: ImportStatus | undefined)
     // Validating.
     const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number; download: number; ready: boolean; searching: boolean }>();
     for (const entry of all) {
-      if (!shown(db, entry) || (!f.cleared && entry.clearedAt)) continue;
+      if (!shown(entry) || (!f.cleared && entry.clearedAt)) continue;
       const key = entry.season === null ? entry.id : `${entry.titleKey}:${entry.season}`;
       const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY, download: -1, ready: false, searching: false };
       group.entries.push(entry);
-      if (matches(db, entry, f)) group.matching++;
+      if (matches(entry, f)) group.matching++;
       group.first = Math.min(group.first, entry.createdAt);
       // An available target is finished. It does not hold the group back.
       if (entry.stage !== 'available') group.progress = Math.min(group.progress, progressOf(entry));
@@ -52,7 +51,7 @@ export function queueGet(poller: Poller, importStatus: ImportStatus | undefined)
     }
     // A series that waits for its episodes has no target yet. The page shows the series itself as searching, so
     // the row is in the queue from the moment of the add.
-    for (const key of loadingTitleKeys(db)) {
+    for (const key of loadingTitleKeys()) {
       const title = db.data.titles[key];
       if (!title) continue;
       const matchesLoading = !f.cleared && !f.priority && (!f.key || f.key === 'searching') && (!f.type || f.type === 'tv') && (!f.q || title.meta.title.toLowerCase().includes(f.q));
@@ -80,8 +79,8 @@ export function queueGet(poller: Poller, importStatus: ImportStatus | undefined)
           pending: true,
         };
       }
-      if (first.season === null) return { kind: 'entry', ...view(db, poller, importStatus, first, lane) };
-      const title = titleOf(db, first)!;
+      if (first.season === null) return { kind: 'entry', ...view(poller, importStatus, first, lane) };
+      const title = titleOf(first)!;
       const counts: Record<string, number> = {};
       for (const entry of group.entries) counts[queueKey(entry)] = (counts[queueKey(entry)] ?? 0) + 1;
       return {

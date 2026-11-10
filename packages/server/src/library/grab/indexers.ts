@@ -1,6 +1,6 @@
 import type { IndexerApp, IndexerNotUsed as NotUsed, MediaType } from '@ladarr/shared/enums';
 import type { IndexerHealth, IndexerRow } from '@ladarr/shared/types';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 
 export type { IndexerApp, NotUsed };
 export const APP_MEDIA: Record<IndexerApp, MediaType> = { sonarr: 'tv', radarr: 'movie' };
@@ -196,7 +196,7 @@ export const newHealth = (): IndexerHealth => ({ okAt: null, failedAt: null, fai
 
 // One indexer record serves both apps. The indexer manager pushes the same indexer to Sonarr and to Radarr.
 // A push of the same address changes the record. It never makes a second one.
-export function savePush(db: Db, app: IndexerApp, parsed: Parsed, id?: number): Indexer | undefined {
+export function savePush(app: IndexerApp, parsed: Parsed, id?: number): Indexer | undefined {
   const { indexers } = db.data;
   const wanted = identity(parsed.baseUrl, parsed.apiPath);
   const existing = id === undefined ? Object.values(indexers).find((item) => identity(item.baseUrl, item.apiPath) === wanted) : indexers[id];
@@ -236,7 +236,7 @@ export function savePush(db: Db, app: IndexerApp, parsed: Parsed, id?: number): 
   return indexer;
 }
 
-export function removePush(db: Db, app: IndexerApp, id: number) {
+export function removePush(app: IndexerApp, id: number) {
   const indexer = db.data.indexers[id];
   if (!indexer?.push[app]) return false;
   delete indexer.push[app];
@@ -245,7 +245,7 @@ export function removePush(db: Db, app: IndexerApp, id: number) {
 }
 
 // The indexers that can serve a media type: the indexer manager pushed them to the matching app.
-export function indexersFor(db: Db, mediaType: MediaType) {
+export function indexersFor(mediaType: MediaType) {
   const app: IndexerApp = mediaType === 'movie' ? 'radarr' : 'sonarr';
   return Object.values(db.data.indexers).filter((indexer) => indexer.push[app]);
 }

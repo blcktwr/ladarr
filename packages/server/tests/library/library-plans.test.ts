@@ -59,13 +59,13 @@ async function seedShow() {
   write(join(tv, 'Show', 'Season 01', 'Show.S01E01.en.srt'), 'subtitle');
   write(join(tv, 'Show', 'poster.jpg'), 'poster');
   app.db.data.titles['tv:1'] = show();
-  await scanTitle(app.db, 'tv:1');
+  await scanTitle('tv:1');
 }
 
 async function seedFilm() {
   write(join(movies, 'Film (2000)', 'Film (2000).mkv'), 'the film');
   app.db.data.titles['movie:2'] = film();
-  await scanTitle(app.db, 'movie:2');
+  await scanTitle('movie:2');
 }
 
 describe('preview of a removal with files', () => {
@@ -170,7 +170,7 @@ describe('a change between the preview and the apply', () => {
     await seedShow();
     const body = await preview({ action: 'remove', keys: ['tv:1'], deleteFiles: true });
     write(join(tv, 'Show', 'Season 01', 'Show.S01E03.mkv'), 'new');
-    await scanTitle(app.db, 'tv:1');
+    await scanTitle('tv:1');
     expect((await apply(body.planId)).body).toMatchObject({ error: 'plan_changed' });
     expect(existsSync(join(tv, 'Show', 'Season 01', 'Show.S01E01.mkv'))).toBe(true);
   });
@@ -270,9 +270,9 @@ describe('safety', () => {
     delete app.db.data.titles['movie:2'];
     app.db.data.files = {};
     app.db.data.titles['movie:2'] = film();
-    const scan = scanTitle(app.db, 'movie:2');
+    const scan = scanTitle('movie:2');
     // The scan has started and waits for the disk. The title goes now.
-    dropTitle(app.db, 'movie:2');
+    dropTitle('movie:2');
     expect((await scan).status).toBe('no_folder');
     expect(app.db.data.files).toEqual({});
   });
@@ -281,15 +281,15 @@ describe('safety', () => {
     await seedShow();
     const kept = app.db.data.titles['tv:1']!;
     const fileId = kept.episodes[0]!.fileId!;
-    const scan = scanTitle(app.db, 'tv:1');
+    const scan = scanTitle('tv:1');
     // The scan waits for the disk. The deletion removes the record and the file now.
-    forgetFile(app.db, kept, fileId);
+    forgetFile(kept, fileId);
     rmSync(join(tv, 'Show', 'Season 01', 'Show.S01E01.mkv'));
     const changed = await scan;
     expect(changed).toMatchObject({ status: 'changed', added: 0, updated: 0 });
     expect(app.db.data.files[fileId]).toBeUndefined();
     // The scan that runs after the deletion finds the disk as it is.
-    expect((await scanTitle(app.db, 'tv:1')).status).toBe('ok');
+    expect((await scanTitle('tv:1')).status).toBe('ok');
     expect(kept.episodes[0]!.fileId).toBeNull();
   });
 
@@ -327,7 +327,7 @@ describe('safety', () => {
     const other = queue.ensure('movie:2', null, null);
     queue.request(other, 'test');
 
-    dropTitle(app.db, 'tv:1', queue);
+    dropTitle('tv:1', queue);
     expect(active.branch).toBe('cancelled');
     expect(finished).toMatchObject({ branch: null, stage: 'available' });
     expect(other.branch).toBeNull();
@@ -451,7 +451,7 @@ describe('removal of one season', () => {
     write(join(tv, 'Show', 'Season 01', 'Show.S01E02.mkv'), 'two');
     write(join(tv, 'Show', 'Season 02', 'Show.S02E01.mkv'), 'three');
     app.db.data.titles['tv:1'] = title({ rootId: 'tv', folder: 'Show', episodes: [episode(1, 1), episode(1, 2), episode(2, 1)] });
-    await scanTitle(app.db, 'tv:1');
+    await scanTitle('tv:1');
   }
 
   it('lists only the files of the season that is removed', async () => {

@@ -1,4 +1,4 @@
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import type { EnqueueInput, Job } from '../core/jobs.ts';
 import type { SourceDownload, SourceEpisode } from '../migration/migration-source.ts';
 
@@ -41,7 +41,6 @@ function mergeEpisodes(current: SourceEpisode[], next: SourceEpisode[]): SourceE
 
 // Saves the work, and starts the job. `enqueue` does not merge a payload, so the job reads the saved state.
 export function requestVerification(
-  db: Db,
   enqueue: (input: EnqueueInput) => Job,
   key: string,
   { downloads = [], episodes = [] }: { downloads?: SourceDownload[]; episodes?: SourceEpisode[] },
@@ -59,4 +58,4 @@ export function requestVerification(
 }
 
 // The first run of a title after an add. The title exists, so the state is new.
-export const verificationOf = (db: Db, key: string) => db.data.verifications[key];
+export const verificationOf = (key: string) => db.data.verifications[key];

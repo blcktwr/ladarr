@@ -328,8 +328,8 @@ class SplitJSONFile implements Adapter<Data> {
   }
 }
 
-// The process opens one database. Every request reads it with get().
-let db: Db | undefined;
+// The process opens one database. Every module reads the same binding.
+export let db: Db;
 
 // lowdb switches to an in-memory adapter when NODE_ENV is "test".
 export async function open(file?: string, queueFile?: string): Promise<Db> {
@@ -349,11 +349,6 @@ export async function open(file?: string, queueFile?: string): Promise<Db> {
   return db;
 }
 
-export function get(): Db {
-  if (!db) throw new Error('The database is not open. Call open() first.');
-  return db;
-}
-
 // A test can point the singleton at a database that it made itself.
 export function set(value: Db) {
   db = value;
@@ -361,7 +356,6 @@ export function set(value: Db) {
 
 // Every change in one tick, or during a running write, costs one more file write at most.
 export function createSaver() {
-  const db = get();
   let running: Promise<void> | undefined;
   let dirty = false;
   const run = async () => {

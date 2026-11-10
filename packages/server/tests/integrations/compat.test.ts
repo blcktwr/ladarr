@@ -80,7 +80,7 @@ afterEach(async () => {
 
 async function start(options: Parameters<typeof startPipeline>[0] = {}) {
   const tmdb = createTmdb({ apiKey: 'k', fetch: tmdbFetch, baseUrl: 'https://tmdb.test/3', spacingMs: 0, ttlMs: 0 });
-  const pipe = await startPipeline({ ...options, handlers: ({ db, events, queue, finder }) => ({ 'metadata.refresh': metadataRefreshHandler({ db, tmdb, events }), 'queue.initial': queueInitialHandler({ db, queue, finder }) }) });
+  const pipe = await startPipeline({ ...options, handlers: ({ db, events, queue, finder }) => ({ 'metadata.refresh': metadataRefreshHandler({ tmdb, events }), 'queue.initial': queueInitialHandler({ queue, finder }) }) });
   pipe.db.data.settings.defaultRoots = { movie: 'movie', tv: 'tv' };
   const app = await pipe.api({ tmdb });
   const root = app.base.replace(/\/api$/, '');

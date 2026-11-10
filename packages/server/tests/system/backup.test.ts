@@ -31,7 +31,7 @@ describe('backup file', () => {
   it('holds a manifest and the database, without the login sessions', async () => {
     const db = await dbWithTitle();
     const target = fresh();
-    const made = await createBackup(db, target, 'manual');
+    const made = await createBackup(target, 'manual');
     expect(isBackupName(made.name)).toBe(true);
 
     const files = unzipSync(readFileSync(join(target, made.name)));
@@ -51,14 +51,14 @@ describe('backup file', () => {
 
   it('can be read by its owner only', async () => {
     const target = fresh();
-    const made = await createBackup(await dbWithTitle(), target, 'manual');
+    const made = await createBackup(target, 'manual');
     expect(statSync(join(target, made.name)).mode & 0o777).toBe(0o600);
   });
 
   it('keeps the data as it was when the backup started, even if the data changes while it is written', async () => {
     const db = await dbWithTitle();
     const target = fresh();
-    const pending = createBackup(db, target, 'manual');
+    const pending = createBackup(target, 'manual');
     db.data.apiKey = 'changed after the start';
     const made = await pending;
     const { data } = await readBackup(readFileSync(join(target, made.name)));
@@ -67,7 +67,7 @@ describe('backup file', () => {
 
   it('leaves no temporary file', async () => {
     const target = fresh();
-    await createBackup(await dbWithTitle(), target, 'manual');
+    await createBackup(target, 'manual');
     expect(readdirSync(target).every((name) => isBackupName(name))).toBe(true);
   });
 });
@@ -75,7 +75,7 @@ describe('backup file', () => {
 describe('reading a bad backup', () => {
   const good = async () => {
     const target = fresh();
-    const made = await createBackup(await dbWithTitle(), target, 'manual');
+    const made = await createBackup(target, 'manual');
     return unzipSync(readFileSync(join(target, made.name)));
   };
   const code = (bytes: Uint8Array) => readBackup(bytes).then(() => 'ok', (err: BackupError) => err.code);
@@ -120,8 +120,8 @@ describe('retention and the daily job', () => {
     const target = fresh();
     const db = await dbWithTitle();
     const now = Date.now();
-    for (let i = 0; i < 10; i++) await createBackup(db, target, 'auto', new Date(now - i * DAY));
-    await createBackup(db, target, 'manual', new Date(now - 30 * DAY));
+    for (let i = 0; i < 10; i++) await createBackup(target, 'auto', new Date(now - i * DAY));
+    await createBackup(target, 'manual', new Date(now - 30 * DAY));
     await pruneBackups(target);
     const left = await listBackups(target);
     expect(left.filter((b) => b.kind === 'auto')).toHaveLength(7);
@@ -133,7 +133,7 @@ describe('retention and the daily job', () => {
   it('makes a backup when none exists, and not again within a day', async () => {
     const target = fresh();
     const db = await dbWithTitle();
-    const run = () => backupAutoHandler(db, target).run({} as never, { signal: new AbortController().signal });
+    const run = () => backupAutoHandler(target).run({} as never, { signal: new AbortController().signal });
     await run();
     await run();
     expect(await listBackups(target)).toHaveLength(1);
@@ -142,8 +142,8 @@ describe('retention and the daily job', () => {
   it('makes a backup when the last automatic one is older than a day', async () => {
     const target = fresh();
     const db = await dbWithTitle();
-    await createBackup(db, target, 'auto', new Date(Date.now() - 2 * DAY));
-    await backupAutoHandler(db, target).run({} as never, { signal: new AbortController().signal });
+    await createBackup(target, 'auto', new Date(Date.now() - 2 * DAY));
+    await backupAutoHandler(target).run({} as never, { signal: new AbortController().signal });
     expect(await listBackups(target)).toHaveLength(2);
   });
 });

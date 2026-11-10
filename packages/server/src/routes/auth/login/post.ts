@@ -1,4 +1,4 @@
-import { get } from '../../../core/db.ts';
+import { db } from '../../../core/db.ts';
 import { verify } from '@node-rs/argon2';
 import type { RequestHandler } from 'express';
 import { startSession } from '../../../core/auth.ts';
@@ -17,7 +17,6 @@ function throttleWait(key: string) {
 }
 
 export function authLogin(): RequestHandler {
-  const db = get();
   return async (req, res) => {
     const key = req.ip ?? 'unknown';
     const wait = throttleWait(key);

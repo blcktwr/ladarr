@@ -1,7 +1,6 @@
-import { get } from '../../core/db.ts';
+import { type Db, type Settings, db } from '../../core/db.ts';
 import type { SettingsSaved } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Db, Settings } from '../../core/db.ts';
 import { configureItemLogs } from '../../core/log.ts';
 import { templateProblem } from '../../library/naming.ts';
 
@@ -18,7 +17,7 @@ const isTimeZone = (value: unknown): value is string => {
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 // Returns the changes to apply, or the name of the first field that is not valid.
-function parseChanges(db: Db, body: unknown): Partial<Settings> | { invalid: string } {
+function parseChanges(body: unknown): Partial<Settings> | { invalid: string } {
   if (!isObject(body)) return { invalid: 'body' };
   const changes: Partial<Settings> = {};
   for (const [key, value] of Object.entries(body)) {
@@ -54,9 +53,8 @@ function parseChanges(db: Db, body: unknown): Partial<Settings> | { invalid: str
 }
 
 export function settingsPatch(): RequestHandler {
-  const db = get();
   return async (req, res) => {
-    const changes = parseChanges(db, req.body);
+    const changes = parseChanges(req.body);
     if ('invalid' in changes) return void res.status(400).json({ error: 'invalid_setting', field: changes.invalid });
     Object.assign(db.data.settings, changes);
     if ('keepQueueLogs' in changes) configureItemLogs();

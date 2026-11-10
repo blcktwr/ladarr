@@ -12,7 +12,7 @@ import { authLogout } from './routes/auth/logout/post.ts';
 import { authSetup } from './routes/auth/setup/post.ts';
 import { authStatus } from './routes/auth/status/get.ts';
 import { jsonOnly } from './helpers/auth.ts';
-import { get } from './core/db.ts';
+import { db } from './core/db.ts';
 import { alertsGet } from './routes/alerts/get.ts';
 import { eventsGet } from './routes/events/get.ts';
 import { healthGet } from './routes/health/get.ts';
@@ -155,7 +155,6 @@ type Options = { services?: Services; urlBase?: string; events?: Events; webDir?
 
 
 export function createApp({ services, urlBase = '', events = createEvents(), webDir, heartbeat, tmdb, configDir, backupDir, enqueue: enqueueInput, cancelJob, persist, restorer, indexers, installUpdate, pauseQueue, resumeQueue, restart }: Options = {}) {
-  const db = get();
   const enqueue = enqueueInput ?? ((input: EnqueueInput) => enqueueJob(input));
   const api = express.Router();
   // A change of the indexers or of the clients can lift the block of a target. The target goes on, and the pages read the new state.

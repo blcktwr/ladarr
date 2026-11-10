@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import { parseRelease } from './release.ts';
 import { titleMatches } from './decide.ts';
 
@@ -28,7 +28,7 @@ export function ownerOf(entry: Entry, titles: Db['data']['titles']) {
 export const seasonOf = (entry: Entry) => entry.season ?? parseRelease(entry.title).season;
 
 // Removes the entries of a title, or of one season of it, when the title or the season is removed.
-export function clearBlocklist(db: Db, titleKey: string, season?: number) {
+export function clearBlocklist(titleKey: string, season?: number) {
   for (const [key, entry] of Object.entries(db.data.blocklist)) {
     if (ownerOf(entry, db.data.titles) !== titleKey) continue;
     if (season !== undefined && seasonOf(entry) !== season) continue;

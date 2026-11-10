@@ -4,7 +4,7 @@ import { safeEqual } from '../core/auth.ts';
 import { isObject, notFound, notSupported, parseId, profiles, refuse, rootNumber, rootsOf, timespan, type CompatCommand, type CompatDeps } from './common.ts';
 import { radarrRoutes } from './radarr.ts';
 import { sonarrRoutes } from './sonarr.ts';
-import { get, type Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import { APP_MEDIA, type IndexerApp } from '../library/grab/indexers.ts';
 import type { SearchPayload } from '../library/grab/finder.ts';
 import type { QueueEntry } from '../library/downloads/queue.ts';
@@ -15,7 +15,6 @@ const SEARCH: Record<IndexerApp, string> = { radarr: 'MoviesSearch', sonarr: 'Mi
 
 // The adapters take the API key in the header X-Api-Key or in the query parameter apikey. Seerr uses the query parameter.
 export const adapterAuth = (): RequestHandler => {
-  const db = get();
   return (req, res, next) => {
     const sent = req.get('x-api-key') ?? (typeof req.query.apikey === 'string' ? req.query.apikey : undefined);
     if (sent && db.data.apiKey && safeEqual(sent, db.data.apiKey)) return next();
@@ -31,7 +30,7 @@ export const wrongPath = (urlBase: string): RequestHandler => (_req, res) =>
   void res.status(404).json({ message: 'NotFound', detail: `Use ${urlBase}/sonarr/api/v3 for a Sonarr caller and ${urlBase}/radarr/api/v3 for a Radarr caller.` });
 
 // Moves the command to its end when every search job that it started has ended. A job that completed is gone from the job queue.
-function settle(db: Db, command: CompatCommand) {
+function settle(command: CompatCommand) {
   if (command.status === 'completed' || command.status === 'failed') return;
   const jobs = command.jobs.flatMap((id) => db.data.jobs[id] ?? []);
   const live = jobs.filter((job) => job.state !== 'failed');
@@ -46,8 +45,8 @@ function settle(db: Db, command: CompatCommand) {
   if (failed) command.message = 'The search failed.';
 }
 
-function commandResource(db: Db, command: CompatCommand) {
-  settle(db, command);
+function commandResource(command: CompatCommand) {
+  settle(command);
   return {
     id: command.id,
     name: command.name,
@@ -64,16 +63,15 @@ function commandResource(db: Db, command: CompatCommand) {
 const QUEUE_STAGES: QueueEntry['stage'][] = ['fetching', 'sending', 'downloading', 'validating', 'importing'];
 
 export function compatRouter(app: IndexerApp, deps: CompatDeps) {
-  const db = get();
   const router = Router();
   const mediaType = APP_MEDIA[app];
 
-  router.get('/qualityProfile', (_req, res) => void res.json(profiles(db)));
+  router.get('/qualityProfile', (_req, res) => void res.json(profiles()));
 
   router.get('/rootfolder', async (_req, res) => {
     res.json(
       await Promise.all(
-        rootsOf(db, mediaType).map(async (root) => {
+        rootsOf(mediaType).map(async (root) => {
           const space = await statfs(root.path).catch(() => undefined);
           return { id: rootNumber(root.id), path: root.path, accessible: Boolean(space), ...(space ? { freeSpace: Number(space.bavail) * Number(space.bsize), totalSpace: Number(space.blocks) * Number(space.bsize) } : {}) };
         }),
@@ -169,17 +167,17 @@ export function compatRouter(app: IndexerApp, deps: CompatDeps) {
       }
       if (!command.entries.length) command.message = 'Nothing to search. The title is paused, not released, complete, or already in the queue.';
     }
-    settle(db, command);
+    settle(command);
     await db.write();
-    res.status(201).json(commandResource(db, command));
+    res.status(201).json(commandResource(command));
   });
 
-  router.get('/command', (_req, res) => void res.json(Object.values(db.data.compat.commands).map((command) => commandResource(db, command))));
+  router.get('/command', (_req, res) => void res.json(Object.values(db.data.compat.commands).map((command) => commandResource(command))));
 
   router.get('/command/:id', (req, res) => {
     const command = db.data.compat.commands[parseId(req.params.id) ?? 0];
     if (!command) return notFound(res, 'No command has this ID.');
-    res.json(commandResource(db, command));
+    res.json(commandResource(command));
   });
 
   router.use(app === 'radarr' ? radarrRoutes(deps) : sonarrRoutes(deps));

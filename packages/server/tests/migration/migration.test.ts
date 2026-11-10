@@ -255,7 +255,7 @@ describe('import', () => {
       series(9, { seriesType: 'daily', path: null }),
     ];
     source = await fakeSource((req, res) => sonarrHandler({ list })(req, res));
-    const handler = migrationImportHandler({ db: app.db, tmdb, events, save: async () => {}, enqueue: (input) => app.db.data.jobs[Object.keys(app.db.data.jobs)[0]!] ?? ({} as never) });
+    const handler = migrationImportHandler({ tmdb, events, save: async () => {}, enqueue: (input) => app.db.data.jobs[Object.keys(app.db.data.jobs)[0]!] ?? ({} as never) });
     runImport = () => handler.run({} as never, { signal: new AbortController().signal });
   });
   afterAll(() => {

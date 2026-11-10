@@ -1,4 +1,4 @@
-import { get } from '../../../../core/db.ts';
+import { db } from '../../../../core/db.ts';
 import type { MediaType } from '@ladarr/shared/enums';
 import type { SourceFolder } from '@ladarr/shared/types';
 import { basename } from 'node:path';
@@ -13,12 +13,11 @@ import { fail } from '../../../../helpers/import-source.ts';
 
 // The folder, the title that its name suggests, and the TMDB results of that name.
 export function importSourceDetect({ tmdb, configDir }: { tmdb?: Tmdb; configDir?: string } = {}): RequestHandler {
-  const db = get();
   return async (req, res) => {
     if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
     try {
       const { path } = req.body ?? {};
-      const { real, videos } = await readFolder(db, { path, configDir });
+      const { real, videos } = await readFolder({ path, configDir });
       if (!videos.length) throw new PlanError('nothing_to_import');
       const mediaType: MediaType = videos.some((file) => parseEpisodes(basename(file.rel))) ? 'tv' : 'movie';
 

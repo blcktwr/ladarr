@@ -1,4 +1,4 @@
-import { get } from '../../../../../../core/db.ts';
+import { db } from '../../../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { REJECTION_TEXT } from '../../../../../../library/grab/decide.ts';
 import type { Finder } from '../../../../../../library/grab/finder.ts';
@@ -9,15 +9,14 @@ import { shown, titleOf } from '../../../../../../helpers/queue.ts';
 // A release of the last search that the user picks by hand after a no-match. The preferences are skipped, the
 // safety checks are not.
 export function queueEntryReleaseGrabPost(queue: Queue, finder: Finder): RequestHandler<{ id: string }> {
-  const db = get();
   return (req, res) => {
     const entry = db.data.queue[req.params.id];
     const { indexerId, guid } = (req.body ?? {}) as { indexerId?: unknown; guid?: unknown };
-    if (!entry || !shown(db, entry)) return void res.status(404).json({ error: 'not_found' });
+    if (!entry || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
     if (typeof indexerId !== 'number' || typeof guid !== 'string') return void res.status(400).json({ error: 'invalid_request' });
     const candidate = (entry.search?.rejected ?? []).find((release) => release.indexerId === indexerId && release.guid === guid);
     if (!candidate) return void res.status(404).json({ error: 'release_not_found' });
-    const title = titleOf(db, entry)!;
+    const title = titleOf(entry)!;
     const release: RawRelease = {
       indexerId: candidate.indexerId,
       guid: candidate.guid,

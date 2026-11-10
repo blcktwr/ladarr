@@ -1,6 +1,6 @@
 import type { MediaType, RootProblem } from '@ladarr/shared/enums';
 import { basename, extname } from 'node:path';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import type { EpisodeMeta, TitleMeta, Tmdb } from '../../metadata/tmdb.ts';
 import type { Found } from './importer.ts';
 import { PlanError, readableRoot } from './plan.ts';
@@ -76,8 +76,8 @@ async function withEpisodes(tmdb: Tmdb, title: Title): Promise<Title> {
 }
 
 // Reads the folder and the title, and plans the files. It changes nothing.
-export async function prepare(db: Db, tmdb: Tmdb | undefined, configDir: string | undefined, input: { path: unknown; mediaType: MediaType; tmdbId: number }) {
-  const { real, videos } = await readFolder(db, { path: input.path, configDir });
+export async function prepare(tmdb: Tmdb | undefined, configDir: string | undefined, input: { path: unknown; mediaType: MediaType; tmdbId: number }) {
+  const { real, videos } = await readFolder({ path: input.path, configDir });
 
     const key = titleKey(input.mediaType, input.tmdbId);
     const existing = db.data.titles[key];
@@ -90,7 +90,7 @@ export async function prepare(db: Db, tmdb: Tmdb | undefined, configDir: string 
 
     const draft = existing ? null : await draftTitle(tmdb!, input.mediaType, input.tmdbId, rootId);
     const title = draft?.title ?? (await withEpisodes(tmdb!, existing!));
-    const plan = await planFiles(db, { title, rootReal, real, videos, replace: false, linkOnly: true });
+    const plan = await planFiles({ title, rootReal, real, videos, replace: false, linkOnly: true });
     return { title, created: !existing, rootId, rootReal, health, plan, episodes: draft?.episodes, fetched: existing && title !== existing ? title.episodes : undefined };
   }
 

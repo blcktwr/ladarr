@@ -11,7 +11,7 @@ import { createPoller } from './library/downloads/poller.ts';
 import { createQueue } from './library/downloads/queue.ts';
 import { createRetry } from './library/downloads/queue-api.ts';
 import { createIndexerService } from './library/grab/torznab.ts';
-import { createSaver, get, open, SCHEMA_VERSION } from './core/db.ts';
+import { SCHEMA_VERSION, createSaver, db, open } from './core/db.ts';
 import { createEvents } from './core/events.ts';
 import { sonarr } from './proxy/sonarr.ts';
 import { radarr } from './proxy/radarr.ts';
@@ -35,7 +35,6 @@ if (blocked) {
 }
 logToFile(config.logFile);
 await open();
-const db = get();
 // An older version must not write to a file of a newer version. It could lose data that it does not know.
 if (db.data.schemaVersion > SCHEMA_VERSION) {
   console.error(`The data file ${config.dbFile} has schema version ${db.data.schemaVersion}. This version reads schema version ${SCHEMA_VERSION} at most. Start a newer version, or restore a backup from this version.`);

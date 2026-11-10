@@ -1,11 +1,11 @@
 import type { ClientState, RootProblem } from '@ladarr/shared/enums';
 import type { Problem } from '@ladarr/shared/types';
 import { listBackups } from './backup.ts';
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import { checkRoot } from '../library/roots.ts';
 import type { Tmdb } from '../metadata/tmdb.ts';
 
-type Sources = { db: Db; tmdb?: Tmdb; heartbeat?: () => number; backupDir?: string; clientCheck?: () => Promise<ClientState>; ffprobe?: () => Promise<boolean> };
+type Sources = { tmdb?: Tmdb; heartbeat?: () => number; backupDir?: string; clientCheck?: () => Promise<ClientState>; ffprobe?: () => Promise<boolean> };
 
 const HEARTBEAT_MAX_AGE_MS = 30_000;
 const BACKUP_MAX_AGE_MS = 48 * 60 * 60_000;
@@ -19,7 +19,7 @@ const rootText: Record<Exclude<RootProblem, 'low_space'>, { message: string; act
   mount_changed: { message: 'Another disk is mounted at {path} now, or the mount is gone.', action: 'If the disk is right, accept it. If not, mount the right disk.' },
 };
 
-export async function collectProblems({ db, tmdb, heartbeat, backupDir, clientCheck, ffprobe }: Sources): Promise<Problem[]> {
+export async function collectProblems({ tmdb, heartbeat, backupDir, clientCheck, ffprobe }: Sources): Promise<Problem[]> {
   const problems: Problem[] = [];
 
   if (!tmdb) problems.push({ id: 'metadata_missing', message: 'No metadata provider is connected.', action: 'Build the image with a TMDB key.' });

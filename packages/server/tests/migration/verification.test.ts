@@ -95,7 +95,7 @@ async function setup({ mediaType = 'tv' as 'tv' | 'movie', episodes = [episode(1
   const item = title(key, mediaType, episodes);
   if (mediaType === 'movie') item.rootId = 'movie';
   db.data.titles[key] = item;
-  const handler = libraryVerifyHandler({ db, queue, clients: fake.clients, finder, events });
+  const handler = libraryVerifyHandler({ queue, clients: fake.clients, finder, events });
   const run = () => handler.run({ payload: { key } } as Job, { signal: new AbortController().signal });
   return { dir, db, queue, finder, fake, key, run, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
@@ -107,7 +107,7 @@ describe('library verification', () => {
   it('attaches a complete torrent and searches the episode that it does not cover', async () => {
     const test = await setup({ list: [torrent(HASH, true)] });
     cleanups.push(test.cleanup);
-    requestVerification(test.db, (input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
+    requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
     await test.run();
     expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ stage: 'validating', transferHash: HASH, clientId: 'client-1' });
     expect(test.db.data.queue[`${test.key}:1x1`]!.release).toMatchObject({ external: true, manual: true });
@@ -118,7 +118,7 @@ describe('library verification', () => {
   it('leaves the episode to the search when the torrent is not in the client', async () => {
     const test = await setup({ list: [] });
     cleanups.push(test.cleanup);
-    requestVerification(test.db, (input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
+    requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
     await test.run();
     expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ stage: 'queued', transferHash: null });
   });
@@ -126,7 +126,7 @@ describe('library verification', () => {
   it('searches when the newest event failed and the torrent is not complete', async () => {
     const test = await setup({ list: [torrent(HASH, false)] });
     cleanups.push(test.cleanup);
-    requestVerification(test.db, (input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 9, failed: true }] });
+    requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 9, failed: true }] });
     await test.run();
     expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ stage: 'queued', transferHash: null });
   });
@@ -134,7 +134,7 @@ describe('library verification', () => {
   it('resumes a stopped partial torrent', async () => {
     const test = await setup({ list: [torrent(HASH, false, 'paused')] });
     cleanups.push(test.cleanup);
-    requestVerification(test.db, (input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
+    requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
     await test.run();
     expect(test.fake.calls).toContain(`resume:${HASH}`);
     expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ stage: 'downloading' });
@@ -144,7 +144,7 @@ describe('library verification', () => {
     const test = await setup({ list: [] });
     cleanups.push(test.cleanup);
     test.fake.fail = true;
-    requestVerification(test.db, (input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
+    requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
     await expect(test.run()).rejects.toMatchObject({ kind: 'outage' });
     expect(test.db.data.verifications[test.key]!.pending).toBe(true);
     expect(Object.keys(test.db.data.queue)).toHaveLength(0);
@@ -154,7 +154,7 @@ describe('library verification', () => {
     const test = await setup({ episodes: [episode(1, 1), episode(2, 1, { airDate: '2001-01-01' })] });
     cleanups.push(test.cleanup);
     test.db.data.titles[test.key]!.seasonOverrides = { 2: 'unmonitored' };
-    requestVerification(test.db, (input) => enqueue(input), test.key, {
+    requestVerification((input) => enqueue(input), test.key, {
       episodes: [
         { season: 1, number: 1, monitored: false, airDateUtc: '2001-02-03T00:00:00Z' },
         { season: 2, number: 1, monitored: true, airDateUtc: null },
@@ -172,13 +172,13 @@ describe('library verification', () => {
   it('attaches a movie torrent before its release date, and starts no search without a date', async () => {
     const attached = await setup({ mediaType: 'movie', list: [torrent(HASH, true)] });
     cleanups.push(attached.cleanup);
-    requestVerification(attached.db, (input) => enqueue(input), attached.key, { downloads: [{ hash: HASH, episodes: [], at: 1, id: 5, failed: false }] });
+    requestVerification((input) => enqueue(input), attached.key, { downloads: [{ hash: HASH, episodes: [], at: 1, id: 5, failed: false }] });
     await attached.run();
     expect(attached.db.data.queue[attached.key]).toMatchObject({ stage: 'validating', transferHash: HASH });
 
     const missing = await setup({ mediaType: 'movie', episodes: [] });
     cleanups.push(missing.cleanup);
-    requestVerification(missing.db, (input) => enqueue(input), missing.key, { downloads: [] });
+    requestVerification((input) => enqueue(input), missing.key, { downloads: [] });
     await missing.run();
     expect(missing.db.data.queue[missing.key]).toBeUndefined();
   });
@@ -190,7 +190,7 @@ describe('library verification', () => {
     test.db.data.titles['tv:2'] = other;
     test.queue.ensure('tv:2', 1, 1);
     test.db.data.queue['tv:2:1x1']!.transferHash = HASH;
-    requestVerification(test.db, (input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
+    requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
     await test.run();
     expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ stage: 'queued', transferHash: null });
   });
@@ -198,7 +198,7 @@ describe('library verification', () => {
   it('returns a blocked import to the search after a delay', async () => {
     const test = await setup();
     cleanups.push(test.cleanup);
-    requestVerification(test.db, (input) => enqueue(input), test.key, { downloads: [] });
+    requestVerification((input) => enqueue(input), test.key, { downloads: [] });
     const entry = test.queue.ensure(test.key, 1, 1);
     test.queue.startAttempt(entry, 'attached download');
     test.queue.move(entry, { stage: 'validating', reason: { code: 'torrent_missing' } }, 'torrent gone');
@@ -211,8 +211,8 @@ describe('library verification', () => {
     const test = await setup();
     cleanups.push(test.cleanup);
     const enqueueJob = (input: Parameters<typeof enqueue>[0]) => enqueue(input);
-    requestVerification(test.db, enqueueJob, test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 1, failed: false }] });
-    requestVerification(test.db, enqueueJob, test.key, { downloads: [{ hash: OTHER, episodes: [{ season: 1, number: 2 }], at: 2, id: 2, failed: false }] });
+    requestVerification(enqueueJob, test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 1, failed: false }] });
+    requestVerification(enqueueJob, test.key, { downloads: [{ hash: OTHER, episodes: [{ season: 1, number: 2 }], at: 2, id: 2, failed: false }] });
     expect(test.db.data.verifications[test.key]!.downloads.map((download) => download.hash).sort()).toEqual([HASH, OTHER].sort());
     expect(Object.values(test.db.data.jobs).filter((job) => job.dedupeKey === `verify:${test.key}`)).toHaveLength(1);
   });
@@ -292,7 +292,7 @@ describe('the retry of a pending verification', () => {
     Object.assign(db.data, emptyData());
     db.data.titles['tv:1'] = title('tv:1', 'tv', [episode(1, 1)]);
     db.data.verifications['tv:1'] = { key: 'tv:1', downloads: [], episodes: [], pending: true, updatedAt: 1 };
-    const handler = verifySweepHandler({ db, enqueue: (input) => enqueue(input) });
+    const handler = verifySweepHandler({ enqueue: (input) => enqueue(input) });
     await handler.run({} as Job, { signal: new AbortController().signal });
     expect(Object.values(db.data.jobs).some((job) => job.dedupeKey === 'verify:tv:1')).toBe(true);
   });
@@ -324,7 +324,7 @@ describe('the source facts of an add', () => {
         },
       ],
     };
-    const plan = await buildPlan(db, {} as Tmdb, source, []);
+    const plan = await buildPlan({} as Tmdb, source, []);
     expect(plan.requests.get('radarr:test:1')).toMatchObject({ manualRelease: true });
   });
 });

@@ -1,4 +1,4 @@
-import { get } from '../../../core/db.ts';
+import { db } from '../../../core/db.ts';
 import type { RenameOverview } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { PlanError } from '../../../library/imports/plan.ts';
@@ -7,17 +7,16 @@ import { fail, isObject, templatesOf } from '../../../helpers/rename.ts';
 
 // The titles that new templates would change, with the count of files that change and the count that are blocked.
 export function renameOverview(): RequestHandler {
-  const db = get();
   return async (req, res) => {
     const body = isObject(req.body) ? req.body : {};
-    const naming = templatesOf(db, body);
+    const naming = templatesOf(body);
     if ('invalid' in naming) return void res.status(400).json({ error: 'invalid_template', field: naming.invalid });
     const titles: { titleKey: string; title: string; year: number | null; rename: number; blocked: number }[] = [];
     const withFiles = new Set(Object.values(db.data.files).map((file) => file.titleKey));
     for (const title of Object.values(db.data.titles)) {
       if (!withFiles.has(title.key)) continue;
       try {
-        const { rows } = await planRename(db, title.key, naming);
+        const { rows } = await planRename(title.key, naming);
         const rename = rows.filter((row) => row.status === 'rename').length;
         const blocked = rows.filter((row) => row.status === 'blocked').length;
         if (rename || blocked) titles.push({ titleKey: title.key, title: title.meta.title, year: title.meta.year, rename, blocked });

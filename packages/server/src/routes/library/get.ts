@@ -1,4 +1,4 @@
-import { get } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { libraryFilter, libraryType, matchesType } from '../../library/tools/filters.ts';
 import { summarize } from '../../library/tools/api.ts';
@@ -6,11 +6,10 @@ import { summarize } from '../../library/tools/api.ts';
 const MAX_PAGE = 100;
 
 export function libraryGet(): RequestHandler {
-  const db = get();
   return (req, res) => {
     const type = libraryType(req.query.type);
     const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
-    const filter = libraryFilter(db, req.query.filter);
+    const filter = libraryFilter(req.query.filter);
     if ('error' in filter) return void res.status(400).json({ error: filter.error });
     const limit = Math.min(Math.max(Math.trunc(Number(req.query.limit)) || 50, 1), MAX_PAGE);
     const offset = Math.max(Math.trunc(Number(req.query.offset)) || 0, 0);
@@ -22,6 +21,6 @@ export function libraryGet(): RequestHandler {
       .reverse()
       .sort((a, b) => b.addedAt - a.addedAt);
     // The summary needs the episodes of each series, so it is only worked out for the page.
-    res.json({ items: matches.slice(offset, offset + limit).map((title) => summarize(db, title)), total: matches.length });
+    res.json({ items: matches.slice(offset, offset + limit).map((title) => summarize(title)), total: matches.length });
   };
 }

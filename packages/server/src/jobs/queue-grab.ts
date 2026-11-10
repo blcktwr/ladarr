@@ -1,4 +1,4 @@
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import { JobError } from '../core/jobs.ts';
 import { catalog, itemFields } from '../core/log.ts';
 import { createGrabber, reasonOf, type GrabberDeps } from '../library/grab/grab.ts';
@@ -12,7 +12,7 @@ const busy = (entry: QueueEntry) => entry.stage === 'sending' || entry.stage ===
 
 // The downloads of a client that run now: one for each torrent in Sending or Downloading, and one for each grab
 // that still fetches its torrent. The targets of the same torrent count once.
-function runningDownloads(db: Db, clients: Clients, clientId: string, own: ReadonlySet<string>) {
+function runningDownloads(clients: Clients, clientId: string, own: ReadonlySet<string>) {
   const hashes = new Set<string>();
   for (const entry of Object.values(db.data.queue)) {
     if (entry.clientId !== clientId || entry.branch === 'cancelled' || own.has(entry.id)) continue;
@@ -35,7 +35,7 @@ function runningDownloads(db: Db, clients: Clients, clientId: string, own: Reado
 }
 
 export function queueGrabHandler(deps: GrabberDeps): Handler {
-  const { db, queue, clients } = deps;
+  const { queue, clients } = deps;
   const grab = createGrabber(deps);
   return {
     concurrency: 2,
@@ -48,7 +48,7 @@ export function queueGrabHandler(deps: GrabberDeps): Handler {
       if (!leader) return true;
       const client = leader.clientId ? clients.get(leader.clientId) : clients.next();
       if (!client || client.config.maxDownloads === 0) return true;
-      return runningDownloads(db, clients, client.id, own) < client.config.maxDownloads;
+      return runningDownloads(clients, client.id, own) < client.config.maxDownloads;
     },
     run: async (job, { signal }) => {
       const { entryIds } = job.payload as { entryIds: string[] };
@@ -61,7 +61,7 @@ export function queueGrabHandler(deps: GrabberDeps): Handler {
         const reason = reasonOf(error);
         const kind = error instanceof JobError ? error.kind : 'outage';
         for (const entry of entries) {
-          catalog.warn('download_failed', `Download failed: ${reason.code} (try ${job.attempts} of ${MAX_ATTEMPTS})`, itemFields(db, entry), { code: reason.code, try: job.attempts, maxTries: MAX_ATTEMPTS, kind });
+          catalog.warn('download_failed', `Download failed: ${reason.code} (try ${job.attempts} of ${MAX_ATTEMPTS})`, itemFields(entry), { code: reason.code, try: job.attempts, maxTries: MAX_ATTEMPTS, kind });
         }
         if (kind === 'invalid_input' || job.attempts >= MAX_ATTEMPTS) {
           for (const entry of entries) queue.move(entry, { reason }, 'grab failed');

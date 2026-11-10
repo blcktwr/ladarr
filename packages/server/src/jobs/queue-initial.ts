@@ -1,12 +1,12 @@
 import { catalog, titleFields } from '../core/log.ts';
 import { JobError } from '../core/jobs.ts';
 import { withTitleLock } from '../core/title-lock.ts';
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import type { Queue } from '../library/downloads/queue.ts';
 import type { Finder } from '../library/grab/finder.ts';
 import type { Handler } from '../core/worker.ts';
 
-export function queueInitialHandler({ db, queue, finder }: { db: Db; queue: Queue; finder: Finder }): Handler {
+export function queueInitialHandler({ queue, finder }: { queue: Queue; finder: Finder }): Handler {
   return {
     concurrency: 1,
     maxAttempts: 10,

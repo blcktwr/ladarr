@@ -31,8 +31,8 @@ async function start({ tmdb: withTmdb = true }: StartOptions = {}) {
   const tmdb = withTmdb ? createTmdb({ apiKey: 'k', fetch: fixture.fetch, baseUrl: 'https://tmdb.test/3', spacingMs: 0, ttlMs: 0 }) : undefined;
   const pipe = await startPipeline({
     handlers: ({ db, events, queue, finder }) => ({
-      ...(tmdb ? { 'metadata.refresh': metadataRefreshHandler({ db, tmdb, events }) } : {}),
-      'queue.initial': queueInitialHandler({ db, queue, finder }),
+      ...(tmdb ? { 'metadata.refresh': metadataRefreshHandler({ tmdb, events }) } : {}),
+      'queue.initial': queueInitialHandler({ queue, finder }),
     }),
   });
   pipe.db.data.settings.defaultRoots = { movie: 'movie', tv: 'tv' };

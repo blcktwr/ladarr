@@ -1,4 +1,4 @@
-import { profilesFor, type Data, type Settings } from '../../core/db.ts';
+import { type Data, type Settings, db, profilesFor } from '../../core/db.ts';
 import type { Indexer } from './indexers.ts';
 import { isMonitored, type Episode, type Title } from '../library.ts';
 import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE, type Profile, type SizeLimits } from './quality.ts';
