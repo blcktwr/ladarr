@@ -20,6 +20,10 @@ describe('parseRelease', () => {
     ['Movie.Name.2021.4K.UHD.BluRay-GRP', { resolution: 2160, source: 'bluray' }],
     ['[SubGroup] Anime Name - 05 [1080p]', { group: 'SubGroup', title: 'Anime Name - 05', resolution: 1080 }],
     ['Movie.Name.2018', { title: 'Movie Name', year: 2018, source: 'unknown', resolution: null }],
+    // A word of the title that looks like a source marker stays in the title.
+    ['Madame.Web.2024.1080p.AMZN.WEB-DL.DDP5.1.Atmos.H.264-LatTeam.mkv SPANiSH', { title: 'Madame Web', year: 2024, resolution: 1080, source: 'webdl' }],
+    ['Madame.Web.2024.1080p.BluRay.BDRip.DTSHD-MA.5.1.h264.mkv SPANiSH', { title: 'Madame Web', year: 2024, resolution: 1080, source: 'bluray' }],
+    ['Cam.2024.1080p.WEB-DL-GRP', { title: 'Cam', year: 2024, resolution: 1080, source: 'webdl' }],
   ])('%s', (name, expected) => {
     expect(parseRelease(name)).toMatchObject(expected);
   });

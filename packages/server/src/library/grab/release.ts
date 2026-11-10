@@ -106,12 +106,16 @@ export function parseRelease(name: string): ParsedRelease {
   // Quality markers.
   const resolutionMatch = /(?:^|[^a-z0-9])(?:(\d{3,4})p|(4k|uhd))(?![a-z0-9])/i.exec(spaced);
   const resolution = resolutionMatch ? (resolutionMatch[2] ? 2160 : Number(resolutionMatch[1])) : null;
-  const sourceMatch =
-    /(?:^|[^a-z0-9])(web[ .-]?dl|web[ .-]?rip|webrip|web|blu[ .-]?ray|bdrip|brrip|bdremux|remux|hdtv|pdtv|dvdrip|dvd|hdcam|cam|hdts|telesync|ts|telecine|tc)(?![a-z0-9])/i.exec(spaced);
+  const at = (match: RegExpMatchArray) => (match.index ?? 0) + (/^[^a-z0-9]/i.test(match[0]) ? 1 : 0);
+  const resolutionAt = resolutionMatch ? at(resolutionMatch) : null;
+  // The source marker comes after the resolution in a release name. A word of the title that looks like one, such as
+  // "Web" in "Madame Web", stays in the title.
+  const sourceMatches = [...spaced.matchAll(/(?:^|[^a-z0-9])(web[ .-]?dl|web[ .-]?rip|webrip|web|blu[ .-]?ray|bdrip|brrip|bdremux|remux|hdtv|pdtv|dvdrip|dvd|hdcam|cam|hdts|telesync|ts|telecine|tc)(?![a-z0-9])/gi)];
+  const sourceMatch = (resolutionAt === null ? sourceMatches[0] : sourceMatches.find((match) => at(match) >= resolutionAt)) ?? sourceMatches[0];
   const key = sourceMatch?.[1]!.toLowerCase().replace(/[ .-]/g, '');
   const source: ReleaseSource =
     key === 'webdl' || key === 'web' ? 'webdl' : key === 'webrip' ? 'webrip' : key && /^(bluray|bdrip|brrip|bdremux|remux)$/.test(key) ? 'bluray' : key === 'hdtv' || key === 'pdtv' ? 'hdtv' : key && /^(dvdrip|dvd)$/.test(key) ? 'dvd' : key && /^(hdcam|cam)$/.test(key) ? 'cam' : key && /^(hdts|telesync|ts|telecine|tc)$/.test(key) ? 'telesync' : 'unknown';
-  const qualityAt = Math.min(...[resolutionMatch, sourceMatch].map((m) => (m ? m.index + (/^[^a-z0-9]/i.test(m[0]) ? 1 : 0) : Infinity)));
+  const qualityAt = Math.min(resolutionAt ?? Infinity, sourceMatch ? at(sourceMatch) : Infinity);
 
   // The year is the last year-like number before the first quality marker. A title can start with a number.
   let year: number | null = null;
