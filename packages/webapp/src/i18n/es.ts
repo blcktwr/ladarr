@@ -155,7 +155,7 @@ export const es: Record<string, string> = {
   'The backup expired. Send the file again.': 'La copia de seguridad expiró. Envía el archivo de nuevo.',
   'Enter the address and the API key.': 'Escribe la dirección y la clave de API.',
   'The preview expired. Start the preview again.': 'La vista previa expiró. Inicia la vista previa de nuevo.',
-  'Nothing needs a search now: the target has a file, is not monitored, is not released, or is in the queue already.': 'Nada necesita una búsqueda ahora: el objetivo tiene un archivo, no tiene seguimiento, no se ha estrenado o ya está en la cola.',
+  'Nothing to search, not released yet or not available digitally.': 'Nada que buscar, aún no se ha estrenado o no está disponible en digital.',
   'The quality profile has no better quality than the current file.': 'El perfil de calidad no tiene una calidad mejor que la del archivo actual.',
   'Uploading': 'Subiendo',
   'New': 'Nuevo',

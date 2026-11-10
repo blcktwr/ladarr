@@ -79,7 +79,7 @@ Object.assign(errorTexts, {
   backup_not_found: 'The backup expired. Send the file again.',
   invalid_connection: 'Enter the address and the API key.',
   plan_not_found: 'The preview expired. Start the preview again.',
-  nothing_to_search: 'Nothing needs a search now: the target has a file, is not monitored, is not released, or is in the queue already.',
+  nothing_to_search: 'Nothing to search, not released yet or not available digitally.',
   no_better_qualities: 'The quality profile has no better quality than the current file.',
 });
 

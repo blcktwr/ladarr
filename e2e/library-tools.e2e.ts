@@ -35,7 +35,7 @@ test('a search on the selected titles', async ({ page }) => {
   // The title has no episode to search, so the answer is a message.
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Search the selected titles' });
-  await expect(dialog).toContainText('Nothing needs a search now');
+  await expect(dialog).toContainText('Nothing to search');
   await dialog.getByText('Close', { exact: true }).click();
   await expect(dialog).toHaveCount(0);
   // Only Search and Remove are left.
@@ -155,7 +155,7 @@ test('a title that has no file has Search, and a title that has a file has Upgra
   await expect(page.getByRole('button', { name: 'Upgrade', exact: true })).toHaveCount(0);
   // The title is paused, so a search has nothing to start.
   await page.getByRole('button', { name: 'Search', exact: true }).click();
-  await expect(page.getByRole('alert').getByText('Nothing needs a search now')).toBeVisible();
+  await expect(page.getByRole('alert').getByText('Nothing to search')).toBeVisible();
   await page.getByRole('button', { name: 'Remove', exact: true }).click();
   const alert = page.getByRole('alertdialog', { name: 'Remove 1 title?' });
   await expect(alert).toBeVisible();
