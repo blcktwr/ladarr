@@ -197,6 +197,8 @@ describe('requests and summary', () => {
     expect(list.total).toBe(1);
     expect(list.items.map((i: { kind: string; season: number | null; total: number; reached: { imported: number } }) => [i.kind, i.season, i.total, i.reached.imported])).toEqual([['group', null, 3, 0]]);
     expect(list.items[0].counts).toEqual({ not_found: 3 });
+    // The summary counts the series, not its episodes: three targets in the same stage are one series.
+    expect((await api.get('/queue/summary')).body.counts).toEqual({ not_found: 1 });
     const children = (await api.get('/queue/groups/tv:1')).body.items;
     expect(children.map((c: { label: string }) => c.label)).toEqual(['Show Name S01E01', 'Show Name S01E02', 'Show Name S02E01']);
     expect(children[0].reason.message).toContain('Not found in any indexers');
