@@ -117,10 +117,13 @@ function FileDetails({ file }: { file: NonNullable<QueueEntryView['file']> }) {
 const importStates = ['planned', 'staged', 'published', 'committed', 'retired'] as const;
 const importRank = (entry: QueueEntryView) => (entry.import ? importStates.indexOf(entry.import.state) : 0);
 
+// The checks belong to a target that validates or imports. A target that a problem stops has no checks.
+const hasChecks = (entry: QueueEntryView) => entry.key !== 'stuck' && (entry.stage === 'validating' || entry.stage === 'importing');
+
 // The checks that ladarr does before a target is complete. The checks of the validation pass together when the plan of
 // the import is made. The steps of the import follow one by one.
 function ImportChecks({ entry }: { entry: QueueEntryView }) {
-  if (entry.stage !== 'validating' && entry.stage !== 'importing') return null;
+  if (!hasChecks(entry)) return null;
   const planned = entry.stage === 'importing';
   const rank = importRank(entry);
   const steps = [
@@ -286,23 +289,28 @@ function downloadPercent(entry: QueueEntryView) {
 // One target. An episode keeps its indicator next to its name, above the fields of its file. The inspector of a movie
 // shows the indicator of its status and the reason that stops it above the progress of the work, under the name, then
 // the checks of the import, then the fields of its release. The label is off in the inspector of a movie, where the
-// heading of the panel says the name.
+// heading of the panel says the name. The actions of an episode, such as the match of a file, follow its indicator.
 // An episode of a series shows the percent of its download in its name.
-function EntryDetails({ entry, label = true, inline = false }: { entry: QueueEntryView; label?: boolean; inline?: boolean }) {
+function EntryDetails({ entry, label = true, inline = false, actions }: { entry: QueueEntryView; label?: boolean; inline?: boolean; actions?: ReactNode }) {
   const percent = inline ? downloadPercent(entry) : null;
   const data = !inline && entry.release ? <ReleaseDetails release={entry.release} /> : inline && entry.file ? <FileDetails file={entry.file} /> : null;
   const name = label && <Text>{percent === null ? entry.label : <>{entry.label} <strong>({percent}%)</strong></>}</Text>;
   const status = shownKey(entry.key);
-  // The reason shows under the status of a movie. The list and the episodes keep the status and the hint.
+  // The reason shows under the status of a movie, and under the status of an episode that a problem stops, above its
+  // file. The list keeps the status and the hint.
   const reason = entry.reason ? t(entry.reason.message) : null;
-  const checks = entry.stage === 'validating' || entry.stage === 'importing';
+  const checks = hasChecks(entry);
   if (inline) {
     return (
       <div className="grid gap-2 w-full min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {name}
-          <EntryStatus entry={entry} />
+          <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
+            <EntryStatus entry={entry} />
+            {actions}
+          </div>
         </div>
+        {entry.key === 'stuck' && reason && <Text variant="small">{reason}</Text>}
         {data}
       </div>
     );
@@ -458,16 +466,6 @@ function MasterRow({ row }: { row: QueueRow }) {
   );
 }
 
-// The actions of one episode of a season: the menu, and the match of a file when the target asks for it.
-function EpisodeActions({ entry, run, refresh, openLogs }: { entry: QueueEntryView; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void }) {
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
-      <ActionMenu label={t('Actions for {name}', { name: entry.label })} items={entryMenu(entry, run, openLogs)} />
-    </div>
-  );
-}
-
 // The columns of the table of the seasons. The label of a column is for a screen reader only, because the row says it.
 const seasonColumns = [{ label: 'Season', hideLabel: true }, { label: 'Actions', hideLabel: true, align: 'end' as const }];
 
@@ -480,16 +478,21 @@ function SeasonEpisodes({ season, entries, run, refresh, openLogs }: { season: n
     <div className="grid gap-4 w-full">
       <Table
         aria-label={t('Episodes of season {number}', { number: season })}
-        columns={[
-          { label: t('Episode'), hideLabel: true },
-          // A fixed action column keeps the width of the row, so a long file name wraps and does not move the status.
-          { label: t('Actions'), hideLabel: true, align: 'end', width: '6rem' },
-        ]}
+        columns={[{ label: t('Episode'), hideLabel: true }]}
         rows={entries.slice((current - 1) * EPISODES, current * EPISODES).map((entry) => ({
           key: `entry:${entry.id}`,
           cells: [
-            <EntryDetails key="detail" entry={entry} inline />,
-            <EpisodeActions key="actions" entry={entry} run={run} refresh={refresh} openLogs={openLogs} />,
+            <EntryDetails
+              key="detail"
+              entry={entry}
+              inline
+              actions={
+                <>
+                  {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
+                  <ActionMenu label={t('Actions for {name}', { name: entry.label })} items={entryMenu(entry, run, openLogs)} />
+                </>
+              }
+            />,
           ],
         }))}
       />
@@ -571,7 +574,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   // The target of the checklist: the one that is furthest behind in the import. A target that a reason stops comes
   // after the targets that move.
   const importing = entries
-    .filter((entry) => entry.stage === 'validating' || entry.stage === 'importing')
+    .filter(hasChecks)
     .sort((a, b) => Number(Boolean(a.reason)) - Number(Boolean(b.reason)) || (a.stage === b.stage ? importRank(a) - importRank(b) : a.stage === 'validating' ? -1 : 1))[0];
   const message =
     status === 'no_match'

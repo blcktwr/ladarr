@@ -69,3 +69,13 @@ test('shows the status on the series and on each episode', async ({ page, contex
   // An episode shows its own status too.
   await expect(page.locator('[data-row="entry:tv:1:1x1"]')).toContainText('Sending');
 });
+
+test('shows the reason that stops an episode under its row', async ({ page, context }) => {
+  await context.addCookies([{ ...cookie, url: URL_BASE }]);
+  await page.goto(`${URL_BASE}/activity`);
+  await page.locator('[data-row="season:tv:1|1"]').click();
+  const episodes = page.getByRole('table', { name: 'Episodes of season 1' });
+  await expect(episodes).toBeVisible();
+  // The reason shows in the row, where the file name shows during validation.
+  await expect(episodes.getByText('This torrent is in the client already and was not added by the app. You can attach it to this target.')).toHaveCount(3);
+});
