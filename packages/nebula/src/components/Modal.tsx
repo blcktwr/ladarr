@@ -39,7 +39,8 @@ export function Modal({ trigger, title, actions, width = 'md', children, open, o
     >
       {trigger && <Dialog.Trigger render={trigger} />}
       <Dialog.Portal>
-        <Dialog.Backdrop className={veil} />
+        {/* A modal on top of another modal also has the veil. Base UI leaves it out for a nested dialog. */}
+        <Dialog.Backdrop forceRender className={veil} />
         <Dialog.Popup className={`${popup} ${widths[width]}`}>
           <div className="flex items-center justify-between gap-4 w-full">
             <Dialog.Title className="text-ink-strong text-[17px]/none font-semibold">{title}</Dialog.Title>
