@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "dev": "concurrently -k -n webapp,server -c cyan,green \"npm run dev -w @ladarr/webapp\" \"npm run dev -w @ladarr/server\"",
+    "proxy": "npm run dev -w @ladarr/webapp",
     "build": "npm run build -w @ladarr/webapp",
     "typecheck": "tsc -p packages/shared && tsc -p packages/server && tsc -p packages/webapp && tsc -p e2e",
     "test": "vitest run",
