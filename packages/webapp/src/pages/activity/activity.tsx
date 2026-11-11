@@ -281,8 +281,9 @@ function GroupRejected({ group, filters, refresh }: { group: QueueGroupRow; filt
 
 // The progress of a download: the part that is done.
 function TransferProgress({ entry }: { entry: QueueEntryView }) {
-  const percent = downloadPercent(entry);
-  if (percent === null || !entry.transfer) return null;
+  if (entry.stage !== 'downloading' || idle(entry)) return null;
+  // The first poll can arrive after the target enters Downloading. The bar shows from 0% until then.
+  const percent = downloadPercent(entry) ?? 0;
   return (
     <div className="grid gap-1">
       <Progress value={percent} label={`${entry.label} ${t('Download')}`} />
