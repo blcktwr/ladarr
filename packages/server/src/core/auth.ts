@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Request, RequestHandler, Response } from 'express';
-import type { Db } from './db.ts';
+import { db } from './db.ts';
 
 export const SESSION_COOKIE = 'ladarr_session';
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -21,7 +21,7 @@ export function safeEqual(a: string, b: string) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-export function findSession(db: Db, req: Request) {
+export function findSession(req: Request) {
   const raw = readCookie(req, SESSION_COOKIE);
   if (!raw) return;
   const tokenHash = sha256(raw);
@@ -32,7 +32,7 @@ export function findSession(db: Db, req: Request) {
 // The cookie belongs to the whole app, also when the API sits under a URL base.
 export const cookiePath = (req: Request) => req.baseUrl.replace(/\/api$/, '') || '/';
 
-export async function startSession(db: Db, req: Request, res: Response) {
+export async function startSession(req: Request, res: Response) {
   const raw = newToken();
   const now = Date.now();
   for (const [tokenHash, session] of Object.entries(db.data.sessions)) {
@@ -50,11 +50,11 @@ export async function startSession(db: Db, req: Request, res: Response) {
 }
 
 // A request passes with the session cookie, or with the API key in X-Api-Key when the route allows it.
-export function requireAuth(db: Db, { allowApiKey = true } = {}): RequestHandler {
+export function requireAuth({ allowApiKey = true } = {}): RequestHandler {
   return (req, res, next) => {
     const key = req.get('x-api-key');
     if (allowApiKey && key && db.data.apiKey && safeEqual(key, db.data.apiKey)) return next();
-    const session = findSession(db, req);
+    const session = findSession(req);
     if (!session) return void res.status(401).json({ error: 'unauthenticated' });
     const safeMethod = ['GET', 'HEAD', 'OPTIONS'].includes(req.method);
     if (!safeMethod && !safeEqual(req.get('x-csrf-token') ?? '', session.csrfToken)) {

@@ -1,8 +1,8 @@
+import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import { parseProfile } from '../../../helpers/quality.ts';
 
-export function qualityProfileCreate(db: Db): RequestHandler {
+export function qualityProfileCreate(): RequestHandler {
   return async (req, res) => {
     const profile = parseProfile(req.body);
     if ('invalid' in profile) return void res.status(400).json({ error: 'invalid_profile', field: profile.invalid });

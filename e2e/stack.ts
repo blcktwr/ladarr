@@ -69,6 +69,8 @@ export async function startStack() {
         LADARR_TMDB_BASE_URL: tmdb.url,
         // The tests and the benchmark call the server without a URL base.
         LADARR_URL_BASE: '',
+        // The proxy ports are not part of this test stack. The tests that need them start the app directly.
+        LADARR_COMPAT_PORTS: '0',
         PATH: `${folders.bin}:${process.env.PATH}`,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -201,7 +203,6 @@ export async function configure(stack: Stack) {
   const steps: [string, string, unknown][] = [
     ['POST', '/roots', { path: stack.folders.movies, mediaType: 'movie' }],
     ['POST', '/roots', { path: stack.folders.tv, mediaType: 'tv' }],
-    ['PATCH', '/settings', { region: 'US', timeZone: 'UTC' }],
     ['POST', '/settings/complete-setup', {}],
     ['POST', '/clients', { name: 'qBittorrent', type: 'qbittorrent', host: '127.0.0.1', port: stack.qbit.port, auth: { type: 'password', username: 'admin', password: 'secret' } }],
   ];

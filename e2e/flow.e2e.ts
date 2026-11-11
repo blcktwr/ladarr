@@ -38,22 +38,16 @@ const section = (page: Page, name: string) => page.getByRole('link', { name, exa
 // The queue status at the end of the navbar is the link to Activity. Its text changes with the queue.
 const openActivity = (page: Page) => page.locator('a[href$="/activity"]').click();
 
-async function addFromSearch(page: Page, query: string, heading: string, seasons = false) {
+async function addFromSearch(page: Page, query: string, heading: string) {
   const box = page.getByRole('searchbox', { name: 'Search', exact: true });
   await box.fill(query);
   await box.press('Enter');
   await page.getByRole('main').getByRole('link', { name: query }).getByText(query, { exact: true }).click();
   await page.getByRole('button', { name: 'Add', exact: true }).click();
-  // A series asks which seasons to download first. The test wants all of them.
-  if (seasons) {
-    const dialog = page.getByRole('dialog', { name: 'Add new series' });
-    await dialog.getByRole('checkbox', { name: 'All seasons' }).click();
-    await dialog.getByRole('button', { name: 'Add', exact: true }).click();
-  }
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Added to the queue')).toBeVisible();
   await expect(page.getByRole('heading', { name: heading })).toBeVisible();
   // The page of the title has its action buttons when the title is in the catalog.
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
 }
 
 test('setup: owner, folders, download client, and indexer', async ({ page }) => {
@@ -190,8 +184,8 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   await expect(spare.getByText('Connected')).toBeVisible();
   await spare.getByRole('button', { name: 'Add', exact: true }).click();
   await clients.getByRole('button', { name: 'Actions for Spare' }).click();
-  await page.getByRole('menuitem', { name: 'Remove' }).click();
-  await page.getByRole('alertdialog', { name: 'Remove Spare?' }).getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await page.getByRole('alertdialog', { name: 'Delete Spare?' }).getByRole('button', { name: 'Delete' }).click();
   await expect(clients.getByRole('cell', { name: 'Spare', exact: true })).toHaveCount(0);
   await expect(clients.getByRole('cell', { name: 'Seedbox', exact: true })).toBeVisible();
 
@@ -240,17 +234,17 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   await page.getByRole('menuitem', { name: 'Test' }).click();
   await expect(notices.getByText('Connected to the indexer.').first()).toBeVisible();
   await indexers.getByRole('button', { name: 'Actions for Renamed' }).click();
-  await page.getByRole('menuitem', { name: 'Remove' }).click();
-  await page.getByRole('alertdialog', { name: 'Remove Renamed?' }).getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await page.getByRole('alertdialog', { name: 'Delete Renamed?' }).getByRole('button', { name: 'Delete' }).click();
   await expect(indexers.getByRole('cell', { name: 'Renamed', exact: true })).toHaveCount(0);
   await expect(indexersEmpty.getByText('No indexer is set.')).toBeVisible();
 
-  // The indexer manager pushes an indexer while Settings is open, and the list changes without a reload. The manager owns its fields: the menu has no Remove, and the form has the delay and the preferred languages.
+  // The indexer manager pushes an indexer while Settings is open, and the list changes without a reload. The manager owns its fields: the menu has no Delete, and the form has the delay and the preferred languages.
   const { apiKey } = await (await page.request.get(`${URL_BASE}/api/auth/api-key`)).json();
   await stack.pushIndexer(apiKey);
   await expect(indexers.getByRole('cell', { name: 'Tracker', exact: true })).toBeVisible();
   await indexers.getByRole('button', { name: 'Actions for Tracker' }).click();
-  await expect(page.getByRole('menuitem', { name: 'Remove' })).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: 'Delete' })).toHaveCount(0);
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const pushed = page.getByRole('dialog', { name: 'Edit an indexer' });
   await expect(pushed.getByLabel('Delay requests')).toBeVisible();
@@ -281,8 +275,8 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   await page.getByRole('menuitem', { name: 'Test' }).click();
   await expect(notices.getByText('The receiver accepted the test event.').first()).toBeVisible();
   await webhook.getByRole('button', { name: `Actions for ${webhookName}` }).click();
-  await page.getByRole('menuitem', { name: 'Remove' }).click();
-  await page.getByRole('alertdialog', { name: `Remove ${webhookName}?` }).getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await page.getByRole('alertdialog', { name: `Delete ${webhookName}?` }).getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByText('No webhook is set.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add webhook' })).toBeEnabled();
   receiver.close();
@@ -346,27 +340,27 @@ test('movie: add, search, download, restart, import', async ({ page }) => {
 
 test('the + of a season opens the add with that season', async ({ page }) => {
   await signIn(page);
-  await page.goto(`${URL_BASE}/catalog/tv/1`);
-  await page.getByRole('button', { name: 'Add Season 1' }).click();
+  await page.goto(`${URL_BASE}/catalog/tv/3`);
+  await page.getByRole('button', { name: 'Add Season 2' }).click();
   const dialog = page.getByRole('dialog', { name: 'Add new series' });
-  await expect(dialog.getByRole('checkbox', { name: 'Season 1' })).toBeChecked();
+  await expect(dialog.getByRole('checkbox', { name: 'Season 2' })).toBeChecked();
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toHaveCount(0);
 });
 
 test('series: add, season pack, crash, import', async ({ page }) => {
   await signIn(page);
-  await addFromSearch(page, 'Show Name', 'Show Name (2020)', true);
+  await addFromSearch(page, 'Show Name', 'Show Name (2020)');
 
   await openActivity(page);
-  const groupRow = page.locator('[data-row="group:tv:1"]');
-  const groupMenu = page.getByRole('button', { name: 'Actions for Show Name (2020)' });
-  // The row of the series shows its status. The movie of the test before comes first, so the user selects the series.
+  const groupRow = page.locator('[data-row="group:tv:1:1"]');
+  const groupMenu = page.getByRole('button', { name: 'Actions for Show Name (2020) Season 1' });
+  // The row of the season shows its status. The movie of the test before comes first, so the user selects the season.
   await expect(groupRow).toContainText('Downloading');
-  await page.getByRole('button', { name: 'Inspect Show Name (2020)' }).click();
+  await page.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
   await expect(groupMenu).toBeVisible();
   // The poster and the name of the master row open the page of the title.
-  await groupRow.getByRole('link', { name: 'Show Name (2020)' }).click();
+  await groupRow.getByRole('link', { name: 'Show Name (2020) Season 1' }).click();
   await expect(page.getByRole('heading', { name: 'Show Name (2020)' })).toBeVisible();
   await openActivity(page);
   // One pack, one transfer, three targets.
@@ -379,7 +373,7 @@ test('series: add, season pack, crash, import', async ({ page }) => {
   await page.reload();
   // The page selects the first row, so the user selects the series. Its seasons are in the inspector, and the series
   // shows the status of its episodes.
-  await page.getByRole('button', { name: 'Inspect Show Name (2020)' }).click();
+  await page.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
   await expect(page.locator('[data-row="season:tv:1|1"]')).toBeVisible();
   await expect(groupRow).toContainText('Downloading');
   // A click on the button of the season opens its episodes in the inspector.

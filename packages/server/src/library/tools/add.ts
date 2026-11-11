@@ -1,5 +1,5 @@
 import type { AddMode, MediaType } from '@ladarr/shared/enums';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { deleteItemLog } from '../../core/log.ts';
 import { titleKey, type Override, type Title } from '../library.ts';
@@ -39,7 +39,7 @@ export class AddError extends Error {
 }
 
 // A title that comes back starts with an empty queue. The targets of the record that was removed before do not return.
-function forgetTargets(db: Db, key: string) {
+function forgetTargets(key: string) {
   const ids = new Set(Object.values(db.data.queue).filter((entry) => entry.titleKey === key).map((entry) => entry.id));
   if (ids.size === 0) return;
   for (const id of ids) {
@@ -82,7 +82,7 @@ function placeholderMeta(input: AddInput): TitleMeta {
 // The one way a title enters the library. The add form and the migration both use it.
 // The caller saves the database after this returns.
 export async function addTitle(
-  { db, tmdb, enqueue }: { db: Db; tmdb: Tmdb; enqueue: (input: EnqueueInput) => Job },
+  { tmdb, enqueue }: { tmdb: Tmdb; enqueue: (input: EnqueueInput) => Job },
   input: AddInput,
 ): Promise<{ title: Title; jobId: string | null }> {
   const key = titleKey(input.mediaType, input.tmdbId);
@@ -97,7 +97,7 @@ export async function addTitle(
   }
 
   const meta = fetched ?? placeholderMeta(input);
-  forgetTargets(db, key);
+  forgetTargets(key);
   const now = Date.now();
   const episodes = input.episodes?.map((episode) => ({ ...episode, override: null, fileId: null }));
   const title: Title = {

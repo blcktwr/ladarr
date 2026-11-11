@@ -1,6 +1,6 @@
 import type { QueueBranch, QueueStage } from '@ladarr/shared/enums';
 import type { EpisodeRef } from '@ladarr/shared/types';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
 import { catalog, deleteItemLog, itemFields } from '../../core/log.ts';
 
@@ -31,6 +31,8 @@ export type ReleaseRef = {
   kind: 'single' | 'multi' | 'pack';
   seeders: number | null;
   manual: boolean;
+  // The comment of the torrent file, when the indexer sent one. A magnet has none.
+  comment?: string;
   // The share limits that the indexer asked for when ladarr chose the release. Old entries lack it.
   seed?: { ratio: number | null; minutes: number | null } | null;
   // Set when the user attached a download that was in the client already. ladarr did not add it, and never removes it.
@@ -66,6 +68,8 @@ export type RejectedRelease = {
   kind: 'single' | 'multi' | 'pack';
   grabbable: boolean;
   reasons: string[];
+  // The size check that stopped the release, with the numbers. Null when the size did not stop it.
+  sizeRejection: { code: 'size_below_min' | 'size_above_max'; value: number; limit: number } | null;
 };
 
 export type SearchState = {
@@ -138,7 +142,7 @@ export const queueKey = (entry: Pick<QueueEntry, 'branch' | 'stage' | 'reason'>)
 
 // The series whose first search waits for its episodes. A series has a target for each episode, so it has none
 // until the episodes arrive. The queue shows the series itself as searching meanwhile.
-export function loadingTitleKeys(db: Db) {
+export function loadingTitleKeys() {
   const keys = new Set<string>();
   for (const job of Object.values(db.data.jobs)) {
     // A job that runs already made its targets, or has none to make. Only a waiting job is a title that waits.
@@ -157,7 +161,7 @@ export function loadingTitleKeys(db: Db) {
 // A torrent belongs to ladarr when a target that ladarr sent to the client has its hash. A torrent that the user
 // attached is the user's, and a target that still looks for a release has not sent a torrent yet.
 const EARLY: readonly Stage[] = ['queued', 'searching', 'fetching'];
-export function addedByApp(db: Db, hash: string) {
+export function addedByApp(hash: string) {
   const entries = Object.values(db.data.queue).filter((entry) => entry.transferHash === hash);
   if (entries.some((entry) => entry.release?.external)) return false;
   return entries.some((entry) => !EARLY.includes(entry.stage));
@@ -166,7 +170,7 @@ export function addedByApp(db: Db, hash: string) {
 // `onMove` runs after each change of the stage or the branch, with the values from before the change.
 export type MoveHook = (entry: QueueEntry, before: { stage: Stage; branch: Branch | null; reason: Reason | null }) => void;
 
-export function createQueue(db: Db, events: Events, persist: () => void, onMove?: MoveHook) {
+export function createQueue(events: Events, persist: () => void, onMove?: MoveHook) {
   const changed = new Set<string>();
   let timer: NodeJS.Timeout | undefined;
 
@@ -214,7 +218,7 @@ export function createQueue(db: Db, events: Events, persist: () => void, onMove?
       manualMatch: null,
       importResult: null,
     });
-    catalog.info('queued', 'Added to the queue', itemFields(db, entry), { season, number });
+    catalog.info('queued', 'Added to the queue', itemFields(entry), { season, number });
     return entry;
   }
 
@@ -239,7 +243,7 @@ export function createQueue(db: Db, events: Events, persist: () => void, onMove?
       const from = before.branch ? `${before.stage} (${before.branch})` : before.stage;
       const to = entry.branch ? `${entry.stage} (${entry.branch})` : entry.stage;
       // The line names the change, as the log of Sonarr does, and the cause stays in the fields.
-      catalog.info('moved', `Changed status from ${from} to ${to}`, { ...itemFields(db, entry), status: entry.branch ?? entry.stage }, fields);
+      catalog.info('moved', `Changed status from ${from} to ${to}`, { ...itemFields(entry), status: entry.branch ?? entry.stage }, fields);
     }
     // An item that is available left the queue, so the whole log of the item goes with it.
     if (entry.stage === 'available' && before.stage !== 'available') deleteItemLog(entry.id);
@@ -258,14 +262,14 @@ export function createQueue(db: Db, events: Events, persist: () => void, onMove?
       : entry.season === null
         ? `${title.meta.title}${title.meta.year ? ` (${title.meta.year})` : ''}`
         : `${title.meta.title} S${pad(entry.season)}E${pad(entry.number!)}`;
-    catalog.info('started', `Attempt ${entry.attempt} to find "${name}"`, itemFields(db, entry), { reason });
+    catalog.info('started', `Attempt ${entry.attempt} to find "${name}"`, itemFields(entry), { reason });
   }
 
   function endAttempt(entry: QueueEntry, outcome: Attempt['outcome'], detail?: string) {
     const attempt = entry.attempts.at(-1);
     if (attempt?.outcome !== 'running') return;
     Object.assign(attempt, { outcome, endedAt: Date.now(), ...(detail ? { detail } : {}) });
-    catalog.info('attempt_ended', `Attempt ${entry.attempt} ended: ${outcome}${detail ? ` (${detail})` : ''}`, itemFields(db, entry), { outcome, ...(detail ? { detail } : {}) });
+    catalog.info('attempt_ended', `Attempt ${entry.attempt} ended: ${outcome}${detail ? ` (${detail})` : ''}`, itemFields(entry), { outcome, ...(detail ? { detail } : {}) });
   }
 
   // A request for a target. It returns false when the target is already in the journey, so no second request starts.

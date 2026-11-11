@@ -1,7 +1,7 @@
 import { realpath, stat } from 'node:fs/promises';
 import type { FileDetails, FileRow } from '@ladarr/shared/types';
 import { Router } from 'express';
-import type { Db, MediaFile } from '../../core/db.ts';
+import { type Db, type MediaFile, db } from '../../core/db.ts';
 import { inside } from '../imports/folder-files.ts';
 import { seeFile } from './remove.ts';
 import type { Title } from '../library.ts';
@@ -14,7 +14,7 @@ const MAX_PROBES = 3;
 export const fileRow = ({ id, path, sizeBytes, mtimeMs, missing, episodes }: MediaFile): FileRow => ({ id, path, sizeBytes, mtimeMs, missing, episodes });
 
 // The file records of each title, sorted by path.
-export function filesByTitle(db: Db) {
+export function filesByTitle() {
   const groups = new Map<string, MediaFile[]>();
   for (const file of Object.values(db.data.files)) {
     const group = groups.get(file.titleKey);
@@ -50,7 +50,7 @@ export function describeProbe(data: Raw): FileDetails {
 
 type Deps = { probe?: typeof ffprobeRaw };
 
-export function libraryFilesRouter(db: Db, { probe = ffprobeRaw }: Deps = {}) {
+export function libraryFilesRouter({ probe = ffprobeRaw }: Deps = {}) {
   const router = Router();
   let running = 0;
 
@@ -69,7 +69,7 @@ export function libraryFilesRouter(db: Db, { probe = ffprobeRaw }: Deps = {}) {
     if ((season === undefined) !== (number === undefined) || (season !== undefined && (!Number.isInteger(season) || !Number.isInteger(number)))) {
       return void res.status(400).json({ error: 'invalid_episode' });
     }
-    const files = (filesByTitle(db).get(title.key) ?? []).filter((file) => season === undefined || file.episodes.some((e) => e.season === season && e.number === number));
+    const files = (filesByTitle().get(title.key) ?? []).filter((file) => season === undefined || file.episodes.some((e) => e.season === season && e.number === number));
     res.json({ files: files.map(fileRow) });
   });
 

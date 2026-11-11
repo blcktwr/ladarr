@@ -1,9 +1,9 @@
+import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import { DELIVER, type DeliveryPayload } from '../../../core/webhook.ts';
 
 // The events that wait go with the webhook. Another webhook must not get them.
-export function webhookDelete(db: Db): RequestHandler<{ id: string }> {
+export function webhookDelete(): RequestHandler<{ id: string }> {
   return async (req, res) => {
     const index = db.data.webhooks.findIndex((item) => item.id === req.params.id);
     if (index < 0) return void res.status(404).json({ error: 'not_found' });

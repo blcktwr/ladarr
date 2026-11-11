@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { BULK_SEARCH_JOB } from '../../src/library/calendar/calendar-search.ts';
 import { librarySearchHandler } from '../../src/jobs/library-search.ts';
-import { openDb, type Db } from '../../src/core/db.ts';
+import { open, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { createFinder } from '../../src/library/grab/finder.ts';
 import { enqueue, type Job } from '../../src/core/jobs.ts';
@@ -14,11 +14,11 @@ const film = (id: number, extra: Partial<Title> = {}) => movie({ key: `movie:${i
 
 // The services without a worker, so the jobs stay in the database where the test can count them.
 async function setup(titles: Title[]) {
-  const db: Db = await openDb('unused.json');
+  const db: Db = await open('unused.json');
   for (const item of titles) db.data.titles[item.key] = item;
-  const queue = createQueue(db, createEvents(), () => {});
-  const finder = createFinder({ db, queue, indexers: {} as never, enqueue: (input) => enqueue(db, input) });
-  const handler = librarySearchHandler({ db, finder, enqueue: (input) => enqueue(db, input) });
+  const queue = createQueue(createEvents(), () => {});
+  const finder = createFinder({ queue, indexers: {} as never, enqueue: (input) => enqueue(input) });
+  const handler = librarySearchHandler({ finder, enqueue: (input) => enqueue(input) });
   const jobs = (type: string) => Object.values(db.data.jobs).filter((job) => job.type === type);
   const run = (payload: unknown, signal = new AbortController().signal, job?: Job) => handler.run({ ...job, payload } as Job, { signal });
   return { db, queue, finder, jobs, run };
@@ -64,7 +64,7 @@ describe('batches', () => {
   it('waits before the next batch while many searches wait', async () => {
     const keys = Array.from({ length: 30 }, (_, n) => film(n + 1).key);
     const { db, jobs, run } = await setup(keys.map((key) => film(Number(key.split(':')[1]))));
-    for (let n = 0; n < 50; n++) enqueue(db, { type: 'queue.search', dedupeKey: `other:${n}` });
+    for (let n = 0; n < 50; n++) enqueue({ type: 'queue.search', dedupeKey: `other:${n}` });
     const before = Date.now();
     await run({ planId: 'p', keys, offset: 0 });
     expect(jobs(BULK_SEARCH_JOB)[0]!.runAt).toBeGreaterThanOrEqual(before + 30_000);
@@ -81,7 +81,7 @@ describe('batches', () => {
   it('keeps the progress of a batch that stops, so a retry starts at the next title', async () => {
     const keys = Array.from({ length: 10 }, (_, n) => film(n + 1).key);
     const { db, finder, jobs, run } = await setup(keys.map((key) => film(Number(key.split(':')[1]))));
-    const job = enqueue(db, { type: BULK_SEARCH_JOB, payload: { planId: 'p', keys, offset: 0 }, dedupeKey: 'library.search:p:0' });
+    const job = enqueue({ type: BULK_SEARCH_JOB, payload: { planId: 'p', keys, offset: 0 }, dedupeKey: 'library.search:p:0' });
     const controller = new AbortController();
     const request = finder.requestSearch;
     finder.requestSearch = (key, options) => {
@@ -195,7 +195,7 @@ describe('selection API', () => {
     const { planId } = (await api!.post('/library/search/preview', { filter: 'missing' })).body;
     await api!.post('/library/search', { planId });
     const job = Object.values(db.data.jobs).find((item) => item.type === BULK_SEARCH_JOB)!;
-    const handler = librarySearchHandler({ db, finder: pipe!.finder, enqueue: (input) => enqueue(db, input) });
+    const handler = librarySearchHandler({ finder: pipe!.finder, enqueue: (input) => enqueue(input) });
     await handler.run(job, { signal: new AbortController().signal });
     expect(Object.keys(db.data.queue).sort()).toEqual(['movie:1', 'movie:5', 'tv:4:1x1', 'tv:4:1x2']);
   });

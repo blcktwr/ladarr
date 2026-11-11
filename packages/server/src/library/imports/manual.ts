@@ -2,7 +2,7 @@ import type { FolderFileStatus } from '@ladarr/shared/enums';
 import type { FolderFile, FolderPlan } from '@ladarr/shared/types';
 import { lstat, realpath, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, parse, sep } from 'node:path';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import { inside, listVideos, type Found, type JournalStep } from './importer.ts';
 import { keyOf, PlanError, presentFile, readableRoot } from './plan.ts';
 import type { Episode, Title } from '../library.ts';
@@ -24,7 +24,7 @@ export type PlanInput = {
 };
 
 // Reads the video files of a folder that the user names. It changes nothing.
-export async function readFolder(db: Db, input: { path: unknown; configDir?: string }): Promise<{ real: string; videos: Found[] }> {
+export async function readFolder(input: { path: unknown; configDir?: string }): Promise<{ real: string; videos: Found[] }> {
   if (typeof input.path !== 'string' || !isAbsolute(input.path)) throw new PlanError('path_not_absolute');
   const real = await realpath(input.path).catch(() => undefined);
   if (!real) throw new PlanError('folder_not_found');
@@ -46,7 +46,7 @@ export async function readFolder(db: Db, input: { path: unknown; configDir?: str
 }
 
 // Decides what an import would do with each video of the folder. It changes nothing.
-export async function planFiles(db: Db, input: PlanInput): Promise<FolderPlan & { steps: JournalStep[] }> {
+export async function planFiles(input: PlanInput): Promise<FolderPlan & { steps: JournalStep[] }> {
   const { title, rootReal, real } = input;
   const rootDev = input.linkOnly ? (await stat(rootReal)).dev : undefined;
   const videos = [...input.videos].sort((a, b) => b.sizeBytes - a.sizeBytes || a.rel.localeCompare(b.rel));
@@ -73,11 +73,11 @@ export async function planFiles(db: Db, input: PlanInput): Promise<FolderPlan & 
     const sameFile = Boolean(target && target.ino === source.ino && target.dev === source.dev);
     const recorded = Object.values(db.data.files).some((record) => record.titleKey === title.key && record.path === dest && !record.missing);
     if (sameFile && recorded) return row(file, 'in_place', found);
-    const old = new Set((movie ? [title.fileId] : episodes.map((episode) => episode.fileId)).filter((id): id is string => Boolean(presentFile(db, id))));
-    if (old.size && !input.replace) return row(file, 'exists', { ...found, replaces: presentFile(db, [...old][0]!)!.path });
+    const old = new Set((movie ? [title.fileId] : episodes.map((episode) => episode.fileId)).filter((id): id is string => Boolean(presentFile(id))));
+    if (old.size && !input.replace) return row(file, 'exists', { ...found, replaces: presentFile([...old][0]!)!.path });
     let replaces: string | null = null;
     if (old.size) {
-      const previous = presentFile(db, [...old][0]!)!;
+      const previous = presentFile([...old][0]!)!;
       const covered = new Set(episodes.map(keyOf));
       // The old file must belong to this file only. Else an episode would lose its file.
       if (old.size > 1 || !previous.episodes.every((episode) => covered.has(keyOf(episode)))) return row(file, 'blocked', { ...found, reason: 'partial_overlap' });
@@ -133,7 +133,7 @@ export async function planFiles(db: Db, input: PlanInput): Promise<FolderPlan & 
         season,
         total: all.length,
         covered: all.filter((episode) => imported.has(keyOf(episode))).length,
-        missing: all.filter((episode) => !imported.has(keyOf(episode)) && !presentFile(db, episode.fileId)).map((episode) => episode.number),
+        missing: all.filter((episode) => !imported.has(keyOf(episode)) && !presentFile(episode.fileId)).map((episode) => episode.number),
       };
     });
 
@@ -152,13 +152,13 @@ export async function planFiles(db: Db, input: PlanInput): Promise<FolderPlan & 
 }
 
 // Reads the folder of a title in the catalog and decides what an import would do with each file. It changes nothing.
-export async function planFolder(db: Db, input: { titleKey: string; path: unknown; replace: boolean; configDir?: string }): Promise<FolderPlan & { steps: JournalStep[]; real: string }> {
+export async function planFolder(input: { titleKey: string; path: unknown; replace: boolean; configDir?: string }): Promise<FolderPlan & { steps: JournalStep[]; real: string }> {
   const title = db.data.titles[input.titleKey];
   if (!title) throw new PlanError('title_not_found');
   const rootReal = await readableRoot(db.data.roots[title.rootId]);
 
-  const { real, videos } = await readFolder(db, input);
-  const plan = await planFiles(db, { title, rootReal, real, videos, replace: input.replace });
+  const { real, videos } = await readFolder(input);
+  const plan = await planFiles({ title, rootReal, real, videos, replace: input.replace });
   return { ...plan, real };
 }
 

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import pino from 'pino';
 import { createStream, type RotatingFileStream } from 'rotating-file-stream';
-import type { Db } from './db.ts';
+import { type Db, db } from './db.ts';
 import { outboundRequests } from './outbound.ts';
 
 const SECRET_KEY = /pass|secret|token|api[-_]?key|authorization|cookie/i;
@@ -165,7 +165,7 @@ export function logToFile(file: string, maxBytes = 1_000_000) {
 
 // The setting says whether a target in the queue keeps its whole log in a file of its own. The queue says which targets
 // are in it: a target that is available left the queue, so its file goes.
-export function configureItemLogs(db: Db) {
+export function configureItemLogs() {
   itemsOn = db.data.settings.keepQueueLogs !== false;
   inQueue = (itemId) => {
     const entry = db.data.queue[itemId];
@@ -177,7 +177,7 @@ export function configureItemLogs(db: Db) {
   startedAt = (itemId) => db.data.queue[itemId]?.createdAt ?? db.data.titles[itemId]?.addedAt ?? 0;
   isTitleKey = (itemId) => Object.hasOwn(db.data.titles, itemId);
   if (!itemsOn) forgetItemLogs();
-  else forgetItemLogsOutsideQueue(db);
+  else forgetItemLogsOutsideQueue();
 }
 
 // Removes the file of one target. A target that left the queue has no log any more.
@@ -201,7 +201,7 @@ function forgetItemLogs() {
 
 // Removes the files that no target in the queue owns. A deletion removes its files at once, and this sweep clears what
 // an older version left behind.
-function forgetItemLogsOutsideQueue(db: Db) {
+function forgetItemLogsOutsideQueue() {
   if (!itemsDir) return;
   // The keys are the targets in the queue and the titles of those targets. A title file holds the lines of its targets.
   const ids = new Set([...Object.keys(db.data.queue), ...Object.values(db.data.queue).map((entry) => entry.titleKey)]);
@@ -270,7 +270,7 @@ const pad = (value: number) => String(value).padStart(2, '0');
 type QueueItem = { id: string; titleKey: string; season: number | null; number: number | null; attempt: number; createdAt: number };
 
 // The fields that name the title or the target of a catalog log.
-export function itemFields(db: Db, entry: QueueItem): ItemFields {
+export function itemFields(entry: QueueItem): ItemFields {
   const title = db.data.titles[entry.titleKey];
   const episode = entry.season === null || entry.number === null ? undefined : title?.episodes.find((item) => item.season === entry.season && item.number === entry.number);
   return {

@@ -34,7 +34,7 @@ const statusTones: Record<string, string> = {
   downloading: 'text-accent',
   validating: 'text-accent',
   importing: 'text-accent',
-  available: 'text-success',
+  available: 'text-accent',
   paused: 'text-warning',
   cancelled: 'text-fog',
 };

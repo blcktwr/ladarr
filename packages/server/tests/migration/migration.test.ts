@@ -255,7 +255,7 @@ describe('import', () => {
       series(9, { seriesType: 'daily', path: null }),
     ];
     source = await fakeSource((req, res) => sonarrHandler({ list })(req, res));
-    const handler = migrationImportHandler({ db: app.db, tmdb, events, save: async () => {}, enqueue: (input) => app.db.data.jobs[Object.keys(app.db.data.jobs)[0]!] ?? ({} as never) });
+    const handler = migrationImportHandler({ tmdb, events, save: async () => {}, enqueue: (input) => app.db.data.jobs[Object.keys(app.db.data.jobs)[0]!] ?? ({} as never) });
     runImport = () => handler.run({} as never, { signal: new AbortController().signal });
   });
   afterAll(() => {
@@ -377,7 +377,43 @@ describe('import', () => {
     expect(app.db.data.titles['tv:5002']).toBeDefined();
   });
 
-  it('shows the progress of the ledger', async () => {
+  it('shows the progress of the current import', async () => {
     expect((await app.get('/migration/status')).body).toMatchObject({ pending: 0, imported: 1 });
+  });
+
+  it('counts only the titles of the import that the user started', async () => {
+    // Titles of an earlier import stay in the ledger. They are not part of the progress of this one.
+    app.db.data.ledger = {
+      'sonarr:old:1': { status: 'imported', app: 'sonarr', sourceId: 1, title: 'Old show', year: null, key: 'tv:1', error: null, request: null, updatedAt: 0 } as never,
+      'sonarr:old:2': { status: 'failed', app: 'sonarr', sourceId: 2, title: 'Old failure', year: null, key: null, error: 'tmdb_not_found', request: null, updatedAt: 0 } as never,
+    };
+    delete app.db.data.titles['tv:5002'];
+    const { body } = await preview();
+    const queued = await app.post('/migration/import', { planId: body.planId });
+    expect(queued.body).toMatchObject({ pending: 2, imported: 0, matched: 0, failed: 0 });
+    expect((await app.get('/migration/status')).body).toEqual({ pending: 2, imported: 0, matched: 0, failed: 0 });
+
+    await runImport();
+    expect((await app.get('/migration/status')).body).toEqual({ pending: 0, imported: 1, matched: 0, failed: 1 });
+  });
+
+  it('imports the pending titles again when the job of the queue is gone', async () => {
+    delete app.db.data.titles['tv:5002'];
+    app.db.data.ledger = {};
+    const first = await preview();
+    expect((await app.post('/migration/import', { planId: first.body.planId })).body).toMatchObject({ pending: 2 });
+    // The server stops before the job runs. The ledger says that the title is pending, and the job is gone.
+    app.db.data.jobs = {};
+
+    const again = await preview();
+    expect(row(again.body, 2)).toMatchObject({ status: 'pending' });
+    expect(again.body.counts.pending).toBe(2);
+    const queued = await app.post('/migration/import', { planId: again.body.planId });
+    expect(queued.body).toMatchObject({ pending: 2, imported: 0 });
+    expect(Object.values(app.db.data.jobs).some((job) => job.type === 'migration.import')).toBe(true);
+
+    await runImport();
+    expect(app.db.data.titles['tv:5002']).toBeDefined();
+    expect((await app.get('/migration/status')).body).toEqual({ pending: 0, imported: 1, matched: 0, failed: 1 });
   });
 });

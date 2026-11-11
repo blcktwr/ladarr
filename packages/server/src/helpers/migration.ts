@@ -1,7 +1,7 @@
 import { isAbsolute } from 'node:path';
 import type { MigrationProgress } from '@ladarr/shared/types';
 import type { MigrationPreview } from '@ladarr/shared/types';
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import type { PathMapping, SourceData } from '../migration/migration-source.ts';
 import type { Plan } from '../migration/migration.ts';
 
@@ -15,9 +15,11 @@ export const plans = new Map<string, Plan & { info: Pick<MigrationPreview, 'app'
 // shortcut: a backup that the user sent stays in memory, so a restart drops it. The user sends the file again.
 export const uploads = new Map<string, SourceData>();
 
-export function progress(db: Db): MigrationProgress {
+export function progress(): MigrationProgress {
   const counts: MigrationProgress = { pending: 0, imported: 0, matched: 0, failed: 0 };
-  for (const entry of Object.values(db.data.ledger)) counts[entry.status]++;
+  const batch = db.data.migrationBatch;
+  // The ledger keeps the results of every import. The user watches the one that they started now.
+  if (batch) for (const entry of Object.values(db.data.ledger)) if (entry.batch === batch) counts[entry.status]++;
   return counts;
 }
 

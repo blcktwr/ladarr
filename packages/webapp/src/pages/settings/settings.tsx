@@ -13,7 +13,7 @@ import { useAuth } from '../auth/auth.tsx';
 import { DownloadClients } from './connections-settings.tsx';
 import { Indexers } from './indexer-settings.tsx';
 import { NamingSettings } from './import-settings.tsx';
-import { FolderSettings, RegionSettings } from './library-settings.tsx';
+import { FolderSettings, GeneralSettings } from './library-settings.tsx';
 import { Qualities } from './quality-settings.tsx';
 import { Backups, SystemVersion } from './system-settings.tsx';
 import { Webhook } from './webhook-settings.tsx';
@@ -211,7 +211,7 @@ const categories = [
       <>
         <Pane>
           <div className="grid grid-cols-[minmax(0,1fr)] justify-items-start gap-4 w-full">
-            <RegionSettings />
+            <GeneralSettings />
             <ApiKey />
           </div>
         </Pane>

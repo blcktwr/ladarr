@@ -85,7 +85,7 @@ export function SeriesBlocklist({ titleKey }: { titleKey: string }) {
                     <span>{row.title}</span>
                     <Text variant="small">{t(row.reason.message)}</Text>
                   </div>,
-                  <Button variant="ghost" iconOnly aria-label={t('Remove {title} from the blocklist', { title: row.title })} onClick={() => void remove(row)}>
+                  <Button variant="ghost" iconOnly aria-label={t('Delete {title} from the blocklist', { title: row.title })} onClick={() => void remove(row)}>
                     <Trash2 />
                   </Button>,
                 ],

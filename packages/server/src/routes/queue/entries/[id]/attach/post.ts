@@ -1,6 +1,6 @@
+import { db } from '../../../../../core/db.ts';
 import type { AttachPreview } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../../../core/db.ts';
 import type { Clients } from '../../../../../library/downloads/client-api.ts';
 import { ClientError, type ClientHandle, type Torrent } from '../../../../../library/downloads/qbittorrent.ts';
 import type { Queue } from '../../../../../library/downloads/queue.ts';
@@ -10,11 +10,11 @@ import { attachRefusal, HASH, MAX_TARGETS } from '../../../../../helpers/queue-a
 import { label, shown } from '../../../../../helpers/queue.ts';
 
 // Attaches a torrent that is in the client already. The user confirms the owner and the title before anything changes.
-export function queueEntryAttachPost(db: Db, queue: Queue, clients: Clients): RequestHandler<{ id: string }> {
+export function queueEntryAttachPost(queue: Queue, clients: Clients): RequestHandler<{ id: string }> {
   return async (req, res) => {
     const entry = db.data.queue[req.params.id];
     const { hash: rawHash, ids, confirmOwner, confirmTitle, preview } = (req.body ?? {}) as { hash?: unknown; ids?: unknown; confirmOwner?: unknown; confirmTitle?: unknown; preview?: unknown };
-    if (!entry || !shown(db, entry)) return void res.status(404).json({ error: 'not_found' });
+    if (!entry || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
     const hash = typeof rawHash === 'string' ? rawHash.toLowerCase() : '';
     if (!HASH.test(hash) || (ids !== undefined && (!Array.isArray(ids) || ids.length > MAX_TARGETS || !ids.every((id) => typeof id === 'string')))) return void res.status(400).json({ error: 'invalid_request' });
     if (!preview && (confirmOwner !== true || confirmTitle !== true)) return void res.status(400).json({ error: 'confirmation_required' });
@@ -22,7 +22,7 @@ export function queueEntryAttachPost(db: Db, queue: Queue, clients: Clients): Re
     const targets = [entry];
     for (const id of (ids ?? []) as string[]) {
       const other = db.data.queue[id];
-      if (!other || !shown(db, other) || other.titleKey !== entry.titleKey) return void res.status(400).json({ error: 'invalid_request' });
+      if (!other || !shown(other) || other.titleKey !== entry.titleKey) return void res.status(400).json({ error: 'invalid_request' });
       if (!targets.includes(other)) targets.push(other);
     }
     const refused = () =>
@@ -55,7 +55,7 @@ export function queueEntryAttachPost(db: Db, queue: Queue, clients: Clients): Re
     if (changed.length) return void res.status(409).json({ error: 'attach_not_supported', unsupported: changed });
     if (Object.values(db.data.queue).some((other) => other.transferHash === hash && isActive(other) && other.titleKey !== entry.titleKey)) return void res.status(409).json({ error: 'torrent_in_use' });
 
-    const summary: AttachPreview = { hash, name: torrent.name, affected: targets.map((target) => ({ id: target.id, label: label(db, target) })) };
+    const summary: AttachPreview = { hash, name: torrent.name, affected: targets.map((target) => ({ id: target.id, label: label(target) })) };
     if (preview) return void res.json(summary);
 
     await attachTorrent({ queue }, { handle: owner, torrent, targets, cause: 'download attached by the user' });

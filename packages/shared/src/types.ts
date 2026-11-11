@@ -30,7 +30,7 @@ import type {
 export type EpisodeRef = { season: number; number: number };
 
 // MiB for each minute of runtime. A limit that is null is not checked.
-export type SizeLimits = { min: number; preferred: number | null; max: number | null };
+export type SizeLimits = { min: number | null; preferred: number | null; max: number | null };
 
 // A quality profile. The qualities of one group have the same rank.
 export type QualityProfile = { id: string; name: string; items: string[][] };
@@ -52,7 +52,8 @@ export type SearchResult = {
 };
 
 // The TMDB facts of a title that may not be in the library. The title page shows them for both.
-export type TitlePreview = SearchResult & { backdropPath: string | null; rating: number | null; runtime: number | null; imdbId: string | null; tvdbId: number | null; providerStatus: string };
+// The date is the release date of a movie, and the first air date of a series.
+export type TitlePreview = SearchResult & { date: string | null; backdropPath: string | null; rating: number | null; runtime: number | null; imdbId: string | null; tvdbId: number | null; providerStatus: string };
 
 export type CastMember = { id: number; name: string; character: string; profilePath: string | null };
 
@@ -75,7 +76,7 @@ export type TitleSummary = {
   availability: Availability;
   // Series only.
   counts: EpisodeCounts | null;
-  // Movies only. The time of the first digital or physical release in the region, or null.
+  // Movies only. The time of the first digital or physical release in any region, or null.
   eligibleAt: number | null;
 };
 
@@ -86,6 +87,8 @@ export type TitleDetail = TitleSummary & {
   queueStatus: string | null;
   overview: string;
   aliases: string[];
+  // The release date of a movie, and the first air date of a series.
+  date: string | null;
   rating: number | null;
   runtime: number | null;
   imdbId: string | null;
@@ -242,14 +245,12 @@ export type FolderListing = { path: string; parent: string | null; folders: stri
 
 export type PresetRow = { id: string; label: string };
 
-export type QualityRow = { id: string; label: string; source: string; resolution: number | null; sizes: SizeLimits };
+export type QualityRow = { id: string; label: string; source: string; resolution: number | null };
 // The qualities of a profile, the best group first. The qualities of one group have the same rank.
 export type ProfileData = QualityProfile;
 
 export type SettingsData = {
   setupCompleted: boolean;
-  region: string;
-  timeZone: string;
   language: Language;
   theme: 'dark' | 'light';
   defaultRoots: { movie: string | null; tv: string | null };
@@ -271,7 +272,7 @@ export type SettingsSaved = { settings: SettingsData };
 // The setup needs the settings and the folders that exist.
 export type SetupData = { settings: SettingsData; roots: RootRow[] };
 
-export type QualityResponse = { qualities: QualityRow[]; profiles: ProfileData[] };
+export type QualityResponse = { qualities: QualityRow[]; profiles: ProfileData[]; sizes: Record<MediaType, Record<string, SizeLimits>> };
 
 // ---- backups, logs, and the state of the system ----
 
@@ -432,6 +433,8 @@ export type QueueRejectedRelease = {
   kind: 'single' | 'multi' | 'pack';
   grabbable: boolean;
   reasons: string[];
+  // The size check that stopped the release, with the numbers. Null when the size did not stop it.
+  sizeRejection: { code: 'size_below_min' | 'size_above_max'; value: number; limit: number } | null;
 };
 
 export type QueueSearch = {
@@ -469,7 +472,7 @@ export type QueueEntryView = {
   completedAt: number | null;
   clearedAt: number | null;
   // `quality` is the source and the resolution that the release name gives, for example "BluRay 1080p".
-  release: { title: string; indexer: string; sizeBytes: number; kind: 'single' | 'multi' | 'pack'; manual: boolean; quality: string | null } | null;
+  release: { title: string; indexer: string; sizeBytes: number; kind: 'single' | 'multi' | 'pack'; manual: boolean; quality: string | null; comment: string | null } | null;
   // The file of the target: the file of its open import, or its record in the library.
   file: { name: string; sizeBytes: number } | null;
   search: QueueSearch | null;
@@ -498,7 +501,7 @@ export type QueueGroupRow = {
   title: string;
   year: number | null;
   posterPath: string | null;
-  // A group covers every season of the series, so it has no season.
+  // A group is one season of a series, and a series that waits for its episodes has no season.
   season: number | null;
   total: number;
   reached: QueueReached;
@@ -675,7 +678,7 @@ export type CalendarEvent = {
   season: number | null;
   number: number | null;
   episodeName: string | null;
-  // The date in the configured time zone, as YYYY-MM-DD.
+  // The date in UTC, as YYYY-MM-DD.
   day: string;
   // The instant of the release when its date has a time. Null when the date has no time.
   at: number | null;
@@ -692,7 +695,6 @@ export type CalendarResponse = {
   from: string;
   to: string;
   today: string;
-  timeZone: string;
   events: CalendarEvent[];
   undated: CalendarUndated[];
   truncated: boolean;

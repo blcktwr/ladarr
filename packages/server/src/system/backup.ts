@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { strFromU8, strToU8, unzip, zip } from 'fflate';
-import { emptyData, SCHEMA_VERSION, type Data, type Db } from '../core/db.ts';
+import { type Data, type Db, SCHEMA_VERSION, db, emptyData } from '../core/db.ts';
 import { APP_VERSION } from './version.ts';
 
 // A safety backup is the copy that a restore makes of the current data before it replaces the data.
@@ -88,7 +88,7 @@ export async function listBackups(dir: string): Promise<BackupRow[]> {
   return items.sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export async function createBackup(db: Db, dir: string, kind: BackupKind, now = new Date()): Promise<BackupRow> {
+export async function createBackup(dir: string, kind: BackupKind, now = new Date()): Promise<BackupRow> {
   // The snapshot is one synchronous step, so no change can land in the middle of it.
   const json = strToU8(JSON.stringify({ ...db.data, sessions: {} }));
   const manifest: Manifest = {

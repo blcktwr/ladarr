@@ -9,7 +9,7 @@ import {
   type Indexer,
   type IndexerApp,
 } from '../library/grab/indexers.ts';
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 
 // The version that ladarr reports to the indexer manager. The indexer manager needs 3.0.5.0 or later.
 export const VERSION: Record<IndexerApp, string> = { sonarr: '4.0.0.0', radarr: '5.0.0.0' };
@@ -78,12 +78,12 @@ export const schemaResource = (app: IndexerApp, implementation: (typeof IMPLEMEN
 });
 
 // The POST and the PUT of an indexer share this handler. The PUT names the record in the path.
-export function save(db: Db, app: IndexerApp, { onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler<{ id?: string }> {
+export function save(app: IndexerApp, { onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler<{ id?: string }> {
   return async (req, res) => {
     const parsed = parsePush(app, req.body);
     if ('errors' in parsed) return void res.status(400).json(parsed.errors);
     const id = req.params.id === undefined ? undefined : Number(req.params.id);
-    const indexer = savePush(db, app, parsed, id);
+    const indexer = savePush(app, parsed, id);
     if (!indexer) {
       if (id !== undefined && !db.data.indexers[id]?.push[app]) return void res.status(404).json({ message: 'NotFound' });
       return void res.status(400).json(invalid('apiKey', 'The API key is missing.').errors);

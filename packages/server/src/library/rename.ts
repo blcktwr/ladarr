@@ -1,7 +1,7 @@
 import type { RenameRow } from '@ladarr/shared/types';
 import { lstat, realpath } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import { inside, type JournalStep } from './imports/importer.ts';
 import { keyOf, PlanError, readableRoot } from './imports/plan.ts';
 import { episodePath, folderName, moviePath, type NamingTemplates } from './naming.ts';
@@ -10,7 +10,7 @@ export type { RenameRow };
 
 // Works out the name that each file of a title would have with the templates. It changes nothing.
 // A rename is safe when the new name is free: no file on the disk has it, and no other record of the library has it.
-export async function planRename(db: Db, titleKey: string, naming: NamingTemplates = db.data.settings.naming) {
+export async function planRename(titleKey: string, naming: NamingTemplates = db.data.settings.naming) {
   const title = db.data.titles[titleKey];
   if (!title) throw new PlanError('title_not_found');
   const rootReal = await readableRoot(db.data.roots[title.rootId]);

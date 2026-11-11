@@ -28,14 +28,16 @@ type ThumbnailProps = (Content | ({ loading: true } & Partial<Content>)) & {
   selected?: boolean;
   onSelectedChange?: (selected: boolean) => void;
   size?: keyof typeof sizes;
+  // A title that has not been released is dim, so the catalog shows that it has nothing to download yet.
+  dimmed?: boolean;
   className?: string;
 };
 
 // A poster of a film or a series, with its title and its year under it, and its type on a bookmark at the top left corner.
-// The poster is a block of stone. While the image loads, the skeleton shows on the block. Then the image fades in. Without an image, the mark of the app shows on the block, faintly. If the image does not load, the bare block stays.
+// The poster is a block of stone. While the image loads, the mark of the app shows on the block under the skeleton. Then the image fades in. Without an image, the mark stays. If the image does not load, the bare block stays.
 // The title has one row, and a long title is cut, so the years of a row of posters stay on one line. The pointer on the title shows all of it.
 // className is for layout only, such as a margin.
-export function Thumbnail({ image = '', title = '', year = '', loading = false, type, overlay, selected = false, onSelectedChange, size = 'md', className = '' }: ThumbnailProps) {
+export function Thumbnail({ image = '', title = '', year = '', loading = false, type, overlay, selected = false, onSelectedChange, size = 'md', dimmed = false, className = '' }: ThumbnailProps) {
   // The image that ended its load, so a new image starts with the skeleton.
   const [done, setDone] = useState('');
   const ready = done === image;
@@ -53,12 +55,12 @@ export function Thumbnail({ image = '', title = '', year = '', loading = false, 
       aria-busy={loading || undefined}
       onClick={event => (event.ctrlKey || event.metaKey) && select(event)}
       onContextMenu={event => event.ctrlKey && event.button === 0 && select(event)}
-      className={`relative grid content-start gap-3 ${sizes[size]} max-w-full ${className}`}
+      className={`relative grid content-start gap-3 ${sizes[size]} max-w-full ${dimmed ? 'opacity-30' : ''} ${className}`}
     >
       <div className={`${block} group relative w-full aspect-2/3 rounded-md overflow-hidden`}>
+        {/* Without a poster, the mark of the app shows faintly in its place, also while the poster loads, under the skeleton. */}
+        {(!image || !ready) && <img src={emptyThumbnail} alt="" className="absolute inset-0 size-full object-cover opacity-30" />}
         {(loading || (image && !ready)) && <Skeleton className="absolute inset-0" />}
-        {/* Without an image, the mark of the app shows faintly in the place of the poster. */}
-        {!loading && !image && <img src={emptyThumbnail} alt="" className="absolute inset-0 size-full object-cover opacity-30" />}
         {/* The title below names the image, so the image has no text of its own. */}
         {!loading && image && (
           <img

@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { emptyData, openDb, type Db } from '../../src/core/db.ts';
+import { emptyData, open, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { enqueue as enqueueJob } from '../../src/core/jobs.ts';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
@@ -56,7 +56,7 @@ const eventsOf = (db: Db) => deliveriesOf(db).map((payload) => payload.event);
 
 // Events go to jobs, without a worker. One webhook for each event of the queue points at the destination.
 async function collect(destination: string | null = 'http://receiver.test/hook') {
-  const db = await openDb('unused.json');
+  const db = await open('unused.json');
   Object.assign(db.data, emptyData());
   if (destination) {
     db.data.webhooks = [
@@ -64,8 +64,8 @@ async function collect(destination: string | null = 'http://receiver.test/hook')
       { id: 'stuck-webhook', type: 'stuck', url: destination },
     ];
   }
-  const webhooks = createWebhooks({ db, enqueue: (input) => enqueueJob(db, input), now: () => NOW });
-  const queue = createQueue(db, createEvents(), () => {}, webhooks.onMove);
+  const webhooks = createWebhooks({ enqueue: (input) => enqueueJob(input), now: () => NOW });
+  const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
   return { db, webhooks, queue };
 }
 
@@ -141,16 +141,15 @@ describe('events', () => {
   });
 
   it('never lets an error reach the move of the queue', async () => {
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     Object.assign(db.data, emptyData());
     db.data.webhooks = [{ id: 'hook', type: 'available', url: 'http://receiver.test/hook' }];
     const webhooks = createWebhooks({
-      db,
       enqueue() {
         throw new Error('broken');
       },
     });
-    const queue = createQueue(db, createEvents(), () => {}, webhooks.onMove);
+    const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
     const entry = queue.ensure('movie:2', null, null);
     expect(() => queue.move(entry, { stage: 'available' }, 'imported')).not.toThrow();
     expect(entry.stage).toBe('available');
@@ -158,7 +157,7 @@ describe('events', () => {
 
   it('drops an event when the backlog is full', async () => {
     const { db, queue } = await collect();
-    for (let i = 0; i < 1_000; i++) enqueueJob(db, { type: 'webhook.deliver', payload: {} });
+    for (let i = 0; i < 1_000; i++) enqueueJob({ type: 'webhook.deliver', payload: {} });
     queue.move(queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
     expect(jobsOf(db)).toHaveLength(1_000);
   });
@@ -168,15 +167,15 @@ describe('delivery', () => {
   async function deliver() {
     const receiver = await startReceiver();
     closers.push(receiver.close);
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     Object.assign(db.data, emptyData());
     db.data.webhooks = [{ id: 'hook', type: 'available', url: receiver.url }];
     db.data.titles['movie:2'] = movie();
-    const worker = createWorker(db, async () => {}, webhookDeliverHandler({ db, timeoutMs: 300 }), { tickMs: 15 });
+    const worker = createWorker(async () => {}, webhookDeliverHandler({ timeoutMs: 300 }), { tickMs: 15 });
     worker.start();
     closers.push(() => worker.stop());
-    const webhooks = createWebhooks({ db, enqueue: (input) => worker.enqueue(input), now: () => NOW });
-    const queue = createQueue(db, createEvents(), () => {}, webhooks.onMove);
+    const webhooks = createWebhooks({ enqueue: (input) => worker.enqueue(input), now: () => NOW });
+    const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
     const finish = () => queue.move(queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
     // The test does not wait for the pause between two tries.
     const skipWaits = () => {
@@ -265,7 +264,7 @@ describe('delivery', () => {
     db.data.webhooks = [];
     finish();
     // No job is made without a webhook. A job that was made before the removal ends without a request.
-    enqueueJob(db, { type: 'webhook.deliver', payload: { webhookId: 'hook' } });
+    enqueueJob({ type: 'webhook.deliver', payload: { webhookId: 'hook' } });
     await until(() => jobsOf(db).length === 0);
     expect(receiver.state.seen).toEqual([]);
   });
@@ -276,16 +275,16 @@ describe('worker slots', () => {
     const receiver = await startReceiver();
     closers.push(receiver.close);
     receiver.state.respond = () => 'hang';
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     Object.assign(db.data, emptyData());
     db.data.webhooks = [{ id: 'hook', type: 'available', url: receiver.url }];
     const ran: string[] = [];
     // Two slots in all. Without separate slots, the two deliveries would take both.
-    const worker = createWorker(db, async () => {}, { ...webhookDeliverHandler({ db, timeoutMs: 60_000 }), work: { run: async () => void ran.push('done') } }, { tickMs: 15, concurrency: 2 });
+    const worker = createWorker(async () => {}, { ...webhookDeliverHandler({ timeoutMs: 60_000 }), work: { run: async () => void ran.push('done') } }, { tickMs: 15, concurrency: 2 });
     worker.start();
     closers.push(() => worker.stop());
-    const webhooks = createWebhooks({ db, enqueue: (input) => worker.enqueue(input) });
-    const queue = createQueue(db, createEvents(), () => {}, webhooks.onMove);
+    const webhooks = createWebhooks({ enqueue: (input) => worker.enqueue(input) });
+    const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
     for (const id of ['movie:1', 'movie:2', 'movie:3']) queue.move(queue.ensure(id, null, null), { stage: 'available' }, 'imported');
     await until(() => receiver.state.seen.length === 2);
 
@@ -305,10 +304,10 @@ describe('import with a receiver outage', () => {
     pipe.db.data.webhooks = [{ id: 'hook', type: 'available', url: receiver.url }];
 
     // The webhook jobs run in their own worker, so the worker of the pipeline needs no change.
-    const hookWorker = createWorker(pipe.db, async () => {}, webhookDeliverHandler({ db: pipe.db, timeoutMs: 60_000 }), { tickMs: 15 });
+    const hookWorker = createWorker(async () => {}, webhookDeliverHandler({ timeoutMs: 60_000 }), { tickMs: 15 });
     hookWorker.start();
     closers.push(() => hookWorker.stop());
-    const webhooks = createWebhooks({ db: pipe.db, enqueue: (input) => hookWorker.enqueue(input) });
+    const webhooks = createWebhooks({ enqueue: (input) => hookWorker.enqueue(input) });
     const move = pipe.queue.move;
     pipe.queue.move = (entry, change, cause, detail) => {
       const before = { stage: entry.stage, branch: entry.branch, reason: entry.reason };
@@ -356,7 +355,7 @@ describe('redaction', () => {
     failing.state.respond = () => 500;
     const app = await startTestApp();
     closers.push(app.close);
-    const worker = createWorker(app.db, async () => {}, webhookDeliverHandler({ db: app.db, timeoutMs: 300 }), { tickMs: 15 });
+    const worker = createWorker(async () => {}, webhookDeliverHandler({ timeoutMs: 300 }), { tickMs: 15 });
     worker.start();
     closers.push(() => worker.stop());
 
@@ -367,8 +366,8 @@ describe('redaction', () => {
     answers.push(saved.body, (await app.get('/webhook')).body, (await app.post('/webhook/test', { url: `http://127.0.0.1:${failing.port}/hook/${secret}` })).body);
 
     // Two failed tries on a receiver that answers 500, then two on a port that nobody listens on.
-    const webhooks = createWebhooks({ db: app.db, enqueue: (input) => worker.enqueue(input) });
-    const queue = createQueue(app.db, createEvents(), () => {}, webhooks.onMove);
+    const webhooks = createWebhooks({ enqueue: (input) => worker.enqueue(input) });
+    const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
     queue.move(queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
     const skipWaits = () => {
       for (const job of jobsOf(app.db)) if (job.state === 'waiting') job.runAt = 0;
@@ -450,11 +449,11 @@ describe('API', () => {
     old.state.respond = () => 503;
     const next = await startReceiver();
     closers.push(next.close);
-    const worker = createWorker(app.db, async () => {}, webhookDeliverHandler({ db: app.db }), { tickMs: 15 });
+    const worker = createWorker(async () => {}, webhookDeliverHandler({}), { tickMs: 15 });
     worker.start();
     closers.push(() => worker.stop());
-    const webhooks = createWebhooks({ db: app.db, enqueue: (input) => worker.enqueue(input) });
-    const queue = createQueue(app.db, createEvents(), () => {}, webhooks.onMove);
+    const webhooks = createWebhooks({ enqueue: (input) => worker.enqueue(input) });
+    const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
 
     await app.fetchJson('POST', '/webhook', { type: 'available', url: old.url });
     const oldId = app.db.data.webhooks[0]!.id;
@@ -494,7 +493,7 @@ describe('old database', () => {
     // lowdb uses a memory adapter when NODE_ENV is "test".
     vi.stubEnv('NODE_ENV', 'production');
     closers.push(() => vi.unstubAllEnvs());
-    const db = await openDb(file);
+    const db = await open(file);
     expect(db.data.webhooks).toEqual([
       { id: expect.any(String), type: 'available', url: 'http://old.test/hook' },
       { id: expect.any(String), type: 'stuck', url: 'http://old.test/hook' },
@@ -509,7 +508,7 @@ describe('old database', () => {
     writeFileSync(file, JSON.stringify({ ...old, schemaVersion: 3 }));
     vi.stubEnv('NODE_ENV', 'production');
     closers.push(() => vi.unstubAllEnvs());
-    const db = await openDb(file);
+    const db = await open(file);
     expect(db.data.webhooks).toEqual([]);
   });
 });

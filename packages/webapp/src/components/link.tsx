@@ -2,6 +2,15 @@ import { Button } from 'nebula';
 import type { ReactNode } from 'react';
 import { useHref, useNavigate } from 'react-router';
 
+// Nebula has no link of text. This one opens a page outside ladarr, in a new tab.
+export function TextLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="text-accent underline">
+      {children}
+    </a>
+  );
+}
+
 // Nebula has no link. This is a ghost Button that renders an anchor, so a new tab opens the right page.
 export function Link({ href, children }: { href: string; children?: ReactNode }) {
   const navigate = useNavigate();

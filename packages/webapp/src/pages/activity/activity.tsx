@@ -1,5 +1,5 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
-import type { LogEntry, LogsResponse, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary } from '@ladarr/shared/types';
+import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, Pause, Play } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
@@ -10,10 +10,12 @@ import { Alert } from '../../components/alert.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
 import { SeriesBlocklist } from './activity-blocklist.tsx';
 import { MatchDialog } from './activity-match.tsx';
-import { LoadFailed, ModalActions, pageWidth } from '../../components/index.ts';
-import { catalogPath, formatBytes, posterUrl, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
+import { PlanDialog } from '../library/library-bulk.tsx';
+import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
+import { catalogPath, formatBytes, groupName, posterUrl, seasonName, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
+import { commentParts } from '../../lib/links.ts';
 import { useLive } from '../../lib/live.ts';
 import { StatusText } from '../../lib/status.tsx';
 
@@ -35,12 +37,19 @@ const query = (f: Filters) => {
   return params;
 };
 const pageKey = (f: Filters, page: number) => `/queue?${query(f)}&limit=${PAGE}&offset=${page * PAGE}`;
-const groupKey = (f: Filters, group: QueueGroupRow) => `/queue/groups/${group.titleKey}?${query(f)}`;
-
-const groupName = (group: QueueGroupRow) => `${group.title}${group.year ? ` (${group.year})` : ''}`;
+const groupKey = (f: Filters, group: QueueGroupRow) => {
+  const params = query(f);
+  if (group.season !== null) params.set('season', String(group.season));
+  return `/queue/groups/${group.titleKey}?${params}`;
+};
 
 // The key of a row on the page: one group of episodes, or one movie.
 const rowKey = (row: QueueRow) => (row.kind === 'group' ? `group:${row.key}` : `entry:${row.id}`);
+
+// The episodes of a group, for the details and for the sections that read the same entries.
+function useGroupEntries(group: QueueGroupRow, filters: Filters) {
+  return useQuery<{ items: QueueEntryView[] }>({ queryKey: [groupKey(filters, group)], gcTime: 0, enabled: !group.pending });
+}
 
 // The name that the page shows for a row.
 const nameOf = (row: QueueRow) => (row.kind === 'group' ? groupName(row) : row.label);
@@ -70,6 +79,24 @@ function EntryStatus({ entry }: { entry: QueueEntryView }) {
   return <StatusText small status={statusLabel(key)} icon={key} help={entry.reason ? t(entry.reason.message) : statusHelpText(entry.key)} />;
 }
 
+// The comment of a release can hold more than one link, with text beside it. Each link opens in a new tab, and the
+// line breaks of the comment stay.
+function CommentText({ text }: { text: string }) {
+  return (
+    <span className="whitespace-pre-wrap">
+      {commentParts(text).map((part, index) =>
+        typeof part === 'string' ? (
+          part
+        ) : (
+          <TextLink key={index} href={part.href}>
+            {part.text}
+          </TextLink>
+        ),
+      )}
+    </span>
+  );
+}
+
 // The release of a target: its name, its quality, and its size.
 function ReleaseDetails({ release }: { release: NonNullable<QueueEntryView['release']> }) {
   return (
@@ -78,6 +105,7 @@ function ReleaseDetails({ release }: { release: NonNullable<QueueEntryView['rele
         { label: t('Release'), value: release.title, wide: true },
         ...(release.quality ? [{ label: t('Quality'), value: release.quality }] : []),
         { label: t('Size'), value: formatBytes(release.sizeBytes) },
+        ...(release.comment ? [{ label: t('Comment'), value: <CommentText text={release.comment} />, wide: true }] : []),
       ]}
     />
   );
@@ -92,17 +120,20 @@ function FileDetails({ file }: { file: NonNullable<QueueEntryView['file']> }) {
 const importStates = ['planned', 'staged', 'published', 'committed', 'retired'] as const;
 const importRank = (entry: QueueEntryView) => (entry.import ? importStates.indexOf(entry.import.state) : 0);
 
+// The checks belong to a target that validates or imports. A target that a problem stops has no checks.
+const hasChecks = (entry: QueueEntryView) => entry.key !== 'stuck' && (entry.stage === 'validating' || entry.stage === 'importing');
+
 // The checks that ladarr does before a target is complete. The checks of the validation pass together when the plan of
 // the import is made. The steps of the import follow one by one.
 function ImportChecks({ entry }: { entry: QueueEntryView }) {
-  if (entry.stage !== 'validating' && entry.stage !== 'importing') return null;
+  if (!hasChecks(entry)) return null;
   const planned = entry.stage === 'importing';
   const rank = importRank(entry);
   const steps = [
+    { label: 'The download is complete.', done: true },
     { label: 'The title and its library folder exist.', done: planned },
     { label: 'The library folder is available.', done: planned },
     { label: 'The download is in the client.', done: planned },
-    { label: 'The download is complete.', done: true },
     { label: 'The download folder is readable.', done: planned },
     { label: 'The download folder is inside the downloads folder.', done: planned },
     { label: 'The video files are found.', done: planned },
@@ -137,6 +168,14 @@ const sourceLabel = (source: string) => sourceLabels[source] ?? (source === 'unk
 // The quality of a release as a person reads it: its resolution and its source.
 const releaseQuality = (release: QueueRejectedRelease) => [release.resolution ? `${release.resolution}p` : null, sourceLabel(release.source)].filter(Boolean).join(' ');
 
+// The size check that stopped a release, with the numbers that made it.
+const sizeReason = (release: QueueRejectedRelease) => {
+  const rejection = release.sizeRejection;
+  if (!rejection) return null;
+  const value = `${rejection.value.toFixed(1)} ${rejection.code === 'size_above_max' ? '>' : '<'} ${rejection.limit} MiB/min`;
+  return rejection.code === 'size_above_max' ? `File size (${value})` : `File size below the minimum: ${value}`;
+};
+
 // The releases that a search found and rejected, with the button that takes one by hand.
 function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; release: QueueRejectedRelease }[]; onDone: () => void }) {
   const [chosen, setChosen] = useState<{ entry: QueueEntryView; release: QueueRejectedRelease } | null>(null);
@@ -166,27 +205,29 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
   return (
     <>
       <Section title={t('Rejected releases')}>
-        <List>
-          {items.map((item) => {
+        <Table
+          aria-label={t('Rejected releases')}
+          columns={[{ label: t('Release'), hideLabel: true }, { label: t('Actions'), align: 'end', hideLabel: true }]}
+          rows={items.map((item) => {
             const quality = releaseQuality(item.release);
             const size = formatBytes(item.release.sizeBytes);
-            return (
-              <Row key={`${item.release.indexerId}:${item.release.guid}`}>
-                <div className="flex w-full min-w-0 items-start gap-3">
-                  <div className="grid min-w-0 flex-1 gap-1">
-                    <Text variant="small">
-                      {quality} ({size})
-                    </Text>
-                    <Text>{item.release.title}</Text>
-                  </div>
-                  <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
-                    <Check />
-                  </Button>
-                </div>
-              </Row>
-            );
+            const reason = sizeReason(item.release);
+            return {
+              key: `${item.release.indexerId}:${item.release.guid}`,
+              cells: [
+                <div className="grid gap-1">
+                  <Text variant="small">
+                    {quality} ({size}){reason ? ` / ${reason}` : ''}
+                  </Text>
+                  <Text>{item.release.title}</Text>
+                </div>,
+                <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
+                  <Check />
+                </Button>,
+              ],
+            };
           })}
-        </List>
+        />
       </Section>
       {chosen && (
         <Modal open onOpenChange={(open) => !open && close()} title={t('Download this release?')}>
@@ -210,6 +251,35 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
   );
 }
 
+// The rejected releases of a row, in their own container under its details.
+function RejectedPane({ items, onDone }: { items: { entry: QueueEntryView; release: QueueRejectedRelease }[]; onDone: () => void }) {
+  if (items.length === 0) return null;
+  return (
+    <Pane className="w-full">
+      <NoMatchReleases items={items} onDone={onDone} />
+    </Pane>
+  );
+}
+
+// The rejected releases of a movie. Only a target that found no match keeps them.
+function MovieRejected({ entry, refresh }: { entry: QueueEntryView; refresh: () => void }) {
+  const releases = entry.key === 'no_match' ? (entry.search?.rejected ?? []) : [];
+  return <RejectedPane items={releases.map((release) => ({ entry, release }))} onDone={refresh} />;
+}
+
+// The rejected releases of a series, one row for each release. Several episodes can have their own.
+function GroupRejected({ group, filters, refresh }: { group: QueueGroupRow; filters: Filters; refresh: () => void }) {
+  const { data } = useGroupEntries(group, filters);
+  const rejected = new Map<string, { entry: QueueEntryView; release: QueueRejectedRelease }>();
+  for (const entry of data?.items ?? []) {
+    for (const release of entry.search?.rejected ?? []) {
+      const key = `${release.indexerId}:${release.guid}`;
+      if (!rejected.has(key)) rejected.set(key, { entry, release });
+    }
+  }
+  return <RejectedPane items={[...rejected.values()]} onDone={refresh} />;
+}
+
 // The progress of a download: the part that is done.
 function TransferProgress({ entry }: { entry: QueueEntryView }) {
   const percent = downloadPercent(entry);
@@ -230,38 +300,42 @@ function downloadPercent(entry: QueueEntryView) {
 
 // One target. An episode keeps its indicator next to its name, above the fields of its file. The inspector of a movie
 // shows the indicator of its status and the reason that stops it above the progress of the work, under the name, then
-// the fields of its release. The label is off in the inspector of a movie, where the heading of the panel says the name.
+// the checks of the import, then the fields of its release. The label is off in the inspector of a movie, where the
+// heading of the panel says the name. The actions of an episode, such as the match of a file, follow its indicator.
 // An episode of a series shows the percent of its download in its name.
-function EntryDetails({ entry, label = true, inline = false, showRejected = true, onDone = () => {} }: { entry: QueueEntryView; label?: boolean; inline?: boolean; showRejected?: boolean; onDone?: () => void }) {
+function EntryDetails({ entry, label = true, inline = false, actions }: { entry: QueueEntryView; label?: boolean; inline?: boolean; actions?: ReactNode }) {
   const percent = inline ? downloadPercent(entry) : null;
   const data = !inline && entry.release ? <ReleaseDetails release={entry.release} /> : inline && entry.file ? <FileDetails file={entry.file} /> : null;
   const name = label && <Text>{percent === null ? entry.label : <>{entry.label} <strong>({percent}%)</strong></>}</Text>;
   const status = shownKey(entry.key);
-  // The reason shows under the status of a movie. The list and the episodes keep the status and the hint.
+  // The reason shows under the status of a movie, and under the status of an episode that a problem stops, above its
+  // file. The list keeps the status and the hint.
   const reason = entry.reason ? t(entry.reason.message) : null;
-  const rejected = showRejected && entry.key === 'no_match' ? (entry.search?.rejected ?? []) : [];
-  const checks = entry.stage === 'validating' || entry.stage === 'importing';
+  const checks = hasChecks(entry);
   if (inline) {
     return (
       <div className="grid gap-2 w-full min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {name}
-          <EntryStatus entry={entry} />
+          <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
+            <EntryStatus entry={entry} />
+            {actions}
+          </div>
         </div>
+        {entry.key === 'stuck' && reason && <Text variant="small">{reason}</Text>}
         {data}
-        {rejected.length > 0 && <NoMatchReleases items={rejected.map((release) => ({ entry, release }))} onDone={onDone} />}
       </div>
     );
   }
   return (
     <div className="grid gap-4 w-full min-w-0">
       {name}
-      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={Boolean(data) || rejected.length > 0 || checks}>
+      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={!checks && Boolean(data)}>
         <TransferProgress entry={entry} />
       </DetailStatus>
-      {rejected.length > 0 && <NoMatchReleases items={rejected.map((release) => ({ entry, release }))} onDone={onDone} />}
-      {data}
       <ImportChecks entry={entry} />
+      {checks && data && <Divider />}
+      {data}
     </div>
   );
 }
@@ -273,10 +347,10 @@ function entryMenu(entry: QueueEntryView, run: Run, openLogs: (entry: QueueEntry
   const items: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] = [];
   const searching = entry.branch === 'waiting';
   // An episode has no search of its own.
-  if (entry.branch !== 'paused' && entry.reason?.action === 'retry' && !(searching && entry.number !== null)) items.push({ label: searching ? t('Search now') : t('Try again'), onClick: () => run('retry', [entry.id]) });
-  if (entry.lane !== null) items.push({ label: t('Remove priority'), onClick: () => run('unpriority', [entry.id]) });
+  if (entry.branch !== 'paused' && entry.reason?.action === 'retry' && !(searching && entry.number !== null)) items.push({ label: searching ? t('Retry') : t('Try again'), onClick: () => run('retry', [entry.id]) });
+  if (entry.lane !== null) items.push({ label: t('Delete priority'), onClick: () => run('unpriority', [entry.id]) });
   if (entry.key === 'available' || entry.key === 'cancelled') {
-    if (entry.hasTorrent && !entry.attached) items.push({ label: t('Remove torrent'), onClick: () => run('remove_torrent', [entry.id]) });
+    if (entry.hasTorrent && !entry.attached) items.push({ label: t('Delete torrent'), onClick: () => run('remove_torrent', [entry.id]) });
     if (!entry.clearedAt) items.push({ label: t('Clear from the list'), onClick: () => run('clear', [entry.id]) });
   }
   items.push({ label: t('Logs'), onClick: () => openLogs(entry) });
@@ -376,8 +450,6 @@ function GroupLine({ group }: { group: QueueGroupRow }) {
   return key ? <StatusText small status={statusLabel(key)} icon={key} /> : <Text variant="small">—</Text>;
 }
 
-const seasonName = (season: number) => (season === 0 ? t('Specials') : t('Season {number}', { number: season }));
-
 // The menu of a series in the inspector. A series whose episodes are loading has no target to act on yet.
 function groupMenu(group: QueueGroupRow, openLogs: (group: QueueGroupRow) => void) {
   if (group.pending) return [];
@@ -404,21 +476,11 @@ function MasterRow({ row }: { row: QueueRow }) {
   );
 }
 
-// The actions of one episode of a season: the menu, and the match of a file when the target asks for it.
-function EpisodeActions({ entry, run, refresh, openLogs }: { entry: QueueEntryView; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void }) {
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
-      <ActionMenu label={t('Actions for {name}', { name: entry.label })} items={entryMenu(entry, run, openLogs)} />
-    </div>
-  );
-}
-
 // The columns of the table of the seasons. The label of a column is for a screen reader only, because the row says it.
 const seasonColumns = [{ label: 'Season', hideLabel: true }, { label: 'Actions', hideLabel: true, align: 'end' as const }];
 
 // The episodes of a season, a page of them at a time.
-function SeasonEpisodes({ season, entries, run, refresh, openLogs, showRejected }: { season: number; entries: QueueEntryView[]; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; showRejected: boolean }) {
+function SeasonEpisodes({ season, entries, run, refresh, openLogs }: { season: number; entries: QueueEntryView[]; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void }) {
   const [page, setPage] = useState(1);
   const pages = Math.max(1, Math.ceil(entries.length / EPISODES));
   const current = Math.min(page, pages);
@@ -426,16 +488,21 @@ function SeasonEpisodes({ season, entries, run, refresh, openLogs, showRejected 
     <div className="grid gap-4 w-full">
       <Table
         aria-label={t('Episodes of season {number}', { number: season })}
-        columns={[
-          { label: t('Episode'), hideLabel: true },
-          // A fixed action column keeps the width of the row, so a long file name wraps and does not move the status.
-          { label: t('Actions'), hideLabel: true, align: 'end', width: '6rem' },
-        ]}
+        columns={[{ label: t('Episode'), hideLabel: true }]}
         rows={entries.slice((current - 1) * EPISODES, current * EPISODES).map((entry) => ({
           key: `entry:${entry.id}`,
           cells: [
-            <EntryDetails key="detail" entry={entry} inline showRejected={showRejected} onDone={refresh} />,
-            <EpisodeActions key="actions" entry={entry} run={run} refresh={refresh} openLogs={openLogs} />,
+            <EntryDetails
+              key="detail"
+              entry={entry}
+              inline
+              actions={
+                <>
+                  {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
+                  <ActionMenu label={t('Actions for {name}', { name: entry.label })} items={entryMenu(entry, run, openLogs)} />
+                </>
+              }
+            />,
           ],
         }))}
       />
@@ -480,7 +547,7 @@ function SeasonTable({ titleKey, entries, opened, onSeason, detail }: { titleKey
 // The inspector of a series: the progress of the whole series, and the seasons. A season opens its episodes under its row.
 function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueGroupRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void }) {
   const [season, setSeason] = useState<number | null>(null);
-  const { data, error, refetch } = useQuery<{ items: QueueEntryView[] }>({ queryKey: [groupKey(filters, group)], gcTime: 0, enabled: !group.pending });
+  const { data, error, refetch } = useGroupEntries(group, filters);
   const entries = data?.items;
   if (group.pending) {
     return (
@@ -499,43 +566,36 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   }
   const counts: Record<string, number> = {};
   for (const entry of entries) counts[entry.key] = (counts[entry.key] ?? 0) + 1;
-  const total = entries.length;
-  const available = counts.available ?? 0;
+  // The count covers the whole series, not only the episodes that the filter shows. An episode that finished its
+  // download counts in validating, importing, and available.
+  const completed = group.reached.completed;
+  const total = group.total;
   const status = overallKey(counts);
-  // The reason that most of the stuck targets share, for the line under the status.
-  const stuck = new Map<string, number>();
-  for (const entry of entries) if (entry.key === 'stuck' && entry.reason) stuck.set(entry.reason.message, (stuck.get(entry.reason.message) ?? 0) + 1);
-  const stuckReason = [...stuck].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  // The line under the status of a stuck season stays general: the reason of one target is not the reason of them all.
+  const stuck = entries.filter((entry) => entry.key === 'stuck').length;
   const toggle = (number: number) => setSeason((current) => (current === number ? null : number));
   // The releases of the series. A pack is one release. Several episodes can have their own.
   const releases = new Map<string, NonNullable<QueueEntryView['release']>>();
   for (const entry of entries) if (entry.release) releases.set(`${entry.release.title}|${entry.release.sizeBytes}`, entry.release);
   const unique = [...releases.values()];
-  // The releases that the last search found and rejected, one row for each release.
-  const rejected = new Map<string, { entry: QueueEntryView; release: QueueRejectedRelease }>();
-  for (const entry of entries) {
-    for (const release of entry.search?.rejected ?? []) {
-      const key = `${release.indexerId}:${release.guid}`;
-      if (!rejected.has(key)) rejected.set(key, { entry, release });
-    }
-  }
   const qualities = [...new Set(unique.flatMap((release) => (release.quality ? [release.quality] : [])))];
   // The target of the checklist: the one that is furthest behind in the import. A target that a reason stops comes
   // after the targets that move.
   const importing = entries
-    .filter((entry) => entry.stage === 'validating' || entry.stage === 'importing')
+    .filter(hasChecks)
     .sort((a, b) => Number(Boolean(a.reason)) - Number(Boolean(b.reason)) || (a.stage === b.stage ? importRank(a) - importRank(b) : a.stage === 'validating' ? -1 : 1))[0];
   const message =
     status === 'no_match'
       ? t('The indexers have releases, but none fits your selected qualities.')
-      : status === 'stuck' && stuckReason
-        ? t(stuckReason)
-        : t('{count} / {total} episodes', { count: available, total });
+      : status === 'stuck'
+        ? t('{count} / {total} episodes are stuck. Open seasons below.', { count: stuck, total })
+        : t('{count} / {total} episodes', { count: completed, total });
   return (
     <div className="grid min-w-0">
       <div className="grid gap-4">
-        {status ? <DetailStatus status={statusLabel(status)} icon={status} message={message} /> : <Text>—</Text>}
-        {status === 'no_match' && rejected.size > 0 && <NoMatchReleases items={[...rejected.values()]} onDone={refresh} />}
+        {status ? <DetailStatus status={statusLabel(status)} icon={status} message={message} divider={!importing} /> : <Text>—</Text>}
+        {importing && <ImportChecks entry={importing} />}
+        {importing && unique.length > 0 && <Divider />}
         {unique.length > 0 && (
           <div>
             {unique.length === 1 ? (
@@ -551,7 +611,6 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
             )}
           </div>
         )}
-        {importing && <ImportChecks entry={importing} />}
       </div>
       {(unique.length > 0 || importing) && (
         <div className="mt-6">
@@ -563,7 +622,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
         entries={entries}
         opened={season}
         onSeason={toggle}
-        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} run={run} refresh={refresh} openLogs={openLogs} showRejected={status !== 'no_match'} />}
+        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} run={run} refresh={refresh} openLogs={openLogs} />}
       />
     </div>
   );
@@ -573,16 +632,20 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
 function MovieDetail({ entry, refresh }: { entry: QueueEntryView; refresh: () => void }) {
   return (
     <div className="grid gap-3">
-      <EntryDetails entry={entry} label={false} onDone={refresh} />
+      <EntryDetails entry={entry} label={false} />
       {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
     </div>
   );
 }
 
 // The inspector of the selected title: its name, its menu, and its progress. The body starts again when the selected
-// title changes, so a season of the title before does not stay open.
-function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
-  const items = row.kind === 'group' ? groupMenu(row, openGroupLogs) : entryMenu(row, run, openLogs);
+// title changes, so a season of the title before does not stay open. The last item of the menu deletes the title from
+// the library, with the same modal as the page of the title.
+function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDelete, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onDelete: (row: QueueRow) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
+  const items: { label: string; onClick: () => void; danger?: boolean }[] = [
+    ...(row.kind === 'group' ? groupMenu(row, openGroupLogs) : entryMenu(row, run, openLogs)),
+    { label: t('Delete'), danger: true, onClick: () => onDelete(row) },
+  ];
   return (
     <div className="grid gap-6 w-full min-w-0">
       {/* The list is under the inspector in a narrow window, so the panel has its own way back. */}
@@ -597,7 +660,7 @@ function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onBack
           <Text variant="heading" className="min-w-0">{nameOf(row)}</Text>
           <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
         </RouterLink>
-        {items.length > 0 && <ActionMenu label={t('Actions for {name}', { name: nameOf(row) })} items={items} />}
+        <ActionMenu label={t('Actions for {name}', { name: nameOf(row) })} items={items} />
       </div>
       {row.kind === 'group' ? (
         <GroupDetail key={`${row.key}|${filters.stage}`} group={row} filters={filters} run={run} refresh={refresh} openLogs={openLogs} />
@@ -669,9 +732,9 @@ const actionLabel: Record<QueueActionName, string> = {
   resume: 'Resume',
   retry: 'Try again',
   priority: 'Prioritize',
-  unpriority: 'Remove priority from',
+  unpriority: 'Delete priority from',
   clear: 'Clear',
-  remove_torrent: 'Remove the torrent of',
+  remove_torrent: 'Delete the torrent of',
 };
 
 // A text for a screen reader that changes at most once in a while, so a burst of changes reads as one message.
@@ -713,6 +776,7 @@ function QueueView() {
   const backButton = useRef<HTMLButtonElement | null>(null);
 
   const [preview, setPreview] = useState<{ body: Parameters<typeof send>[0]; data: QueueActionPreview } | null>(null);
+  const [deletion, setDeletion] = useState<{ request: PlanRequest; subject: string } | null>(null);
   const [logs, setLogs] = useState<QueueEntryView | null>(null);
   const [groupLogs, setGroupLogs] = useState<QueueGroupRow | null>(null);
   const [announcement, setAnnouncement] = useState('');
@@ -906,18 +970,22 @@ function QueueView() {
             {/* The page control lies under the pane, so the table keeps the whole pane and the control is not part of its container. */}
             {pages > 1 && <Pagination aria-label={t('Pages')} page={page + 1} count={pages} onPageChange={(next) => setPage(next - 1)} />}
           </div>
-          {/* The inspector stays at the side of the list while the page scrolls, so a click on a row that lies low
-              shows its detail with no scroll to the top. A tall detail scrolls inside the pane. */}
-          <div className={`grid gap-6 min-w-0 min-[800px]:sticky min-[800px]:top-6 min-[800px]:max-h-[calc(100dvh-3rem)] min-[800px]:overflow-y-auto ${open ? '' : 'max-[800px]:hidden'}`}>
+          {/* The inspector takes the height of its content. A tall detail grows down the page, and the pane has no scroll. */}
+          <div className={`grid gap-6 min-w-0 ${open ? '' : 'max-[800px]:hidden'}`}>
             {chosen ? (
               <>
                 <Pane className="w-full">
-                  <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onBack={back} backRef={backButton} />
+                  <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(row) => setDeletion({ request: { action: 'remove', keys: [row.titleKey] }, subject: row.title })} onBack={back} backRef={backButton} />
                 </Pane>
-                {chosen.kind === 'group' && (
-                  <Pane className="w-full">
-                    <SeriesBlocklist titleKey={chosen.titleKey} />
-                  </Pane>
+                {chosen.kind === 'group' ? (
+                  <>
+                    <GroupRejected group={chosen} filters={filters} refresh={refresh} />
+                    <Pane className="w-full">
+                      <SeriesBlocklist titleKey={chosen.titleKey} />
+                    </Pane>
+                  </>
+                ) : (
+                  <MovieRejected entry={chosen} refresh={refresh} />
                 )}
               </>
             ) : (
@@ -953,6 +1021,7 @@ function QueueView() {
           }}
         />
       )}
+      {deletion && <PlanDialog request={deletion.request} subject={deletion.subject} onClose={() => setDeletion(null)} onDone={() => refresh()} />}
     </div>
   );
 }

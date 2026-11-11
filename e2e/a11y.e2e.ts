@@ -42,7 +42,7 @@ const settingsTab = (tab: string, ready: (page: Page) => Promise<unknown>): Open
   await ready(page);
 };
 // The row of the series in the master list of the queue.
-const groupRow = (page: Page) => page.locator('[data-row="group:tv:1"]');
+const groupRow = (page: Page) => page.locator('[data-row="group:tv:1:1"]');
 
 // Pages that need a signed-in owner. The name tells what the user sees.
 const PAGES: [string, Opener][] = [
@@ -76,7 +76,7 @@ const PAGES: [string, Opener][] = [
     async (page) => {
       await activityPage(page);
       // The list is alone below 800 px, so the button of the row opens the inspector of the series first.
-      await page.getByRole('button', { name: 'Inspect Show Name (2020)' }).click();
+      await page.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
       await page.getByRole('button', { name: 'Show episodes of Season 1' }).click();
       await expect(page.getByRole('table', { name: 'Episodes of season 1' })).toBeVisible();
     },
@@ -160,7 +160,7 @@ const PAGES: [string, Opener][] = [
 const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
 // Open findings of the design system and of the app. Each one is a rule and a part of the HTML of the element.
-// A finding that is not here fails the test. Remove an entry when its finding is fixed.
+// A finding that is not here fails the test. Delete an entry when its finding is fixed.
 const KNOWN: [rule: string, html: string, why: string][] = [
 ];
 

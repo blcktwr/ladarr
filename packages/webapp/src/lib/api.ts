@@ -14,9 +14,14 @@ export const setCsrfToken = (token: string) => {
   csrfToken = token;
 };
 
+// A build serves the API itself. In development the page is on port 3000 and the server on port 3001.
+const origin = import.meta.env.DEV ? `${location.protocol}//${location.hostname}:3001/` : '';
+export const apiUrl = (path: string) => `${origin}api${path}`;
+
 export async function api<T = unknown>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  const res = await fetch(`api${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: init.method ?? 'GET',
+    credentials: 'include',
     headers: {
       ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
       ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
@@ -33,7 +38,8 @@ export async function api<T = unknown>(path: string, init: { method?: string; bo
 export function upload<T = unknown>(path: string, file: Blob, onProgress?: (part: number) => void): Promise<T> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open('POST', `api${path}`);
+    request.open('POST', apiUrl(path));
+    request.withCredentials = true;
     request.setRequestHeader('content-type', 'application/zip');
     if (csrfToken) request.setRequestHeader('x-csrf-token', csrfToken);
     request.upload.addEventListener('progress', (event) => {

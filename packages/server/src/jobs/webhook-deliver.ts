@@ -1,4 +1,4 @@
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import { JobError } from '../core/jobs.ts';
 import { log } from '../core/log.ts';
 import { DELIVER, MAX_ATTEMPTS, send, type DeliveryPayload } from '../core/webhook.ts';
@@ -7,7 +7,7 @@ import type { Handler } from '../core/worker.ts';
 // A receiver that is busy or down can recover. Another status means that the address or the receiver is wrong.
 const retryable = (status: number) => status >= 500 || status === 408 || status === 425 || status === 429;
 
-export function webhookDeliverHandler({ db, timeoutMs }: { db: Db; timeoutMs?: number }): Record<string, Handler> {
+export function webhookDeliverHandler({ timeoutMs }: { timeoutMs?: number }): Record<string, Handler> {
   return {
     [DELIVER]: {
       concurrency: 2,

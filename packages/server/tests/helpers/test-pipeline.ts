@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { emptyData, openDb, type Db } from '../../src/core/db.ts';
+import { emptyData, open, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { createFinder } from '../../src/library/grab/finder.ts';
 import { createImportStatus } from '../../src/library/imports/status.ts';
@@ -29,13 +29,15 @@ import type { ProbeResult } from '../../src/library/probe.ts';
 import type { Handler } from '../../src/core/worker.ts';
 
 // A torrent with one file, or with the given files (paths inside the folder that has the name of the release).
-export const makeTorrent = (name: string, files?: string[]) => {
+export const makeTorrent = (name: string, files?: string[], comment?: string) => {
   const list = files ? `5:filesl${files.map((file) => `d6:lengthi1000e4:pathl${file.split('/').map((part) => `${part.length}:${part}`).join('')}ee`).join('')}e` : '6:lengthi1000e';
-  return Buffer.from(`d8:announce5:http:4:infod${list}4:name${name.length}:${name}12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAee`);
+  // The comment is a top-level key, outside the info dictionary, so the info hash does not change.
+  const commentPart = comment === undefined ? '' : `7:comment${Buffer.byteLength(comment, 'utf8')}:${comment}`;
+  return Buffer.from(`d8:announce5:http:${commentPart}4:infod${list}4:name${name.length}:${name}12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAee`);
 };
 export const hashOf = (name: string, files?: string[]) => infoHashOf(makeTorrent(name, files));
 
-export type FakeItem = { title: string; size: number; seeders?: number; category?: number; bad?: boolean; files?: string[] };
+export type FakeItem = { title: string; size: number; seeders?: number; category?: number; bad?: boolean; files?: string[]; comment?: string };
 
 const xmlEscape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
@@ -49,8 +51,9 @@ export async function startFakeTracker() {
     if (url.pathname.endsWith('/download')) {
       const file = url.searchParams.get('file')!;
       state.downloads.push(file);
-      if (state.items.find((item) => item.title === file)?.bad) return void res.end('<html>not a torrent</html>');
-      return void res.end(makeTorrent(file, state.items.find((item) => item.title === file)?.files));
+      const item = state.items.find((item) => item.title === file);
+      if (item?.bad) return void res.end('<html>not a torrent</html>');
+      return void res.end(makeTorrent(file, item?.files, item?.comment));
     }
     const t = url.searchParams.get('t');
     if (t === 'caps') {
@@ -106,7 +109,7 @@ export async function startPipeline(options: Options = {}) {
   const folders = { tv: join(dir, 'tv'), movies: join(dir, 'movies'), downloads: join(dir, 'downloads') };
   for (const folder of Object.values(folders)) mkdirSync(folder);
 
-  const db: Db = await openDb('unused.json');
+  const db: Db = await open('unused.json');
   Object.assign(db.data, emptyData());
   db.data.roots = {
     tv: { id: 'tv', path: folders.tv, mediaType: 'tv', dev: statSync(folders.tv).dev },
@@ -126,22 +129,22 @@ export async function startPipeline(options: Options = {}) {
     return originalPublish(type, data);
   };
   const save = async () => {};
-  const queue = createQueue(db, events, () => {});
-  const limiter = createLimiter(db);
-  const indexers = createIndexerService(db, limiter, { timeoutMs: 2_000 });
-  const clients = createClients(db);
+  const queue = createQueue(events, () => {});
+  const limiter = createLimiter();
+  const indexers = createIndexerService(limiter, { timeoutMs: 2_000 });
+  const clients = createClients();
   const importStatus = createImportStatus(events, { pollMs: options.copyPollMs ?? 20 });
   let real!: ReturnType<typeof createWorker>;
-  const finder = createFinder({ db, queue, indexers, enqueue: (input) => real.enqueue(input) });
+  const finder = createFinder({ queue, indexers, enqueue: (input) => real.enqueue(input) });
   const handlers = {
     'queue.search': queueSearchHandler(finder),
-    'queue.grab': queueGrabHandler({ db, queue, finder, indexers, clients, save, reconcileMs: 20 }),
-    'import.run': importRunHandler({ db, queue, events, clients, save, probe: options.probe ?? (async () => ({ ok: true, durationSeconds: 2700, container: 'matroska', videoCodec: 'h264', audioLanguages: ['eng'] })), afterStep: options.afterStep, fs: options.fs, status: importStatus }),
-    'import.resume': importResumeHandler(db),
+    'queue.grab': queueGrabHandler({ queue, finder, indexers, clients, save, reconcileMs: 20 }),
+    'import.run': importRunHandler({ queue, events, clients, save, probe: options.probe ?? (async () => ({ ok: true, durationSeconds: 2700, container: 'matroska', videoCodec: 'h264', audioLanguages: ['eng'] })), afterStep: options.afterStep, fs: options.fs, status: importStatus }),
+    'import.resume': importResumeHandler(),
     ...options.handlers?.({ db, events, queue, finder }),
   };
-  real = createWorker(db, save, handlers, { tickMs: 15 });
-  const poller = createPoller({ db, queue, events, clients, enqueue: (input) => real.enqueue(input), intervalMs: 20 });
+  real = createWorker(save, handlers, { tickMs: 15 });
+  const poller = createPoller({ queue, events, clients, enqueue: (input) => real.enqueue(input), intervalMs: 20 });
   real.start();
   poller.start();
 

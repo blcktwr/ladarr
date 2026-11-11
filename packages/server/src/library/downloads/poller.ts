@@ -1,5 +1,5 @@
 import type { ClientState } from '@ladarr/shared/enums';
-import type { Db } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
 import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { catalog, itemFields, log } from '../../core/log.ts';
@@ -36,7 +36,6 @@ export type Transfer = {
 export type ClientStatus = { state: ClientState; lastOkAt: number | null };
 
 type Deps = {
-  db: Db;
   queue: Queue;
   events: Events;
   clients: Clients;
@@ -51,7 +50,7 @@ const GRACE_MS = 60_000;
 // One poll for each client that has a download, whatever the number of rows or browser tabs. The progress stays in memory:
 // it is replaceable, and the client reports it again after a restart. The client is read to see the part of each file, and
 // a download that finishes, appears, or fails, so one check each 10 seconds keeps the rows close to the client.
-export function createPoller({ db, queue, events, clients, enqueue, intervalMs = 10_000 }: Deps) {
+export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_000 }: Deps) {
   const transfers = new Map<string, Transfer>();
   const seen = new Set<string>();
   const status: ClientStatus = { state: 'unconfigured', lastOkAt: null };
@@ -163,7 +162,7 @@ export function createPoller({ db, queue, events, clients, enqueue, intervalMs =
     const groups = new Map<string, QueueEntry[]>();
     for (const entry of entries) {
       // A target in Sending next to an attached target keeps waiting. Only the grab decides about its torrent.
-      if (entry.stage === 'sending' && entry.transferHash && !addedByApp(db, entry.transferHash)) continue;
+      if (entry.stage === 'sending' && entry.transferHash && !addedByApp(entry.transferHash)) continue;
       groups.set(entry.transferHash!, [...(groups.get(entry.transferHash!) ?? []), entry]);
     }
 
@@ -196,7 +195,7 @@ export function createPoller({ db, queue, events, clients, enqueue, intervalMs =
         }
         if (torrent.complete && entry.stage === 'downloading' && entry.branch !== 'paused' && !entry.reason) {
           // The client has all the data. The files are not in the library yet, so the next step is the check.
-          catalog.info('download_completed', `Download completed: "${torrent.name}"`, itemFields(db, entry), { hash, name: torrent.name, sizeBytes: torrent.sizeBytes, seeds: torrent.seeds, peers: torrent.peers });
+          catalog.info('download_completed', `Download completed: "${torrent.name}"`, itemFields(entry), { hash, name: torrent.name, sizeBytes: torrent.sizeBytes, seeds: torrent.seeds, peers: torrent.peers });
           queue.move(entry, { stage: 'validating', reason: null }, 'download complete');
         }
       }

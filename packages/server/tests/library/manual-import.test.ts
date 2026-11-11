@@ -400,7 +400,7 @@ describe('interruption', () => {
     t.pipe.importStatus.begin(id, 'import', 'tv:1', 1);
     // The journal is open and no job runs it. The title is busy.
     expect((await importFolder(t.inbox)).body.error).toBe('title_busy');
-    const handler = importResumeHandler(t.pipe.db);
+    const handler = importResumeHandler();
     await handler.run({} as Job, { signal: new AbortController().signal });
     await t.finished(id);
     expect(readFileSync(join(t.pipe.folders.tv, E01), 'utf8')).toBe('one');

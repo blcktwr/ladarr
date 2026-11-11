@@ -35,11 +35,11 @@ test('a search on the selected titles', async ({ page }) => {
   // The title has no episode to search, so the answer is a message.
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Search the selected titles' });
-  await expect(dialog).toContainText('Nothing needs a search now');
+  await expect(dialog).toContainText('Nothing to search');
   await dialog.getByText('Close', { exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  // Only Search and Remove are left.
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  // Only Search and Delete are left.
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
   for (const name of ['Pause', 'Resume', 'Refresh metadata', 'Set quality', 'Clear selection']) await expect(page.getByRole('button', { name })).toHaveCount(0);
 });
 
@@ -70,9 +70,9 @@ test('Add on a title that is not in the catalog adds it', async ({ page }) => {
   await expect(page.getByRole('button', { name: /^Add / })).toHaveCount(0);
   await page.getByRole('link', { name: /Movie Name 2019 Movies$/ }).getByText('Movie Name', { exact: true }).click();
   await expect(page).toHaveURL(/\/catalog\/movie\/2$/);
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Add', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
   expect((await stack.call('GET', '/library/movie:2')).body.title.presetOverride).toBeNull();
 });
 
@@ -97,9 +97,6 @@ test('the catalog shows the type of a title on its poster', async ({ page }) => 
     await page.reload();
     const anime = page.getByRole('main').getByRole('link', { name: 'Show Name 2020 Anime', exact: true });
     await expect(anime).toBeVisible();
-    await page.getByRole('tab', { name: 'Anime' }).click();
-    await expect(anime).toBeVisible();
-    await expect(page.getByRole('main').getByRole('link', { name: /Movie Name/ })).toHaveCount(0);
   } finally {
     const restored = await stack.call('PATCH', '/library/tv:1', { seriesType: 'standard' });
     if (restored.status >= 300) throw new Error(`PATCH /library/tv:1 answered ${restored.status}: ${JSON.stringify(restored.body)}`);
@@ -140,10 +137,10 @@ test('the page of a title shows the TMDB score, the cast, and the recommendation
   await page.getByRole('link', { name: /Bench Movie Alpha/ }).getByText('Bench Movie Alpha', { exact: true }).click();
   await expect(page).toHaveURL(/\/catalog\/movie\/900001$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Bench Movie Alpha (2019)' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   // The page stays at the same address, and it shows the actions of a title that is in the catalog now.
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/catalog\/movie\/900001$/);
   // A series with no cast and no recommendations has neither section.
   await page.goto(`${URL_BASE}/catalog/tv/1`);
@@ -158,16 +155,16 @@ test('a title that has no file has Search, and a title that has a file has Upgra
   await expect(page.getByRole('button', { name: 'Upgrade', exact: true })).toHaveCount(0);
   // The title is paused, so a search has nothing to start.
   await page.getByRole('button', { name: 'Search', exact: true }).click();
-  await expect(page.getByRole('alert').getByText('Nothing needs a search now')).toBeVisible();
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
-  const alert = page.getByRole('alertdialog', { name: 'Remove 1 title?' });
+  await expect(page.getByRole('alert').getByText('Nothing to search')).toBeVisible();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  const alert = page.getByRole('alertdialog', { name: 'Delete 1 title?' });
   await expect(alert).toBeVisible();
   // The alert has the switch and the two buttons. The switch makes no request, so the button does not change.
   const plans: string[] = [];
   page.on('request', (request) => request.url().includes('/library/plans') && plans.push(request.url()));
   await alert.getByRole('switch', { name: 'Delete the files too' }).click();
-  await expect(alert.getByRole('button', { name: 'Remove', exact: true })).toBeEnabled();
-  await expect(alert.getByRole('button')).toHaveText(['Cancel', 'Remove']);
+  await expect(alert.getByRole('button', { name: 'Delete', exact: true })).toBeEnabled();
+  await expect(alert.getByRole('button')).toHaveText(['Cancel', 'Delete']);
   expect(plans).toEqual([]);
   await alert.getByRole('button', { name: 'Cancel' }).click();
   await expect(alert).toHaveCount(0);
@@ -181,7 +178,7 @@ test('a title that has no file has Search, and a title that has a file has Upgra
   });
   await page.route(/\/library\/movie:2\/upgrades$/, (route) => route.fulfill({ json: { resolutions: [1080, 2160] } }));
   await page.goto(`${URL_BASE}/catalog/movie/2`);
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Search', exact: true })).toHaveCount(0);
   // Upgrade asks for a resolution first, then for a plan of the title.
   await page.getByRole('button', { name: 'Upgrade', exact: true }).click();
@@ -194,24 +191,24 @@ test('a title that has no file has Search, and a title that has a file has Upgra
   await preview;
 });
 
-test('Remove asks in an alert, and the page stays open as a title that is not in the catalog', async ({ page }) => {
+test('Delete asks in an alert, and the page stays open as a title that is not in the catalog', async ({ page }) => {
   await page.goto(`${URL_BASE}/catalog/movie/900001`);
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
-  const alert = page.getByRole('alertdialog', { name: 'Remove 1 title?' });
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  const alert = page.getByRole('alertdialog', { name: 'Delete 1 title?' });
   await expect(alert.getByRole('switch', { name: 'Delete the files too' })).toBeVisible();
-  await alert.getByRole('button', { name: 'Remove', exact: true }).click();
+  await alert.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Bench Movie Alpha removed from the library')).toBeVisible();
   await expect(page).toHaveURL(/\/catalog\/movie\/900001$/);
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
 });
 
 test('removing a series tells the person that it is out of the library', async ({ page }) => {
   const added = await stack.call('POST', '/library', { mediaType: 'tv', tmdbId: 3, add: 'paused' });
   expect(added.status).toBe(201);
   await page.goto(`${URL_BASE}/catalog/tv/3`);
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
-  await page.getByRole('alertdialog', { name: 'Remove 1 title?' }).getByRole('button', { name: 'Remove', exact: true }).click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByRole('alertdialog', { name: 'Delete 1 title?' }).getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Two Seasons removed from the library')).toBeVisible();
   await expect(page.getByRole('button', { name: /^Add/ })).toBeVisible();
 });
@@ -228,7 +225,7 @@ test('an actor opens a page with the movies and the series of the actor', async 
   await expect(page.getByRole('button', { name: /^Add / })).toHaveCount(0);
   await page.getByRole('main').getByRole('link', { name: /Show Name/ }).getByText('Show Name', { exact: true }).click();
   await expect(page).toHaveURL(/\/catalog\/tv\/1$/);
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
 });
 
 test('the back button of a page opens the page before it, or the catalog', async ({ page }) => {
@@ -296,6 +293,103 @@ test('the quality profiles are an ordered priority chain', async ({ page }) => {
 
   await expect(moveUp('1080p')).toBeDisabled();
   await expect(moveDown('2160p')).toBeDisabled();
+});
+
+test('the file size limits are in the dialog of the profile', async ({ page }) => {
+  await page.goto(`${URL_BASE}/settings`);
+  await page.getByRole('tab', { name: 'Quality' }).click();
+  // The sizes are no longer a section of their own.
+  await expect(page.getByRole('region', { name: 'File size' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Actions for 1080p' }).click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit quality' });
+  // The sizes of a series are the ones of the default table, so the dialog starts with Series.
+  const media = dialog.getByRole('combobox', { name: 'Media' });
+  await expect(media).toContainText('Series');
+
+  await dialog.getByRole('button', { name: 'Show size limits for 1080p' }).click();
+  const minimum = dialog.getByRole('spinbutton', { name: 'Minimum for WEB-DL 1080p' });
+  await expect(minimum).toHaveValue('12.5');
+
+  // The table of movies has its own limits.
+  await media.click();
+  await page.getByRole('option', { name: 'Movies' }).click();
+  await expect(minimum).toHaveValue('');
+  await expect(minimum).toHaveAttribute('placeholder', '∞');
+  await media.click();
+  await page.getByRole('option', { name: 'Series' }).click();
+
+  try {
+    await minimum.fill('15.1');
+    await expect(minimum).toHaveValue('15.1');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(async () => (await stack.call('GET', '/quality')).body.sizes.tv['webdl-1080'].min).toBe(15.1);
+  } finally {
+    // The size belongs to the quality of the series table, so the test puts the default back for the next tests.
+    await stack.call('PUT', '/quality/sizes/tv/webdl-1080', { min: 12.5, preferred: null, max: null });
+  }
+});
+
+test('an empty size limit shows infinity and saves as no limit', async ({ page }) => {
+  await page.goto(`${URL_BASE}/settings`);
+  await page.getByRole('tab', { name: 'Quality' }).click();
+  await page.getByRole('button', { name: 'Actions for 1080p' }).click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit quality' });
+  await dialog.getByRole('button', { name: 'Show size limits for 1080p' }).click();
+
+  const minimum = dialog.getByRole('spinbutton', { name: 'Minimum for WEB-DL 1080p' });
+  try {
+    await minimum.fill('');
+    await expect(minimum).toHaveAttribute('placeholder', '∞');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect.poll(async () => (await stack.call('GET', '/quality')).body.sizes.tv['webdl-1080'].min).toBeNull();
+    // The empty minimum persists when the dialog opens again.
+    await page.getByRole('button', { name: 'Actions for 1080p' }).click();
+    await page.getByRole('menuitem', { name: 'Edit' }).click();
+    await dialog.getByRole('button', { name: 'Show size limits for 1080p' }).click();
+    await expect(minimum).toHaveValue('');
+    await expect(minimum).toHaveAttribute('placeholder', '∞');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+  } finally {
+    // The size belongs to the quality of the series table, so the test puts the default back for the next tests.
+    await stack.call('PUT', '/quality/sizes/tv/webdl-1080', { min: 12.5, preferred: null, max: null });
+  }
+});
+
+test('the table of the profile scrolls sideways under its first column', async ({ page }) => {
+  // A narrow window makes the table wider than the page, so it scrolls sideways.
+  await page.setViewportSize({ width: 800, height: 900 });
+  await page.goto(`${URL_BASE}/settings`);
+  await page.getByRole('tab', { name: 'Quality' }).click();
+  await page.getByRole('button', { name: 'Actions for 1080p' }).click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Edit quality' });
+  const table = dialog.getByRole('table', { name: 'Qualities' });
+  const header = (name: string) => table.getByRole('columnheader', { name, exact: true });
+  // The label of the first column is hidden, so its name starts with "Resolution".
+  const resolutionHeader = table.getByRole('columnheader', { name: /^Resolution/ });
+  await expect(resolutionHeader).toBeVisible();
+  for (const name of ['Remux', 'BluRay', 'WEBRip', 'WEB-DL', 'Raw-HD', 'HDTV', 'SDTV', 'DVD']) {
+    await expect(header(name)).toBeVisible();
+  }
+  await expect(table.getByRole('row').filter({ hasText: '576p' })).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Show size limits for 1080p' }).click();
+  // The table is wider than the page, so it scrolls sideways. The first column stays at the left edge.
+  const resolutionBefore = (await resolutionHeader.boundingBox())!.x;
+  const sourceBefore = (await header('Remux').boundingBox())!.x;
+  await table.evaluate((element) => { (element.parentElement as HTMLElement).scrollLeft = 400; });
+  await page.waitForTimeout(200);
+  const resolutionAfter = (await resolutionHeader.boundingBox())!.x;
+  const sourceAfter = (await header('Remux').boundingBox())!.x;
+  expect(Math.abs(resolutionAfter - resolutionBefore)).toBeLessThanOrEqual(1);
+  expect(sourceBefore - sourceAfter).toBeGreaterThan(100);
+  await expect(table.getByRole('row').filter({ hasText: '1080p' })).toBeVisible();
 });
 
 test('the General tab changes the language of the interface', async ({ page }) => {

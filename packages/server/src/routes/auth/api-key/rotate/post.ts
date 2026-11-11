@@ -1,8 +1,8 @@
+import { db } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { newToken } from '../../../../core/auth.ts';
-import type { Db } from '../../../../core/db.ts';
 
-export function authRotateApiKey(db: Db): RequestHandler {
+export function authRotateApiKey(): RequestHandler {
   return async (_req, res) => {
     const previous = db.data.apiKey;
     db.data.apiKey = newToken();

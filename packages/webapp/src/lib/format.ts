@@ -1,6 +1,7 @@
 import { ApiError } from './api.ts';
 import { t } from '../i18n/index.ts';
 import type { Availability, MediaType, RootProblem } from '@ladarr/shared/enums';
+import type { QueueGroupRow } from '@ladarr/shared/types';
 
 // A map of labels. The text goes through t() when a page reads it, so a map made at import time follows the language.
 export const labels = <Key extends string>(map: Record<Key, string>) =>
@@ -79,7 +80,7 @@ Object.assign(errorTexts, {
   backup_not_found: 'The backup expired. Send the file again.',
   invalid_connection: 'Enter the address and the API key.',
   plan_not_found: 'The preview expired. Start the preview again.',
-  nothing_to_search: 'Nothing needs a search now: the target has a file, is not monitored, is not released, or is in the queue already.',
+  nothing_to_search: 'Nothing to search, not released yet or not available digitally.',
   no_better_qualities: 'The quality profile has no better quality than the current file.',
 });
 
@@ -171,3 +172,11 @@ export function formatDuration(seconds: number) {
   const hours = Math.floor(seconds / 3600);
   return `${hours} h ${Math.round((seconds % 3600) / 60)} min`;
 }
+
+// A season as the page names it. Season 0 is Specials.
+export const seasonName = (season: number) => (season === 0 ? t('Specials') : t('Season {number}', { number: season }));
+
+// The name of a group: its title and its year, and its season. A series that waits for its episodes has no season.
+export const groupName = (group: Pick<QueueGroupRow, 'title' | 'year' | 'season'>) =>
+  `${group.title}${group.year ? ` (${group.year})` : ''}${group.season === null ? '' : ` ${seasonName(group.season)}`}`;
+

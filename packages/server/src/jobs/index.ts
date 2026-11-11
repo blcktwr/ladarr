@@ -1,4 +1,4 @@
-import type { Db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import type { Events } from '../core/events.ts';
 import type { EnqueueInput, Job } from '../core/jobs.ts';
 import type { Handler } from '../core/worker.ts';
@@ -26,7 +26,6 @@ import { queueSweepHandler } from './queue-sweep.ts';
 import { webhookDeliverHandler } from './webhook-deliver.ts';
 
 type Deps = {
-  db: Db;
   backupDir: string;
   events: Events;
   save: () => Promise<void>;
@@ -39,21 +38,21 @@ type Deps = {
   importStatus: ImportStatus;
 };
 
-export function jobHandlers({ db, backupDir, events, save, tmdb, enqueue, clients, queue, finder, indexers, importStatus }: Deps): Record<string, Handler> {
+export function jobHandlers({ backupDir, events, save, tmdb, enqueue, clients, queue, finder, indexers, importStatus }: Deps): Record<string, Handler> {
   return {
-    'backup.auto': backupAutoHandler(db, backupDir),
-    'library.scan': libraryScanHandler({ db, events }),
-    'library.verify': libraryVerifyHandler({ db, queue, clients, finder, events }),
-    'library.verify.sweep': verifySweepHandler({ db, enqueue }),
-    ...(tmdb ? { 'metadata.refresh': metadataRefreshHandler({ db, tmdb, events }), 'metadata.sweep': metadataSweepHandler(db), 'migration.import': migrationImportHandler({ db, tmdb, events, save, enqueue }) } : {}),
-    'library.search': librarySearchHandler({ db, finder, enqueue }),
+    'backup.auto': backupAutoHandler(backupDir),
+    'library.scan': libraryScanHandler({ events }),
+    'library.verify': libraryVerifyHandler({ queue, clients, finder, events }),
+    'library.verify.sweep': verifySweepHandler({ enqueue }),
+    ...(tmdb ? { 'metadata.refresh': metadataRefreshHandler({ tmdb, events }), 'metadata.sweep': metadataSweepHandler(), 'migration.import': migrationImportHandler({ tmdb, events, save, enqueue }) } : {}),
+    'library.search': librarySearchHandler({ finder, enqueue }),
     'queue.search': queueSearchHandler(finder),
-    'queue.initial': queueInitialHandler({ db, queue, finder }),
+    'queue.initial': queueInitialHandler({ queue, finder }),
     'queue.rss': queueRssHandler(finder),
     'queue.sweep': queueSweepHandler(finder),
-    'queue.grab': queueGrabHandler({ db, queue, finder, indexers, clients, save }),
-    'import.run': importRunHandler({ db, queue, events, clients, save, status: importStatus }),
-    'import.resume': importResumeHandler(db),
-    ...webhookDeliverHandler({ db }),
+    'queue.grab': queueGrabHandler({ queue, finder, indexers, clients, save }),
+    'import.run': importRunHandler({ queue, events, clients, save, status: importStatus }),
+    'import.resume': importResumeHandler(),
+    ...webhookDeliverHandler({}),
   };
 }

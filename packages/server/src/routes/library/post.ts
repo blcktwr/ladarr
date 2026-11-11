@@ -1,7 +1,7 @@
+import { type Db, db, profilesFor } from '../../core/db.ts';
 import type { AddMode } from '@ladarr/shared/enums';
 import type { RequestHandler } from 'express';
 import { explainProfile } from '../../library/grab/quality.ts';
-import { profilesFor, type Db } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
 import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { catalog, titleFields } from '../../core/log.ts';
@@ -11,7 +11,7 @@ import { changed, detail, isObject, seasonOverridesOf, summaryOf } from '../../h
 
 type Deps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job };
 
-export function libraryAdd(db: Db, { tmdb, events, enqueue }: Deps): RequestHandler {
+export function libraryAdd({ tmdb, events, enqueue }: Deps): RequestHandler {
   return async (req, res) => {
     if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
     const body = isObject(req.body) ? req.body : {};
@@ -39,7 +39,7 @@ export function libraryAdd(db: Db, { tmdb, events, enqueue }: Deps): RequestHand
     let added;
     try {
       // The add returns before the TMDB facts arrive. The refresh job fetches them, and the queue shows the title meanwhile.
-      added = await addTitle({ db, tmdb, enqueue }, { mediaType, tmdbId, mode, seriesType, preset, rootId, seasonOverrides, summary, deferMetadata: true });
+      added = await addTitle({ tmdb, enqueue }, { mediaType, tmdbId, mode, seriesType, preset, rootId, seasonOverrides, summary, deferMetadata: true });
     } catch (err) {
       if (err instanceof AddError) return void res.status(409).json({ error: err.code, key: err.key });
       throw err;
@@ -57,7 +57,7 @@ export function libraryAdd(db: Db, { tmdb, events, enqueue }: Deps): RequestHand
     // with no monitored season yet: its episodes start the search when they air.
     const searchNow = mode !== 'future' || Object.keys(seasonOverrides ?? {}).length > 0;
     if (!added.title.paused && searchNow) enqueue({ type: 'queue.initial', payload: { key: added.title.key }, dedupeKey: `initial:${added.title.key}` });
-    await changed(db, events, added.title.key);
-    res.status(201).json({ title: detail(db, added.title), jobId: added.jobId });
+    await changed(events, added.title.key);
+    res.status(201).json({ title: detail(added.title), jobId: added.jobId });
   };
 }

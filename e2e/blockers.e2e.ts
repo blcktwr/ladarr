@@ -12,7 +12,6 @@ test.beforeAll(async () => {
   for (const [method, path, body] of [
     ['POST', '/roots', { path: stack.folders.movies, mediaType: 'movie' }],
     ['POST', '/roots', { path: stack.folders.tv, mediaType: 'tv' }],
-    ['PATCH', '/settings', { region: 'US', timeZone: 'UTC' }],
     ['POST', '/settings/complete-setup', {}],
     ['POST', '/backups', {}],
     ['POST', '/library', { mediaType: 'movie', tmdbId: 2, add: 'all' }],

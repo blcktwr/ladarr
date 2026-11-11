@@ -1,5 +1,5 @@
 import { basename } from 'node:path';
-import { profilesFor, type Db, type MediaFile } from '../../core/db.ts';
+import { type Db, type MediaFile, db, profilesFor } from '../../core/db.ts';
 import { isMonitored, type Title } from '../library.ts';
 import { qualityResolution, type ReleaseSource } from './quality.ts';
 import { parseRelease } from './release.ts';
@@ -14,7 +14,7 @@ export function qualityOfFile(file: MediaFile): { source: ReleaseSource; resolut
 type UpgradeFile = { title: Title; season: number | null; number: number | null; file: MediaFile; resolution: number };
 
 // The files of a title, with the episode of each one. A paused title has none.
-function upgradeFiles(db: Db, title: Title): UpgradeFile[] {
+function upgradeFiles(title: Title): UpgradeFile[] {
   if (title.paused) return [];
   const files: UpgradeFile[] = [];
   const add = (fileId: string | null, season: number | null, number: number | null) => {
@@ -27,24 +27,24 @@ function upgradeFiles(db: Db, title: Title): UpgradeFile[] {
     files.push({ title, season, number, file, resolution });
   };
   if (title.mediaType === 'movie') add(title.fileId, null, null);
-  else for (const episode of title.episodes) if (isMonitored(title, episode, db.data.settings)) add(episode.fileId, episode.season, episode.number);
+  else for (const episode of title.episodes) if (isMonitored(title, episode)) add(episode.fileId, episode.season, episode.number);
   return files;
 }
 
 // The resolutions that the profile chain of the title defines, the lowest first.
-const definedResolutions = (db: Db, title: Title) =>
+const definedResolutions = (title: Title) =>
   [...new Set(profilesFor(db.data, title).flatMap((profile) => profile.items.flat()).map(qualityResolution))]
     .filter((resolution): resolution is number => resolution !== null)
     .sort((a, b) => a - b);
 
 // The resolutions that the Upgrade button of a title page offers: the ones that the chain defines above a file.
-export function upgradeResolutions(db: Db, title: Title): number[] {
-  const files = upgradeFiles(db, title);
-  return definedResolutions(db, title).filter((resolution) => files.some((file) => file.resolution < resolution));
+export function upgradeResolutions(title: Title): number[] {
+  const files = upgradeFiles(title);
+  return definedResolutions(title).filter((resolution) => files.some((file) => file.resolution < resolution));
 }
 
 // The files that a search of one resolution covers: the files below it, when the chain defines it.
-export function manualUpgradeTargets(db: Db, title: Title, resolution: number): UpgradeFile[] {
-  if (!definedResolutions(db, title).includes(resolution)) return [];
-  return upgradeFiles(db, title).filter((file) => file.resolution < resolution);
+export function manualUpgradeTargets(title: Title, resolution: number): UpgradeFile[] {
+  if (!definedResolutions(title).includes(resolution)) return [];
+  return upgradeFiles(title).filter((file) => file.resolution < resolution);
 }

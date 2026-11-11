@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { bestOf, decide, explainDecision, topRejections, type Context, type Want } from '../../src/library/grab/decide.ts';
-import { defaultProfiles, defaultSizes, type Profile } from '../../src/library/grab/quality.ts';
+import { defaultProfiles, defaultSizes, unlimitedSizes, type Profile } from '../../src/library/grab/quality.ts';
 import { episode, indexer, movie, NOW, release, title } from '../helpers/test-fixtures.ts';
 import { emptyData } from '../../src/core/db.ts';
 
-const settings = { ...emptyData().settings, timeZone: 'UTC' };
+const settings = { ...emptyData().settings };
 const ctx = (extra: Partial<Context> = {}): Context => ({
   settings,
   quality: emptyData(),
@@ -100,10 +100,19 @@ describe('policy', () => {
     expect(codes('Show.Name.S01E02.CAM-GRP', ep2)).toContain('quality_rejected');
     expect(codes('Show.Name.S01E02.720p.WEB-DL-GRP', ep2)).toContain('quality_not_in_profile');
     expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, {}, { sizeBytes: 10 * 1024 * 1024 })).toContain('size_below_min');
-    expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, {}, { sizeBytes: 90_000 * 1024 * 1024 })).toContain('size_above_max');
+    const capped = { quality: { ...emptyData(), qualitySizes: { movie: unlimitedSizes(), tv: { ...defaultSizes(), 'webdl-1080': { min: 12.5, preferred: null, max: 150 } } } } };
+    expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, capped, { sizeBytes: 90_000 * 1024 * 1024 })).toContain('size_above_max');
     const strict = { settings: { ...settings, audio: { language: 'es', strict: true } } };
     expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, strict)).toContain('audio_unverified');
     expect(codes('Show.Name.S01E02.GERMAN.1080p.WEB-DL-GRP', ep2, strict)).toContain('audio_language_missing');
+  });
+
+  it('uses the table of movies for a movie and the table of series for an episode', () => {
+    // The same 10 MiB file is 0.1 MiB per minute of the 100 minutes of the movie, and about 0.2 MiB per minute of the
+    // 45 minutes of the episode. The table of movies has no minimum, so only the episode is too small.
+    const size = { sizeBytes: 10 * 1024 * 1024 };
+    expect(codes('Movie.Name.2019.1080p.WEB-DL-GRP', film, {}, size)).toEqual([]);
+    expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, {}, size)).toEqual(['size_below_min']);
   });
 
   it('rejects a blocked release, a release in the queue, and a target that has a file', () => {
@@ -134,7 +143,8 @@ describe('ranking', () => {
     const webrip = release('Show.Name.S01E02.1080p.WEBRip-B', { sizeBytes: 55 * 45 * MIB });
     const webdlBig = release('Show.Name.S01E02.1080p.WEB-DL-C', { sizeBytes: 140 * 45 * MIB });
     const webdlNear = release('Show.Name.S01E02.1080p.WEB-DL-D', { sizeBytes: 62 * 45 * MIB });
-    expect(pick([bluray, webrip, webdlBig, webdlNear])).toBe(webdlNear.guid);
+    const near = { quality: { ...emptyData(), qualitySizes: { movie: unlimitedSizes(), tv: { ...defaultSizes(), 'webdl-1080': { min: 12.5, preferred: 60, max: null } } } } };
+    expect(pick([bluray, webrip, webdlBig, webdlNear], near)).toBe(webdlNear.guid);
     expect(pick([bluray, webrip])).toBe(webrip.guid);
   });
 
@@ -165,10 +175,10 @@ describe('a chain of profiles', () => {
   // The 480p profile of the chain takes 480p only.
   const p480: Profile = { id: 'p480', name: '480p', items: [['webdl-480'], ['webrip-480'], ['bluray-480']] };
   const chain = [p1080, p480];
-  const chainData = () => ({ profiles: { p1080, p480 }, profileOrder: ['p1080', 'p480'], qualitySizes: defaultSizes() });
+  const chainData = () => ({ profiles: { p1080, p480 }, profileOrder: ['p1080', 'p480'], qualitySizes: { movie: unlimitedSizes(), tv: defaultSizes() } });
   // A title with the preset "3" starts at that profile and uses the profiles below it: p480 here.
   const p720Only: Profile = { id: '3', name: '720p custom', items: [['webdl-720']] };
-  const withPreset3 = () => ({ profiles: { p1080, '3': p720Only, p480 }, profileOrder: ['p1080', '3', 'p480'], qualitySizes: defaultSizes() });
+  const withPreset3 = () => ({ profiles: { p1080, '3': p720Only, p480 }, profileOrder: ['p1080', '3', 'p480'], qualitySizes: { movie: unlimitedSizes(), tv: defaultSizes() } });
 
   it('accepts a 480p release in the second profile', () => {
     const quality = chainData();

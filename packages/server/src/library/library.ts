@@ -44,17 +44,17 @@ export const titleKey = (mediaType: MediaType, tmdbId: number) => `${mediaType}:
 const episodeKey = (episode: { season: number; number: number }) => `${episode.season}x${episode.number}`;
 
 // A file that is gone from the disk does not make an episode or a movie available.
-type Clock = { now: number; timeZone: string; files: Record<string, { missing: boolean }> };
+type Clock = { now: number; files: Record<string, { missing: boolean }> };
 const present = (clock: Clock, fileId: string | null) => Boolean(fileId && clock.files[fileId] && !clock.files[fileId]!.missing);
 
-export function isMonitored(title: Title, episode: Episode, { timeZone }: Pick<Clock, 'timeZone'>) {
+export function isMonitored(title: Title, episode: Episode) {
   if (episode.override) return episode.override === 'monitored';
   const season = title.seasonOverrides[episode.season];
   if (season) return season === 'monitored';
   // Specials are outside the policy. The user selects them one by one.
   if (episode.season === 0) return false;
   if (title.policy === 'future') {
-    const airs = episodeEligibleAt(episode.airDate, timeZone);
+    const airs = episodeEligibleAt(episode.airDate);
     // An episode without a date has not aired, so it is in the future.
     return airs === null || airs >= title.futureFrom;
   }
@@ -62,7 +62,7 @@ export function isMonitored(title: Title, episode: Episode, { timeZone }: Pick<C
 }
 
 export function seriesCounts(title: Title, clock: Clock, include: (episode: Episode) => boolean = () => true) {
-  const { now, timeZone } = clock;
+  const { now } = clock;
   let total = 0;
   let eligible = 0;
   let available = 0;
@@ -70,8 +70,8 @@ export function seriesCounts(title: Title, clock: Clock, include: (episode: Epis
   for (const episode of title.episodes) {
     if (!include(episode)) continue;
     total++;
-    if (!isMonitored(title, episode, { timeZone })) continue;
-    const airs = episodeEligibleAt(episode.airDate, timeZone);
+    if (!isMonitored(title, episode)) continue;
+    const airs = episodeEligibleAt(episode.airDate);
     if (airs === null || airs > now) upcoming++;
     else {
       eligible++;
@@ -81,18 +81,16 @@ export function seriesCounts(title: Title, clock: Clock, include: (episode: Epis
   return { total, eligible, available, upcoming };
 }
 
-// The earliest known digital or physical release in the region. A theatrical release alone gives no date.
-export function movieEligibleAt(title: Title, { region, timeZone }: { region: string; timeZone: string }) {
-  const times = title.meta.releaseDates
-    .filter((date) => date.region === region && (date.kind === 'digital' || date.kind === 'physical'))
-    .map((date) => releaseInstant(date.date, timeZone));
+// The earliest known digital or physical release in any region. A theatrical release alone gives no date.
+export function movieEligibleAt(title: Title) {
+  const times = title.meta.releaseDates.filter((date) => date.kind === 'digital' || date.kind === 'physical').map((date) => releaseInstant(date.date));
   return times.length ? Math.min(...times) : null;
 }
 
-export function availability(title: Title, clock: Clock & { region: string }): Availability {
+export function availability(title: Title, clock: Clock): Availability {
   if (title.mediaType === 'movie') {
     if (present(clock, title.fileId)) return 'available';
-    const at = movieEligibleAt(title, clock);
+    const at = movieEligibleAt(title);
     return title.manualRelease || (at !== null && at <= clock.now) ? 'missing' : 'waiting';
   }
   const { eligible, available } = seriesCounts(title, clock);

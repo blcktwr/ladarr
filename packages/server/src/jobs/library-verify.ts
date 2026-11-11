@@ -1,4 +1,4 @@
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import type { Events } from '../core/events.ts';
 import { JobError } from '../core/jobs.ts';
 import { withTitleLock } from '../core/title-lock.ts';
@@ -14,28 +14,28 @@ import { scanTitle } from '../library/scan.ts';
 import { verificationOf, type VerificationState } from '../library/verification.ts';
 import type { SourceDownload } from '../migration/migration-source.ts';
 
-type Deps = { db: Db; queue: Queue; clients: Clients; finder: Finder; events: Events };
+type Deps = { queue: Queue; clients: Clients; finder: Finder; events: Events };
 
-const present = (db: Db, fileId: string | null) => Boolean(fileId && db.data.files[fileId] && !db.data.files[fileId]!.missing);
+const present = (fileId: string | null) => Boolean(fileId && db.data.files[fileId] && !db.data.files[fileId]!.missing);
 const episodeKey = (season: number, number: number) => `${season}x${number}`;
 
 // The source monitors each episode. The season of the source is only the fallback. A difference becomes an override,
 // and an agreement removes an old override, so the source decides the state of the episode it knows.
-function applyEpisodes(title: Title, state: VerificationState, timeZone: string) {
+function applyEpisodes(title: Title, state: VerificationState) {
   for (const source of state.episodes) {
     const episode = title.episodes.find((item) => item.season === source.season && item.number === source.number);
     if (!episode) continue;
     if (!episode.airDate && source.airDateUtc) episode.airDate = source.airDateUtc;
     episode.override = null;
-    const natural = isMonitored(title, episode, { timeZone });
+    const natural = isMonitored(title, episode);
     episode.override = natural === source.monitored ? null : source.monitored ? 'monitored' : 'unmonitored';
   }
 }
 
-export function libraryVerifyHandler({ db, queue, clients, finder, events }: Deps): Handler {
+export function libraryVerifyHandler({ queue, clients, finder, events }: Deps): Handler {
   async function verify(key: string, signal: AbortSignal) {
     const title = db.data.titles[key];
-    const state = verificationOf(db, key);
+    const state = verificationOf(key);
     // The title left the library while the verification waited. Its work goes with it.
     if (!title) {
       delete db.data.verifications[key];
@@ -48,10 +48,10 @@ export function libraryVerifyHandler({ db, queue, clients, finder, events }: Dep
     if (title.mediaType === 'movie' && title.metaLoadedAt === null) throw new JobError('outage', 'The metadata is not loaded yet.');
     signal.throwIfAborted();
 
-    applyEpisodes(title, state, db.data.settings.timeZone);
+    applyEpisodes(title, state);
 
     // The folder decides which targets already have a file. The scan must run before the client is read.
-    const scan = await scanTitle(db, key);
+    const scan = await scanTitle(key);
     if (scan.status === 'root_unavailable' || scan.status === 'changed') throw new JobError('outage', 'The folder of the title cannot be read.');
 
     // The torrents that the backup records: only the ones that are still in a client.
@@ -97,12 +97,12 @@ export function libraryVerifyHandler({ db, queue, clients, finder, events }: Dep
         if (download.failed && !torrent.complete) continue;
         let target: QueueEntry | undefined;
         if (title.mediaType === 'movie') {
-          if (title.paused || present(db, title.fileId)) continue;
+          if (title.paused || present(title.fileId)) continue;
           target = queue.ensure(key, null, null);
         } else {
           if (title.paused) continue;
           const episode = title.episodes.find((item) => episodeKey(item.season, item.number) === episodeOf);
-          if (!episode || !isMonitored(title, episode, db.data.settings) || present(db, episode.fileId)) continue;
+          if (!episode || !isMonitored(title, episode) || present(episode.fileId)) continue;
           target = queue.ensure(key, episode.season, episode.number);
         }
         // A target that already works with this torrent keeps its work.
@@ -122,8 +122,8 @@ export function libraryVerifyHandler({ db, queue, clients, finder, events }: Dep
       if (entry.titleKey !== key || !isActive(entry)) continue;
       const hasFile =
         title.mediaType === 'movie'
-          ? present(db, title.fileId)
-          : present(db, title.episodes.find((episode) => episode.season === entry.season && episode.number === entry.number)?.fileId ?? null);
+          ? present(title.fileId)
+          : present(title.episodes.find((episode) => episode.season === entry.season && episode.number === entry.number)?.fileId ?? null);
       if (!hasFile) continue;
       queue.endAttempt(entry, 'imported', 'the file is in the library');
       queue.move(entry, { stage: 'available', branch: null, reason: null }, 'file is in the library');
@@ -138,7 +138,7 @@ export function libraryVerifyHandler({ db, queue, clients, finder, events }: Dep
     if (!title.paused) finder.requestSearch(key, { reason: 'import verification' });
 
     // A second import can add hashes while this run waits. It keeps the state pending, and the next run reads them.
-    const current = verificationOf(db, key);
+    const current = verificationOf(key);
     if (current && current.updatedAt === state.updatedAt) current.pending = false;
     events.publish('library.changed', { key });
   }

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { openDb, type Db } from '../../src/core/db.ts';
+import { open, type Db } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { availability, seriesCounts, type Episode, type Title } from '../../src/library/library.ts';
 import { scanTitle } from '../../src/library/scan.ts';
@@ -14,7 +14,7 @@ let tv: string;
 let movies: string;
 let db: Db;
 
-const clock = () => ({ now: Date.now(), timeZone: 'UTC', region: 'US', files: db.data.files });
+const clock = () => ({ now: Date.now(), files: db.data.files });
 const write = (path: string, bytes = 10) => {
   mkdirSync(join(path, '..'), { recursive: true });
   writeFileSync(path, Buffer.alloc(bytes));
@@ -56,7 +56,7 @@ beforeEach(async () => {
   movies = join(dir, 'lib', 'movies');
   mkdirSync(tv, { recursive: true });
   mkdirSync(movies, { recursive: true });
-  db = await openDb('unused.json');
+  db = await open('unused.json');
   const dev = statSync(tv).dev;
   db.data.roots = { tv: { id: 'tv', path: tv, mediaType: 'tv', dev }, movies: { id: 'movies', path: movies, mediaType: 'movie', dev } };
 });
@@ -70,7 +70,7 @@ describe('movie scan', () => {
     write(join(movies, 'Film (2000)', 'Extras', 'Featurette.mp4'), 100);
     db.data.titles['movie:1'] = title('movie:1', 'movie', 'Film (2000)');
 
-    const result = await scanTitle(db, 'movie:1');
+    const result = await scanTitle('movie:1');
     expect(result).toMatchObject({ status: 'ok', added: 1, extraFiles: ['Film (2000)/Extras/Featurette.mp4'] });
     const file = db.data.files[db.data.titles['movie:1']!.fileId!]!;
     expect(file).toMatchObject({ path: 'Film (2000)/Film (2000).mkv', sizeBytes: 500, missing: false, titleKey: 'movie:1' });
@@ -80,10 +80,10 @@ describe('movie scan', () => {
   it('keeps its file when a bigger one appears, and does not add a second record when it runs again', async () => {
     write(join(movies, 'Film', 'a.mkv'), 100);
     db.data.titles['movie:1'] = title('movie:1', 'movie', 'Film');
-    await scanTitle(db, 'movie:1');
+    await scanTitle('movie:1');
     const first = db.data.titles['movie:1']!.fileId;
     write(join(movies, 'Film', 'b.mkv'), 900);
-    const result = await scanTitle(db, 'movie:1');
+    const result = await scanTitle('movie:1');
     expect(db.data.titles['movie:1']!.fileId).toBe(first);
     expect(result).toMatchObject({ added: 0, updated: 1, extraFiles: ['Film/b.mkv'] });
     expect(Object.keys(db.data.files)).toHaveLength(1);
@@ -92,23 +92,23 @@ describe('movie scan', () => {
   it('marks a file that is gone as missing, keeps the record, and takes a new file after that', async () => {
     write(join(movies, 'Film', 'a.mkv'), 100);
     db.data.titles['movie:1'] = title('movie:1', 'movie', 'Film');
-    await scanTitle(db, 'movie:1');
+    await scanTitle('movie:1');
     const id = db.data.titles['movie:1']!.fileId!;
     rmSync(join(movies, 'Film', 'a.mkv'));
 
-    expect(await scanTitle(db, 'movie:1')).toMatchObject({ status: 'ok', missing: 1 });
+    expect(await scanTitle('movie:1')).toMatchObject({ status: 'ok', missing: 1 });
     expect(db.data.files[id]!.missing).toBe(true);
     expect(db.data.titles['movie:1']!.fileId).toBe(id);
     expect(availability(db.data.titles['movie:1']!, clock())).toBe('missing');
 
     write(join(movies, 'Film', 'a.mkv'), 100);
-    await scanTitle(db, 'movie:1');
+    await scanTitle('movie:1');
     expect(db.data.files[id]!.missing).toBe(false);
 
     rmSync(join(movies, 'Film', 'a.mkv'));
-    await scanTitle(db, 'movie:1');
+    await scanTitle('movie:1');
     write(join(movies, 'Film', 'new.mkv'), 50);
-    await scanTitle(db, 'movie:1');
+    await scanTitle('movie:1');
     expect(db.data.files[id]).toBeUndefined();
     expect(db.data.files[db.data.titles['movie:1']!.fileId!]!.path).toBe('Film/new.mkv');
   });
@@ -124,7 +124,7 @@ describe('series scan', () => {
     write(join(tv, 'Show', 'Season 01', 'Show.S09E01.mkv'));
     db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes());
 
-    const result = await scanTitle(db, 'tv:1');
+    const result = await scanTitle('tv:1');
     expect(result).toMatchObject({ status: 'ok', added: 2, unmatched: ['Show/Season 01/random.mkv'], unknownEpisodes: ['Show/Season 01/Show.S09E01.mkv'] });
     const eps = db.data.titles['tv:1']!.episodes;
     expect(eps.map((e) => Boolean(e.fileId))).toEqual([true, true, true, false]);
@@ -137,10 +137,10 @@ describe('series scan', () => {
   it('keeps the file that an episode has, and reports a second file for it', async () => {
     write(join(tv, 'Show', 'Show.S01E01.mkv'));
     db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes());
-    await scanTitle(db, 'tv:1');
+    await scanTitle('tv:1');
     const first = db.data.titles['tv:1']!.episodes[0]!.fileId;
     write(join(tv, 'Show', 'Show.S01E01.proper.mkv'));
-    const result = await scanTitle(db, 'tv:1');
+    const result = await scanTitle('tv:1');
     expect(result.duplicates).toEqual(['Show/Show.S01E01.proper.mkv']);
     expect(db.data.titles['tv:1']!.episodes[0]!.fileId).toBe(first);
   });
@@ -149,9 +149,9 @@ describe('series scan', () => {
     write(join(tv, 'Show', 'Show.S01E01.mkv'));
     write(join(tv, 'Show', 'Show.S01E02.mkv'));
     db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes());
-    await scanTitle(db, 'tv:1');
+    await scanTitle('tv:1');
     rmSync(join(tv, 'Show', 'Show.S01E02.mkv'));
-    expect((await scanTitle(db, 'tv:1')).missing).toBe(1);
+    expect((await scanTitle('tv:1')).missing).toBe(1);
     expect(seriesCounts(db.data.titles['tv:1']!, clock())).toMatchObject({ eligible: 4, available: 1 });
     expect(db.data.titles['tv:1']!.episodes[1]!.fileId).toBeTruthy();
   });
@@ -161,11 +161,11 @@ describe('safety', () => {
   it('records nothing when the root is not there, so a missing mount deletes nothing', async () => {
     write(join(movies, 'Film', 'a.mkv'));
     db.data.titles['movie:1'] = title('movie:1', 'movie', 'Film');
-    await scanTitle(db, 'movie:1');
+    await scanTitle('movie:1');
     const id = db.data.titles['movie:1']!.fileId!;
 
     rmSync(movies, { recursive: true });
-    expect((await scanTitle(db, 'movie:1')).status).toBe('root_unavailable');
+    expect((await scanTitle('movie:1')).status).toBe('root_unavailable');
     expect(db.data.files[id]!.missing).toBe(false);
     expect(db.data.titles['movie:1']!.fileId).toBe(id);
   });
@@ -173,24 +173,24 @@ describe('safety', () => {
   it('records nothing when another disk is mounted at the root', async () => {
     write(join(movies, 'Film', 'a.mkv'));
     db.data.titles['movie:1'] = title('movie:1', 'movie', 'Film');
-    await scanTitle(db, 'movie:1');
+    await scanTitle('movie:1');
     db.data.roots.movies!.dev += 1;
-    expect((await scanTitle(db, 'movie:1')).status).toBe('root_unavailable');
+    expect((await scanTitle('movie:1')).status).toBe('root_unavailable');
     expect(Object.values(db.data.files).every((file) => !file.missing)).toBe(true);
   });
 
   it('marks the files as missing when the root is healthy but the folder of the title is gone', async () => {
     write(join(movies, 'Film', 'a.mkv'));
     db.data.titles['movie:1'] = title('movie:1', 'movie', 'Film');
-    await scanTitle(db, 'movie:1');
+    await scanTitle('movie:1');
     rmSync(join(movies, 'Film'), { recursive: true });
-    expect(await scanTitle(db, 'movie:1')).toMatchObject({ status: 'folder_missing', missing: 1 });
+    expect(await scanTitle('movie:1')).toMatchObject({ status: 'folder_missing', missing: 1 });
   });
 
   it('refuses a folder that leaves the root', async () => {
     write(join(dir, 'lib', 'outside', 'a.mkv'));
     db.data.titles['movie:1'] = title('movie:1', 'movie', '../outside');
-    expect((await scanTitle(db, 'movie:1')).status).toBe('no_folder');
+    expect((await scanTitle('movie:1')).status).toBe('no_folder');
     expect(Object.keys(db.data.files)).toHaveLength(0);
   });
 
@@ -201,14 +201,14 @@ describe('safety', () => {
     symlinkSync(join(dir, 'lib', 'elsewhere'), join(movies, 'Film', 'linked-folder'));
     symlinkSync(join(dir, 'lib', 'elsewhere', 'big.mkv'), join(movies, 'Film', 'linked-file.mkv'));
     db.data.titles['movie:1'] = title('movie:1', 'movie', 'Film');
-    await scanTitle(db, 'movie:1');
+    await scanTitle('movie:1');
     expect(db.data.files[db.data.titles['movie:1']!.fileId!]!.path).toBe('Film/real.mkv');
   });
 
   it('does nothing for a title without a folder, or an unknown title', async () => {
     db.data.titles['movie:1'] = title('movie:1', 'movie', null);
-    expect((await scanTitle(db, 'movie:1')).status).toBe('no_folder');
-    expect((await scanTitle(db, 'movie:9')).status).toBe('no_folder');
+    expect((await scanTitle('movie:1')).status).toBe('no_folder');
+    expect((await scanTitle('movie:9')).status).toBe('no_folder');
   });
 });
 
@@ -216,7 +216,7 @@ describe('scan job and API', () => {
   it('runs from the job handler', async () => {
     write(join(movies, 'Film', 'a.mkv'));
     db.data.titles['movie:1'] = title('movie:1', 'movie', 'Film');
-    const handler = libraryScanHandler({ db, events: createEvents() });
+    const handler = libraryScanHandler({ events: createEvents() });
     await handler.run({ payload: { key: 'movie:1' } } as never, { signal: new AbortController().signal });
     expect(db.data.titles['movie:1']!.fileId).toBeTruthy();
   });

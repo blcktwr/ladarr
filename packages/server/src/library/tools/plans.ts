@@ -4,7 +4,7 @@ import { join, relative, sep } from 'node:path';
 import type { PlanAction, PlanSkip } from '@ladarr/shared/enums';
 import type { PlanFile, PlanPreview, PlanRequest, PlanResult, PlanTitle } from '@ladarr/shared/types';
 import { Router } from 'express';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
 import { inside, listFiles } from '../imports/folder-files.ts';
 import type { EnqueueInput, Job } from '../../core/jobs.ts';
@@ -35,7 +35,7 @@ const posix = (path: string) => path.split(sep).join('/');
 type Failure = { status: number; body: Record<string, unknown> };
 const fail = (status: number, error: string, extra: Record<string, unknown> = {}): Failure => ({ status, body: { error, ...extra } });
 
-function parse(db: Db, body: unknown): PlanRequest | Failure {
+function parse(body: unknown): PlanRequest | Failure {
   if (!isObject(body)) return fail(400, 'invalid_plan');
   const { action, keys } = body;
   if (!ACTIONS.includes(action as PlanAction)) return fail(400, 'invalid_action');
@@ -65,7 +65,7 @@ function parse(db: Db, body: unknown): PlanRequest | Failure {
 // What the preview saw. The apply checks that the library and the disk are still the same.
 type Stored = { preview: PlanPreview; seen: Map<string, Seen>; ids: Map<string, string[]> };
 
-export function libraryPlansRouter(db: Db, { tmdb, events, enqueue, queue, cancelJob }: Deps) {
+export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob }: Deps) {
   const router = Router();
   // shortcut: plans stay in memory, so a restart drops them. The user starts the preview again.
   const plans = new Map<string, Stored>();
@@ -92,7 +92,7 @@ export function libraryPlansRouter(db: Db, { tmdb, events, enqueue, queue, cance
     if (request.action === 'refresh' && !tmdb) return fail(503, 'metadata_unavailable');
 
     const deleting = destructive(request);
-    const groups = filesByTitle(db);
+    const groups = filesByTitle();
     const downloads = new Map<string, number>();
     for (const entry of Object.values(db.data.queue)) if (entry.attempt > 0 && isActive(entry)) downloads.set(entry.titleKey, (downloads.get(entry.titleKey) ?? 0) + 1);
 
@@ -158,7 +158,7 @@ export function libraryPlansRouter(db: Db, { tmdb, events, enqueue, queue, cance
   async function changedSince(stored: Stored): Promise<string[]> {
     const { preview: plan } = stored;
     const changed = new Set<string>();
-    const groups = filesByTitle(db);
+    const groups = filesByTitle();
     for (const row of plan.titles) {
       const title = db.data.titles[row.key];
       if (!title) {
@@ -211,7 +211,7 @@ export function libraryPlansRouter(db: Db, { tmdb, events, enqueue, queue, cance
     }
     // No await from here to the end of this function, so the records change in one step.
     const current = db.data.titles[key];
-    if (current) for (const id of retired) forgetFile(db, current, id);
+    if (current) for (const id of retired) forgetFile(current, id);
     else for (const id of retired) delete db.data.files[id];
     log.info('library files deleted', { key, deleted: retired.length, failed });
     return failed;
@@ -262,11 +262,11 @@ export function libraryPlansRouter(db: Db, { tmdb, events, enqueue, queue, cance
           }
         }
         if (season !== undefined) {
-          dropSeason(db, row.key, season, queue, cancelJob);
+          dropSeason(row.key, season, queue, cancelJob);
           title.seasonOverrides[String(season)] = 'unmonitored';
           for (const episode of title.episodes) if (episode.season === season) episode.override = null;
         } else if (request.action === 'remove' && !kept) {
-          dropTitle(db, row.key, queue, cancelJob);
+          dropTitle(row.key, queue, cancelJob);
         }
         if (kept && !result.skipped.some((item) => item.key === row.key)) skip(row.key, 'files_not_deleted');
       }
@@ -281,7 +281,7 @@ export function libraryPlansRouter(db: Db, { tmdb, events, enqueue, queue, cance
   }
 
   router.post('/plans', async (req, res) => {
-    const request = parse(db, req.body);
+    const request = parse(req.body);
     if ('status' in request) return void res.status(request.status).json(request.body);
     for (const [id, plan] of plans) if (plan.preview.expiresAt < Date.now()) plans.delete(id);
     const stored = await preview(request);

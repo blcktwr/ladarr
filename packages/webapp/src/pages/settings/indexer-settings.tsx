@@ -47,7 +47,15 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
   const settings = useQuery<SettingsResponse>({ queryKey: ['/settings'] });
   const language = settings.data?.settings.language;
   const languageNames = useMemo(() => new Intl.DisplayNames([language ?? getLanguage()], { type: 'language' }), [language]);
-  const languageOptions = (settings.data?.aliasLanguageOptions ?? []).map((value) => ({ value, label: languageNames.of(value) ?? value }));
+  // A value that Intl does not read as a language tag stays as it is. One bad value does not break the form.
+  const languageLabel = (value: string) => {
+    try {
+      return languageNames.of(value) ?? value;
+    } catch {
+      return value;
+    }
+  };
+  const languageOptions = (settings.data?.aliasLanguageOptions ?? []).map((value) => ({ value, label: languageLabel(value) }));
   useEffect(() => {
     if (saved.data) setDraft((current) => (current.apiKey ? current : { ...current, apiKey: saved.data.apiKey }));
   }, [saved.data]);
@@ -255,7 +263,7 @@ export function Indexers() {
                 items={[
                   { label: t('Edit'), onClick: () => setEditing(row) },
                   { label: t('Test'), onClick: () => void runTest(row) },
-                  ...(row.manual ? [{ label: t('Remove'), danger: true, onClick: () => setRemoving(row) }] : []),
+                  ...(row.manual ? [{ label: t('Delete'), danger: true, onClick: () => setRemoving(row) }] : []),
                 ]}
               />,
             ],
@@ -265,7 +273,7 @@ export function Indexers() {
       {editing && (
         <IndexerForm indexer={editing} open onOpenChange={(next) => !next && setEditing(null)} onDone={done} />
       )}
-      <Confirm open={removing !== null} onOpenChange={(next) => !next && !removePending && setRemoving(null)} title={t('Remove {name}?', { name: removing?.name ?? '' })} confirm={t('Remove')} pending={removePending} onConfirm={() => removing && void remove(removing)} />
+      <Confirm open={removing !== null} onOpenChange={(next) => !next && !removePending && setRemoving(null)} title={t('Delete {name}?', { name: removing?.name ?? '' })} confirm={t('Delete')} pending={removePending} onConfirm={() => removing && void remove(removing)} />
     </div>
   );
 }

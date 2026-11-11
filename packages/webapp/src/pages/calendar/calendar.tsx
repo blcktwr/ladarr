@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Actions, Badge, Button, EmptyState, Field, List, Pane, Row, Section, Spinner, SubMenu, Switch } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
-import { api } from '../../lib/api.ts';
+import { api, apiUrl } from '../../lib/api.ts';
 import { Confirm, Link, LoadFailed } from '../../components/index.ts';
 import { availabilityLabel, catalogPath } from '../../lib/format.ts';
 import { useLive } from '../../lib/live.ts';
@@ -40,7 +40,7 @@ function Status({ event }: { event: CalendarEvent }) {
 }
 
 function Events({ data }: { data: CalendarResponse }) {
-  const time = (event: CalendarEvent) => (event.at === null ? '' : ` ${new Date(event.at).toLocaleTimeString(getLanguage(), { timeZone: data.timeZone, hour: '2-digit', minute: '2-digit' })}`);
+  const time = (event: CalendarEvent) => (event.at === null ? '' : ` ${new Date(event.at).toLocaleTimeString(getLanguage(), { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' })}`);
   if (data.events.length === 0) return <EmptyState>{t('Nothing is scheduled.')}</EmptyState>;
   return (
     <List>
@@ -78,8 +78,8 @@ function NoDate({ data }: { data: CalendarResponse }) {
 function Feed() {
   const { data, error, isFetching: loading, refetch: reload } = useQuery<{ token: string | null }>({ queryKey: ['/calendar/feed'] });
   const [failed, setFailed] = useState(false);
-  // The URL base is part of the base URL of the page.
-  const url = data?.token ? new URL(`api/calendar/feed.ics?token=${data.token}`, document.baseURI).href : '';
+  // The URL base is part of the base URL of the page. In development the API has its own origin.
+  const url = data?.token ? new URL(apiUrl(`/calendar/feed.ics?token=${data.token}`), document.baseURI).href : '';
 
   async function change(method: 'POST' | 'DELETE') {
     setFailed(false);

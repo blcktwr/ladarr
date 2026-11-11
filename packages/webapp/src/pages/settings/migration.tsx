@@ -117,7 +117,7 @@ export function Migration({ onFinish, onClose, embedded = false }: { onFinish?: 
   const series = preview?.rows.filter((row) => row.mediaType === 'tv').length ?? 0;
   const movies = preview ? preview.rows.length - series : 0;
   const sourceApp = preview?.app === 'radarr' ? { label: t('Movies'), count: movies } : { label: t('Series'), count: series };
-  const total = preview ? preview.counts.new + preview.counts.verify : 0;
+  const total = preview ? preview.counts.new + preview.counts.pending + preview.counts.verify : 0;
   const action = preview ? (
     <Button disabled={total === 0} pending={busy === 'import'} onClick={() => void start()}>
       {t('Import {count} titles', { count: total })}

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Db } from './db.ts';
+import { db } from './db.ts';
 
 export type ErrorKind = 'invalid_input' | 'outage' | 'uncertain';
 
@@ -48,7 +48,7 @@ export const backoffMs = (attempts: number) => Math.min(BACKOFF_BASE_MS * 2 ** (
 const held = (job: Job | undefined, token: string): job is Job => job?.state === 'running' && job.leaseOwner === token;
 
 // shortcut: dedupe and claim scan every job. Fine for thousands of jobs, so index by key if it is not.
-export function enqueue(db: Db, input: EnqueueInput): Job {
+export function enqueue(input: EnqueueInput): Job {
   const { jobs } = db.data;
   const runAt = input.runAt ?? Date.now();
   if (input.dedupeKey) {
@@ -56,7 +56,7 @@ export function enqueue(db: Db, input: EnqueueInput): Job {
     if (active) {
       // A request for earlier work must not wait for the time of a scheduled run.
       if (active.state === 'waiting' && runAt < active.runAt) active.runAt = runAt;
-      if (input.priority) prioritize(db, active.id);
+      if (input.priority) prioritize(active.id);
       return active;
     }
   }
@@ -76,7 +76,7 @@ export function enqueue(db: Db, input: EnqueueInput): Job {
     priority: null,
   };
   jobs[job.id] = job;
-  if (input.priority) prioritize(db, job.id);
+  if (input.priority) prioritize(job.id);
   return job;
 }
 
@@ -91,7 +91,7 @@ function precedes(a: Job, b: Job) {
 }
 
 // The check and the change run in one synchronous step, so two callers never get the same job.
-export function claim(db: Db, now: number, leaseMs: number, canStart: (job: Job) => boolean = () => true) {
+export function claim(now: number, leaseMs: number, canStart: (job: Job) => boolean = () => true) {
   let best: Job | undefined;
   for (const job of Object.values(db.data.jobs)) {
     if (job.state !== 'waiting' || job.runAt > now || !canStart(job)) continue;
@@ -106,7 +106,7 @@ export function claim(db: Db, now: number, leaseMs: number, canStart: (job: Job)
 }
 
 // Only a lease that has expired is recovered. A job that keeps losing its lease runs out of attempts.
-export function recoverExpired(db: Db, now: number, maxAttempts: (type: string) => number) {
+export function recoverExpired(now: number, maxAttempts: (type: string) => number) {
   let recovered = 0;
   for (const job of Object.values(db.data.jobs)) {
     if (job.state !== 'running' || job.leaseExpiresAt! > now) continue;
@@ -120,25 +120,25 @@ export function recoverExpired(db: Db, now: number, maxAttempts: (type: string) 
       job.state = 'waiting';
     }
   }
-  pruneFailed(db);
+  pruneFailed();
   return recovered;
 }
 
-export function renew(db: Db, id: string, token: string, now: number, leaseMs: number) {
+export function renew(id: string, token: string, now: number, leaseMs: number) {
   const job = db.data.jobs[id];
   if (!held(job, token)) return false;
   job.leaseExpiresAt = now + leaseMs;
   return true;
 }
 
-export function complete(db: Db, id: string, token: string) {
+export function complete(id: string, token: string) {
   if (!held(db.data.jobs[id], token)) return false;
   delete db.data.jobs[id];
   return true;
 }
 
 // Gives the job back after a stop. The interrupted try does not count as an attempt.
-export function release(db: Db, id: string, token: string) {
+export function release(id: string, token: string) {
   const job = db.data.jobs[id];
   if (!held(job, token)) return false;
   job.state = 'waiting';
@@ -148,7 +148,7 @@ export function release(db: Db, id: string, token: string) {
   return true;
 }
 
-export function fail(db: Db, id: string, token: string, error: unknown, now: number, maxAttempts: number) {
+export function fail(id: string, token: string, error: unknown, now: number, maxAttempts: number) {
   const job = db.data.jobs[id];
   if (!held(job, token)) return;
   const kind = error instanceof JobError ? error.kind : 'outage';
@@ -157,7 +157,7 @@ export function fail(db: Db, id: string, token: string, error: unknown, now: num
   job.leaseExpiresAt = null;
   if (kind === 'invalid_input' || job.attempts >= maxAttempts) {
     job.state = 'failed';
-    pruneFailed(db);
+    pruneFailed();
   } else {
     job.state = 'waiting';
     job.runAt = now + backoffMs(job.attempts);
@@ -165,18 +165,18 @@ export function fail(db: Db, id: string, token: string, error: unknown, now: num
   return job.state;
 }
 
-export function prioritize(db: Db, id: string) {
+export function prioritize(id: string) {
   const job = db.data.jobs[id];
   if (job && job.priority === null) job.priority = db.data.prioritySeq++;
 }
 
 // The job goes back to its place in the normal lane, because that lane orders by due time.
-export function deprioritize(db: Db, id: string) {
+export function deprioritize(id: string) {
   const job = db.data.jobs[id];
   if (job) job.priority = null;
 }
 
-function pruneFailed(db: Db) {
+function pruneFailed() {
   const failed = Object.values(db.data.jobs).filter((job) => job.state === 'failed');
   for (const job of failed.sort((a, b) => b.seq - a.seq).slice(KEPT_FAILED)) delete db.data.jobs[job.id];
 }

@@ -1,7 +1,7 @@
 import type { BackupsResponse, UpdateCheck, VersionInfo } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { api } from '../../lib/api.ts';
+import { api, apiUrl } from '../../lib/api.ts';
 import { Badge, Button, Details, Divider, EmptyState, List, Row, Section, Spinner, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
@@ -128,7 +128,7 @@ export function Backups() {
             actions={
               <>
                 <RestoreBackup name={backup.name} createdAt={backup.createdAt} />
-                <Button variant="ghost" onClick={() => location.assign(new URL(`api/backups/${backup.name}/download`, document.baseURI))}>
+                <Button variant="ghost" onClick={() => location.assign(new URL(apiUrl(`/backups/${backup.name}/download`), document.baseURI))}>
                   {t('Download')}
                 </Button>
                 <Button variant="ghost" onClick={() => void run(() => api(`/backups/${backup.name}`, { method: 'DELETE' }))}>

@@ -1,6 +1,6 @@
+import { db } from '../../../../../core/db.ts';
 import type { AttachCandidates } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../../../core/db.ts';
 import type { Clients } from '../../../../../library/downloads/client-api.ts';
 import { ClientError, type Torrent } from '../../../../../library/downloads/qbittorrent.ts';
 import { isActive } from '../../../../../library/downloads/queue.ts';
@@ -8,11 +8,11 @@ import { attachRefusal, MAX_TORRENTS } from '../../../../../helpers/queue-attach
 import { label, shown } from '../../../../../helpers/queue.ts';
 
 // The torrents of the client that the user can attach to the target, and the targets that can share the download.
-export function queueEntryExternalGet(db: Db, clients: Clients): RequestHandler<{ id: string }> {
+export function queueEntryExternalGet(clients: Clients): RequestHandler<{ id: string }> {
   return async (req, res) => {
     const entry = db.data.queue[req.params.id];
     const handles = clients.all();
-    if (!entry || !shown(db, entry)) return void res.status(404).json({ error: 'not_found' });
+    if (!entry || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
     const refusal = attachRefusal(entry);
     if (refusal) return void res.status(409).json({ error: 'attach_not_supported', reason: refusal });
     if (!handles.length) return void res.status(409).json({ error: 'client_missing' });
@@ -34,7 +34,7 @@ export function queueEntryExternalGet(db: Db, clients: Clients): RequestHandler<
     const siblings =
       entry.season === null
         ? []
-        : Object.values(db.data.queue).filter((other) => other.id !== entry.id && other.titleKey === entry.titleKey && other.season === entry.season && shown(db, other) && attachRefusal(other) === null);
+        : Object.values(db.data.queue).filter((other) => other.id !== entry.id && other.titleKey === entry.titleKey && other.season === entry.season && shown(other) && attachRefusal(other) === null);
     const body: AttachCandidates = {
       total: free.length,
       torrents: free.slice(0, MAX_TORRENTS).map((torrent) => ({
@@ -46,7 +46,7 @@ export function queueEntryExternalGet(db: Db, clients: Clients): RequestHandler<
         category: torrent.category,
         addedAt: torrent.addedAt,
       })),
-      siblings: siblings.sort((a, b) => (a.number ?? 0) - (b.number ?? 0)).map((other) => ({ id: other.id, label: label(db, other) })),
+      siblings: siblings.sort((a, b) => (a.number ?? 0) - (b.number ?? 0)).map((other) => ({ id: other.id, label: label(other) })),
     };
     res.json(body);
   };

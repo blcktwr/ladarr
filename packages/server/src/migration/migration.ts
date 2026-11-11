@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises';
 import { isAbsolute, relative, sep } from 'node:path';
 import type { ImportNote, MigrationStatus } from '@ladarr/shared/enums';
 import type { MigrationRow } from '@ladarr/shared/types';
-import type { Db, LedgerEntry } from '../core/db.ts';
+import { type Db, type LedgerEntry, db } from '../core/db.ts';
 import type { Events } from '../core/events.ts';
 import type { EnqueueInput, Job } from '../core/jobs.ts';
 import { titleKey, type Override, type Title } from '../library/library.ts';
@@ -11,7 +11,7 @@ import type { Tmdb } from '../metadata/tmdb.ts';
 
 const LOOKUPS_AT_ONCE = 4;
 
-export type MigrateDeps = { db: Db; tmdb: Tmdb; events: Events; save: () => Promise<void>; enqueue: (input: EnqueueInput) => Job };
+export type MigrateDeps = { tmdb: Tmdb; events: Events; save: () => Promise<void>; enqueue: (input: EnqueueInput) => Job };
 
 // What a re-import gives to a title that is in the library already. The job adds no title; it synchronizes the
 // source facts and verifies the files, the hashes, and the queue.
@@ -55,7 +55,7 @@ function titleNotes(source: SourceTitle): ImportNote[] {
 }
 
 // Looks at the source and the library and says what an import would do. It changes nothing.
-export async function buildPlan(db: Db, tmdb: Tmdb, source: SourceData, mappings: PathMapping[]): Promise<Plan> {
+export async function buildPlan(tmdb: Tmdb, source: SourceData, mappings: PathMapping[]): Promise<Plan> {
   const profiles = new Map(source.profiles.map((profile) => [profile.id, { profile, ...mapProfile(profile) }]));
 
   const resolved = await mapLimit(source.titles, LOOKUPS_AT_ONCE, async (item) => {
@@ -133,9 +133,9 @@ export async function buildPlan(db: Db, tmdb: Tmdb, source: SourceData, mappings
     const episodes = item.episodes ?? [];
     const manualRelease = item.mediaType === 'movie' && item.minimumAvailability !== null && item.minimumAvailability !== 'released';
 
-    if (status === 'new' && tmdbId) {
+    if ((status === 'new' || status === 'pending') && tmdbId) {
       const defaultRoot = db.data.settings.defaultRoots[item.mediaType];
-      requests.set(ledgerKey, {
+      const built: LedgerEntry['request'] = {
         mediaType: item.mediaType,
         tmdbId,
         // A title outside the folders of ladarr goes to the default folder. Its path is not kept.
@@ -148,7 +148,9 @@ export async function buildPlan(db: Db, tmdb: Tmdb, source: SourceData, mappings
         downloads,
         sourceEpisodes: episodes,
         manualRelease,
-      });
+      };
+      // A title that waits from an earlier try keeps the choices of that try. A new import starts the job again.
+      requests.set(ledgerKey, status === 'pending' ? entry?.request ?? built : built);
     }
     // A re-import verifies a title that is in the library already. It also applies the source facts that the first
     // import did not read: the paused state, the season and episode monitoring, and the source folder.
@@ -171,7 +173,7 @@ function seasonOverridesOf(item: SourceTitle): Record<string, Override> {
 const hasFiles = (title: Title) => Boolean(title.fileId || title.episodes.some((episode) => episode.fileId));
 
 // The facts of the source that the first import did not keep. The files of a title that has them keep their folder.
-export function applyExisting(db: Db, source: Existing) {
+export function applyExisting(source: Existing) {
   const title = db.data.titles[source.key];
   if (!title) return;
   title.paused = !source.monitored;

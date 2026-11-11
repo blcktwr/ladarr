@@ -1,7 +1,7 @@
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
-import { openDb } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 
 const events = createEvents(3);
@@ -10,8 +10,8 @@ let cookie = '';
 let close: () => void;
 
 beforeAll(async () => {
-  const db = await openDb('unused.json');
-  const server = createApp(db, { events }).listen(0);
+  const db = await open('unused.json');
+  const server = createApp({ events }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
   close = () => {

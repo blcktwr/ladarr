@@ -257,7 +257,7 @@ export function DownloadClients() {
                 items={[
                   { label: t('Edit'), onClick: () => setEditing(client) },
                   { label: t('Test'), onClick: () => void runTest(client) },
-                  { label: t('Remove'), danger: true, onClick: () => setRemoving(client) },
+                  { label: t('Delete'), danger: true, onClick: () => setRemoving(client) },
                 ]}
               />,
             ],
@@ -265,7 +265,7 @@ export function DownloadClients() {
         />
       )}
       {editing && <ClientForm client={editing} open onOpenChange={(next) => !next && setEditing(null)} onDone={done} />}
-      <Confirm open={removing !== null} onOpenChange={(next) => !next && !removePending && setRemoving(null)} title={t('Remove {name}?', { name: removing?.name ?? '' })} confirm={t('Remove')} pending={removePending} onConfirm={() => removing && void remove(removing)} />
+      <Confirm open={removing !== null} onOpenChange={(next) => !next && !removePending && setRemoving(null)} title={t('Delete {name}?', { name: removing?.name ?? '' })} confirm={t('Delete')} pending={removePending} onConfirm={() => removing && void remove(removing)} />
     </div>
   );
 }

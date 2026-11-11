@@ -402,7 +402,7 @@ describe('backup through the API', () => {
     app = await startTestApp({ tmdb, events });
     await app.post('/roots', { path: join(dir, 'tv'), mediaType: 'tv' });
     await app.post('/roots', { path: join(dir, 'movies'), mediaType: 'movie' });
-    const handler = migrationImportHandler({ db: app.db, tmdb, events, save: async () => {}, enqueue: () => ({}) as never });
+    const handler = migrationImportHandler({ tmdb, events, save: async () => {}, enqueue: () => ({}) as never });
     runImport = () => handler.run({} as never, { signal: new AbortController().signal });
   });
   afterAll(() => {
@@ -461,7 +461,7 @@ describe('backup through the API', () => {
     const [key, entry] = Object.entries(app.db.data.ledger).find(([, candidate]) => candidate.sourceId === 1)!;
     expect(entry.status).toBe('imported');
     const source: SourceData = { app: 'sonarr', version: 'x', namespace: key.replace(/:1$/, ''), profiles: [], titles: [{ ...(await read(sonarr())).titles[0]!, tmdbId: 6001, tvdbId: null }] };
-    const { rows } = await buildPlan(app.db, tmdb, source, []);
+    const { rows } = await buildPlan(tmdb, source, []);
     expect(rows[0]).toMatchObject({ ledgerKey: key, status: 'new' });
   });
 

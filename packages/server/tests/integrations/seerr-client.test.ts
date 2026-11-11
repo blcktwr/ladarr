@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../src/app.ts';
-import { emptyData, openDb } from '../../src/core/db.ts';
+import { emptyData, open } from '../../src/core/db.ts';
 import { metadataRefreshHandler } from '../../src/jobs/metadata-refresh.ts';
 import { queueInitialHandler } from '../../src/jobs/queue-initial.ts';
 import { createTmdb } from '../../src/metadata/tmdb.ts';
@@ -31,8 +31,8 @@ async function start({ tmdb: withTmdb = true }: StartOptions = {}) {
   const tmdb = withTmdb ? createTmdb({ apiKey: 'k', fetch: fixture.fetch, baseUrl: 'https://tmdb.test/3', spacingMs: 0, ttlMs: 0 }) : undefined;
   const pipe = await startPipeline({
     handlers: ({ db, events, queue, finder }) => ({
-      ...(tmdb ? { 'metadata.refresh': metadataRefreshHandler({ db, tmdb, events }) } : {}),
-      'queue.initial': queueInitialHandler({ db, queue, finder }),
+      ...(tmdb ? { 'metadata.refresh': metadataRefreshHandler({ tmdb, events }) } : {}),
+      'queue.initial': queueInitialHandler({ queue, finder }),
     }),
   });
   pipe.db.data.settings.defaultRoots = { movie: 'movie', tv: 'tv' };
@@ -370,9 +370,9 @@ describe('the Seerr API for Wholphin', () => {
   });
 
   it('answers under the URL base', async () => {
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     db.data.apiKey = 'secret';
-    const server = createApp(db, { urlBase: '/base' }).listen(0);
+    const server = createApp({ urlBase: '/base' }).listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/base/seerr/api/v1`;
     try {
@@ -399,7 +399,7 @@ it('loads an old database file with no seerr section', async () => {
     delete old.seerr;
     writeFileSync(file, JSON.stringify(old));
     vi.stubEnv('NODE_ENV', 'production');
-    const db = await openDb(file);
+    const db = await open(file);
     expect(db.data.seerr).toEqual({ requestSeq: 0, requests: {} });
   } finally {
     vi.unstubAllEnvs();

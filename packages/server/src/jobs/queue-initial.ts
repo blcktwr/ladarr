@@ -1,12 +1,12 @@
 import { catalog, titleFields } from '../core/log.ts';
 import { JobError } from '../core/jobs.ts';
 import { withTitleLock } from '../core/title-lock.ts';
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import type { Queue } from '../library/downloads/queue.ts';
 import type { Finder } from '../library/grab/finder.ts';
 import type { Handler } from '../core/worker.ts';
 
-export function queueInitialHandler({ db, queue, finder }: { db: Db; queue: Queue; finder: Finder }): Handler {
+export function queueInitialHandler({ queue, finder }: { queue: Queue; finder: Finder }): Handler {
   return {
     concurrency: 1,
     maxAttempts: 10,
@@ -28,7 +28,7 @@ export function queueInitialHandler({ db, queue, finder }: { db: Db; queue: Queu
       // A title with nothing to search leaves the queue. The page learns it from this message.
       await withTitleLock(key, async () => {
         if (!finder.requestSearch(title.key, { reason: 'title added' }).length) {
-          catalog.info('empty', 'No target to search: no episode is due', titleFields(title));
+          catalog.info('empty', title.mediaType === 'movie' ? 'No target to search: the movie has no release date' : 'No target to search: no episode is due', titleFields(title));
           queue.notify();
         }
       });

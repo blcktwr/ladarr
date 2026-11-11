@@ -1,6 +1,6 @@
+import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import type { Finder } from '../../../library/grab/finder.ts';
-import type { Db } from '../../../core/db.ts';
 import { deprioritize, prioritize, type EnqueueInput, type Job } from '../../../core/jobs.ts';
 import type { Clients } from '../../../library/downloads/client-api.ts';
 import type { Poller } from '../../../library/downloads/poller.ts';
@@ -9,7 +9,7 @@ import { addedByApp, isActive, queueKey, type Queue, type QueueEntry } from '../
 import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts';
 import { bySeasonNumber, label, lanePositions, shown } from '../../../helpers/queue.ts';
 
-export function queueActionsPost(db: Db, queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
+export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
   type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'clear' | 'remove_torrent';
   const ACTIONS: Action[] = ['pause', 'resume', 'retry', 'priority', 'unpriority', 'clear', 'remove_torrent'];
 
@@ -19,7 +19,7 @@ export function queueActionsPost(db: Db, queue: Queue, finder: Finder, poller: P
       return Boolean(payload?.entryIds?.includes(entry.id)) || Boolean(payload?.hash && payload.hash === entry.transferHash);
     });
 
-  const sharing = (entry: QueueEntry) => sharingOf(db, entry);
+  const sharing = (entry: QueueEntry) => sharingOf(entry);
 
   // The torrent is one that a target of ladarr sent to the client.
   // Says if the action fits the stage of the entry. A refusal is clear and changes nothing.
@@ -42,9 +42,9 @@ export function queueActionsPost(db: Db, queue: Queue, finder: Finder, poller: P
         if (!entry.transferHash) return 'This target has no torrent.';
         if (sharing(entry).length > 0) return 'A target still uses this torrent.';
         // ladarr removes only a torrent that it added. A download that the user attached stays in the client.
-        if (removal?.attached.has(entry.transferHash)) return 'This torrent was not added by the app. Remove it in the download client.';
+        if (removal?.attached.has(entry.transferHash)) return 'This torrent was not added by the app. Delete it in the download client.';
         const found = removal?.torrents.get(entry.transferHash);
-        return found && !addedByApp(db, found.hash) ? 'This torrent was not added by the app. Remove it in the download client.' : null;
+        return found && !addedByApp(found.hash) ? 'This torrent was not added by the app. Delete it in the download client.' : null;
       }
     }
   }
@@ -59,7 +59,7 @@ export function queueActionsPost(db: Db, queue: Queue, finder: Finder, poller: P
     return [entry];
   }
 
-  const { retry } = createRetry({ db, queue, finder, enqueue });
+  const { retry } = createRetry({ queue, finder, enqueue });
 
   async function apply(action: Action, entries: QueueEntry[]) {
     const removed = new Set<string>();
@@ -94,12 +94,12 @@ export function queueActionsPost(db: Db, queue: Queue, finder: Finder, poller: P
           break;
         case 'priority': {
           queue.setPriority(entry, true);
-          for (const job of jobsOf(entry)) prioritize(db, job.id);
+          for (const job of jobsOf(entry)) prioritize(job.id);
           break;
         }
         case 'unpriority': {
           queue.setPriority(entry, false);
-          for (const job of jobsOf(entry)) deprioritize(db, job.id);
+          for (const job of jobsOf(entry)) deprioritize(job.id);
           break;
         }
         case 'clear':
@@ -122,7 +122,7 @@ export function queueActionsPost(db: Db, queue: Queue, finder: Finder, poller: P
 
   // The entries of a group in the order that they have now, for an action on a group. A null season takes every season.
   function groupEntries(titleKey: string, season: number | null) {
-    return Object.values(db.data.queue).filter((entry) => entry.titleKey === titleKey && (season === null || entry.season === season) && shown(db, entry)).sort((a, b) => a.createdAt - b.createdAt || bySeasonNumber(a, b));
+    return Object.values(db.data.queue).filter((entry) => entry.titleKey === titleKey && (season === null || entry.season === season) && shown(entry)).sort((a, b) => a.createdAt - b.createdAt || bySeasonNumber(a, b));
   }
 
   return async (req, res) => {
@@ -130,7 +130,7 @@ export function queueActionsPost(db: Db, queue: Queue, finder: Finder, poller: P
     if (!action || !ACTIONS.includes(action)) return void res.status(400).json({ error: 'invalid_action' });
     let picked: QueueEntry[];
     if (group && typeof group.titleKey === 'string') picked = groupEntries(group.titleKey, group.season ?? null);
-    else if (Array.isArray(ids) && ids.length <= 1000 && ids.every((id) => typeof id === 'string')) picked = ids.flatMap((id) => (db.data.queue[id] && shown(db, db.data.queue[id]!) ? [db.data.queue[id]!] : []));
+    else if (Array.isArray(ids) && ids.length <= 1000 && ids.every((id) => typeof id === 'string')) picked = ids.flatMap((id) => (db.data.queue[id] && shown(db.data.queue[id]!) ? [db.data.queue[id]!] : []));
     else return void res.status(400).json({ error: 'invalid_request' });
 
     // Before a removal, read the torrents in the client. The queue decides if ladarr added a torrent.
@@ -163,11 +163,11 @@ export function queueActionsPost(db: Db, queue: Queue, finder: Finder, poller: P
       if (refusal) unsupported.push({ id: entry.id, reason: refusal });
       else for (const other of scope(action, entry)) affected.set(other.id, other);
     }
-    const lane = lanePositions(db);
+    const lane = lanePositions();
     const list = [...affected.values()];
     const transfers = new Map<string, number>();
     for (const entry of list) if (entry.transferHash && ['pause', 'resume', 'remove_torrent'].includes(action)) transfers.set(entry.transferHash, (transfers.get(entry.transferHash) ?? 0) + 1);
-    const summary = { action, affected: list.map((entry) => ({ id: entry.id, label: label(db, entry), stage: entry.stage, key: queueKey(entry), lane: lane.get(entry.id) ?? null })), unsupported, sharedTransfers: [...transfers].map(([hash, count]) => ({ name: poller.transfer(hash)?.name ?? removal?.torrents.get(hash)?.name ?? hash, entries: count })) };
+    const summary = { action, affected: list.map((entry) => ({ id: entry.id, label: label(entry), stage: entry.stage, key: queueKey(entry), lane: lane.get(entry.id) ?? null })), unsupported, sharedTransfers: [...transfers].map(([hash, count]) => ({ name: poller.transfer(hash)?.name ?? removal?.torrents.get(hash)?.name ?? hash, entries: count })) };
     if (preview) return void res.json(summary);
     if (!list.length) return void res.status(409).json({ error: 'action_not_supported', unsupported });
     try {

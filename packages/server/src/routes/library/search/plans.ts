@@ -1,5 +1,5 @@
+import { db } from '../../../core/db.ts';
 import type { Finder } from '../../../library/grab/finder.ts';
-import type { Db } from '../../../core/db.ts';
 import { isActive } from '../../../library/downloads/queue.ts';
 import type { Title } from '../../../library/library.ts';
 
@@ -20,7 +20,7 @@ export const isObject = (value: unknown): value is Record<string, unknown> => ty
 
 // The targets that a search would start now: wanted, and not in the journey already.
 // A target that waits for a release starts again, like in the finder.
-export function startable(db: Db, finder: Finder, title: Title) {
+export function startable(finder: Finder, title: Title) {
   const free = (id: string) => {
     const entry = db.data.queue[id];
     return !entry || entry.attempt === 0 || !isActive(entry) || entry.branch === 'waiting';

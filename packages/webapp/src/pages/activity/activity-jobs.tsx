@@ -123,7 +123,7 @@ export function JobsPanel() {
                         <Play />
                       </Button>
                     )}
-                    <Button variant="ghost" iconOnly aria-label={t('Remove {name} from the queue', { name })} disabled={job.state === 'running'} onClick={() => void act(`/queue/jobs/${job.id}`, 'DELETE')}>
+                    <Button variant="ghost" iconOnly aria-label={t('Delete {name} from the queue', { name })} disabled={job.state === 'running'} onClick={() => void act(`/queue/jobs/${job.id}`, 'DELETE')}>
                       <X />
                     </Button>
                   </div>,

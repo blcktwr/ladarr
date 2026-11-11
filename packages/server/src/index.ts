@@ -1,3 +1,4 @@
+import type { Server } from 'node:http';
 import { dirname } from 'node:path';
 import { loadConfig } from '@ladarr/shared/config';
 import { createApp } from './app.ts';
@@ -8,9 +9,13 @@ import { unfinishedImports } from './library/imports/importer.ts';
 import { createLimiter } from './core/limiter.ts';
 import { createPoller } from './library/downloads/poller.ts';
 import { createQueue } from './library/downloads/queue.ts';
+import { createRetry } from './library/downloads/queue-api.ts';
 import { createIndexerService } from './library/grab/torznab.ts';
-import { createSaver, openDb, SCHEMA_VERSION } from './core/db.ts';
+import { SCHEMA_VERSION, createSaver, db, open } from './core/db.ts';
 import { createEvents } from './core/events.ts';
+import { sonarr } from './proxy/sonarr.ts';
+import { radarr } from './proxy/radarr.ts';
+import { seerr } from './proxy/seerr.ts';
 import { closeLog, configureItemLogs, log, logToFile } from './core/log.ts';
 import { createRestorer } from './system/restore.ts';
 import { firstUnwritable } from './core/permissions.ts';
@@ -29,14 +34,14 @@ if (blocked) {
   process.exit(1);
 }
 logToFile(config.logFile);
-const db = await openDb(config.dbFile, config.queueFile);
+await open();
 // An older version must not write to a file of a newer version. It could lose data that it does not know.
 if (db.data.schemaVersion > SCHEMA_VERSION) {
   console.error(`The data file ${config.dbFile} has schema version ${db.data.schemaVersion}. This version reads schema version ${SCHEMA_VERSION} at most. Start a newer version, or restore a backup from this version.`);
   process.exit(1);
 }
 // The log of each target in the queue has a file of its own, as the settings say.
-configureItemLogs(db);
+configureItemLogs();
 const events = createEvents();
 
 const tmdb = config.tmdbApiKey ? createTmdb({ apiKey: config.tmdbApiKey, baseUrl: config.tmdbBaseUrl }) : undefined;
@@ -44,54 +49,82 @@ if (!tmdb) log.warn('No TMDB key is in this build, so titles cannot be searched'
 // Not awaited: the server starts at once, and the status shows the result when it arrives.
 else void withOutboundRequests(() => tmdb.check().then(({ ok, code }) => ok || log.warn('TMDB check failed', { code })));
 
-const save = createSaver(db);
+const save = createSaver();
 const persist = () => void save().catch((error) => log.error('could not save the database', { error }));
-const clients = createClients(db);
+const clients = createClients();
 const webhooks = createWebhooks({
-  db,
   enqueue: (input) => worker.enqueue(input),
 });
-const queue = createQueue(db, events, persist, webhooks.onMove);
-const limiter = createLimiter(db, persist);
-const indexers = createIndexerService(db, limiter, {}, persist);
-const finder = createFinder({ db, queue, indexers, enqueue: (input) => worker.enqueue(input) });
-const poller = createPoller({ db, queue, events, clients, enqueue: (input) => worker.enqueue(input) });
+const queue = createQueue(events, persist, webhooks.onMove);
+const limiter = createLimiter(persist);
+const indexers = createIndexerService(limiter, {}, persist);
+const finder = createFinder({ queue, indexers, enqueue: (input) => worker.enqueue(input) });
+const poller = createPoller({ queue, events, clients, enqueue: (input) => worker.enqueue(input) });
 const importStatus = createImportStatus(events);
 const worker = createWorker(
-  db,
   save,
-  jobHandlers({ db, backupDir: config.backupDir, events, save, tmdb, enqueue: (input) => worker.enqueue(input), clients, queue, finder, indexers, importStatus }),
+  jobHandlers({ backupDir: config.backupDir, events, save, tmdb, enqueue: (input) => worker.enqueue(input), clients, queue, finder, indexers, importStatus }),
 );
 worker.start();
 poller.start();
 // An import that stopped in the middle runs again. Its journal says where to go on.
-for (const hash of unfinishedImports(db)) worker.enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
+for (const hash of unfinishedImports()) worker.enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
 
-const restorer = createRestorer({ db, dir: config.backupDir, worker });
+const restorer = createRestorer({ dir: config.backupDir, worker });
+const services = { queue, finder, poller, clients, importStatus };
+const retries = createRetry({ queue, finder, enqueue: (input) => worker.enqueue(input) });
+const indexersChanged = () => {
+  retries.retryBlocked('no_indexers');
+  events.publish('indexers.changed');
+};
 
-const server = createApp(db, {
-  urlBase: config.urlBase,
-  events,
-  webDir: config.webDir,
-  heartbeat: () => worker.heartbeat,
-  tmdb,
-  configDir: config.configDir,
-  backupDir: config.backupDir,
-  restorer,
-  enqueue: worker.enqueue,
-  cancelJob: (id) => worker.cancel(id),
-  persist,
-  services: { queue, finder, poller, clients, importStatus },
-  indexers,
-  installUpdate: () => installUpdate(),
-  // The jobs stop before the files change. The ones that run finish first, so no import is cut in the middle.
-  pauseQueue: () => worker.drain(),
-  resumeQueue: () => worker.resume(),
-  // The files of the new version are in place. A clean stop saves the data, and Docker starts the process again.
-  restart: () => void shutdown('update'),
-}).listen(config.port, () => {
-  log.info('server listening', { port: config.port });
-});
+const servers: Server[] = [];
+function listen(app: ReturnType<typeof createApp>, port: number, name: string) {
+  const server = app.listen(port, () => {
+    log.info('server listening', { port, app: name });
+    // The log is a file, so the console shows where each app answers.
+    console.log(`${name[0]!.toUpperCase()}${name.slice(1)}  http://localhost:${port}${name === 'ladarr' ? config.urlBase : ''}`);
+  });
+  server.on('error', (error) => {
+    log.error('could not listen', { port, app: name, error });
+    void shutdown('listen');
+  });
+  servers.push(server);
+}
+
+listen(
+  createApp({
+    urlBase: config.urlBase,
+    events,
+    webDir: config.webDir,
+    devOrigin: config.devOrigin,
+    heartbeat: () => worker.heartbeat,
+    tmdb,
+    configDir: config.configDir,
+    backupDir: config.backupDir,
+    restorer,
+    enqueue: worker.enqueue,
+    cancelJob: (id) => worker.cancel(id),
+    persist,
+    services,
+    indexers,
+    installUpdate: () => installUpdate(),
+    // The jobs stop before the files change. The ones that run finish first, so no import is cut in the middle.
+    pauseQueue: () => worker.drain(),
+    resumeQueue: () => worker.resume(),
+    // The files of the new version are in place. A clean stop saves the data, and Docker starts the process again.
+    restart: () => void shutdown('update'),
+  }),
+  config.port,
+  'ladarr',
+);
+
+if (config.proxy) {
+  const deps = { restorer, tmdb, events, enqueue: worker.enqueue, services };
+  listen(sonarr({ ...deps, onChange: indexersChanged }), 8989, 'sonarr');
+  listen(radarr({ ...deps, onChange: indexersChanged }), 7878, 'radarr');
+  listen(seerr(deps), 5055, 'seerr');
+}
 
 let stopping = false;
 async function shutdown(signal: string) {
@@ -100,8 +133,10 @@ async function shutdown(signal: string) {
   stopping = true;
   log.info('server stopping', { signal });
   try {
-    server.close();
-    server.closeAllConnections();
+    for (const server of servers) {
+      server.close();
+      server.closeAllConnections();
+    }
     poller.stop();
     limiter.stop();
     // The worker aborts its jobs, waits for them, and saves the database.

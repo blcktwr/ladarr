@@ -11,20 +11,7 @@ export default defineConfig({
   // A fixed port, because other Vite apps use 5173. With strictPort, Vite stops if the port is busy and does not move to another one.
   server: {
     host: true,
-    port: 36590,
+    port: 3000,
     strictPort: true,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3000',
-        // The event stream has no end. When the server restarts, the proxy must end the answer of the browser too.
-        // Without this end, the page keeps a dead connection and shows no change until the person loads the page again.
-        configure: (proxy) =>
-          proxy.on('proxyRes', (proxyRes, _req, res) => {
-            proxyRes.on('close', () => {
-              if (!res.writableEnded) res.end();
-            });
-          }),
-      },
-    },
   },
 });

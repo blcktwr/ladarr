@@ -38,8 +38,8 @@ test('shows an item job with its time, its payload, and its actions', async ({ p
   await run.click();
   await expect.poll(async () => (await stack.call('GET', '/queue/jobs')).body.items[0].runAt).toBeLessThanOrEqual(Date.now());
 
-  // Remove takes the job out of the queue.
-  await panel.getByRole('button', { name: 'Remove Search Movie Name (2019) from the queue' }).click();
+  // Delete takes the job out of the queue.
+  await panel.getByRole('button', { name: 'Delete Search Movie Name (2019) from the queue' }).click();
   await expect.poll(async () => (await stack.call('GET', '/queue/jobs')).body.items.length).toBe(0);
   await expect(panel.getByText('No job is in the queue.')).toBeVisible();
 });

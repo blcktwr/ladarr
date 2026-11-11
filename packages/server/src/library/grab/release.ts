@@ -110,11 +110,25 @@ export function parseRelease(name: string): ParsedRelease {
   const resolutionAt = resolutionMatch ? at(resolutionMatch) : null;
   // The source marker comes after the resolution in a release name. A word of the title that looks like one, such as
   // "Web" in "Madame Web", stays in the title.
-  const sourceMatches = [...spaced.matchAll(/(?:^|[^a-z0-9])(web[ .-]?dl|web[ .-]?rip|webrip|web|blu[ .-]?ray|bdrip|brrip|bdremux|remux|hdtv|pdtv|dvdrip|dvd|hdcam|cam|hdts|telesync|ts|telecine|tc)(?![a-z0-9])/gi)];
-  const sourceMatch = (resolutionAt === null ? sourceMatches[0] : sourceMatches.find((match) => at(match) >= resolutionAt)) ?? sourceMatches[0];
-  const key = sourceMatch?.[1]!.toLowerCase().replace(/[ .-]/g, '');
+  const sourceMatches = [...spaced.matchAll(/(?:^|[^a-z0-9])(web[ .-]?dl|web[ .-]?rip|webrip|web|blu[ .-]?ray|bdremux|remux|bdrip|brrip|raw[ .-]?hd|hdtv|sdtv|pdtv|dvdrip|dvd|hdcam|cam|hdts|telesync|ts|telecine|tc)(?![a-z0-9])/gi)];
+  const keyOf = (match: RegExpMatchArray) => match[1]!.toLowerCase().replace(/[ .-]/g, '');
+  // The source marker comes after the resolution in a release name. A word of the title that looks like one, such as
+  // "Web" in "Madame Web", stays in the title. A remux or a raw capture wins over the BluRay or HDTV marker before it.
+  const after = resolutionAt === null ? sourceMatches : sourceMatches.filter((match) => at(match) >= resolutionAt);
+  const sourceMatch = after.find((match) => /^(bdremux|remux|rawhd)$/.test(keyOf(match))) ?? after[0] ?? sourceMatches[0];
+  const key = sourceMatch ? keyOf(sourceMatch) : undefined;
   const source: ReleaseSource =
-    key === 'webdl' || key === 'web' ? 'webdl' : key === 'webrip' ? 'webrip' : key && /^(bluray|bdrip|brrip|bdremux|remux)$/.test(key) ? 'bluray' : key === 'hdtv' || key === 'pdtv' ? 'hdtv' : key && /^(dvdrip|dvd)$/.test(key) ? 'dvd' : key && /^(hdcam|cam)$/.test(key) ? 'cam' : key && /^(hdts|telesync|ts|telecine|tc)$/.test(key) ? 'telesync' : 'unknown';
+    key === 'webdl' || key === 'web' ? 'webdl'
+    : key === 'webrip' ? 'webrip'
+    : key && /^(bdremux|remux)$/.test(key) ? 'remux'
+    : key && /^(bluray|bdrip|brrip)$/.test(key) ? 'bluray'
+    : key === 'rawhd' ? 'rawhd'
+    : key === 'hdtv' ? 'hdtv'
+    : key === 'sdtv' || key === 'pdtv' ? 'sdtv'
+    : key && /^(dvdrip|dvd)$/.test(key) ? 'dvd'
+    : key && /^(hdcam|cam)$/.test(key) ? 'cam'
+    : key && /^(hdts|telesync|ts|telecine|tc)$/.test(key) ? 'telesync'
+    : 'unknown';
   const qualityAt = Math.min(resolutionAt ?? Infinity, sourceMatch ? at(sourceMatch) : Infinity);
 
   // The year is the last year-like number before the first quality marker. A title can start with a number.

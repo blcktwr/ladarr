@@ -1,6 +1,6 @@
 import type { SeasonRow, TitleDetail } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import { profilesInOrder, type Db } from '../core/db.ts';
+import { type Db, db, profilesInOrder } from '../core/db.ts';
 import type { Events } from '../core/events.ts';
 import { loadingTitleKeys, queueKey, type QueueEntry } from '../library/downloads/queue.ts';
 import { clock, summarize } from '../library/tools/api.ts';
@@ -34,13 +34,13 @@ export const summaryOf = (value: unknown): { title: string; year: number | null;
   return { title: title.trim(), year, posterPath };
 };
 
-export const changed = async (db: Db, events: Events, key: string) => {
+export const changed = async (events: Events, key: string) => {
   await db.write();
   events.publish('library.changed', { key });
 };
 
 // A request for a key outside the library, or with a bad key, gets 404.
-export function titleParam(db: Db): RequestHandler<{ key: string }> {
+export function titleParam(): RequestHandler<{ key: string }> {
   return (req, res, next) => {
     const title = KEY.test(req.params.key) ? db.data.titles[req.params.key] : undefined;
     if (!title) return void res.status(404).json({ error: 'not_found' });
@@ -57,9 +57,9 @@ const statusKey = (entry: QueueEntry) => {
   return key === 'waiting' ? 'searching' : key;
 };
 
-function queueStatusOf(db: Db, titleKey: string) {
+function queueStatusOf(titleKey: string) {
   // A series is in the queue while its episodes load, before it has a target.
-  if (loadingTitleKeys(db).has(titleKey)) return 'searching';
+  if (loadingTitleKeys().has(titleKey)) return 'searching';
   const counts: Record<string, number> = {};
   for (const entry of Object.values(db.data.queue)) {
     if (entry.titleKey !== titleKey || entry.attempt === 0 || entry.clearedAt) continue;
@@ -69,8 +69,8 @@ function queueStatusOf(db: Db, titleKey: string) {
   return queueOrder.find((key) => counts[key]) ?? (counts.available ? 'available' : null);
 }
 
-export function detail(db: Db, title: Title): TitleDetail {
-  const at = clock(db);
+export function detail(title: Title): TitleDetail {
+  const at = clock();
   const { meta } = title;
   const seasons: SeasonRow[] = meta.seasons.map((season) => ({
     seasonNumber: season.seasonNumber,
@@ -79,10 +79,11 @@ export function detail(db: Db, title: Title): TitleDetail {
     override: title.seasonOverrides[season.seasonNumber] ?? null,
   }));
   return {
-    ...summarize(db, title),
-    queueStatus: queueStatusOf(db, title.key),
+    ...summarize(title),
+    queueStatus: queueStatusOf(title.key),
     overview: meta.overview,
     aliases: meta.aliases,
+    date: meta.date,
     rating: meta.rating,
     runtime: meta.runtime,
     imdbId: meta.imdbId,

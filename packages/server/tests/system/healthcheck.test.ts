@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
-import { openDb } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 
 const run = promisify(execFile);
 const script = fileURLToPath(new URL('../../src/system/healthcheck.ts', import.meta.url));
@@ -23,7 +23,8 @@ let close = () => {};
 afterEach(() => close());
 
 async function serve(heartbeat: () => number, urlBase?: string) {
-  const server = createApp(await openDb('unused.json'), { heartbeat, urlBase }).listen(0);
+  await open('unused.json');
+  const server = createApp({ heartbeat, urlBase }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   close = () => {
     server.closeAllConnections();

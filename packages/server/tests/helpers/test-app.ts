@@ -1,11 +1,12 @@
 import type { AddressInfo } from 'node:net';
 import { createApp } from '../../src/app.ts';
-import { openDb, type Db } from '../../src/core/db.ts';
+import { open, set, type Db } from '../../src/core/db.ts';
 
 // Starts the app on a free port with a signed-in owner. For tests only.
-export async function startTestApp(options: Parameters<typeof createApp>[1] = {}, existing?: Db) {
-  const db: Db = existing ?? (await openDb('unused.json'));
-  const server = createApp(db, options).listen(0);
+export async function startTestApp(options: Parameters<typeof createApp>[0] = {}, existing?: Db) {
+  const db: Db = existing ?? (await open('unused.json'));
+  set(db);
+  const server = createApp(options).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
 
@@ -18,6 +19,7 @@ export async function startTestApp(options: Parameters<typeof createApp>[1] = {}
   const { csrfToken } = await (await fetch(`${base}/auth/status`, { headers: { cookie } })).json();
 
   async function call(method: string, path: string, body?: unknown) {
+    set(db);
     const res = await fetch(`${base}${path}`, {
       method,
       headers: { cookie, 'x-csrf-token': csrfToken, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },

@@ -1,8 +1,8 @@
+import { db } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../../core/db.ts';
 
 // A profile that a title uses stays: the title would change its quality without a word. The chain keeps one profile.
-export function qualityProfileDelete(db: Db): RequestHandler<{ id: string }> {
+export function qualityProfileDelete(): RequestHandler<{ id: string }> {
   return async (req, res) => {
     const id = req.params.id;
     if (!Object.hasOwn(db.data.profiles, id)) return void res.status(404).json({ error: 'not_found' });

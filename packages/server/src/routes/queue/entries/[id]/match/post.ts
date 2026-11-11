@@ -1,7 +1,7 @@
+import { db } from '../../../../../core/db.ts';
 import type { QueueMatchPreview } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import type { Finder } from '../../../../../library/grab/finder.ts';
-import type { Db } from '../../../../../core/db.ts';
 import type { EnqueueInput, Job } from '../../../../../core/jobs.ts';
 import type { Clients } from '../../../../../library/downloads/client-api.ts';
 import { ClientError } from '../../../../../library/downloads/qbittorrent.ts';
@@ -11,20 +11,20 @@ import { listDownloadFiles } from '../../../../../library/imports/importer.ts';
 import { label, shown } from '../../../../../helpers/queue.ts';
 
 // Matches a file of the download to the target, or to several episodes. The match stays through every retry.
-export function queueEntryMatchPost(db: Db, queue: Queue, finder: Finder, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler<{ id: string }> {
-  const { retry } = createRetry({ db, queue, finder, enqueue });
+export function queueEntryMatchPost(queue: Queue, finder: Finder, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler<{ id: string }> {
+  const { retry } = createRetry({ queue, finder, enqueue });
   return async (req, res) => {
     const entry = db.data.queue[req.params.id];
     const handle = clients.get(entry?.clientId);
     const { file, covers, preview } = (req.body ?? {}) as { file?: unknown; covers?: unknown; preview?: boolean };
-    if (!entry?.transferHash || !shown(db, entry)) return void res.status(404).json({ error: 'not_found' });
+    if (!entry?.transferHash || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
     if (!handle) return void res.status(409).json({ error: 'client_missing' });
     if (typeof file !== 'string') return void res.status(400).json({ error: 'invalid_request' });
     const files = await listDownloadFiles(handle, entry.transferHash).catch(() => undefined);
     // The file must be one that the download has. The path comes from the user, so it is never used as it is.
     if (!files?.some((item) => item.rel === file)) return void res.status(400).json({ error: 'file_not_in_download' });
 
-    const group = sharingOf(db, entry);
+    const group = sharingOf(entry);
     let covered: QueueEntry[] = [entry];
     if (covers !== undefined) {
       const list = covers as Covered[];
@@ -39,10 +39,10 @@ export function queueEntryMatchPost(db: Db, queue: Queue, finder: Finder, client
     const preview_: QueueMatchPreview = {
       file,
       // The file that each target has now, so the preview shows every association that changes.
-      affected: covered.map((other) => ({ id: other.id, label: label(db, other), current: other.manualMatch?.file ?? null })),
-      replaces: taken.map((other) => ({ id: other.id, label: label(db, other) })),
+      affected: covered.map((other) => ({ id: other.id, label: label(other), current: other.manualMatch?.file ?? null })),
+      replaces: taken.map((other) => ({ id: other.id, label: label(other) })),
       // A target that waits for a repair starts its import again.
-      retries: covered.filter((other) => other.reason !== null && (other.stage === 'validating' || other.stage === 'importing')).map((other) => ({ id: other.id, label: label(db, other) })),
+      retries: covered.filter((other) => other.reason !== null && (other.stage === 'validating' || other.stage === 'importing')).map((other) => ({ id: other.id, label: label(other) })),
     };
     if (preview) return void res.json(preview_);
 

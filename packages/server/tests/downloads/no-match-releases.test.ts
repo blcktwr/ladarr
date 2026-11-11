@@ -13,6 +13,7 @@ afterEach(async () => {
 const LOW = 'Movie.Name.2019.720p.BluRay.x264-LOW';
 const WRONG = 'Other.Movie.2019.1080p.BluRay-WRONG';
 const BLOCKED = 'Movie.Name.2019.720p.BluRay-BLOCKED';
+const TINY = 'Movie.Name.2019.1080p.WEB-DL-TINY';
 const LOW_SIZE = 60 * 100 * MIB;
 const film = () => movie({ rootId: 'movie', manualRelease: true });
 
@@ -20,6 +21,8 @@ const film = () => movie({ rootId: 'movie', manualRelease: true });
 async function rejectedFilm(items: { title: string; size: number }[]) {
   pipe = await startPipeline();
   api = await pipe.api();
+  // A movie has no size limit by default, so the search would take the TINY release. The test sets a limit to reject it.
+  pipe.db.data.qualitySizes.movie['webdl-1080'] = { min: 12.5, preferred: null, max: null };
   const m = film();
   pipe.db.data.titles[m.key] = m;
   pipe.tracker.state.items = items;
@@ -34,6 +37,7 @@ describe('the rejected releases of a search with no match', () => {
     const { entry, detail } = await rejectedFilm([
       { title: LOW, size: LOW_SIZE },
       { title: WRONG, size: 100 * 120 * MIB },
+      { title: TINY, size: 10 * MIB },
     ]);
 
     const view = await detail();
@@ -56,6 +60,12 @@ describe('the rejected releases of a search with no match', () => {
     expect(item).not.toHaveProperty('link');
     expect(item).not.toHaveProperty('magnet');
     expect(item).not.toHaveProperty('infoHash');
+    // The size check of the quality did not stop this release, so the list has no numbers for it.
+    expect(item.sizeRejection).toBeNull();
+    // A 1080p WEB-DL of 10 MiB is 0.1 MiB/min for the 100 minutes of the movie, below the 12.5 MiB/min of the quality.
+    // The list carries the numbers of the check, so the row can show why the file size did not fit.
+    const tiny = view.search.rejected.find((release: { title: string }) => release.title === TINY);
+    expect(tiny.sizeRejection).toEqual({ code: 'size_below_min', value: 0.1, limit: 12.5 });
     // A release of another title breaks a safety check, so a manual grab cannot take it. The list still shows it,
     // with the reason that stopped it, and says that it is not grabbable.
     const wrong = view.search.rejected.find((release: { title: string }) => release.title === WRONG);

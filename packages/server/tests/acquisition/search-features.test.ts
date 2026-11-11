@@ -50,7 +50,7 @@ describe('upgrades', () => {
 
   it('previews the files below the chosen resolution, and starts the search', async () => {
     // The file is 720p, so the 1080p release is the chosen upgrade.
-    const { film } = await libraryWithFile('webdl', { handlers: ({ db, finder }) => ({ [BULK_SEARCH_JOB]: librarySearchHandler({ db, finder, enqueue: (input) => enqueue(db, input) }) }) }, 720);
+    const { film } = await libraryWithFile('webdl', { handlers: ({ db, finder }) => ({ [BULK_SEARCH_JOB]: librarySearchHandler({ finder, enqueue: (input) => enqueue(input) }) }) }, 720);
     pipe!.tracker.state.items = [{ title: WEBDL, size: webdlSize }];
     api = await pipe!.api();
 
@@ -95,7 +95,7 @@ describe('upgrades', () => {
     ['higher', 'Movie.Name.2019.2160p.WEB-DL-GRP', 100 * 150 * MIB],
     ['lower', 'Movie.Name.2019.480p.WEB-DL-GRP', 100 * 30 * MIB],
   ])('does not take a %s resolution than the chosen one', async (_name, name, size) => {
-    const { film } = await libraryWithFile('webdl', { handlers: ({ db, finder }) => ({ [BULK_SEARCH_JOB]: librarySearchHandler({ db, finder, enqueue: (input) => enqueue(db, input) }) }) }, 720);
+    const { film } = await libraryWithFile('webdl', { handlers: ({ db, finder }) => ({ [BULK_SEARCH_JOB]: librarySearchHandler({ finder, enqueue: (input) => enqueue(input) }) }) }, 720);
     // The chain takes every WEB-DL resolution, so the release has a known quality.
     pipe!.db.data.profiles = { p: { id: 'p', name: 'All', items: [['webdl-2160'], ['webdl-1080'], ['webdl-720'], ['webdl-480']] } };
     pipe!.db.data.profileOrder = ['p'];

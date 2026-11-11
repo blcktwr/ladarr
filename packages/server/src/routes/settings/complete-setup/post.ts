@@ -1,8 +1,8 @@
+import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 
 // The setup ends when both default folders exist. No download can start before that.
-export function settingsCompleteSetup(db: Db): RequestHandler {
+export function settingsCompleteSetup(): RequestHandler {
   return async (_req, res) => {
     const { defaultRoots } = db.data.settings;
     if (!defaultRoots.movie || !defaultRoots.tv) return void res.status(400).json({ error: 'roots_required' });

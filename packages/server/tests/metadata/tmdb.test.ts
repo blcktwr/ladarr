@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../src/app.ts';
-import { openDb } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
 import { createTmdb, TmdbError } from '../../src/metadata/tmdb.ts';
 
@@ -304,8 +304,8 @@ describe('search route', () => {
   });
 
   beforeAll(async () => {
-    const db = await openDb('unused.json');
-    const server = createApp(db, { tmdb: client(send) }).listen(0);
+    const db = await open('unused.json');
+    const server = createApp({ tmdb: client(send) }).listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
     close = () => server.close();
@@ -329,11 +329,11 @@ describe('search route', () => {
     expect(body.results).toMatchObject([{ mediaType: 'movie', tmdbId: 603, year: 1999 }]);
   });
 
-  it('shows the oldest title first, and a title with no year last', async () => {
+  it('shows the newest title first, and a title with no year last', async () => {
     const { body } = await search('many');
     expect(body.results.map((result: { title: string; year: number | null }) => [result.title, result.year])).toEqual([
-      ['Old', 1980],
       ['New', 2024],
+      ['Old', 1980],
       ['Undated', null],
     ]);
   });
@@ -357,8 +357,8 @@ describe('search route', () => {
 
 describe('without a TMDB client', () => {
   it('reports the missing provider and refuses to search', async () => {
-    const db = await openDb('unused.json');
-    const server = createApp(db).listen(0);
+    const db = await open('unused.json');
+    const server = createApp().listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
     try {

@@ -1,4 +1,4 @@
-import { profilesFor, type Data, type Settings } from '../../core/db.ts';
+import { type Data, type Settings, db, profilesFor } from '../../core/db.ts';
 import type { Indexer } from './indexers.ts';
 import { isMonitored, type Episode, type Title } from '../library.ts';
 import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE, type Profile, type SizeLimits } from './quality.ts';
@@ -85,9 +85,9 @@ export function titleMatches(parsedTitle: string, title: Title) {
   return wanted !== '' && alias(title).includes(wanted);
 }
 
-const episodeAired = (title: Title, episode: Episode, ctx: Pick<Context, 'settings' | 'now'>) => {
-  const at = episodeEligibleAt(episode.airDate, ctx.settings.timeZone);
-  return at !== null && at <= ctx.now;
+const episodeAired = (episode: Episode, now: number) => {
+  const at = episodeEligibleAt(episode.airDate);
+  return at !== null && at <= now;
 };
 
 export function decide(release: RawRelease, want: Want, ctx: Context): Decision {
@@ -136,7 +136,7 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
       const inSeason = title.episodes.filter((episode) => episode.season === want.season);
       covers = inSeason.map((episode) => ({ season: episode.season, number: episode.number }));
       // A pack must not bring back an episode that the user has, or one that the user did not ask for.
-      const unwanted = inSeason.some((episode) => episodeAired(title, episode, ctx) && (!isMonitored(title, episode, ctx.settings) || ctx.hasFile(episode)));
+      const unwanted = inSeason.some((episode) => episodeAired(episode, ctx.now) && (!isMonitored(title, episode) || ctx.hasFile(episode)));
       if (unwanted && !ctx.manual) reject('pack_has_unwanted_episodes');
       if (!inSeason.length) reject('wrong_season');
     }
@@ -153,7 +153,9 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
         : covers.map((c) => runtimeOf(title.episodes.find((e) => e.season === c.season && e.number === c.number)));
   const runtimeMinutes = runtimes.length && runtimes.every((value): value is number => typeof value === 'number' && value > 0) ? runtimes.reduce((sum, value) => sum + value, 0) : null;
   const audio = parsed.audioLanguages?.filter((language) => language !== 'multi') ?? null;
-  const quality = evaluateChain(profiles, ctx.quality.qualitySizes, { source: parsed.source, resolution: parsed.resolution, sizeBytes: release.sizeBytes, audioLanguages: audio?.length ? audio : null }, { runtimeMinutes, audio: ctx.settings.audio });
+  // A movie and an episode check their size against different tables.
+  const sizes = want.kind === 'movie' ? ctx.quality.qualitySizes.movie : ctx.quality.qualitySizes.tv;
+  const quality = evaluateChain(profiles, sizes, { source: parsed.source, resolution: parsed.resolution, sizeBytes: release.sizeBytes, audioLanguages: audio?.length ? audio : null }, { runtimeMinutes, audio: ctx.settings.audio });
   // A manual choice may skip the preferences of the profile. It does not skip a camera copy of unknown source: the user sees the warning.
   if (!ctx.manual) rejections.push(...quality.rejections);
 

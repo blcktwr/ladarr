@@ -1,5 +1,5 @@
 import { claim, complete, enqueue, fail, recoverExpired, release, renew, type EnqueueInput, type Job } from './jobs.ts';
-import type { Db } from './db.ts';
+import { db } from './db.ts';
 import { log } from './log.ts';
 import { withOutboundRequests } from './outbound.ts';
 
@@ -23,7 +23,6 @@ type Options = { tickMs?: number; leaseMs?: number; concurrency?: number; graceM
 const queueWork = (type: string) => (type.startsWith('queue.') && type !== 'queue.initial') || type === 'import.run';
 
 export function createWorker(
-  db: Db,
   save: () => Promise<void>,
   handlers: Record<string, Handler>,
   { tickMs = 1_000, leaseMs = 60_000, concurrency = 4, graceMs = 10_000 }: Options = {},
@@ -42,15 +41,15 @@ export function createWorker(
   function finish(job: Job, token: string, controller: AbortController, outcome: { error: unknown } | null) {
     const now = Date.now();
     let final = true;
-    if (!outcome) complete(db, job.id, token);
+    if (!outcome) complete(job.id, token);
     else if (controller.signal.aborted) {
-      release(db, job.id, token);
+      release(job.id, token);
       final = false;
     } else {
-      final = fail(db, job.id, token, outcome.error, now, maxAttempts(job.type)) === 'failed';
+      final = fail(job.id, token, outcome.error, now, maxAttempts(job.type)) === 'failed';
     }
     const every = handlers[job.type]?.every;
-    if (final && every && !stopping) enqueue(db, { type: job.type, dedupeKey: job.type, runAt: now + every });
+    if (final && every && !stopping) enqueue({ type: job.type, dedupeKey: job.type, runAt: now + every });
   }
 
   function start(job: Job) {
@@ -76,14 +75,14 @@ export function createWorker(
     lastTick = Date.now();
     if (paused) return;
     const now = Date.now();
-    let changed = recoverExpired(db, now, maxAttempts) > 0;
+    let changed = recoverExpired(now, maxAttempts) > 0;
     const shared = () => [...inflight.values()].filter((entry) => !handlers[entry.job.type]?.separate).length;
     const canStart = (job: Job) => {
       const handler = handlers[job.type];
       return Boolean(handler) && running(job.type) < (handler!.concurrency ?? 1) && (handler!.canStart?.(job) ?? true) && (handler!.separate || shared() < concurrency) && (!db.data.queuePaused || !queueWork(job.type));
     };
     // Each claim fills a slot, so the loop ends.
-    for (let job = claim(db, now, leaseMs, canStart); job; job = claim(db, now, leaseMs, canStart)) {
+    for (let job = claim(now, leaseMs, canStart); job; job = claim(now, leaseMs, canStart)) {
       start(job);
       changed = true;
     }
@@ -93,7 +92,7 @@ export function createWorker(
   // A job of each periodic type must wait in the data. A start or a resume makes sure of that.
   function schedulePeriodic() {
     for (const [type, handler] of Object.entries(handlers)) {
-      if (handler.every) enqueue(db, { type, dedupeKey: type });
+      if (handler.every) enqueue({ type, dedupeKey: type });
     }
     persist();
   }
@@ -109,12 +108,12 @@ export function createWorker(
       tick();
       tickTimer = setInterval(tick, tickMs);
       leaseTimer = setInterval(() => {
-        for (const { job, token } of inflight.values()) renew(db, job.id, token, Date.now(), leaseMs);
+        for (const { job, token } of inflight.values()) renew(job.id, token, Date.now(), leaseMs);
       }, leaseMs / 3);
     },
 
     enqueue(input: EnqueueInput) {
-      const job = enqueue(db, input);
+      const job = enqueue(input);
       persist();
       setImmediate(tick);
       return job;

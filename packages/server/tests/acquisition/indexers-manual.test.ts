@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { openDb } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { createLimiter } from '../../src/core/limiter.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { createIndexerService } from '../../src/library/grab/torznab.ts';
@@ -22,8 +22,8 @@ const fake = (async (input: URL | string) => {
 const body = (overrides: Record<string, unknown> = {}) => ({ name: 'Tracker', type: 'torznab', baseUrl: 'http://127.0.0.1:9/1/', apiKey: 'good', ...overrides });
 
 beforeAll(async () => {
-  const db = await openDb('unused.json');
-  app = await startTestApp({ indexers: createIndexerService(db, createLimiter(db), { fetch: fake }) }, db);
+  const db = await open('unused.json');
+  app = await startTestApp({ indexers: createIndexerService(createLimiter(), { fetch: fake }) }, db);
 });
 afterAll(() => app.close());
 

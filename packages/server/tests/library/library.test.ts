@@ -13,7 +13,7 @@ import { createTmdb } from '../../src/metadata/tmdb.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 
 const NOW = Date.UTC(2024, 5, 1);
-const clock = { now: NOW, timeZone: 'UTC', region: 'US', files: { f: { missing: false }, both: { missing: false } } };
+const clock = { now: NOW, files: { f: { missing: false }, both: { missing: false } } };
 
 const episode = (season: number, number: number, airDate: string | null, extra: Partial<Episode> = {}): Episode => ({
   tmdbId: season * 100 + number,
@@ -58,19 +58,19 @@ describe('monitoring', () => {
 
   it('monitors every regular episode with the All policy, but not specials', () => {
     const show = title({ policy: 'all' });
-    expect([past, today, later, unknown, special].map((e) => isMonitored(show, e, clock))).toEqual([true, true, true, true, false]);
+    expect([past, today, later, unknown, special].map((e) => isMonitored(show, e))).toEqual([true, true, true, true, false]);
   });
 
   it('monitors only episodes that air from the boundary with the Future policy', () => {
     const show = title({ policy: 'future', futureFrom: NOW });
-    expect([past, today, later, unknown].map((e) => isMonitored(show, e, clock))).toEqual([false, true, true, true]);
+    expect([past, today, later, unknown].map((e) => isMonitored(show, e))).toEqual([false, true, true, true]);
   });
 
   it('lets an episode choice beat a season choice, and a season choice beat the policy', () => {
     const show = title({ policy: 'future', futureFrom: NOW, seasonOverrides: { 1: 'monitored' } });
-    expect(isMonitored(show, past, clock)).toBe(true);
-    expect(isMonitored(show, { ...past, override: 'unmonitored' }, clock)).toBe(false);
-    expect(isMonitored(title({ seasonOverrides: { 0: 'monitored' } }), special, clock)).toBe(true);
+    expect(isMonitored(show, past)).toBe(true);
+    expect(isMonitored(show, { ...past, override: 'unmonitored' })).toBe(false);
+    expect(isMonitored(title({ seasonOverrides: { 0: 'monitored' } }), special)).toBe(true);
   });
 });
 
@@ -106,14 +106,14 @@ describe('movie availability', () => {
     expect(availability(movie([{ region: 'US', kind: 'theatrical', date: '2020-01-01T00:00:00.000Z' }]), clock)).toBe('waiting');
   });
 
-  it('uses a past digital or physical date in the region', () => {
+  it('uses a past digital or physical date in any region', () => {
     expect(availability(movie([{ region: 'US', kind: 'digital', date: '2020-07-15T00:00:00.000Z' }]), clock)).toBe('missing');
     expect(availability(movie([{ region: 'US', kind: 'physical', date: '2020-07-15T00:00:00.000Z' }]), clock)).toBe('missing');
   });
 
-  it('waits for a future date, a date in another region, and no date', () => {
+  it('waits for a future date and no date', () => {
     expect(availability(movie([{ region: 'US', kind: 'digital', date: '2999-01-01T00:00:00.000Z' }]), clock)).toBe('waiting');
-    expect(availability(movie([{ region: 'GB', kind: 'digital', date: '2020-01-01T00:00:00.000Z' }]), clock)).toBe('waiting');
+    expect(availability(movie([{ region: 'GB', kind: 'digital', date: '2020-01-01T00:00:00.000Z' }]), clock)).toBe('missing');
     expect(availability(movie([]), clock)).toBe('waiting');
   });
 
@@ -201,7 +201,7 @@ describe('library API', () => {
     const tmdb = createTmdb({ apiKey: 'k', fetch: fakeFetch, baseUrl: 'https://tmdb.test/3', spacingMs: 0, ttlMs: 0 });
     const events = createEvents();
     app = await startTestApp({ tmdb, events });
-    const handler = metadataRefreshHandler({ db: app.db, tmdb, events });
+    const handler = metadataRefreshHandler({ tmdb, events });
     refresh = (key) => handler.run({ payload: { key } } as never, { signal: new AbortController().signal });
   });
   afterAll(() => {
@@ -342,7 +342,7 @@ describe('library API', () => {
     // The user chose season 1, so its old episodes are monitored. The old episodes of season 2 are not.
     await refresh('tv:2000');
     const title = app.db.data.titles['tv:2000']!;
-    expect(title.episodes.map((e) => [e.season, e.number, isMonitored(title, e, clock)])).toEqual([
+    expect(title.episodes.map((e) => [e.season, e.number, isMonitored(title, e)])).toEqual([
       [1, 1, true],
       [1, 2, true],
       [2, 1, false],
@@ -354,12 +354,12 @@ describe('library API', () => {
   it('starts a re-added series with an empty queue', async () => {
     const body = { mediaType: 'tv', tmdbId: 2000, add: 'future', seasonOverrides: { 1: 'monitored' } };
     expect((await app.post('/library', body)).status).toBe(201);
-    const queue = createQueue(app.db, createEvents(), () => {});
+    const queue = createQueue(createEvents(), () => {});
     const old = queue.ensure('tv:2000', 2, 1);
     queue.request(old, 'test');
     queue.endAttempt(old, 'cancelled');
     queue.move(old, { branch: 'cancelled', reason: null }, 'title removed');
-    const job = enqueue(app.db, { type: 'queue.search', payload: { titleKey: 'tv:2000', season: 2, entryIds: [old.id] }, dedupeKey: 'search:tv:2000:2:tv:2000:2x1' });
+    const job = enqueue({ type: 'queue.search', payload: { titleKey: 'tv:2000', season: 2, entryIds: [old.id] }, dedupeKey: 'search:tv:2000:2:tv:2000:2x1' });
 
     await app.del('/library/tv:2000');
     expect((await app.post('/library', body)).status).toBe(201);

@@ -1,5 +1,5 @@
 import type { Response } from 'express';
-import type { Db } from '../core/db.ts';
+import { type Db, db } from '../core/db.ts';
 import type { NamingTemplates } from '../library/naming.ts';
 import { templateProblem } from '../library/naming.ts';
 import { PlanError } from '../library/imports/plan.ts';
@@ -14,7 +14,7 @@ export function fail(res: Response, error: unknown) {
 }
 
 // The templates of the request, or the saved ones. A template that is not valid never reaches the plan.
-export function templatesOf(db: Db, body: Record<string, unknown>): NamingTemplates | { invalid: string } {
+export function templatesOf(body: Record<string, unknown>): NamingTemplates | { invalid: string } {
   if (body.movie === undefined && body.episode === undefined) return db.data.settings.naming;
   const next = { movie: body.movie, episode: body.episode };
   for (const kind of ['movie', 'episode'] as const) if (templateProblem(kind, next[kind])) return { invalid: kind };

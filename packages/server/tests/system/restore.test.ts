@@ -11,7 +11,7 @@ import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createBackup, listBackups, readBackup } from '../../src/system/backup.ts';
-import { emptyData, openDb, SCHEMA_VERSION, type Data } from '../../src/core/db.ts';
+import { emptyData, open, SCHEMA_VERSION, set, type Data } from '../../src/core/db.ts';
 import type { EnqueueInput } from '../../src/core/jobs.ts';
 import { createRestorer, MAX_UPLOAD_BYTES, restoreGate } from '../../src/system/restore.ts';
 import { startTestApp } from '../helpers/test-app.ts';
@@ -49,26 +49,26 @@ describe('restore through the API', () => {
   const start = async (pause?: () => Promise<boolean>) => {
     backupDir = fresh();
     worker = fakeWorker(pause);
-    const db = await openDb('unused.json');
-    app = await startTestApp({ backupDir, restorer: createRestorer({ db, dir: backupDir, worker }) }, db);
+    const db = await open('unused.json');
+    app = await startTestApp({ backupDir, restorer: createRestorer({ dir: backupDir, worker }) }, db);
     return db;
   };
   afterEach(() => app?.close());
 
   it('replaces the data with the backup, makes a safety backup, and ends the sessions', async () => {
     const db = await start();
-    db.data.settings.region = 'FR';
+    db.data.settings.naming.movie = 'FR';
     db.data.blocklist = { a: { title: 'Kept', reason: 'bad', at: 1 } };
     const apiKey = db.data.apiKey;
     const { backup } = (await app.post('/backups')).body;
 
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
     db.data.blocklist = {};
     db.data.apiKey = 'changed after the backup';
 
     const res = await app.post(`/backups/${backup.name}/restore`);
     expect(res.status).toBe(200);
-    expect(db.data.settings.region).toBe('FR');
+    expect(db.data.settings.naming.movie).toBe('FR');
     expect(db.data.blocklist).toEqual({ a: { title: 'Kept', reason: 'bad', at: 1 } });
     expect(db.data.apiKey).toBe(apiKey);
     expect(db.data.sessions).toEqual({});
@@ -79,7 +79,7 @@ describe('restore through the API', () => {
     const safety = (await listBackups(backupDir)).find((item) => item.kind === 'safety')!;
     expect(safety.name).toBe(res.body.safetyBackup);
     const saved = await readBackup(readFileSync(join(backupDir, safety.name)));
-    expect(saved.data.settings.region).toBe('DE');
+    expect(saved.data.settings.naming.movie).toBe('DE');
     expect(saved.data.apiKey).toBe('changed after the backup');
     // The worker stopped before the safety backup and runs again after the restore.
     expect(worker.calls).toMatchObject({ pause: 1, resume: 1 });
@@ -94,28 +94,28 @@ describe('restore through the API', () => {
 
   it('restores a backup file that is not in the backup folder', async () => {
     const db = await start();
-    db.data.settings.region = 'FR';
+    db.data.settings.naming.movie = 'FR';
     const { backup } = (await app.post('/backups')).body;
     // The file comes from another machine: the folder does not have it.
     const bytes = readFileSync(join(backupDir, backup.name));
     rmSync(join(backupDir, backup.name));
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
 
     const res = await upload(bytes);
     expect(res.status).toBe(200);
-    expect(db.data.settings.region).toBe('FR');
+    expect(db.data.settings.naming.movie).toBe('FR');
     expect(db.data.sessions).toEqual({});
     // The safety backup holds the data from before the restore, and the sent file is not kept in the folder.
     const kept = await listBackups(backupDir);
     expect(kept.map((item) => item.kind)).toEqual(['safety']);
     expect(kept[0]!.name).toBe(res.body.safetyBackup);
-    expect((await readBackup(readFileSync(join(backupDir, kept[0]!.name)))).data.settings.region).toBe('DE');
+    expect((await readBackup(readFileSync(join(backupDir, kept[0]!.name)))).data.settings.naming.movie).toBe('DE');
     expect(worker.calls).toMatchObject({ pause: 1, resume: 1 });
   });
 
   it('changes nothing when the file is not a backup, is damaged, or comes from a newer version', async () => {
     const db = await start();
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
     const { backup } = (await app.post('/backups')).body;
     const bytes = readFileSync(join(backupDir, backup.name));
     const files = unzipSync(bytes);
@@ -127,7 +127,7 @@ describe('restore through the API', () => {
     expect(await upload(newer)).toMatchObject({ status: 422, body: { error: 'unsupported_schema' } });
     expect(await upload(new Uint8Array())).toMatchObject({ status: 400, body: { error: 'invalid_archive' } });
     expect(await upload(bytes, 'text/plain')).toMatchObject({ status: 400, body: { error: 'invalid_archive' } });
-    expect(db.data.settings.region).toBe('DE');
+    expect(db.data.settings.naming.movie).toBe('DE');
     // Nothing was written, so the worker did not stop and no safety backup exists.
     expect(worker.calls).toMatchObject({ pause: 0, resume: 0 });
     expect((await listBackups(backupDir)).map((item) => item.kind)).toEqual(['manual']);
@@ -182,14 +182,14 @@ describe('restore through the API', () => {
     const files = unzipSync(readFileSync(join(backupDir, backup.name)));
     const badName = 'ladarr-manual-20200101T000000000Z.zip';
     writeFileSync(join(backupDir, badName), build(files));
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
     const before = db.data;
 
     const res = await app.post(`/backups/${badName}/restore`);
     expect(res.status).toBe(422);
     expect(res.body.error).toBe(code);
     expect(db.data).toBe(before);
-    expect(db.data.settings.region).toBe('DE');
+    expect(db.data.settings.naming.movie).toBe('DE');
     expect((await app.get('/backups')).status).toBe(200);
     expect((await listBackups(backupDir)).some((item) => item.kind === 'safety')).toBe(false);
     expect(worker.calls.pause).toBe(0);
@@ -233,23 +233,23 @@ describe('restore through the API', () => {
   it('does not restore for the API key, only for a session', async () => {
     const db = await start();
     const { backup } = (await app.post('/backups')).body;
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
     const res = await fetch(`${app.base}/backups/${backup.name}/restore`, { method: 'POST', headers: { 'x-api-key': db.data.apiKey! } });
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'session_required' });
-    expect(db.data.settings.region).toBe('DE');
+    expect(db.data.settings.naming.movie).toBe('DE');
   });
 
   it('changes nothing when a job does not stop', async () => {
     const db = await start(async () => false);
     const { backup } = (await app.post('/backups')).body;
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
     const before = db.data;
 
     const res = await app.post(`/backups/${backup.name}/restore`);
     expect(res).toMatchObject({ status: 409, body: { error: 'worker_busy' } });
     expect(db.data).toBe(before);
-    expect(db.data.settings.region).toBe('DE');
+    expect(db.data.settings.naming.movie).toBe('DE');
     expect(worker.calls.resume).toBe(1);
     expect((await listBackups(backupDir)).some((item) => item.kind === 'safety')).toBe(false);
   });
@@ -257,7 +257,7 @@ describe('restore through the API', () => {
   it('keeps the data and starts the worker again when the file can not be written', async () => {
     const db = await start();
     const { backup } = (await app.post('/backups')).body;
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
     const before = db.data;
     db.write = async () => {
       throw new Error('disk full');
@@ -266,7 +266,7 @@ describe('restore through the API', () => {
     const res = await app.post(`/backups/${backup.name}/restore`);
     expect(res.status).toBe(500);
     expect(db.data).toBe(before);
-    expect(db.data.settings.region).toBe('DE');
+    expect(db.data.settings.naming.movie).toBe('DE');
     expect(worker.calls.resume).toBe(1);
     // The gate opens again.
     expect((await app.post('/backups')).status).toBe(201);
@@ -276,7 +276,7 @@ describe('restore through the API', () => {
     let release!: (idle: boolean) => void;
     const db = await start(() => new Promise<boolean>((resolve) => (release = resolve)));
     const { backup } = (await app.post('/backups')).body;
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
 
     const running = app.post(`/backups/${backup.name}/restore`);
     await until(() => worker.calls.pause === 1);
@@ -288,11 +288,11 @@ describe('restore through the API', () => {
     expect(sync.status).toBe(503);
     expect((await app.get('/backups')).status).toBe(200);
     // Nothing was written yet.
-    expect(db.data.settings.region).toBe('DE');
+    expect(db.data.settings.naming.movie).toBe('DE');
 
     release(true);
     expect((await running).status).toBe(200);
-    expect(db.data.settings.region).toBe('US');
+    expect(db.data.settings.naming.movie).toBe('{title} ({year})');
     expect(worker.calls.pause).toBe(1);
   });
 
@@ -318,10 +318,10 @@ describe('restore through the API', () => {
 describe('requests that change data', () => {
   const setup = async (drainMs?: number) => {
     const backupDir = fresh();
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     const worker = fakeWorker();
-    const restorer = createRestorer({ db, dir: backupDir, worker, drainMs });
-    const { name } = await createBackup(db, backupDir, 'manual');
+    const restorer = createRestorer({ dir: backupDir, worker, drainMs });
+    const { name } = await createBackup(backupDir, 'manual');
     return { db, worker, restorer, name };
   };
   const response = () => new EventEmitter() as unknown as Response;
@@ -330,25 +330,25 @@ describe('requests that change data', () => {
     const { db, worker, restorer, name } = await setup();
     const pending = response();
     restorer.track(pending);
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
 
     const done = restorer.restore(name);
     await sleep(80);
     expect(worker.calls.pause).toBe(0);
-    expect(db.data.settings.region).toBe('DE');
+    expect(db.data.settings.naming.movie).toBe('DE');
 
     pending.emit('close');
     await done;
-    expect(db.data.settings.region).toBe('US');
+    expect(db.data.settings.naming.movie).toBe('{title} ({year})');
   });
 
   it('stop the restore when one does not end, and the data stays', async () => {
     const { db, worker, restorer, name } = await setup(60);
     restorer.track(response());
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
 
     await expect(restorer.restore(name)).rejects.toMatchObject({ code: 'requests_busy' });
-    expect(db.data.settings.region).toBe('DE');
+    expect(db.data.settings.naming.movie).toBe('DE');
     expect(worker.calls.pause).toBe(0);
     expect(restorer.busy()).toBe(false);
   });
@@ -367,32 +367,33 @@ describe('the file on the disk', () => {
     const backupDir = fresh();
     const file = join(fresh(), 'db.json');
     const db = new Low<Data>(new JSONFile<Data>(file), emptyData());
-    db.data.settings.region = 'FR';
+    set(db);
+    db.data.settings.naming.movie = 'FR';
     await db.write();
     const worker = fakeWorker();
-    const restorer = createRestorer({ db, dir: backupDir, worker });
-    const { name } = await createBackup(db, backupDir, 'manual');
+    const restorer = createRestorer({ dir: backupDir, worker });
+    const { name } = await createBackup(backupDir, 'manual');
 
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
     await db.write();
     await restorer.restore(name);
-    expect(JSON.parse(readFileSync(file, 'utf8')).settings.region).toBe('FR');
+    expect(JSON.parse(readFileSync(file, 'utf8')).settings.naming.movie).toBe('FR');
     expect(readdirSync(join(file, '..'))).toEqual(['db.json']);
 
     // A failed write: the file keeps the old data, and so does the memory.
-    db.data.settings.region = 'DE';
+    db.data.settings.naming.movie = 'DE';
     await db.write();
     db.adapter.write = async () => {
       throw new Error('disk full');
     };
     await expect(restorer.restore(name)).rejects.toThrow('disk full');
-    expect(db.data.settings.region).toBe('DE');
-    expect(JSON.parse(readFileSync(file, 'utf8')).settings.region).toBe('DE');
+    expect(db.data.settings.naming.movie).toBe('DE');
+    expect(JSON.parse(readFileSync(file, 'utf8')).settings.naming.movie).toBe('DE');
   });
 
   it('fills a collection that an older backup lacks', async () => {
     const backupDir = fresh();
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     const old: Partial<Data> = { ...emptyData() };
     delete old.blocklist;
     const json = strToU8(JSON.stringify(old));
@@ -400,15 +401,15 @@ describe('the file on the disk', () => {
     const name = 'ladarr-manual-20200101T000000000Z.zip';
     writeFileSync(join(backupDir, name), zipSync({ 'manifest.json': strToU8(JSON.stringify(manifest)), 'db.json': json }));
 
-    await createRestorer({ db, dir: backupDir, worker: fakeWorker() }).restore(name);
+    await createRestorer({ dir: backupDir, worker: fakeWorker() }).restore(name);
     expect(db.data.blocklist).toEqual({});
   });
 });
 
 describe('worker pause', () => {
-  const newWorker = async (handlers: Parameters<typeof createWorker>[2], graceMs = 2_000) => {
-    const db = await openDb('unused.json');
-    const worker = createWorker(db, async () => {}, handlers, { tickMs: 10, graceMs });
+  const newWorker = async (handlers: Parameters<typeof createWorker>[1], graceMs = 2_000) => {
+    const db = await open('unused.json');
+    const worker = createWorker(async () => {}, handlers, { tickMs: 10, graceMs });
     worker.start();
     return { db, worker };
   };
@@ -505,12 +506,12 @@ describe('restore with an interrupted import journal', () => {
 
     beforeBackup?.(pipe.db.data);
     const backupDir = fresh();
-    const { name } = await createBackup(pipe.db, backupDir, 'manual');
+    const { name } = await createBackup(backupDir, 'manual');
     // The backup holds the queue entry and the journal, because it holds the database.
     const saved = await readBackup(readFileSync(join(backupDir, name)));
     expect(Object.keys(saved.data.imports)).toHaveLength(1);
     expect(saved.data.queue[entry!.id]).toBeDefined();
-    const restorer = createRestorer({ db: pipe.db, dir: backupDir, worker: pipe.worker });
+    const restorer = createRestorer({ dir: backupDir, worker: pipe.worker });
     const finishLive = async () => {
       pipe!.worker.enqueue({ type: 'import.run', payload: { hash: hashOf(NAME) }, dedupeKey: `import:${hashOf(NAME)}` });
       await until(() => pipe!.db.data.queue[entry!.id]!.stage === 'available' && Object.keys(pipe!.db.data.imports).length === 0, 12_000);

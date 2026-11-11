@@ -38,6 +38,18 @@ describe('requests and summary', () => {
     expect((await api!.post('/queue/search', { titleKey: film.key })).body.started).toEqual([]);
   });
 
+  it('lets the user search a movie that waits for its release', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const film = movie({ rootId: 'movie', manualRelease: false, meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'theatrical', date: '2019-01-01T00:00:00.000Z' }] } });
+    pipe.db.data.titles[film.key] = film;
+    expect(pipe.finder.requestSearch(film.key)).toEqual([]);
+
+    const started = await api.post('/queue/search', { titleKey: film.key });
+    expect(started.status).toBe(202);
+    expect(started.body.started).toEqual([film.key]);
+  });
+
   it('names the quality of the release of an entry', async () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });
@@ -178,14 +190,14 @@ describe('requests and summary', () => {
     const list = (await api.get('/queue?stage=searching')).body;
     expect(list.total).toBe(2);
     expect(list.items.map((item: { key: string; counts: Record<string, number> }) => [item.key, item.counts])).toEqual([
-      ['tv:2', { fetching: 1 }],
-      ['tv:1', { searching: 1 }],
+      ['tv:2:1', { fetching: 1 }],
+      ['tv:1:1', { searching: 1 }],
     ]);
     // Fetching has no tab of its own.
     expect((await api.get('/queue?stage=fetching')).body.total).toBe(0);
   });
 
-  it('shows a series as one group, with the episodes of every season as lazy children', async () => {
+  it('shows each season of a series as its own group, with its episodes as lazy children', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
     const series = title({ rootId: 'tv', episodes: [aired(1), aired(2), episode(2, 1, '2020-02-01')] });
@@ -194,21 +206,52 @@ describe('requests and summary', () => {
     await until(() => pipe!.queue.get('tv:1:2x1')!.branch === 'waiting' && pipe!.queue.get('tv:1:1x2')!.branch === 'waiting');
 
     const list = (await api.get('/queue')).body;
-    expect(list.total).toBe(1);
-    expect(list.items.map((i: { kind: string; season: number | null; total: number; reached: { imported: number } }) => [i.kind, i.season, i.total, i.reached.imported])).toEqual([['group', null, 3, 0]]);
-    expect(list.items[0].counts).toEqual({ not_found: 3 });
+    expect(list.total).toBe(2);
+    expect(list.items.map((i: { kind: string; key: string; season: number | null; total: number; reached: { imported: number } }) => [i.kind, i.key, i.season, i.total, i.reached.imported])).toEqual([
+      ['group', 'tv:1:1', 1, 2, 0],
+      ['group', 'tv:1:2', 2, 1, 0],
+    ]);
+    expect(list.items.map((i: { counts: Record<string, number> }) => i.counts)).toEqual([{ not_found: 2 }, { not_found: 1 }]);
+    // The summary counts the series, not its seasons: every target of the series waits for its next search.
+    expect((await api.get('/queue/summary')).body.counts).toEqual({ not_found: 1 });
     const children = (await api.get('/queue/groups/tv:1')).body.items;
     expect(children.map((c: { label: string }) => c.label)).toEqual(['Show Name S01E01', 'Show Name S01E02', 'Show Name S02E01']);
     expect(children[0].reason.message).toContain('Not found in any indexers');
     expect(children[0].search).toMatchObject({ result: 'no_results' });
+    // The group of a season reads the episodes of that season only.
+    const season2 = (await api.get('/queue/groups/tv:1?season=2')).body.items;
+    expect(season2.map((c: { label: string }) => c.label)).toEqual(['Show Name S02E01']);
 
     // Filters. A target that waits for its next search is in Waiting, also when the search found nothing.
-    expect((await api.get('/queue?stage=queued')).body.total).toBe(1);
+    expect((await api.get('/queue?stage=queued')).body.total).toBe(2);
     expect((await api.get('/queue?stage=searching')).body.total).toBe(0);
     expect((await api.get('/queue?stage=not_found')).body.total).toBe(0);
     expect((await api.get('/queue?stage=waiting&type=movie')).body.total).toBe(0);
-    expect((await api.get('/queue?q=show')).body.total).toBe(1);
+    expect((await api.get('/queue?q=show')).body.total).toBe(2);
     expect((await api.get('/queue?q=other')).body.total).toBe(0);
+  });
+
+  it('gives each season of a series its own slot in the stage that it reached', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const series = title({ rootId: 'tv', episodes: [aired(1), episode(2, 1, '2020-02-01')] });
+    pipe.db.data.titles[series.key] = series;
+    const first = pipe.queue.ensure(series.key, 1, 1);
+    const second = pipe.queue.ensure(series.key, 2, 1);
+    pipe.queue.request(first, 'test');
+    pipe.queue.request(second, 'test');
+    pipe.queue.move(first, { stage: 'fetching', branch: null, reason: null }, 'test');
+    pipe.queue.move(second, { stage: 'importing' }, 'test');
+
+    // The season that fetches its release shows in Searching, and the season that imports shows in Importing.
+    const searching = (await api.get('/queue?stage=searching')).body;
+    expect(searching.items.map((item: { key: string; season: number | null; counts: Record<string, number> }) => [item.key, item.season, item.counts])).toEqual([['tv:1:1', 1, { fetching: 1 }]]);
+    const importing = (await api.get('/queue?stage=importing')).body;
+    expect(importing.items.map((item: { key: string; season: number | null; counts: Record<string, number> }) => [item.key, item.season, item.counts])).toEqual([['tv:1:2', 2, { importing: 1 }]]);
+    // Both seasons are rows of the list, also when the same series has one in each stage.
+    expect((await api.get('/queue')).body.items.map((item: { key: string }) => item.key)).toEqual(['tv:1:2', 'tv:1:1']);
+    // The summary counts the series once for each stage that its seasons show.
+    expect((await api.get('/queue/summary')).body.counts).toEqual({ fetching: 1, importing: 1 });
   });
 
   it('shows a series as searching from the add, before its episodes load', async () => {
@@ -216,7 +259,7 @@ describe('requests and summary', () => {
     api = await pipe.api();
     const series = title({ episodesLoadedAt: null, episodes: [] });
     pipe.db.data.titles[series.key] = series;
-    enqueue(pipe.db, { type: 'queue.initial', payload: { key: series.key }, dedupeKey: `initial:${series.key}` });
+    enqueue({ type: 'queue.initial', payload: { key: series.key }, dedupeKey: `initial:${series.key}` });
 
     // The series is one group that searches. It has no target yet, so it has no season and no episode row.
     const list = (await api.get('/queue')).body;
@@ -241,7 +284,7 @@ describe('requests and summary', () => {
     api = await pipe.api();
     const series = title({ episodesLoadedAt: null, episodes: [], paused: true });
     pipe.db.data.titles[series.key] = series;
-    enqueue(pipe.db, { type: 'queue.initial', payload: { key: series.key }, dedupeKey: `initial:${series.key}` });
+    enqueue({ type: 'queue.initial', payload: { key: series.key }, dedupeKey: `initial:${series.key}` });
     expect((await api.get('/queue')).body.items).toEqual([]);
   });
 
@@ -315,7 +358,7 @@ describe('requests and summary', () => {
 });
 
 describe('order', () => {
-  // The rows of the default view, as "movie:11" for a movie and "group:tv:1" for a series.
+  // The rows of the default view, as "movie:11" for a movie and "group:tv:1:1" for a season of a series.
   const rows = async () => (await api!.get('/queue')).body.items.map((row: { kind: string; id: string; key: string }) => (row.kind === 'group' ? `group:${row.key}` : row.id));
 
   // A target of the queue at the place in time of the test, before its first move.
@@ -389,7 +432,7 @@ describe('order', () => {
     pipe.queue.move(target('movie:12', 3_000), { stage: 'validating' }, 'test');
 
     // The group is at Downloading: above the search and below the validation.
-    expect(await rows()).toEqual(['movie:12', 'group:tv:1', 'movie:11']);
+    expect(await rows()).toEqual(['movie:12', 'group:tv:1:1', 'movie:11']);
   });
 
   it('does not let the number of episodes decide the order of two series that tie', async () => {
@@ -403,7 +446,7 @@ describe('order', () => {
     for (let number = 1; number <= 2; number++) pipe.queue.move(target('tv:1', 2_000 + number, 1, number), { stage: 'downloading' }, 'test');
 
     // Both series are at Downloading, so the one that came first goes first.
-    expect(await rows()).toEqual(['group:tv:2', 'group:tv:1']);
+    expect(await rows()).toEqual(['group:tv:2:1', 'group:tv:1:1']);
   });
 
   it('puts the movie that has more of its download above the one that was created earlier', async () => {
@@ -477,7 +520,7 @@ describe('order', () => {
 
     // The first series came first and has the episode that is further, but the second series goes first: its
     // slowest downloading episode has more of its file than the slowest one of the first series.
-    expect(await rows()).toEqual(['group:tv:1', 'group:tv:2']);
+    expect(await rows()).toEqual(['group:tv:1:1', 'group:tv:2:1']);
   });
 
   it('leaves finished rows out of the list and keeps the group', async () => {
@@ -497,7 +540,7 @@ describe('order', () => {
     pipe.queue.move(target('tv:1', 3_001, 1, 2), { stage: 'downloading' }, 'test');
 
     const list = (await api.get('/queue')).body;
-    expect(list.items.map((row: { kind: string; key: string }) => [row.kind, row.key])).toEqual([['group', 'tv:1']]);
+    expect(list.items.map((row: { kind: string; key: string }) => [row.kind, row.key])).toEqual([['group', 'tv:1:1']]);
     expect(list.items[0].reached.imported).toBe(1);
 
     // The entry of a finished target still answers.
@@ -542,7 +585,7 @@ describe('order', () => {
     pipe.queue.move(target('tv:1', 2_001, 1, 2), { branch: 'waiting' }, 'test');
     pipe.queue.move(target('movie:12', 3_000), { stage: 'downloading' }, 'test');
 
-    expect(await rows()).toEqual(['movie:12', 'group:tv:1', 'movie:11']);
+    expect(await rows()).toEqual(['movie:12', 'group:tv:1:1', 'movie:11']);
   });
 });
 
@@ -736,7 +779,7 @@ describe('jobs', () => {
   }
 
   const search = (entry: { titleKey: string; id: string }, runAt?: number) =>
-    enqueue(pipe!.db, { type: 'queue.search', payload: { titleKey: entry.titleKey, season: null, entryIds: [entry.id] }, runAt });
+    enqueue({ type: 'queue.search', payload: { titleKey: entry.titleKey, season: null, entryIds: [entry.id] }, runAt });
 
   const searchJobs = () => Object.values(pipe!.db.data.jobs).filter((job) => job.type === 'queue.search');
 
@@ -757,10 +800,10 @@ describe('jobs', () => {
     const { film, entry } = await start();
     const later = Date.now() + 60_000;
     const allowed = [
-      enqueue(pipe!.db, { type: 'queue.initial', payload: { key: film.key } }),
+      enqueue({ type: 'queue.initial', payload: { key: film.key } }),
       search(entry),
-      enqueue(pipe!.db, { type: 'queue.grab', payload: { entryIds: [entry.id] }, runAt: later }),
-      enqueue(pipe!.db, { type: 'import.run', payload: { hash: 'a' }, runAt: later }),
+      enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, runAt: later }),
+      enqueue({ type: 'import.run', payload: { hash: 'a' }, runAt: later }),
     ];
     // The worker holds one job of the item flow. The list shows it above the jobs that wait.
     const running = search(entry, later);
@@ -768,15 +811,15 @@ describe('jobs', () => {
     running.leaseOwner = 'test';
     running.leaseExpiresAt = Date.now() + 60_000;
     // A job outside the item flow stays out of the list, also when the worker holds it.
-    const otherRunning = enqueue(pipe!.db, { type: 'queue.rss', runAt: later });
+    const otherRunning = enqueue({ type: 'queue.rss', runAt: later });
     otherRunning.state = 'running';
     otherRunning.leaseOwner = 'test';
     otherRunning.leaseExpiresAt = Date.now() + 60_000;
     const others = [
       otherRunning,
-      enqueue(pipe!.db, { type: 'backup.auto', runAt: later }),
-      enqueue(pipe!.db, { type: 'test.wait', payload: { name: 'x' }, runAt: later }),
-      enqueue(pipe!.db, { type: 'metadata.sweep', runAt: later }),
+      enqueue({ type: 'backup.auto', runAt: later }),
+      enqueue({ type: 'test.wait', payload: { name: 'x' }, runAt: later }),
+      enqueue({ type: 'metadata.sweep', runAt: later }),
     ];
 
     const jobs = await api!.get('/queue/jobs');
@@ -813,7 +856,7 @@ describe('jobs', () => {
     api = await pipe.api();
     pipe.db.data.queuePaused = true;
     // The import jobs stay waiting while the queue is paused.
-    const waiting = (hash: string, runAt: number, priority = false) => enqueue(pipe!.db, { type: 'import.run', payload: { hash }, runAt, priority });
+    const waiting = (hash: string, runAt: number, priority = false) => enqueue({ type: 'import.run', payload: { hash }, runAt, priority });
 
     // The priority job starts before every waiting job of the normal lane, also when it is due later.
     const first = waiting('priority', 9_000, true);
@@ -893,7 +936,7 @@ describe('jobs', () => {
     await start();
     const next = Date.now() + 60_000;
     pipe!.db.data.indexers[1]!.nextRequestAt = next;
-    const job = enqueue(pipe!.db, { type: 'import.run', payload: { hash: 'a' } });
+    const job = enqueue({ type: 'import.run', payload: { hash: 'a' } });
 
     const item = (await api!.get('/queue/jobs')).body.items.find((row: { id: string }) => row.id === job.id);
     expect(item.eta).toBeLessThan(next);
@@ -904,7 +947,7 @@ describe('jobs', () => {
     const other = movie({ key: 'movie:3', tmdbId: 3, rootId: 'movie', manualRelease: true, meta: { ...film.meta, tmdbId: 3, title: 'Other Movie', originalTitle: 'Other Movie' } });
     pipe!.db.data.titles[other.key] = other;
     const second = pipe!.queue.ensure(other.key, null, null);
-    const job = enqueue(pipe!.db, { type: 'queue.search', payload: { titleKey: film.key, season: null, entryIds: [entry.id, second.id] } });
+    const job = enqueue({ type: 'queue.search', payload: { titleKey: film.key, season: null, entryIds: [entry.id, second.id] } });
 
     const item = (await api!.get('/queue/jobs')).body.items.find((row: { id: string }) => row.id === job.id);
     expect(item.label).toBe('Movie Name (2019)');
@@ -938,7 +981,7 @@ describe('jobs', () => {
   it('keeps a running job above the search job that waits for the next search', async () => {
     const { film, entry } = await startWaiting();
     // The running job is due after the waiting one, so only its state puts it first.
-    const running = enqueue(pipe!.db, { type: 'queue.search', payload: { titleKey: film.key, season: null, entryIds: [entry.id] }, runAt: entry.search!.nextAt! + 60_000 });
+    const running = enqueue({ type: 'queue.search', payload: { titleKey: film.key, season: null, entryIds: [entry.id] }, runAt: entry.search!.nextAt! + 60_000 });
     running.state = 'running';
     running.leaseOwner = 'test';
     running.leaseExpiresAt = Date.now() + 60_000;
@@ -952,7 +995,7 @@ describe('jobs', () => {
   it('marks a waiting job of a target as priority from the jobs list', async () => {
     const { entry } = await start();
     const job = search(entry);
-    const other = enqueue(pipe!.db, { type: 'queue.rss', runAt: Date.now() + 60_000 });
+    const other = enqueue({ type: 'queue.rss', runAt: Date.now() + 60_000 });
     const running = search(entry);
     running.state = 'running';
     running.leaseOwner = 'test';
@@ -968,7 +1011,7 @@ describe('jobs', () => {
   it('runs a waiting job of a target now from the jobs list', async () => {
     const { entry } = await start();
     const job = search(entry, Date.now() + 60_000);
-    const other = enqueue(pipe!.db, { type: 'queue.rss', runAt: Date.now() + 60_000 });
+    const other = enqueue({ type: 'queue.rss', runAt: Date.now() + 60_000 });
     const running = search(entry, Date.now() + 60_000);
     running.state = 'running';
     running.leaseOwner = 'test';
@@ -984,7 +1027,7 @@ describe('jobs', () => {
   it('removes a waiting job of a target from the jobs list', async () => {
     const { entry } = await start();
     const job = search(entry);
-    const other = enqueue(pipe!.db, { type: 'queue.rss', runAt: Date.now() + 60_000 });
+    const other = enqueue({ type: 'queue.rss', runAt: Date.now() + 60_000 });
     const running = search(entry);
     running.state = 'running';
     running.leaseOwner = 'test';

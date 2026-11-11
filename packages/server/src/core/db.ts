@@ -1,9 +1,10 @@
 import type { Language, MediaType } from '@ladarr/shared/enums';
+import { loadConfig } from '@ladarr/shared/config';
 import { Low, Memory, type Adapter } from 'lowdb';
 import { TextFile } from 'lowdb/node';
 import { dirname, join } from 'node:path';
-import type { CompatCommand } from '../compatibility/common.ts';
-import type { SeerrRequest } from '../compatibility/seerr.ts';
+import type { CompatCommand } from '../proxy/common.ts';
+import type { SeerrRequest } from '../proxy/seerr.ts';
 import type { Job } from './jobs.ts';
 import type { Override, Title } from '../library/library.ts';
 import type { Indexer } from '../library/grab/indexers.ts';
@@ -14,19 +15,17 @@ import type { ImportJournal } from '../library/imports/importer.ts';
 import type { VerificationState } from '../library/verification.ts';
 import type { SourceDownload, SourceEpisode } from '../migration/migration-source.ts';
 import { DEFAULT_NAMING, type NamingTemplates } from '../library/naming.ts';
-import { defaultProfiles, defaultSizes, type Profile, type ReleaseSource, type SizeLimits } from '../library/grab/quality.ts';
+import { defaultProfiles, defaultSizes, QUALITY_TABLE_VERSION, unlimitedSizes, type Profile, type ReleaseSource, type SizeLimits } from '../library/grab/quality.ts';
 import type { WebhookState } from './webhook.ts';
 
 // Change this number when a new version cannot read the file of an old one, or the other way round.
 // Version 2 keeps the queue work in queue.json, so an older version must not open the new db.json.
-// Version 4 keeps the webhooks in a list, so an older version must not open the new db.json.
-export const SCHEMA_VERSION = 4;
+// Version 5 removes the region and the time zone from the settings.
+// Version 6 splits the size limits of the qualities into one table for movies and one for series.
+export const SCHEMA_VERSION = 6;
 
 export type Settings = {
   setupCompleted: boolean;
-  // ISO 3166-1 region for movie release dates, and the IANA time zone for date-only air dates.
-  region: string;
-  timeZone: string;
   // The language of the interface. The server sends no text in it.
   language: Language;
   // The colors of the interface.
@@ -43,6 +42,8 @@ export type Settings = {
 // One title from a Sonarr or Radarr import. The ledger keeps the result, so a second import skips what is done.
 export type LedgerEntry = {
   status: 'pending' | 'imported' | 'matched' | 'failed';
+  // The import that wrote the entry. The status counts only the entries of the current import.
+  batch?: string;
   app: 'sonarr' | 'radarr';
   sourceId: number;
   title: string;
@@ -100,16 +101,20 @@ export type Data = {
   jobSeq: number;
   prioritySeq: number;
   settings: Settings;
-  // The quality profiles, keyed by ID. The sizes are keyed by the ID of a quality. See quality.ts.
+  // The quality profiles, keyed by ID. The sizes are keyed by the media type and the ID of a quality. See quality.ts.
   profiles: Record<string, Profile>;
   // The IDs of the profiles, the best first. A search tries them in this order.
   profileOrder: string[];
-  qualitySizes: Record<string, SizeLimits>;
+  qualitySizes: Record<MediaType, Record<string, SizeLimits>>;
+  // The version of the table that set the sizes. A new version replaces them, so an update takes priority.
+  qualitySizesVersion: number;
   roots: Record<string, Root>;
   // Keyed by media type and TMDB ID, for example "tv:1396".
   titles: Record<string, Title>;
   // Keyed by the namespace of the source and the ID in the source, for example "sonarr:1a2b3c4d:57".
   ledger: Record<string, LedgerEntry>;
+  // The ID of the import whose titles are going into the library now. The status counts only its entries.
+  migrationBatch: string | null;
   // The verification of each imported title, keyed by the title key. See library/verification.ts.
   verifications: Record<string, VerificationState>;
   files: Record<string, MediaFile>;
@@ -150,8 +155,6 @@ export const emptyData = (): Data => ({
   prioritySeq: 0,
   settings: {
     setupCompleted: false,
-    region: 'US',
-    timeZone: 'UTC',
     language: 'en',
     theme: 'dark',
     defaultRoots: { movie: null, tv: null },
@@ -161,10 +164,12 @@ export const emptyData = (): Data => ({
   },
   profiles: defaultProfiles(),
   profileOrder: ['p1080', 'p2160'],
-  qualitySizes: defaultSizes(),
+  qualitySizes: { movie: unlimitedSizes(), tv: defaultSizes() },
+  qualitySizesVersion: QUALITY_TABLE_VERSION,
   roots: {},
   titles: {},
   ledger: {},
+  migrationBatch: null,
   verifications: {},
   files: {},
   indexers: {},
@@ -209,7 +214,10 @@ type OneClient = { url: string; username: string; password: string; downloadPath
 // A file from an older version can lack a collection that a newer version added.
 export function withDefaults(data: Data): Data {
   const empty = emptyData();
-  const loaded = { ...empty.settings, ...data.settings } as Settings & { maxAliases?: number; aliasLanguages?: string[] | null; upgrades?: { enabled: boolean; stopAt: string }; defaultPreset?: string; recentDays?: number; recoveryDays?: number };
+  const loaded = { ...empty.settings, ...data.settings } as Settings & { maxAliases?: number; aliasLanguages?: string[] | null; upgrades?: { enabled: boolean; stopAt: string }; defaultPreset?: string; recentDays?: number; recoveryDays?: number; region?: string; timeZone?: string };
+  // The movie release region and the time zone are gone from the settings.
+  delete loaded.region;
+  delete loaded.timeZone;
   // An older file has the number of aliases. The search asks for every alias now.
   delete loaded.maxAliases;
   // The languages of the aliases are a choice of each indexer now.
@@ -234,6 +242,17 @@ export function withDefaults(data: Data): Data {
   const webhooks = [...(data.webhooks ?? [])];
   if (oldWebhook?.url) for (const type of ['available', 'stuck'] as const) webhooks.push({ id: randomUUID(), type, url: oldWebhook.url });
   const seerr = { ...empty.seerr, ...(data.seerr ?? {}) };
+  // The sizes of an older table are the sizes of the newer table now. The table of the series keeps the values that a
+  // person set. The table of the movies starts with no size limit.
+  type SizeTables = Data['qualitySizes'];
+  const storedSizes = data.qualitySizes as unknown as SizeTables | Record<string, SizeLimits> | undefined;
+  const split = storedSizes !== undefined && (Object.hasOwn(storedSizes, 'movie') || Object.hasOwn(storedSizes, 'tv'));
+  const tables = split ? (storedSizes as SizeTables) : null;
+  const oldTable = split ? undefined : (storedSizes as Record<string, SizeLimits> | undefined);
+  const qualitySizes: SizeTables =
+    data.qualitySizesVersion === QUALITY_TABLE_VERSION
+      ? { movie: { ...unlimitedSizes(), ...(tables?.movie ?? {}) }, tv: { ...defaultSizes(), ...(tables?.tv ?? oldTable ?? {}) } }
+      : { movie: unlimitedSizes(), tv: defaultSizes() };
   const next: Data = {
     ...empty,
     ...rest,
@@ -242,6 +261,9 @@ export function withDefaults(data: Data): Data {
     settings,
     profiles,
     profileOrder,
+    // A quality that a newer version added gets the default sizes.
+    qualitySizes,
+    qualitySizesVersion: QUALITY_TABLE_VERSION,
     webhooks,
     seerr,
   };
@@ -322,17 +344,34 @@ class SplitJSONFile implements Adapter<Data> {
   }
 }
 
+// The process opens one database. Every module reads the same binding.
+export let db: Db;
+
 // lowdb switches to an in-memory adapter when NODE_ENV is "test".
-export async function openDb(file: string, queueFile = join(dirname(file), QUEUE_FILE)): Promise<Db> {
-  const adapter = process.env.NODE_ENV === 'test' ? new Memory<Data>() : new SplitJSONFile(file, queueFile);
-  const db = new Low<Data>(adapter, emptyData());
-  await db.read();
-  db.data = withDefaults(db.data);
+export async function open(file?: string, queueFile?: string): Promise<Db> {
+  let dbFile = file;
+  let queue = queueFile;
+  if (!dbFile) {
+    const config = loadConfig();
+    dbFile = config.dbFile;
+    queue ??= config.queueFile;
+  }
+  queue ??= join(dirname(dbFile), QUEUE_FILE);
+  const adapter = process.env.NODE_ENV === 'test' ? new Memory<Data>() : new SplitJSONFile(dbFile, queue);
+  const next = new Low<Data>(adapter, emptyData());
+  await next.read();
+  next.data = withDefaults(next.data);
+  db = next;
   return db;
 }
 
+// A test can point the singleton at a database that it made itself.
+export function set(value: Db) {
+  db = value;
+}
+
 // Every change in one tick, or during a running write, costs one more file write at most.
-export function createSaver(db: Db) {
+export function createSaver() {
   let running: Promise<void> | undefined;
   let dirty = false;
   const run = async () => {

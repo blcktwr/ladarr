@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { emptyData, withDefaults, type Data } from '../../src/core/db.ts';
-import { QUALITIES } from '../../src/library/grab/quality.ts';
+import { QUALITIES, QUALITY_TABLE_VERSION, type SizeLimits } from '../../src/library/grab/quality.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { title } from '../helpers/test-fixtures.ts';
 
@@ -15,10 +15,14 @@ const mixed = { name: 'Mixed', items: [['bluray-1080'], ['webdl-1080', 'webrip-1
 const ids = (body: { profiles: { id: string }[] }) => body.profiles.map((profile) => profile.id);
 
 describe('quality profiles', () => {
-  it('lists every quality with its sizes, and the profiles in the order of the chain', async () => {
+  it('lists every quality and the sizes of the two tables, and the profiles in the order of the chain', async () => {
     const { body } = await app.get('/quality');
     expect(body.qualities).toHaveLength(QUALITIES.length);
-    expect(body.qualities.find((quality: { id: string }) => quality.id === 'webdl-1080')).toMatchObject({ label: 'WEB-DL 1080p', sizes: { min: 15, preferred: 60, max: 150 } });
+    const webdl = body.qualities.find((quality: { id: string }) => quality.id === 'webdl-1080');
+    expect(webdl).toMatchObject({ label: 'WEB-DL 1080p' });
+    expect(webdl).not.toHaveProperty('sizes');
+    expect(body.sizes.tv['webdl-1080']).toEqual({ min: 12.5, preferred: null, max: null });
+    expect(body.sizes.movie['webdl-1080']).toEqual({ min: null, preferred: null, max: null });
     expect(ids(body)).toEqual(['p1080', 'p2160']);
   });
 
@@ -115,9 +119,26 @@ describe('a chain with one profile', () => {
 });
 
 describe('sizes of a quality', () => {
-  it('saves limits in order, and a limit that is null is not checked', async () => {
-    expect((await app.fetchJson('PUT', '/quality/sizes/hdtv-720', { min: 10, preferred: null, max: 50 })).body.sizes).toEqual({ min: 10, preferred: null, max: 50 });
-    expect(app.db.data.qualitySizes['hdtv-720']).toEqual({ min: 10, preferred: null, max: 50 });
+  it('saves the limits of a series quality in the table of series', async () => {
+    const res = await app.fetchJson('PUT', '/quality/sizes/tv/hdtv-720', { min: 10, preferred: null, max: 50 });
+    expect(res).toMatchObject({ status: 200, body: { sizes: { min: 10, preferred: null, max: 50 } } });
+    expect(app.db.data.qualitySizes.tv['hdtv-720']).toEqual({ min: 10, preferred: null, max: 50 });
+    // The table of movies keeps its own limits for the quality.
+    expect(app.db.data.qualitySizes.movie['hdtv-720']).toEqual({ min: null, preferred: null, max: null });
+  });
+
+  it('saves the limits of a movie quality in the table of movies', async () => {
+    const res = await app.fetchJson('PUT', '/quality/sizes/movie/hdtv-720', { min: 20, preferred: 30, max: 60 });
+    expect(res).toMatchObject({ status: 200, body: { sizes: { min: 20, preferred: 30, max: 60 } } });
+    expect(app.db.data.qualitySizes.movie['hdtv-720']).toEqual({ min: 20, preferred: 30, max: 60 });
+    // The table of series keeps the limits that the test above saved.
+    expect(app.db.data.qualitySizes.tv['hdtv-720']).toEqual({ min: 10, preferred: null, max: 50 });
+  });
+
+  it('saves a null minimum that turns off the minimum check', async () => {
+    const res = await app.fetchJson('PUT', '/quality/sizes/tv/hdtv-720', { min: null, preferred: null, max: null });
+    expect(res).toMatchObject({ status: 200, body: { sizes: { min: null, preferred: null, max: null } } });
+    expect(app.db.data.qualitySizes.tv['hdtv-720']).toEqual({ min: null, preferred: null, max: null });
   });
 
   it.each([
@@ -127,11 +148,46 @@ describe('sizes of a quality', () => {
     [{ min: '1', preferred: null, max: null }],
     [{ preferred: null, max: null }],
   ])('rejects %j', async (body) => {
-    expect((await app.fetchJson('PUT', '/quality/sizes/hdtv-720', body)).status).toBe(400);
+    expect(await app.fetchJson('PUT', '/quality/sizes/tv/hdtv-720', body)).toMatchObject({ status: 400, body: { error: 'invalid_sizes' } });
+  });
+
+  it('does not find a media type that is not on the list', async () => {
+    expect(await app.fetchJson('PUT', '/quality/sizes/foo/hdtv-720', { min: 1, preferred: null, max: null })).toMatchObject({ status: 404, body: { error: 'not_found' } });
   });
 
   it('does not find a quality that is not on the list', async () => {
-    expect((await app.fetchJson('PUT', '/quality/sizes/nope', { min: 1, preferred: null, max: null })).status).toBe(404);
+    expect(await app.fetchJson('PUT', '/quality/sizes/tv/nope', { min: 1, preferred: null, max: null })).toMatchObject({ status: 404, body: { error: 'not_found' } });
+  });
+});
+
+describe('the sizes of the tables', () => {
+  it('keeps the sizes of a file of the current table in the table of series, and starts the movies unlimited', () => {
+    const data = emptyData();
+    (data as unknown as { qualitySizes: Record<string, SizeLimits> }).qualitySizes = { 'hdtv-720': { min: 10, preferred: null, max: 50 } };
+    const next = withDefaults(data);
+    expect(next.qualitySizes.tv['hdtv-720']).toEqual({ min: 10, preferred: null, max: 50 });
+    expect(next.qualitySizes.movie['hdtv-720']).toEqual({ min: null, preferred: null, max: null });
+  });
+
+  it('replaces the sizes of a file of an older table, so an update takes priority', () => {
+    const old = emptyData() as Data & { qualitySizesVersion?: number };
+    (old as unknown as { qualitySizes: Record<string, SizeLimits> }).qualitySizes = { 'hdtv-720': { min: 10, preferred: null, max: 50 } };
+    old.qualitySizesVersion = QUALITY_TABLE_VERSION - 1;
+    const next = withDefaults(old);
+    expect(next.qualitySizes.tv['hdtv-720']).toEqual({ min: 17.1, preferred: null, max: null });
+    expect(next.qualitySizes.movie['hdtv-720']).toEqual({ min: null, preferred: null, max: null });
+    expect(next.qualitySizesVersion).toBe(QUALITY_TABLE_VERSION);
+  });
+
+  it('keeps both tables of a file of the new shape, with the defaults for a missing quality', () => {
+    const data = emptyData();
+    data.qualitySizes.tv['hdtv-720'] = { min: 10, preferred: null, max: 50 };
+    data.qualitySizes.movie['webdl-1080'] = { min: 40, preferred: null, max: null };
+    delete data.qualitySizes.movie['hdtv-720'];
+    const next = withDefaults(data);
+    expect(next.qualitySizes.tv['hdtv-720']).toEqual({ min: 10, preferred: null, max: 50 });
+    expect(next.qualitySizes.movie['webdl-1080']).toEqual({ min: 40, preferred: null, max: null });
+    expect(next.qualitySizes.movie['hdtv-720']).toEqual({ min: null, preferred: null, max: null });
   });
 });
 

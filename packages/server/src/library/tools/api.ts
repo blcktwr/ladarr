@@ -1,11 +1,11 @@
 import type { TitleSummary } from '@ladarr/shared/types';
-import type { Db } from '../../core/db.ts';
+import { type Db, db } from '../../core/db.ts';
 import { availability, movieEligibleAt, seriesCounts, type Title } from '../library.ts';
 
-export const clock = (db: Db) => ({ now: Date.now(), timeZone: db.data.settings.timeZone, region: db.data.settings.region, files: db.data.files });
+export const clock = () => ({ now: Date.now(), files: db.data.files });
 
-export function summarize(db: Db, title: Title): TitleSummary {
-  const at = clock(db);
+export function summarize(title: Title): TitleSummary {
+  const at = clock();
   const series = title.mediaType === 'tv';
   return {
     key: title.key,
@@ -19,6 +19,6 @@ export function summarize(db: Db, title: Title): TitleSummary {
     seriesType: series ? title.seriesType : null,
     availability: availability(title, at),
     counts: series ? seriesCounts(title, at) : null,
-    eligibleAt: series ? null : movieEligibleAt(title, at),
+    eligibleAt: series ? null : movieEligibleAt(title),
   };
 }

@@ -4,14 +4,14 @@ import { join } from 'node:path';
 import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createSaver, emptyData, openDb, type Data, type Db } from '../../src/core/db.ts';
+import { createSaver, emptyData, open, set, type Data } from '../../src/core/db.ts';
 import { backoffMs, claim, complete, deprioritize, enqueue, fail, JobError, prioritize, recoverExpired } from '../../src/core/jobs.ts';
 import { createWorker } from '../../src/core/worker.ts';
 
 const LEASE = 60_000;
 // The tests pass their own clock to the job functions, so jobs are due at time 0 unless a test says else.
-const add = (db: Db, input: Parameters<typeof enqueue>[1]) => enqueue(db, { runAt: 0, ...input });
-const newDb = () => openDb('unused.json');
+const add = (input: Parameters<typeof enqueue>[0]) => enqueue({ runAt: 0, ...input });
+const newDb = () => open('unused.json');
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const until = async (check: () => boolean) => {
   for (let i = 0; i < 200 && !check(); i++) await sleep(10);
@@ -21,22 +21,22 @@ const until = async (check: () => boolean) => {
 describe('claim', () => {
   it('gives one job to only one of two claims', async () => {
     const db = await newDb();
-    add(db, { type: 'a' });
-    const claims = [claim(db, Date.now(), LEASE), claim(db, Date.now(), LEASE)];
+    add({ type: 'a' });
+    const claims = [claim(Date.now(), LEASE), claim(Date.now(), LEASE)];
     expect(claims.filter(Boolean)).toHaveLength(1);
   });
 
   it('does not claim a job before its time', async () => {
     const db = await newDb();
-    add(db, { type: 'a', runAt: 5_000 });
-    expect(claim(db, 4_999, LEASE)).toBeUndefined();
-    expect(claim(db, 5_000, LEASE)).toBeDefined();
+    add({ type: 'a', runAt: 5_000 });
+    expect(claim(4_999, LEASE)).toBeUndefined();
+    expect(claim(5_000, LEASE)).toBeDefined();
   });
 
   it('coalesces jobs with the same key and keeps the earlier time', async () => {
     const db = await newDb();
-    const first = add(db, { type: 'a', dedupeKey: 'a:1', runAt: 9_000 });
-    expect(add(db, { type: 'a', dedupeKey: 'a:1', runAt: 1_000 }).id).toBe(first.id);
+    const first = add({ type: 'a', dedupeKey: 'a:1', runAt: 9_000 });
+    expect(add({ type: 'a', dedupeKey: 'a:1', runAt: 1_000 }).id).toBe(first.id);
     expect(Object.keys(db.data.jobs)).toHaveLength(1);
     expect(first.runAt).toBe(1_000);
   });
@@ -45,30 +45,30 @@ describe('claim', () => {
 describe('leases', () => {
   it('recovers an expired lease and leaves a valid one', async () => {
     const db = await newDb();
-    const expired = add(db, { type: 'a' });
-    const valid = add(db, { type: 'a' });
-    claim(db, 0, 1_000);
-    claim(db, 900, LEASE);
-    expect(recoverExpired(db, 1_000, () => 5)).toBe(1);
+    const expired = add({ type: 'a' });
+    const valid = add({ type: 'a' });
+    claim(0, 1_000);
+    claim(900, LEASE);
+    expect(recoverExpired(1_000, () => 5)).toBe(1);
     expect(db.data.jobs[expired.id]!.state).toBe('waiting');
     expect(db.data.jobs[valid.id]!.state).toBe('running');
   });
 
   it('fails a job whose lease keeps expiring', async () => {
     const db = await newDb();
-    const job = add(db, { type: 'a' });
-    claim(db, 0, 1_000);
-    recoverExpired(db, 1_000, () => 1);
+    const job = add({ type: 'a' });
+    claim(0, 1_000);
+    recoverExpired(1_000, () => 1);
     expect(db.data.jobs[job.id]!.state).toBe('failed');
   });
 
   it('ignores a result from a holder that lost the lease', async () => {
     const db = await newDb();
-    const job = add(db, { type: 'a' });
-    const stale = claim(db, 0, 1_000)!.leaseOwner!;
-    recoverExpired(db, 1_000, () => 5);
-    claim(db, 1_000, LEASE);
-    expect(complete(db, job.id, stale)).toBe(false);
+    const job = add({ type: 'a' });
+    const stale = claim(0, 1_000)!.leaseOwner!;
+    recoverExpired(1_000, () => 5);
+    claim(1_000, LEASE);
+    expect(complete(job.id, stale)).toBe(false);
     expect(db.data.jobs[job.id]!.state).toBe('running');
   });
 });
@@ -76,20 +76,20 @@ describe('leases', () => {
 describe('failures', () => {
   it('retries an outage with backoff and stops at the attempt limit', async () => {
     const db = await newDb();
-    const job = add(db, { type: 'a' });
-    const token = claim(db, 0, LEASE)!.leaseOwner!;
-    expect(fail(db, job.id, token, new Error('down'), 0, 2)).toBe('waiting');
+    const job = add({ type: 'a' });
+    const token = claim(0, LEASE)!.leaseOwner!;
+    expect(fail(job.id, token, new Error('down'), 0, 2)).toBe('waiting');
     expect(db.data.jobs[job.id]!.runAt).toBe(backoffMs(1));
-    expect(claim(db, backoffMs(1) - 1, LEASE)).toBeUndefined();
-    const second = claim(db, backoffMs(1), LEASE)!.leaseOwner!;
-    expect(fail(db, job.id, second, new Error('down'), 0, 2)).toBe('failed');
+    expect(claim(backoffMs(1) - 1, LEASE)).toBeUndefined();
+    const second = claim(backoffMs(1), LEASE)!.leaseOwner!;
+    expect(fail(job.id, second, new Error('down'), 0, 2)).toBe('failed');
   });
 
   it('does not retry invalid input', async () => {
     const db = await newDb();
-    const job = add(db, { type: 'a' });
-    const token = claim(db, 0, LEASE)!.leaseOwner!;
-    expect(fail(db, job.id, token, new JobError('invalid_input', 'bad'), 0, 5)).toBe('failed');
+    const job = add({ type: 'a' });
+    const token = claim(0, LEASE)!.leaseOwner!;
+    expect(fail(job.id, token, new JobError('invalid_input', 'bad'), 0, 5)).toBe('failed');
     expect(db.data.jobs[job.id]!.lastError).toEqual({ kind: 'invalid_input', message: 'bad' });
   });
 });
@@ -97,22 +97,22 @@ describe('failures', () => {
 describe('priority', () => {
   it('starts marked jobs first, in mark order, before older normal jobs', async () => {
     const db = await newDb();
-    const normal = add(db, { type: 'a', runAt: 1 });
-    const [a, b, c] = ['A', 'B', 'C'].map((name) => add(db, { type: 'a', payload: name, runAt: 2 }));
-    prioritize(db, c!.id);
-    prioritize(db, a!.id);
-    prioritize(db, b!.id);
-    const order = [1, 2, 3, 4].map(() => claim(db, 10, LEASE)!.id);
+    const normal = add({ type: 'a', runAt: 1 });
+    const [a, b, c] = ['A', 'B', 'C'].map((name) => add({ type: 'a', payload: name, runAt: 2 }));
+    prioritize(c!.id);
+    prioritize(a!.id);
+    prioritize(b!.id);
+    const order = [1, 2, 3, 4].map(() => claim(10, LEASE)!.id);
     expect(order).toEqual([c!.id, a!.id, b!.id, normal.id]);
   });
 
   it('returns a job to its place in the normal lane', async () => {
     const db = await newDb();
-    const first = add(db, { type: 'a', runAt: 1 });
-    const second = add(db, { type: 'a', runAt: 2 });
-    prioritize(db, second.id);
-    deprioritize(db, second.id);
-    expect(claim(db, 10, LEASE)!.id).toBe(first.id);
+    const first = add({ type: 'a', runAt: 1 });
+    const second = add({ type: 'a', runAt: 2 });
+    prioritize(second.id);
+    deprioritize(second.id);
+    expect(claim(10, LEASE)!.id).toBe(first.id);
   });
 
   it('keeps jobs and lane order after a restart', async () => {
@@ -120,15 +120,17 @@ describe('priority', () => {
     try {
       const file = join(dir, 'db.json');
       const before = new Low<Data>(new JSONFile(file), emptyData());
-      const [x, y] = ['x', 'y'].map((name) => add(before, { type: 'a', payload: name }));
-      add(before, { type: 'a', runAt: 0 });
-      prioritize(before, y!.id);
-      prioritize(before, x!.id);
+      set(before);
+      const [x, y] = ['x', 'y'].map((name) => add({ type: 'a', payload: name }));
+      add({ type: 'a', runAt: 0 });
+      prioritize(y!.id);
+      prioritize(x!.id);
       await before.write();
 
       const after = new Low<Data>(new JSONFile(file), emptyData());
       await after.read();
-      expect([claim(after, 10, LEASE)!.id, claim(after, 10, LEASE)!.id]).toEqual([y!.id, x!.id]);
+      set(after);
+      expect([claim(10, LEASE)!.id, claim(10, LEASE)!.id]).toEqual([y!.id, x!.id]);
     } finally {
       rmSync(dir, { recursive: true });
     }
@@ -139,7 +141,7 @@ describe('saver', () => {
   it('writes the file once for many changes in the same tick', async () => {
     const db = await newDb();
     const write = vi.spyOn(db, 'write');
-    const save = createSaver(db);
+    const save = createSaver();
     await Promise.all(Array.from({ length: 100 }, () => save()));
     expect(write).toHaveBeenCalledTimes(1);
   });
@@ -148,7 +150,7 @@ describe('saver', () => {
 describe('worker heartbeat', () => {
   it('moves with each tick', async () => {
     const db = await newDb();
-    const worker = createWorker(db, createSaver(db), {}, { tickMs: 10 });
+    const worker = createWorker(createSaver(), {}, { tickMs: 10 });
     const first = worker.heartbeat;
     worker.start();
     await sleep(40);
@@ -168,7 +170,7 @@ describe('worker', () => {
   it('runs a job once and removes it', async () => {
     const db = await newDb();
     const run = vi.fn(async () => {});
-    const worker = createWorker(db, createSaver(db), { a: { run } }, { tickMs: 10 });
+    const worker = createWorker(createSaver(), { a: { run } }, { tickMs: 10 });
     stop = worker.stop;
     worker.start();
     worker.enqueue({ type: 'a', payload: { n: 1 } });
@@ -187,7 +189,7 @@ describe('worker', () => {
       active--;
       finished++;
     };
-    const worker = createWorker(db, createSaver(db), { a: { run, concurrency: 2 } }, { tickMs: 10 });
+    const worker = createWorker(createSaver(), { a: { run, concurrency: 2 } }, { tickMs: 10 });
     stop = worker.stop;
     worker.start();
     for (let i = 0; i < 6; i++) worker.enqueue({ type: 'a', dedupeKey: `a:${i}` });
@@ -198,7 +200,7 @@ describe('worker', () => {
   it('schedules a recurring job again after each run, but only one at a time', async () => {
     const db = await newDb();
     const run = vi.fn(async () => {});
-    const worker = createWorker(db, createSaver(db), { poll: { run, every: 20 } }, { tickMs: 10 });
+    const worker = createWorker(createSaver(), { poll: { run, every: 20 } }, { tickMs: 10 });
     stop = worker.stop;
     worker.start();
     await until(() => run.mock.calls.length >= 3);
@@ -213,7 +215,7 @@ describe('worker', () => {
         started = true;
         signal.addEventListener('abort', () => reject(new Error('aborted')));
       });
-    const worker = createWorker(db, createSaver(db), { a: { run } }, { tickMs: 10 });
+    const worker = createWorker(createSaver(), { a: { run } }, { tickMs: 10 });
     worker.start();
     worker.enqueue({ type: 'a' });
     await until(() => started);
@@ -235,7 +237,7 @@ describe('worker', () => {
         });
       });
     const other = vi.fn(async () => {});
-    const worker = createWorker(db, createSaver(db), { a: { run: slow, concurrency: 2 }, b: { run: other } }, { tickMs: 10 });
+    const worker = createWorker(createSaver(), { a: { run: slow, concurrency: 2 }, b: { run: other } }, { tickMs: 10 });
     stop = worker.stop;
     worker.start();
     const job = worker.enqueue({ type: 'a' });
@@ -253,7 +255,7 @@ describe('worker', () => {
     const run = vi.fn(async () => {
       throw new JobError('outage', 'provider down');
     });
-    const worker = createWorker(db, createSaver(db), { a: { run } }, { tickMs: 10 });
+    const worker = createWorker(createSaver(), { a: { run } }, { tickMs: 10 });
     stop = worker.stop;
     worker.start();
     worker.enqueue({ type: 'a', payload: { id: 7 } });
@@ -267,7 +269,7 @@ describe('worker', () => {
     const db = await newDb();
     const queueRun = vi.fn(async () => {});
     const backupRun = vi.fn(async () => {});
-    const worker = createWorker(db, createSaver(db), { 'queue.search': { run: queueRun }, 'backup.auto': { run: backupRun } }, { tickMs: 10 });
+    const worker = createWorker(createSaver(), { 'queue.search': { run: queueRun }, 'backup.auto': { run: backupRun } }, { tickMs: 10 });
     stop = worker.stop;
     db.data.queuePaused = true;
     worker.start();

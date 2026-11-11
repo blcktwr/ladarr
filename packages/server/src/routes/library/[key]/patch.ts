@@ -1,5 +1,5 @@
+import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import type { Events } from '../../../core/events.ts';
 import type { EnqueueInput, Job } from '../../../core/jobs.ts';
 import type { Title } from '../../../library/library.ts';
@@ -10,7 +10,7 @@ type Deps = { events: Events; enqueue: (input: EnqueueInput) => Job };
 
 const hasFiles = (title: Title) => Boolean(title.fileId) || title.episodes.some((episode) => episode.fileId);
 
-export function libraryTitleUpdate(db: Db, { events, enqueue }: Deps): RequestHandler<{ key: string }> {
+export function libraryTitleUpdate({ events, enqueue }: Deps): RequestHandler<{ key: string }> {
   return async (req, res) => {
     const title: Title = res.locals.title;
     const body = req.body;
@@ -36,8 +36,8 @@ export function libraryTitleUpdate(db: Db, { events, enqueue }: Deps): RequestHa
     Object.assign(title, next);
     // A resume checks the folder, the client, and the queue, and starts the search for the old missing targets. The
     // search of a title that the user paused has never run for them.
-    if (wasPaused && !title.paused) requestVerification(db, enqueue, title.key, {});
-    await changed(db, events, title.key);
-    res.json({ title: detail(db, title) });
+    if (wasPaused && !title.paused) requestVerification(enqueue, title.key, {});
+    await changed(events, title.key);
+    res.json({ title: detail(title) });
   };
 }

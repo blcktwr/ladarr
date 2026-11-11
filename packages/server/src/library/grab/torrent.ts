@@ -91,6 +91,13 @@ function decode(buf: Buffer, at: number, depth = 0): { value: unknown; end: numb
   return { value: buf.toString('utf8', colon + 1, end), end };
 }
 
+// The comment of a torrent. It is a top-level key, and it is absent in most torrents.
+export function torrentComment(torrent: Buffer): string | undefined {
+  if (torrent[0] !== 0x64) throw new Error('invalid torrent');
+  const top = decode(torrent, 0).value as { comment?: unknown };
+  return typeof top.comment === 'string' && top.comment.length > 0 ? top.comment : undefined;
+}
+
 // The files of a torrent, with the path inside the download. A torrent with one file gives that file.
 export function torrentFiles(torrent: Buffer): { path: string; length: number }[] {
   const top = decode(torrent, 0).value as { info?: { name?: unknown; length?: unknown; files?: unknown } };

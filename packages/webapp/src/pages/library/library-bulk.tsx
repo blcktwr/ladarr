@@ -61,7 +61,7 @@ const question: Record<PlanAction, string> = {
   resume: 'Resume {titles}?',
   refresh: 'Refresh the metadata of {titles}?',
   preset: 'Set the quality of {titles}?',
-  remove: 'Remove {titles}?',
+  remove: 'Delete {titles}?',
   delete_files: 'Delete the files of {titles}?',
 };
 
@@ -70,7 +70,7 @@ const confirmText: Record<PlanAction, string> = {
   resume: 'Resume',
   refresh: 'Refresh',
   preset: 'Set quality',
-  remove: 'Remove',
+  remove: 'Delete',
   delete_files: 'Delete files',
 };
 
@@ -174,7 +174,7 @@ export function PlanDialog({ request, subject, onClose, onDone }: { request: Pla
         request.fileIds
           ? t('Delete {files}?', { files: fileCount(request.fileIds.length) })
           : request.action === 'remove' && request.season !== undefined
-            ? t('Remove {season}?', { season: subject ?? '' })
+            ? t('Delete {season}?', { season: subject ?? '' })
             : t(question[action], { titles: titleCount(request.keys.length) })
       }
       confirm={t(confirmText[action])}
@@ -199,7 +199,7 @@ export function BulkActions({ selection, onRemove }: { selection: Selection; onR
     <>
       <SearchPlanButton label={t('Search')} heading={t('Search the selected titles')} request={{ kind: 'search', keys }} />
       <Button variant="ghost" onClick={() => onRemove({ action: 'remove', keys })}>
-        {t('Remove')}
+        {t('Delete')}
       </Button>
     </>
   );

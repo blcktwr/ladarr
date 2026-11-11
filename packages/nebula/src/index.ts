@@ -37,6 +37,7 @@ export { Row } from './components/Row.tsx';
 export { SearchField } from './components/SearchField.tsx';
 export { Section } from './components/Section.tsx';
 export { SideMenu } from './components/SideMenu.tsx';
+export { Slider } from './components/Slider.tsx';
 export { Spinner } from './components/Spinner.tsx';
 export { SubMenu } from './components/SubMenu.tsx';
 export { Switch } from './components/Switch.tsx';

@@ -1,34 +1,42 @@
+import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../core/db.ts';
 import type { Poller } from '../../../library/downloads/poller.ts';
 import { loadingTitleKeys, queueKey } from '../../../library/downloads/queue.ts';
 import { DAY_MS, itemJobs, jobLabel, shown } from '../../../helpers/queue.ts';
 
-export function queueSummaryGet(db: Db, poller: Poller): RequestHandler {
+export function queueSummaryGet(poller: Poller): RequestHandler {
   return (_req, res) => {
-    const counts: Record<string, number> = {};
+    // The titles of each stage. A series counts once for each stage that its episodes show, so its number of episodes
+    // does not change the count of the menu.
+    const titles = new Map<string, Set<string>>();
     const working: Record<string, number> = {};
     let stopped = 0;
     let targets = 0;
+    const add = (key: string, titleKey: string) => {
+      const found = titles.get(key) ?? new Set<string>();
+      found.add(titleKey);
+      titles.set(key, found);
+    };
     for (const entry of Object.values(db.data.queue)) {
-      if (!shown(db, entry) || entry.clearedAt) continue;
+      if (!shown(entry) || entry.clearedAt) continue;
       targets++;
-      const key = queueKey(entry);
-      counts[key] = (counts[key] ?? 0) + 1;
+      add(queueKey(entry), entry.titleKey);
       // A target that can still move has no branch and no reason. One with a reason waits for the person.
       if (entry.branch !== null || entry.stage === 'available') continue;
       if (entry.reason) stopped++;
       else working[entry.stage] = (working[entry.stage] ?? 0) + 1;
     }
     // A series that waits for its episodes counts as one target that searches.
-    for (const key of loadingTitleKeys(db)) {
+    for (const key of loadingTitleKeys()) {
       targets++;
-      counts.searching = (counts.searching ?? 0) + 1;
+      add('searching', key);
       working.searching = (working.searching ?? 0) + 1;
     }
+    const counts: Record<string, number> = {};
+    for (const [key, found] of titles) counts[key] = found.size;
     const transfers = poller.transfers().filter((t) => !t.complete);
     const since = Date.now() - DAY_MS;
-    const current = itemJobs(db).find((job) => job.state === 'running');
+    const current = itemJobs().find((job) => job.state === 'running');
     res.json({
       cursor: db.data.queueRev,
       counts,
@@ -43,7 +51,7 @@ export function queueSummaryGet(db: Db, poller: Poller): RequestHandler {
       client: poller.status(),
       hasClient: db.data.downloadClients.some((client) => client.enabled),
       indexers: Object.keys(db.data.indexers).length,
-      currentJob: current ? { type: current.type, label: jobLabel(db, current) } : null,
+      currentJob: current ? { type: current.type, label: jobLabel(current) } : null,
     });
   };
 }

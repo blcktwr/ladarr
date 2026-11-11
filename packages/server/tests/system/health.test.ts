@@ -93,7 +93,7 @@ describe('backup problem', () => {
   it('shows again when the newest backup is older than two days', async () => {
     const old = await startTestApp({ backupDir: join(dir, 'old-backups') });
     try {
-      await createBackup(old.db, join(dir, 'old-backups'), 'auto', new Date(Date.now() - 3 * 24 * 60 * 60_000));
+      await createBackup(join(dir, 'old-backups'), 'auto', new Date(Date.now() - 3 * 24 * 60 * 60_000));
       const found = (await old.get('/system/status')).body.problems.map((p: { id: string }) => p.id);
       expect(found).toContain('backup_stale');
     } finally {

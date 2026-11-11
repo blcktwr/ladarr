@@ -301,7 +301,7 @@ describe('the templates in the import', () => {
     await t.finished(started.body.id);
     expect(t.tree(t.pipe.folders.tv).sort()).toEqual(['Show Name (2020)/Season 01/Show Name S01E01 Episode 1.mkv', 'Show Name (2020)/Season 01/Show Name S01E02E03.mkv']);
     const before = Object.values(t.pipe.db.data.files).map((file) => file.id).sort();
-    const result = await scanTitle(t.pipe.db, 'tv:1');
+    const result = await scanTitle('tv:1');
     expect(result).toMatchObject({ status: 'ok', missing: 0, unmatched: [], added: 0 });
     expect(Object.values(t.pipe.db.data.files).map((file) => file.id).sort()).toEqual(before);
     expect(Object.values(t.pipe.db.data.files).every((file) => !file.missing)).toBe(true);

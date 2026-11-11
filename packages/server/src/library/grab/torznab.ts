@@ -1,5 +1,5 @@
 import { backoffMs, JobError } from '../../core/jobs.ts';
-import type { Db } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import { outboundFetch } from '../../core/http.ts';
 import { indexerName, type Caps, type Indexer } from './indexers.ts';
 import type { Limiter } from '../../core/limiter.ts';
@@ -131,7 +131,7 @@ const FUNCTION = { search: 'search', tv: 'tvsearch', movie: 'movie' } as const;
 type Options = { fetch?: typeof fetch; timeoutMs?: number };
 
 // The native indexer service. The adapter endpoints for the indexer manager do not use it, and it does not use them.
-export function createIndexerService(db: Db, limiter: Limiter, { fetch: fetchImpl = fetch, timeoutMs = 30_000 }: Options = {}, onChange: () => void = () => {}) {
+export function createIndexerService(limiter: Limiter, { fetch: fetchImpl = fetch, timeoutMs = 30_000 }: Options = {}, onChange: () => void = () => {}) {
   const url = (indexer: Indexer, params: Record<string, string>) => {
     const target = new URL(`${indexer.baseUrl.replace(/\/+$/, '')}${indexer.apiPath}`);
     for (const [key, value] of Object.entries({ ...params, apikey: indexer.apiKey })) target.searchParams.set(key, value);

@@ -1,15 +1,15 @@
+import { db } from '../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { savePush, summarize } from '../../library/grab/indexers.ts';
-import type { Db } from '../../core/db.ts';
 import { exists, invalidSetting, parseManual, setDelay } from '../../helpers/indexers.ts';
 
-export function indexersCreate(db: Db, { onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler {
+export function indexersCreate({ onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler {
   return async (req, res) => {
     const result = parseManual(req.body);
     if ('invalid' in result) return invalidSetting(res, result.invalid);
-    if (exists(db, result.parsed.sonarr)) return void res.status(409).json({ error: 'exists' });
-    const indexer = savePush(db, 'sonarr', result.parsed.sonarr)!;
-    savePush(db, 'radarr', result.parsed.radarr);
+    if (exists(result.parsed.sonarr)) return void res.status(409).json({ error: 'exists' });
+    const indexer = savePush('sonarr', result.parsed.sonarr)!;
+    savePush('radarr', result.parsed.radarr);
     indexer.manual = true;
     indexer.preferredLanguages = result.preferredLanguages;
     setDelay(indexer, result.delaySeconds);

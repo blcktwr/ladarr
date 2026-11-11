@@ -1,16 +1,16 @@
+import { db } from '../../../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Db } from '../../../../../core/db.ts';
 import type { Clients } from '../../../../../library/downloads/client-api.ts';
 import { ClientError } from '../../../../../library/downloads/qbittorrent.ts';
 import type { AttachCache } from '../../../../../helpers/queue-attach.ts';
 import { pruneCache, readDetail } from '../../../../../helpers/queue-attach.ts';
 import { shown } from '../../../../../helpers/queue.ts';
 
-export function queueEntryClientGet(db: Db, clients: Clients, cache: AttachCache): RequestHandler<{ id: string }> {
+export function queueEntryClientGet(clients: Clients, cache: AttachCache): RequestHandler<{ id: string }> {
   return async (req, res) => {
     const entry = db.data.queue[req.params.id];
     const handle = clients.get(entry?.clientId);
-    if (!entry?.transferHash || !shown(db, entry)) return void res.status(404).json({ error: 'not_found' });
+    if (!entry?.transferHash || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
     if (!handle) return void res.status(409).json({ error: 'client_missing' });
     const hash = entry.transferHash;
     const now = Date.now();

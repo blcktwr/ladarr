@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
-import { openDb } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { metadataRefreshHandler } from '../../src/jobs/metadata-refresh.ts';
 import { queueInitialHandler } from '../../src/jobs/queue-initial.ts';
 import { createTmdb } from '../../src/metadata/tmdb.ts';
-import { timespan } from '../../src/compatibility/common.ts';
+import { timespan } from '../../src/proxy/common.ts';
 import { FakeRadarr, FakeSonarr, type AddSeriesOptions, type RadarrMovieOptions } from '../helpers/test-seerr.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 
@@ -80,7 +80,7 @@ afterEach(async () => {
 
 async function start(options: Parameters<typeof startPipeline>[0] = {}) {
   const tmdb = createTmdb({ apiKey: 'k', fetch: tmdbFetch, baseUrl: 'https://tmdb.test/3', spacingMs: 0, ttlMs: 0 });
-  const pipe = await startPipeline({ ...options, handlers: ({ db, events, queue, finder }) => ({ 'metadata.refresh': metadataRefreshHandler({ db, tmdb, events }), 'queue.initial': queueInitialHandler({ db, queue, finder }) }) });
+  const pipe = await startPipeline({ ...options, handlers: ({ db, events, queue, finder }) => ({ 'metadata.refresh': metadataRefreshHandler({ tmdb, events }), 'queue.initial': queueInitialHandler({ queue, finder }) }) });
   pipe.db.data.settings.defaultRoots = { movie: 'movie', tv: 'tv' };
   const app = await pipe.api({ tmdb });
   const root = app.base.replace(/\/api$/, '');
@@ -229,9 +229,9 @@ describe('Seerr request for a movie', () => {
     expect(pipe.db.data.queue['movie:603']!.search).toMatchObject({ result: 'no_results' });
 
     // A new process reads the same data.
-    const copy = await openDb('unused.json');
+    const copy = await open('unused.json');
     Object.assign(copy.data, JSON.parse(JSON.stringify(pipe.db.data)));
-    const server = createApp(copy).listen(0);
+    const server = createApp().listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
     try {
       const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}/radarr/api/v3`;
@@ -433,9 +433,9 @@ describe('refused and unsupported calls', () => {
   });
 
   it('names the URL base in the answer for a wrong path', async () => {
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     db.data.apiKey = 'secret';
-    const server = createApp(db, { urlBase: '/ladarr' }).listen(0);
+    const server = createApp({ urlBase: '/ladarr' }).listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
     const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
     try {
@@ -459,9 +459,9 @@ describe('refused and unsupported calls', () => {
   it('answers the adapter paths and the page when the URL base is the name of an adapter', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ladarr-compat-web-'));
     writeFileSync(join(dir, 'index.html'), '<html><head><base href="/" /></head><body>app</body></html>');
-    const db = await openDb('unused.json');
+    const db = await open('unused.json');
     db.data.apiKey = 'secret';
-    const server = createApp(db, { urlBase: '/sonarr', webDir: dir }).listen(0);
+    const server = createApp({ urlBase: '/sonarr', webDir: dir }).listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
     const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
     try {

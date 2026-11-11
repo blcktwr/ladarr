@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
-import type { Db, MediaFile } from '../core/db.ts';
+import { type Db, type MediaFile, db } from '../core/db.ts';
 import { filesVersion } from './tools/remove.ts';
 import { isSample, isVideoFile, parseEpisodes } from './parse.ts';
 import { checkRoot } from './roots.ts';
@@ -64,7 +64,7 @@ async function findVideos(folder: string, rootReal: string): Promise<Found[]> {
 
 // Looks at the folder of a title and updates the file records. It only reads the disk.
 // It never deletes a file, a title or an episode. A file that is gone is marked missing, and only when the root is healthy.
-export async function scanTitle(db: Db, key: string): Promise<ScanResult> {
+export async function scanTitle(key: string): Promise<ScanResult> {
   const title = db.data.titles[key];
   const root = title && db.data.roots[title.rootId];
   if (!title || !root || !title.folder) return empty('no_folder');

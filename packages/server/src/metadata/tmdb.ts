@@ -28,7 +28,7 @@ export type TitleMeta = SearchResult & {
   seasons: SeasonSummary[];
 };
 
-// A date-only air date stays a date. The caller applies the time zone.
+// A date-only air date stays a date. The caller uses UTC.
 // shortcut: no episode overview, to keep the database file small. Fetch it on demand if the UI needs it.
 export type EpisodeMeta = {
   tmdbId: number;
