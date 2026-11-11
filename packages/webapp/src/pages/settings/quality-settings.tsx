@@ -151,97 +151,95 @@ function ProfileModal({ profile, qualities, open, onOpenChange, onSaved }: { pro
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      title={profile ? t('Edit {name}', { name: profile.name }) : t('Add a profile')}
+      title={profile ? t('Edit quality') : t('Add a profile')}
       width="xl"
     >
       {error && <Alert tone="danger">{error}</Alert>}
       <Field label={t('Name')} required value={draft.name} onValueChange={(name) => set({ name })} />
-      <Section title={t('Qualities')}>
-        <Table
-          aria-label={t('Qualities')}
-          stickyFirst
-          minWidth="62rem"
-          columns={[
-            {
-              label: t('Resolution'),
-              hideLabel: true,
-              width: '10rem',
-            },
-            ...sources.map((source) => ({
-              label: <span title={SOURCE_INFO[source] ? t(SOURCE_INFO[source]) : undefined}>{sourceName(source)}</span>,
-              width: '6.5rem',
-            })),
-          ]}
-          rows={resolutions.map((resolution) => {
-            const rowQualities = sources
-              .map((source) => qualityAt(source, resolution))
-              .filter((quality): quality is QualityRow => quality !== undefined);
-            const open = expanded === resolution && rowQualities.length > 0;
-            return {
-              key: String(resolution),
-              active: open,
-              cells: [
-                <div className="grid">
-                  <div className="flex h-12 items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      iconOnly
-                      disabled={!rowQualities.length}
-                      aria-label={open ? t('Hide bitrates for {resolution}p', { resolution }) : t('Show bitrates for {resolution}p', { resolution })}
-                      onClick={() => setExpanded(open ? null : resolution)}
-                    >
-                      {open ? <ChevronDown /> : <ChevronRight />}
-                    </Button>
-                    {resolution}p
-                    {RESOLUTION_INFO[resolution] && <Hint label={t('About {resolution}p', { resolution })}>{t(RESOLUTION_INFO[resolution])}</Hint>}
-                  </div>
-                  {open && (
-                    <div className="mt-3 grid gap-2.5">
-                      {LIMITS.map((limit) => (
-                        <div key={limit.key} className="flex h-7 items-center justify-end">
-                          <Text variant="small">{t(limit.label)}</Text>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>,
-                ...sources.map((source) => {
-                  const quality = qualityAt(source, resolution);
-                  if (!quality) return null;
-                  const index = slots.findIndex((slot) => slot.id === quality.id);
-                  return (
-                    <div className="grid">
-                      <div className="flex h-12 items-center gap-1">
-                        <Checkbox aria-label={quality.label} checked={index >= 0} onCheckedChange={() => toggle(quality.id)} />
-                        {index >= 0 && <Badge>{ranks[index]}</Badge>}
+      <Table
+        aria-label={t('Qualities')}
+        stickyFirst
+        minWidth="62rem"
+        columns={[
+          {
+            label: t('Resolution'),
+            hideLabel: true,
+            width: '10rem',
+          },
+          ...sources.map((source) => ({
+            label: <span title={SOURCE_INFO[source] ? t(SOURCE_INFO[source]) : undefined}>{sourceName(source)}</span>,
+            width: '6.5rem',
+          })),
+        ]}
+        rows={resolutions.map((resolution) => {
+          const rowQualities = sources
+            .map((source) => qualityAt(source, resolution))
+            .filter((quality): quality is QualityRow => quality !== undefined);
+          const open = expanded === resolution && rowQualities.length > 0;
+          return {
+            key: String(resolution),
+            active: open,
+            cells: [
+              <div className="grid">
+                <div className="flex h-12 items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    iconOnly
+                    disabled={!rowQualities.length}
+                    aria-label={open ? t('Hide bitrates for {resolution}p', { resolution }) : t('Show bitrates for {resolution}p', { resolution })}
+                    onClick={() => setExpanded(open ? null : resolution)}
+                  >
+                    {open ? <ChevronDown /> : <ChevronRight />}
+                  </Button>
+                  {resolution}p
+                  {RESOLUTION_INFO[resolution] && <Hint label={t('About {resolution}p', { resolution })}>{t(RESOLUTION_INFO[resolution])}</Hint>}
+                </div>
+                {open && (
+                  <div className="mt-3 grid gap-2.5">
+                    {LIMITS.map((limit) => (
+                      <div key={limit.key} className="flex h-7 items-center justify-end">
+                        <Text variant="small">{t(limit.label)}</Text>
                       </div>
-                      {open && (
-                        <div className="mt-3 grid gap-2.5">
-                          {LIMITS.map((limit) => (
-                            <Field
-                              key={limit.key}
-                              size="sm"
-                              hideLabel
-                              width="xs"
-                              label={t(limit.name, { name: quality.label })}
-                              type="number"
-                              min="0"
-                              step="any"
-                              placeholder={limit.key === 'min' ? undefined : '∞'}
-                              value={current(quality)[limit.key]}
-                              onValueChange={(text) => setSize(quality.id, { ...current(quality), [limit.key]: text })}
-                            />
-                          ))}
-                        </div>
-                      )}
+                    ))}
+                  </div>
+                )}
+              </div>,
+              ...sources.map((source) => {
+                const quality = qualityAt(source, resolution);
+                if (!quality) return null;
+                const index = slots.findIndex((slot) => slot.id === quality.id);
+                return (
+                  <div className="grid">
+                    <div className="flex h-12 items-center gap-1">
+                      <Checkbox aria-label={quality.label} checked={index >= 0} onCheckedChange={() => toggle(quality.id)} />
+                      {index >= 0 && <Badge>{ranks[index]}</Badge>}
                     </div>
-                  );
-                }),
-              ],
-            };
-          })}
-        />
-      </Section>
+                    {open && (
+                      <div className="mt-3 grid gap-2.5">
+                        {LIMITS.map((limit) => (
+                          <Field
+                            key={limit.key}
+                            size="sm"
+                            hideLabel
+                            width="xs"
+                            label={t(limit.name, { name: quality.label })}
+                            type="number"
+                            min="0"
+                            step="any"
+                            placeholder={limit.key === 'min' ? undefined : '∞'}
+                            value={current(quality)[limit.key]}
+                            onValueChange={(text) => setSize(quality.id, { ...current(quality), [limit.key]: text })}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              }),
+            ],
+          };
+        })}
+      />
       <ModalActions>
         <div className="mr-auto">
           <Text variant="small">{t('The priority is given by the order in which you select.')}</Text>

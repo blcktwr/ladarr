@@ -275,6 +275,7 @@ export const es: Record<string, string> = {
   'Download clients': 'Clientes de descargas',
   'Edit': 'Editar',
   'Edit {name}': 'Editar {name}',
+  'Edit quality': 'Editar calidad',
   'Enter a name.': 'Ingresa un nombre.',
   'Enter a number from 0 to 3600.': 'Ingresa un número de 0 a 3600.',
   'Enter a whole number from 0 to 100.': 'Ingresa un número entero de 0 a 100.',
