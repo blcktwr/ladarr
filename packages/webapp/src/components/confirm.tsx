@@ -31,6 +31,9 @@ export function Confirm({ label, title, confirm, onConfirm, disabled, children }
     >
       {children}
       <ModalActions>
+        <Button variant="ghost" onClick={() => setOpen(false)}>
+          {t('Cancel')}
+        </Button>
         <Button
           variant="danger"
           onClick={() => {
@@ -39,9 +42,6 @@ export function Confirm({ label, title, confirm, onConfirm, disabled, children }
           }}
         >
           {confirm}
-        </Button>
-        <Button variant="ghost" onClick={() => setOpen(false)}>
-          {t('Cancel')}
         </Button>
       </ModalActions>
     </Modal>
