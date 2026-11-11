@@ -23,6 +23,27 @@ export type QueueStage = 'queued' | 'searching' | 'fetching' | 'sending' | 'down
 // "waiting" means that no release is eligible yet.
 export type QueueBranch = 'paused' | 'cancelled' | 'waiting';
 
+// The checks of an import, in the order that the importer runs them.
+export const IMPORT_CHECK_IDS = [
+  'download_complete',
+  'title_folder',
+  'root_available',
+  'download_in_client',
+  'download_readable',
+  'download_inside',
+  'files_found',
+  'destination_inside',
+  'file_readable',
+  'destination_free',
+  'names_unique',
+  'staged',
+  'published',
+  'committed',
+  'retired',
+] as const;
+export type ImportCheckId = (typeof IMPORT_CHECK_IDS)[number];
+export type ImportCheckState = 'pending' | 'running' | 'ok' | 'failed';
+
 // The state of a download client connection.
 export type ClientState = 'unconfigured' | 'ok' | 'rejected' | 'unreachable';
 

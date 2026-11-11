@@ -99,6 +99,8 @@ type Options = {
   indexer?: Partial<Indexer>;
   // How often the size of a running copy is read.
   copyPollMs?: number;
+  // How long each import check stays in `running`. The production default is 100 ms.
+  checkDelayMs?: number;
   // More job handlers, for a test that needs the metadata or the first search.
   handlers?: (context: { db: Db; events: ReturnType<typeof createEvents>; queue: ReturnType<typeof createQueue>; finder: ReturnType<typeof createFinder> }) => Record<string, Handler>;
 };
@@ -139,7 +141,17 @@ export async function startPipeline(options: Options = {}) {
   const handlers = {
     'queue.search': queueSearchHandler(finder),
     'queue.grab': queueGrabHandler({ queue, finder, indexers, clients, save, reconcileMs: 20 }),
-    'import.run': importRunHandler({ queue, events, clients, save, probe: options.probe ?? (async () => ({ ok: true, durationSeconds: 2700, container: 'matroska', videoCodec: 'h264', audioLanguages: ['eng'] })), afterStep: options.afterStep, fs: options.fs, status: importStatus }),
+    'import.run': importRunHandler({
+      queue,
+      events,
+      clients,
+      save,
+      probe: options.probe ?? (async () => ({ ok: true, durationSeconds: 2700, container: 'matroska', videoCodec: 'h264', audioLanguages: ['eng'] })),
+      afterStep: options.afterStep,
+      fs: options.fs,
+      status: importStatus,
+      checkDelayMs: options.checkDelayMs ?? 0,
+    }),
     'import.resume': importResumeHandler(),
     ...options.handlers?.({ db, events, queue, finder }),
   };

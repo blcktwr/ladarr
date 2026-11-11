@@ -1,3 +1,4 @@
+import { type ImportCheckId, IMPORT_CHECK_IDS } from '@ladarr/shared/enums';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { copyFile as fsCopyFile, link as fsLink, lstat, mkdir, readdir, realpath, rename as fsRename, rm, stat, statfs, unlink } from 'node:fs/promises';
@@ -60,6 +61,8 @@ type Deps = {
   save: () => Promise<void>;
   probe?: (path: string) => Promise<ProbeResult>;
   status?: ImportStatus;
+  // How long a check stays in `running` before its work starts. Slow work keeps it there until it ends.
+  checkDelayMs?: number;
   // For tests: replace a file operation, or stop after a step to test a restart.
   fs?: Partial<Fs>;
   afterStep?: (state: JournalStep['state'], step: JournalStep) => void | Promise<void>;
@@ -121,8 +124,14 @@ export async function listVideos(base: string, { skipHidden = false }: { skipHid
   return found;
 }
 
-export function createImporter({ queue, events, clients, save, probe = probeFile, status, fs = {}, afterStep, now = Date.now }: Deps) {
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const checkKey = (hash: string, titleKey: string) => `${hash}:${titleKey}`;
+
+export function createImporter({ queue, events, clients, save, probe = probeFile, status, checkDelayMs = 100, fs = {}, afterStep, now = Date.now }: Deps) {
   const ops: Fs = { link: fs.link ?? fsLink, copyFile: fs.copyFile ?? fsCopyFile, rename: fs.rename ?? fsRename };
+  const wait = async () => {
+    if (checkDelayMs > 0) await sleep(checkDelayMs);
+  };
 
   const entriesOf = (ids: string[]) => ids.map((id) => queue.get(id)).filter((entry): entry is QueueEntry => Boolean(entry));
   const block = (entries: QueueEntry[], code: string, detail?: string) => {
@@ -197,74 +206,191 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
   }
 
   async function plan(hash: string, group: QueueEntry[], handle: ClientHandle): Promise<ImportJournal | undefined> {
-    const title = db.data.titles[group[0]!.titleKey];
+    const existing = db.data.titles[group[0]!.titleKey];
     // A manual import or a rename of this title is open. Its names are not in the library records yet, so the plan would see a taken name.
     // The targets stay in Validating, and the next poll of the client asks for a new run.
-    if (title && Object.values(db.data.imports).some((journal) => journal.titleKey === title.key && journal.sourceBase)) return;
-    const root = title && db.data.roots[title.rootId];
-    if (!title || !root) return void block(group, 'title_unavailable');
+    if (existing && Object.values(db.data.imports).some((journal) => journal.titleKey === existing.key && journal.sourceBase)) return;
 
-    const health = await checkRoot(root.path, root.dev);
-    if (health.problems.some((problem) => BAD_ROOT.includes(problem))) return void block(group, 'root_unavailable');
+    const key = checkKey(hash, group[0]!.titleKey);
+    status?.startChecks(key, group.map((entry) => entry.id), IMPORT_CHECK_IDS);
 
-    const torrent = await handle.api.find(hash);
-    if (!torrent) return void block(group, 'torrent_missing');
-    if (!torrent.complete) return;
+    const failureOf = (problem: ImportProblem) => ({ code: problem.code, ...(problem.message === problem.code ? {} : { detail: problem.message }) });
+    const failGroup = (problem: ImportProblem) => block(group, problem.code, problem.message === problem.code ? undefined : problem.message);
 
-    // The client says where the download is. ladarr must see the same path. It must lead into the save folder of the torrent, also after links are resolved.
-    const base = await realpath(torrent.savePath).catch(() => undefined);
-    const content = await realpath(torrent.contentPath).catch(() => undefined);
-    if (!base || !content) return void block(group, 'download_not_found');
-    if (!inside(base, content)) return void block(group, 'path_outside_downloads');
-
-    const files = await listVideos(content);
-    const { picks, missing } = pick(title, group, files);
-    // A pack with some files leaves the other episodes to a new search. A torrent with no usable file blocks, because
-    // another search would only find the same torrent.
-    if (missing.length && picks.length) uncovered(missing);
-    else if (missing.length) block(missing, 'file_not_found');
-    if (!picks.length) return;
-
-    const rootReal = await realpath(root.path);
-    const folder = title.folder ?? folderName(title);
-    const steps: JournalStep[] = [];
-    for (const { file, entries, episodes } of picks) {
+    // Runs one check and keeps its reason when it fails.
+    const run = async <T>(id: ImportCheckId, work: () => Promise<T>): Promise<T> => {
+      status?.setCheck(key, id, 'running');
+      await wait();
       try {
-        const extension = extname(file.abs).toLowerCase();
-        const dest = title.mediaType === 'movie' ? moviePath(title, folder, extension, db.data.settings.naming) : episodePath(title, folder, episodes, extension, db.data.settings.naming);
-        if (!inside(rootReal, join(rootReal, dest))) throw new ImportProblem('destination_outside_root');
-        const result = await probe(file.abs);
-        if (result.ok === false) throw new ImportProblem('file_unreadable', result.reason);
-        // Without ffprobe the check is basic: the file has data. A health problem tells the user.
-        if (result.ok === 'skipped' && file.sizeBytes === 0) throw new ImportProblem('file_unreadable', 'empty');
-
-        const known = title.mediaType === 'movie' ? title.fileId : episodes.map((e) => e.fileId).find(Boolean);
-        const old = known ? db.data.files[known] : undefined;
-        const exists = await lstat(join(rootReal, dest)).then(() => true, () => false);
-        // A file at the destination is safe to replace only when it is the file that the library has for this target.
-        if (exists && !(old && old.path === dest && !old.missing)) throw new ImportProblem('destination_exists');
-        steps.push({
-          entryIds: entries.map((e) => e.id),
-          source: posix(relative(base, file.abs)),
-          dest,
-          replaces: old && !old.missing ? old.path : null,
-          state: 'planned',
-          method: null,
-          sizeBytes: file.sizeBytes,
-          episodes: episodes.map((e) => ({ season: e.season, number: e.number })),
-          validation: result.ok === true ? 'ffprobe' : 'basic',
-        });
+        const value = await work();
+        status?.setCheck(key, id, 'ok');
+        return value;
       } catch (error) {
         const problem = problemOf(error);
-        block(entries, problem.code, problem.message === problem.code ? undefined : problem.message);
+        status?.setCheck(key, id, 'failed', failureOf(problem));
+        throw problem;
       }
-    }
-    if (!steps.length) return;
-    // Two files can not share a destination.
-    if (new Set(steps.map((s) => s.dest)).size !== steps.length) {
-      block(steps.flatMap((s) => entriesOf(s.entryIds)), 'destination_exists');
+    };
+    // Runs one check of the whole group. A failed check blocks every target of the group and stops the plan.
+    const checked = async <T>(id: ImportCheckId, work: () => Promise<T>): Promise<T | undefined> => {
+      try {
+        return await run(id, work);
+      } catch (error) {
+        failGroup(problemOf(error));
+        return undefined;
+      }
+    };
+
+    // The download is complete while the target is still in Validating. Only then does it move to Importing.
+    status?.setCheck(key, 'download_complete', 'running');
+    await wait();
+    const torrent = await handle.api.find(hash);
+    if (!torrent) {
+      status?.setCheck(key, 'download_complete', 'failed', { code: 'torrent_missing' });
+      block(group, 'torrent_missing');
       return;
     }
+    if (!torrent.complete) {
+      // The client has not finished. The target waits in Validating, and the next poll starts a new run.
+      status?.setCheck(key, 'download_complete', 'pending');
+      return;
+    }
+    status?.setCheck(key, 'download_complete', 'ok');
+
+    // Checks 2-15 belong to Importing. Every target of the group moves there before the first one.
+    for (const entry of group) queue.move(entry, { stage: 'importing', branch: null, reason: null }, 'import started');
+    status?.publishChecks(key);
+
+    const found = await checked('title_folder', async () => {
+      const title = db.data.titles[group[0]!.titleKey];
+      const root = title && db.data.roots[title.rootId];
+      if (!title || !root) throw new ImportProblem('title_unavailable');
+      return { title, root };
+    });
+    if (!found) return;
+    const { title, root } = found;
+
+    const health = await checked('root_available', async () => {
+      const result = await checkRoot(root.path, root.dev);
+      if (result.problems.some((problem) => BAD_ROOT.includes(problem))) throw new ImportProblem('root_unavailable');
+      return result;
+    });
+    if (!health) return;
+
+    const clientTorrent = await checked('download_in_client', async () => torrent);
+    if (!clientTorrent) return;
+
+    // The client says where the download is. ladarr must see the same path. It must lead into the save folder of the torrent, also after links are resolved.
+    const paths = await checked('download_readable', async () => {
+      const save = await realpath(clientTorrent.savePath).catch(() => undefined);
+      const content = await realpath(clientTorrent.contentPath).catch(() => undefined);
+      if (!save || !content) throw new ImportProblem('download_not_found');
+      return { base: save, content };
+    });
+    if (!paths) return;
+    const { base, content } = paths;
+
+    const leads = await checked('download_inside', async () => {
+      if (!inside(base, content)) throw new ImportProblem('path_outside_downloads');
+      return true;
+    });
+    if (!leads) return;
+
+    let picked: { picks: Pick[]; missing: QueueEntry[] };
+    try {
+      picked = await run('files_found', async () => {
+        const files = await listVideos(content);
+        const result = pick(title, group, files);
+        if (!result.picks.length) throw new ImportProblem('file_not_found');
+        return result;
+      });
+    } catch (error) {
+      failGroup(problemOf(error));
+      return;
+    }
+    // A pack with some files leaves the other episodes to a new search. A torrent with no usable file blocks, because
+    // another search would only find the same torrent.
+    if (picked.missing.length) uncovered(picked.missing);
+
+    type Candidate = Pick & { dest: string | null; replaces: string | null; validation: 'ffprobe' | 'basic'; failed: boolean };
+    const candidates: Candidate[] = picked.picks.map((item) => ({ ...item, dest: null, replaces: null, validation: 'basic', failed: false }));
+    const alive = () => candidates.filter((candidate) => !candidate.failed);
+
+    // Runs a check for each file. A file that fails is blocked here, and the other files go on.
+    const perFile = async (id: ImportCheckId, work: (candidate: Candidate) => Promise<void>) => {
+      status?.setCheck(key, id, 'running');
+      await wait();
+      let failure: ImportProblem | undefined;
+      for (const candidate of alive()) {
+        try {
+          await work(candidate);
+        } catch (error) {
+          const problem = problemOf(error);
+          candidate.failed = true;
+          failure ??= problem;
+          block(candidate.entries, problem.code, problem.message === problem.code ? undefined : problem.message);
+        }
+      }
+      status?.setCheck(key, id, failure ? 'failed' : 'ok', failure ? failureOf(failure) : undefined);
+      return alive().length > 0;
+    };
+
+    let rootReal: string | undefined;
+    const folder = title.folder ?? folderName(title);
+    const destinations = await perFile('destination_inside', async (candidate) => {
+      rootReal ??= await realpath(root.path);
+      const extension = extname(candidate.file.abs).toLowerCase();
+      const dest = title.mediaType === 'movie' ? moviePath(title, folder, extension, db.data.settings.naming) : episodePath(title, folder, candidate.episodes, extension, db.data.settings.naming);
+      if (!inside(rootReal, join(rootReal, dest))) throw new ImportProblem('destination_outside_root');
+      candidate.dest = dest;
+    });
+    if (!destinations || !rootReal) return;
+
+    const readable = await perFile('file_readable', async (candidate) => {
+      const result = await probe(candidate.file.abs);
+      if (result.ok === false) throw new ImportProblem('file_unreadable', result.reason);
+      // Without ffprobe the check is basic: the file has data. A health problem tells the user.
+      if (result.ok === 'skipped' && candidate.file.sizeBytes === 0) throw new ImportProblem('file_unreadable', 'empty');
+      candidate.validation = result.ok === true ? 'ffprobe' : 'basic';
+    });
+    if (!readable) return;
+
+    const free = await perFile('destination_free', async (candidate) => {
+      const dest = candidate.dest!;
+      const known = title.mediaType === 'movie' ? title.fileId : candidate.episodes.map((e) => e.fileId).find(Boolean);
+      const old = known ? db.data.files[known] : undefined;
+      const exists = await lstat(join(rootReal!, dest)).then(() => true, () => false);
+      // A file at the destination is safe to replace only when it is the file that the library has for this target.
+      if (exists && !(old && old.path === dest && !old.missing)) throw new ImportProblem('destination_exists');
+      candidate.replaces = old && !old.missing ? old.path : null;
+    });
+    if (!free) return;
+
+    status?.setCheck(key, 'names_unique', 'running');
+    await wait();
+    const built = alive();
+    const names = new Map<string, number>();
+    for (const candidate of built) if (candidate.dest) names.set(candidate.dest, (names.get(candidate.dest) ?? 0) + 1);
+    const duplicates = built.filter((candidate) => candidate.dest !== null && (names.get(candidate.dest) ?? 0) > 1);
+    // Two files can not share a destination. The check covers every built step, so a duplicate stops the whole import.
+    if (duplicates.length) for (const candidate of built) candidate.failed = true;
+    if (duplicates.length) block(built.flatMap((candidate) => candidate.entries), 'destination_exists');
+    status?.setCheck(key, 'names_unique', duplicates.length ? 'failed' : 'ok', duplicates.length ? { code: 'destination_exists' } : undefined);
+    if (!alive().length) return;
+
+    const steps: JournalStep[] = alive().map((candidate) => ({
+      entryIds: candidate.entries.map((e) => e.id),
+      source: posix(relative(base, candidate.file.abs)),
+      dest: candidate.dest!,
+      replaces: candidate.replaces,
+      state: 'planned',
+      method: null,
+      sizeBytes: candidate.file.sizeBytes,
+      episodes: candidate.episodes.map((e) => ({ season: e.season, number: e.number })),
+      validation: candidate.validation,
+    }));
+    if (!steps.length) return;
+
     const journal: ImportJournal = { id: randomUUID(), hash, titleKey: title.key, steps, createdAt: now(), clientId: handle.id, downloadBase: base };
     db.data.imports[journal.id] = journal;
     for (const step of steps) {
@@ -280,7 +406,6 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
           replaces: step.replaces,
           episodes: step.episodes.length,
         });
-        queue.move(entry, { stage: 'importing', branch: null, reason: null }, 'import started');
       }
     }
     await save();
@@ -400,6 +525,9 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     if (journal.sourceBase) settleQueue(title, step);
     for (const entry of entriesOf(step.entryIds)) {
       entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };
+      // A download import moves its targets to Available after every step is retired. A manual import and a rename
+      // finish each target here.
+      if (!journal.sourceBase) continue;
       catalog.info('import_completed', `Import completed: ${step.dest}`, itemFields(entry), { path: step.dest, method: step.method, validation: step.validation });
       queue.endAttempt(entry, 'imported');
       queue.move(entry, { stage: 'available', branch: null, reason: null }, 'imported', step.method ?? undefined);
@@ -433,6 +561,22 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     if (result.ok === false) throw new ImportProblem('file_unreadable', result.reason);
     if (result.ok === 'skipped' && step.sizeBytes === 0) throw new ImportProblem('file_unreadable', 'empty');
     step.validation = result.ok === true ? 'ffprobe' : 'basic';
+  }
+
+  // A download import moves its targets to Available only when every step is retired. Until then they stay in
+  // Importing, and every target of the group shows the same check list.
+  function finishDownload(journal: ImportJournal) {
+    const done = new Set<string>();
+    for (const step of journal.steps) {
+      for (const entry of entriesOf(step.entryIds)) {
+        if (done.has(entry.id)) continue;
+        done.add(entry.id);
+        entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };
+        catalog.info('import_completed', `Import completed: ${step.dest}`, itemFields(entry), { path: step.dest, method: step.method, validation: step.validation });
+        queue.endAttempt(entry, 'imported');
+        queue.move(entry, { stage: 'available', branch: null, reason: null }, 'imported', step.method ?? undefined);
+      }
+    }
   }
 
   // Moves each step forward from the state that it has. A restart calls this again, so every state can start from itself.
@@ -481,17 +625,97 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       }
     };
 
-    for (const step of [...journal.steps]) {
-      try {
-        if (step.state === 'planned') {
-          if (journal.sourceBase && journal.kind !== 'rename') await checkSource(step, base);
-          await stage(journal, step, rootReal, base);
-          step.state = 'staged';
-          await save();
-          shown(step);
-          await after('staged', step);
+    // A step that fails before the library record is in the journal goes out, and its targets are blocked. The other
+    // steps of the import go on. A failure after the record cannot be undone, so it goes up as it is.
+    const failed = async (step: JournalStep, error: unknown): Promise<ImportProblem> => {
+      const problem = problemOf(error);
+      if (step.state !== 'planned' && step.state !== 'staged' && step.state !== 'published') throw error;
+      // Nothing is in the library yet. Remove the staged file. The old library file was not changed.
+      await rm(stagePathOf(journal, step, rootReal), { force: true }).catch(() => {});
+      block(entriesOf(step.entryIds), problem.code, problem.message === problem.code ? undefined : problem.message);
+      journal.steps = journal.steps.filter((other) => other !== step);
+      status?.problem(journal.id, step.source, problem.code, problem.message === problem.code ? undefined : problem.message);
+      const affected = entriesOf(step.entryIds);
+      if (affected.length) {
+        for (const entry of affected) catalog.warn('import_failed', `Import failed: ${problem.code} (${step.source})`, itemFields(entry), { code: problem.code, state: step.state, file: step.source, dest: step.dest });
+      } else log.warn('import step failed', { code: problem.code, state: step.state });
+      return problem;
+    };
+
+    if (journal.sourceBase) {
+      for (const step of [...journal.steps]) {
+        try {
+          if (step.state === 'planned') {
+            if (journal.kind !== 'rename') await checkSource(step, base);
+            await stage(journal, step, rootReal, base);
+            step.state = 'staged';
+            await save();
+            shown(step);
+            await after('staged', step);
+          }
+          if (step.state === 'staged') {
+            // The staged file must be there and whole. If not, the step starts again.
+            const staged = await stat(stagePathOf(journal, step, rootReal)).catch(() => undefined);
+            const published = await stat(join(rootReal, step.dest)).catch(() => undefined);
+            if (!staged && !(published && published.size === step.sizeBytes)) {
+              step.state = 'planned';
+              await stage(journal, step, rootReal, base);
+              step.state = 'staged';
+            } else if (staged && staged.size !== step.sizeBytes) throw new ImportProblem('copy_incomplete');
+            if (staged) await publish(journal, step, rootReal);
+            step.state = 'published';
+            await save();
+            shown(step);
+            await after('published', step);
+          }
+          if (step.state === 'published') {
+            await commit(journal, step, rootReal);
+            await save();
+            shown(step);
+            await after('committed', step);
+          }
+          if (step.state === 'committed') {
+            await retire(journal, step, rootReal);
+            await save();
+            shown(step);
+            status?.stepDone(journal.id);
+            await after('retired', step);
+          }
+        } catch (error) {
+          if (error === crash) throw error;
+          await failed(step, error);
         }
-        if (step.state === 'staged') {
+      }
+    } else {
+      const key = checkKey(journal.hash, journal.titleKey);
+      // Each phase runs for every step that still has work in it. A step that fails leaves the journal, and the phase
+      // keeps its reason.
+      const phase = async (id: ImportCheckId, advance: (step: JournalStep) => Promise<void>) => {
+        status?.setCheck(key, id, 'running');
+        await wait();
+        let failure: ImportProblem | undefined;
+        for (const step of [...journal.steps]) {
+          try {
+            await advance(step);
+          } catch (error) {
+            if (error === crash) throw error;
+            failure ??= await failed(step, error);
+          }
+        }
+        status?.setCheck(key, id, failure ? 'failed' : 'ok', failure ? { code: failure.code, ...(failure.message === failure.code ? {} : { detail: failure.message }) } : undefined);
+      };
+
+      await phase('staged', async (step) => {
+        if (step.state !== 'planned') return;
+        await stage(journal, step, rootReal, base);
+        step.state = 'staged';
+        await save();
+        shown(step);
+        await after('staged', step);
+      });
+      if (journal.steps.length) {
+        await phase('published', async (step) => {
+          if (step.state !== 'staged') return;
           // The staged file must be there and whole. If not, the step starts again.
           const staged = await stat(stagePathOf(journal, step, rootReal)).catch(() => undefined);
           const published = await stat(join(rootReal, step.dest)).catch(() => undefined);
@@ -505,37 +729,30 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
           await save();
           shown(step);
           await after('published', step);
-        }
-        if (step.state === 'published') {
+        });
+      }
+      if (journal.steps.length) {
+        await phase('committed', async (step) => {
+          if (step.state !== 'published') return;
           await commit(journal, step, rootReal);
           await save();
           shown(step);
           await after('committed', step);
-        }
-        if (step.state === 'committed') {
+        });
+      }
+      if (journal.steps.length) {
+        await phase('retired', async (step) => {
+          if (step.state !== 'committed') return;
           await retire(journal, step, rootReal);
           await save();
           shown(step);
           status?.stepDone(journal.id);
           await after('retired', step);
-        }
-      } catch (error) {
-        if (error === crash) throw error;
-        const problem = problemOf(error);
-        if (step.state === 'planned' || step.state === 'staged' || step.state === 'published') {
-          // Nothing is in the library yet. Remove the staged file. The old library file was not changed.
-          await rm(stagePathOf(journal, step, rootReal), { force: true }).catch(() => {});
-          block(entriesOf(step.entryIds), problem.code, problem.message === problem.code ? undefined : problem.message);
-          journal.steps = journal.steps.filter((other) => other !== step);
-          status?.problem(journal.id, step.source, problem.code, problem.message === problem.code ? undefined : problem.message);
-          const affected = entriesOf(step.entryIds);
-          if (affected.length) {
-            for (const entry of affected) catalog.warn('import_failed', `Import failed: ${problem.code} (${step.source})`, itemFields(entry), { code: problem.code, state: step.state, file: step.source, dest: step.dest });
-          } else log.warn('import step failed', { code: problem.code, state: step.state });
-        } else throw error;
+        });
       }
     }
     if (journal.steps.every((step) => step.state === 'retired') || !journal.steps.length) {
+      if (!journal.sourceBase) finishDownload(journal);
       delete db.data.imports[journal.id];
       // The files are in, so a search only targets the episodes that have no file. A download import runs it too:
       // a pack can leave episodes without a file, and they must not wait for another action.
@@ -576,9 +793,15 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
   return { run };
 }
 
-// The IDs of the downloads that have an unfinished import, so a start of the server can finish them.
+// The IDs of the downloads that have an unfinished import, so a start of the server can finish them. A target in
+// Validating or Importing with a torrent is unfinished too, also when no journal was written.
 export const unfinishedImports = () => {
-  return [...new Set(Object.values(db.data.imports).map((journal) => journal.hash))];
+  const hashes = new Set(Object.values(db.data.imports).map((journal) => journal.hash));
+  for (const entry of Object.values(db.data.queue)) {
+    if (!entry.transferHash || entry.branch === 'cancelled') continue;
+    if (entry.stage === 'validating' || entry.stage === 'importing') hashes.add(entry.transferHash);
+  }
+  return [...hashes];
 };
 
 // The video files of a download, for the "Match file" choice. Returns nothing when the download is not reachable.

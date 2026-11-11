@@ -245,6 +245,8 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
       : null,
     importResult: entry.importResult ?? null,
     import: importOf(importStatus, entry),
+    // The checks belong to the import of the target. A target outside Validating and Importing has none.
+    checks: entry.stage === 'validating' || entry.stage === 'importing' ? (importStatus?.checksOf(entry.id) ?? null) : null,
   };
   if (!detail) return base;
   return {

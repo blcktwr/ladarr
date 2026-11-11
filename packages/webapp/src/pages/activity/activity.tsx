@@ -1,7 +1,7 @@
-import type { QueueActionName } from '@ladarr/shared/enums';
+import type { ImportCheckId, QueueActionName } from '@ladarr/shared/enums';
 import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, Pause, Play } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, LoaderCircle, Pause, Play, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
@@ -116,46 +116,45 @@ function FileDetails({ file }: { file: NonNullable<QueueEntryView['file']> }) {
   return <Text variant="small">{file.name} ({formatBytes(file.sizeBytes)})</Text>;
 }
 
-// The steps of the import journal. A check with a higher place is done.
-const importStates = ['planned', 'staged', 'published', 'committed', 'retired'] as const;
-const importRank = (entry: QueueEntryView) => (entry.import ? importStates.indexOf(entry.import.state) : 0);
+// The checks belong to a target that validates or imports. A target outside those stages has none.
+const hasChecks = (entry: QueueEntryView) => Boolean(entry.checks?.length);
 
-// The checks belong to a target that validates or imports. A target that a problem stops has no checks.
-const hasChecks = (entry: QueueEntryView) => entry.key !== 'stuck' && (entry.stage === 'validating' || entry.stage === 'importing');
+// The labels of the checks, in the order that the importer runs them. The server sends the same IDs.
+const checkLabels: Record<ImportCheckId, string> = {
+  download_complete: 'The download is complete.',
+  title_folder: 'The title and its library folder exist.',
+  root_available: 'The library folder is available.',
+  download_in_client: 'The download is in the client.',
+  download_readable: 'The download folder is readable.',
+  download_inside: 'The download folder is inside the downloads folder.',
+  files_found: 'The video files are found.',
+  destination_inside: 'The destination is inside the library folder.',
+  file_readable: 'The file is readable.',
+  destination_free: 'The destination name is free.',
+  names_unique: 'No two files have the same name.',
+  staged: 'The file is in the folder of the title.',
+  published: 'The file has its final name.',
+  committed: 'The library record is updated.',
+  retired: 'The replaced file is removed.',
+};
 
-// The checks that ladarr does before a target is complete. The checks of the validation pass together when the plan of
-// the import is made. The steps of the import follow one by one.
+// The checks that ladarr does before a target is complete, in the order that the server sends them.
 function ImportChecks({ entry }: { entry: QueueEntryView }) {
-  if (!hasChecks(entry)) return null;
-  const planned = entry.stage === 'importing';
-  const rank = importRank(entry);
-  const steps = [
-    { label: 'The download is complete.', done: true },
-    { label: 'The title and its library folder exist.', done: planned },
-    { label: 'The library folder is available.', done: planned },
-    { label: 'The download is in the client.', done: planned },
-    { label: 'The download folder is readable.', done: planned },
-    { label: 'The download folder is inside the downloads folder.', done: planned },
-    { label: 'The video files are found.', done: planned },
-    { label: 'The destination is inside the library folder.', done: planned },
-    { label: 'The file is readable.', done: planned },
-    { label: 'The destination name is free.', done: planned },
-    { label: 'No two files have the same name.', done: planned },
-    { label: 'The file is in the folder of the title.', done: rank >= 1 },
-    { label: 'The file has its final name.', done: rank >= 2 },
-    { label: 'The library record is updated.', done: rank >= 3 },
-    { label: 'The replaced file is removed.', done: rank >= 4 },
-  ];
+  if (!entry.checks?.length) return null;
   return (
     <List>
-      {steps.map((step) => (
-        <Row key={step.label}>
-          {step.done ? (
+      {entry.checks.map((check) => (
+        <Row key={check.id}>
+          {check.state === 'running' ? (
+            <LoaderCircle className="size-4.5 shrink-0 text-accent animate-spin motion-reduce:animate-none" role="img" aria-label={t('Importing')} />
+          ) : check.state === 'ok' ? (
             <Check className="size-4.5 shrink-0 text-success" role="img" aria-label={t('Done')} />
+          ) : check.state === 'failed' ? (
+            <X className="size-4.5 shrink-0 text-error" role="img" aria-label={t('Failed')} />
           ) : (
             <Circle className="size-4.5 shrink-0 text-fog" role="img" aria-label={t('Waiting')} />
           )}
-          <Text variant="small">{t(step.label)}</Text>
+          <Text variant="small">{t(checkLabels[check.id])}</Text>
         </Row>
       ))}
     </List>
@@ -581,11 +580,9 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   for (const entry of entries) if (entry.release) releases.set(`${entry.release.title}|${entry.release.sizeBytes}`, entry.release);
   const unique = [...releases.values()];
   const qualities = [...new Set(unique.flatMap((release) => (release.quality ? [release.quality] : [])))];
-  // The target of the checklist: the one that is furthest behind in the import. A target that a reason stops comes
-  // after the targets that move.
-  const importing = entries
-    .filter(hasChecks)
-    .sort((a, b) => Number(Boolean(a.reason)) - Number(Boolean(b.reason)) || (a.stage === b.stage ? importRank(a) - importRank(b) : a.stage === 'validating' ? -1 : 1))[0];
+  // The target of the checklist: an episode with checks that moves, or one that a reason stopped. Every target of a
+  // pack carries the same list.
+  const importing = entries.find((entry) => hasChecks(entry) && entry.reason === null) ?? entries.find(hasChecks);
   const message =
     status === 'no_match'
       ? t('The indexers have releases, but none fits your selected qualities.')
@@ -820,6 +817,23 @@ function QueueView() {
   useLive('queue.changed', refresh);
   // The client reports the part of each file at every poll, and the rows show it.
   useLive('queue.progress', refresh);
+  // The checks of an import change one by one. The rows read the new state here, without the debounce of `refresh`,
+  // so the sequence stays visible.
+  useLive('import.checks', (data) => {
+    const event = data as { entries?: { id: string; stage: QueueEntryView['stage']; key: string; checks: NonNullable<QueueEntryView['checks']> }[] } | undefined;
+    if (!event?.entries?.length) return;
+    const updated = new Map(event.entries.map((entry) => [entry.id, entry]));
+    const patch = (item: QueueEntryView): QueueEntryView => {
+      const change = updated.get(item.id);
+      return change ? { ...item, stage: change.stage, key: change.key, checks: change.checks } : item;
+    };
+    void queryClient.setQueriesData<QueuePage>({ predicate: (query) => String(query.queryKey[0]).startsWith('/queue?') }, (page) =>
+      page ? { ...page, items: page.items.map((row) => (row.kind === 'entry' ? { ...row, ...patch(row) } : row)) } : page,
+    );
+    void queryClient.setQueriesData<{ items: QueueEntryView[] }>({ predicate: (query) => String(query.queryKey[0]).startsWith('/queue/groups/') }, (data) =>
+      data ? { ...data, items: data.items.map(patch) } : data,
+    );
+  });
   // A title that loads its episodes, or leaves the library, changes the pending row of the queue.
   useLive('library.changed', refresh);
   // The row of a series that waits for its episodes depends on a job, and the end of that wait can arrive with no

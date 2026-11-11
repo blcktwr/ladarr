@@ -3,6 +3,8 @@ import type {
   BackupKind,
   ClientState,
   FolderFileStatus,
+  ImportCheckId,
+  ImportCheckState,
   ImportNote,
   IndexerApp,
   IndexerNotUsed,
@@ -448,6 +450,15 @@ export type QueueSearch = {
   rejected: QueueRejectedRelease[];
 };
 
+// One check of an import. The state and the reason are the ones of the last run.
+export type ImportCheck = {
+  id: ImportCheckId;
+  state: ImportCheckState;
+  code: string | null;
+  detail: string | null;
+  at: number | null;
+};
+
 export type QueueEntryView = {
   id: string;
   titleKey: string;
@@ -484,6 +495,8 @@ export type QueueEntryView = {
   importResult: { at: number; ok: boolean; method: 'hardlink' | 'copy' | null; path: string | null; validation: 'ffprobe' | 'basic' } | null;
   // The step of the open import. The method and the step do not depend on the bytes of a copy.
   import: { state: 'planned' | 'staged' | 'published' | 'committed' | 'retired'; method: 'hardlink' | 'copy' | null; copy: { copiedBytes: number; totalBytes: number; observedAt: number } | null } | null;
+  // The checks of the open import. Null when the target has no check run.
+  checks: ImportCheck[] | null;
 };
 
 export type QueueEntryDetail = QueueEntryView & {
