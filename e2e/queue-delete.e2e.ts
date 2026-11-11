@@ -54,7 +54,8 @@ test('deletes a series and a movie from the queue with the modal of the library'
   await expect(page.getByText('Movie Name', { exact: true })).toBeVisible();
   await page.locator('a[href$="/activity"]').click();
 
-  // The movie has the same menu and the same modal. Its deletion keeps the file data of its torrent.
+  // The movie has the same menu and the same modal. The user turns the switch off, so the catalog loses the title and
+  // the torrent and its files stay.
   await page.locator('[data-row="entry:movie:2"]').click();
   await expect(page.getByRole('heading', { name: 'Movie Name (2019)' })).toBeVisible();
   await page.getByRole('button', { name: 'Actions for Movie Name (2019)' }).click();
@@ -66,8 +67,8 @@ test('deletes a series and a movie from the queue with the modal of the library'
   await movieAlert.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect.poll(async () => (await stack.call('GET', '/library/movie:2')).status, { timeout: 30_000 }).toBe(404);
   await expect(page.locator('[data-row="entry:movie:2"]')).toHaveCount(0);
-  await expect.poll(() => [...stack.qbit.torrents.values()].some((torrent) => torrent.name.includes('Movie.Name')), { timeout: 30_000 }).toBe(false);
-  expect(stack.qbit.calls).toContainEqual(expect.objectContaining({ path: 'torrents/delete', body: expect.stringContaining('"deleteFiles":"false"') }));
+  expect([...stack.qbit.torrents.values()].some((torrent) => torrent.name.includes('Movie.Name'))).toBe(true);
+  expect(stack.qbit.calls.some((call) => call.path === 'torrents/delete' && call.body?.includes('"deleteFiles":"false"'))).toBe(false);
 
   // The catalog loses the movie too.
   await page.locator('a[href$="/catalog"]').click();

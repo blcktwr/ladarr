@@ -280,13 +280,13 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
           dropSeason(row.key, season, queue, cancelJob);
           title.seasonOverrides[String(season)] = 'unmonitored';
           for (const episode of title.episodes) if (episode.season === season) episode.override = null;
-          if (!kept) await removeTorrents(refs, request.deleteFiles === true);
+          if (!kept && request.deleteFiles === true) await removeTorrents(refs, true);
         } else if (request.action === 'remove' && !kept) {
           const removed = Object.values(db.data.queue).filter((entry) => entry.titleKey === row.key);
           const ids = new Set(removed.map((entry) => entry.id));
           const refs = torrentsForRemoval(removed, Object.values(db.data.queue).filter((entry) => !ids.has(entry.id)));
           dropTitle(row.key, queue, cancelJob);
-          await removeTorrents(refs, request.deleteFiles === true);
+          if (request.deleteFiles === true) await removeTorrents(refs, true);
         }
         if (kept && !result.skipped.some((item) => item.key === row.key)) skip(row.key, 'files_not_deleted');
       }
