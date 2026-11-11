@@ -274,10 +274,27 @@ export function createQueue(events: Events, persist: () => void, onMove?: MoveHo
     catalog.info('attempt_ended', `Attempt ${entry.attempt} ended: ${outcome}${detail ? ` (${detail})` : ''}`, itemFields(entry), { outcome, ...(detail ? { detail } : {}) });
   }
 
+  // The file that an imported target gave keeps the torrent of its entry, so a removal can delete that torrent later.
+  function rememberDownload(entry: QueueEntry) {
+    const attempt = entry.attempts.at(-1);
+    if (attempt?.outcome !== 'imported' || !entry.importResult?.ok) return;
+    if (!entry.clientId || !entry.transferHash) return;
+    const title = db.data.titles[entry.titleKey];
+    if (!title) return;
+    const fileId =
+      title.mediaType === 'movie'
+        ? title.fileId
+        : (title.episodes.find((episode) => episode.season === entry.season && episode.number === entry.number)?.fileId ?? null);
+    const file = fileId ? db.data.files[fileId] : undefined;
+    if (!file || file.download) return;
+    file.download = { clientId: entry.clientId, hash: entry.transferHash, external: entry.release?.external === true };
+  }
+
   // A request for a target. It returns false when the target is already in the journey, so no second request starts.
   function request(entry: QueueEntry, reason: string) {
     // An entry that was made but never requested has no attempt yet.
     if (entry.attempt > 0 && isActive(entry)) return false;
+    rememberDownload(entry);
     Object.assign(entry, { search: null, release: null, transferHash: null, clientId: null, importResult: null, clearedAt: null, completedAt: null, manualMatch: entry.manualMatch });
     startAttempt(entry, reason);
     move(entry, { stage: 'queued', branch: null, reason: null }, reason);

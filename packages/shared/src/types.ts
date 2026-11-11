@@ -108,6 +108,8 @@ export type TitleDetail = TitleSummary & {
   metaLoadedAt: number | null;
   episodesLoadedAt: number | null;
   seasons: SeasonRow[];
+  // The resolutions of the files of the title, the highest first, without duplicates.
+  resolutions: number[];
 };
 
 // The TMDB facts of an episode. A title that is not in the library has them too.
@@ -248,6 +250,8 @@ export type FolderListing = { path: string; parent: string | null; folders: stri
 export type PresetRow = { id: string; label: string };
 
 export type QualityRow = { id: string; label: string; source: string; resolution: number | null };
+// A quality of the chain of a title that an upgrade can reach.
+export type UpgradeQuality = { id: string; label: string };
 // The qualities of a profile, the best group first. The qualities of one group have the same rank.
 export type ProfileData = QualityProfile;
 
@@ -679,7 +683,7 @@ export type SearchPlan = {
 };
 
 // The selection of a search on the library: titles that the user chose, or a filter with a media type.
-export type LibrarySearchRequest = { kind: 'search' | 'upgrades'; filter?: LibraryFilter; type?: LibraryType; keys?: string[]; resolution?: number };
+export type LibrarySearchRequest = { kind: 'search' | 'upgrades'; filter?: LibraryFilter; type?: LibraryType; keys?: string[]; quality?: string };
 
 export type CalendarEvent = {
   // The queue entry ID of the target.

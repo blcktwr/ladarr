@@ -1,5 +1,5 @@
 import type { LibraryType } from '@ladarr/shared/enums';
-import type { CastMember, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary } from '@ladarr/shared/types';
+import type { CastMember, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary, UpgradeQuality } from '@ladarr/shared/types';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { ArrowLeft, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
@@ -10,7 +10,7 @@ import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, Empty
 import { Alert } from '../../components/alert.tsx';
 import { Link, LoadFailed, LoadingGallery, pageWidth } from '../../components/index.ts';
 import { ModalActions } from '../../components/modal-actions.tsx';
-import { catalogPath, contentType, posterUrl, describeError, errorMessages, shownKey, statusLabel } from '../../lib/format.ts';
+import { catalogPath, contentType, posterUrl, describeError, shownKey, statusLabel } from '../../lib/format.ts';
 import { t, getLanguage } from '../../i18n/index.ts';
 import { useLive } from '../../lib/live.ts';
 import { StatusText } from '../../lib/status.tsx';
@@ -158,40 +158,26 @@ async function search(body: Target) {
   return started.length;
 }
 
-// The Upgrade button of a title page. The dialog offers the resolutions that the profile chain defines above a file.
-// The user picks one, and ladarr searches the files below it for a release of exactly that resolution.
-function UpgradeDialog({ titleKey }: { titleKey: string }) {
+// The Upgrade button of a title page. The dialog offers the qualities that the profile chain defines above a file.
+// The user picks one, and ladarr searches the files below it for a release of exactly that quality.
+function UpgradeDialog({ titleKey, qualities, error }: { titleKey: string; qualities?: UpgradeQuality[]; error?: unknown }) {
   const [open, setOpen] = useState(false);
-  const [resolutions, setResolutions] = useState<number[]>([]);
   const [choice, setChoice] = useState('');
   const [message, setMessage] = useState('');
   const [pending, setPending] = useState(false);
   const queueNotice = useQueueNotice();
   const id = useId();
-
-  async function load() {
-    setMessage('');
-    setResolutions([]);
-    setChoice('');
-    setPending(true);
-    try {
-      const { resolutions } = await api<{ resolutions: number[] }>(`/library/${titleKey}/upgrades`);
-      setResolutions(resolutions);
-      setChoice(String(resolutions[0] ?? ''));
-      if (!resolutions.length) setMessage(errorMessages.no_better_qualities);
-    } catch (err) {
-      setMessage(describeError(err));
-    } finally {
-      setPending(false);
-    }
-  }
+  const options = qualities ?? [];
+  // With no quality left, the button is disabled and says why. A read that failed keeps it enabled, so the dialog shows the error.
+  const empty = qualities !== undefined && options.length === 0;
+  const selected = options.some((option) => option.id === choice) ? choice : (options[0]?.id ?? '');
 
   async function start() {
+    if (!selected) return;
     setMessage('');
     setPending(true);
     try {
-      const resolution = Number(choice);
-      const plan = await api<SearchPlan>('/library/search/preview', { method: 'POST', body: { kind: 'upgrades', keys: [titleKey], resolution } });
+      const plan = await api<SearchPlan>('/library/search/preview', { method: 'POST', body: { kind: 'upgrades', keys: [titleKey], quality: selected } });
       if (!plan.planId) throw new ApiError(409, 'nothing_to_search');
       await api('/library/search', { method: 'POST', body: { planId: plan.planId } });
       queueNotice(plan.targets);
@@ -208,20 +194,27 @@ function UpgradeDialog({ titleKey }: { titleKey: string }) {
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (next) void load();
+        if (next) setMessage('');
       }}
       title={t('Search for upgrades')}
-      trigger={<Button variant="ghost">{t('Upgrade')}</Button>}
+      trigger={
+        <span title={empty ? t('You already have the latest quality.') : undefined}>
+          <Button variant="ghost" disabled={empty}>
+            {t('Upgrade')}
+          </Button>
+        </span>
+      }
     >
       {message && <Alert tone="danger">{message}</Alert>}
-      {resolutions.length > 0 && (
+      {error != null && !qualities && <Alert tone="danger">{describeError(error)}</Alert>}
+      {options.length > 0 && (
         <>
-          <label htmlFor={id}>{t('Resolution')}</label>
-          <Dropdown id={id} value={choice} options={resolutions.map((resolution) => ({ value: String(resolution), label: `${resolution}p` }))} onValueChange={(value) => setChoice(value ?? '')} />
+          <label htmlFor={id}>{t('Quality')}</label>
+          <Dropdown id={id} value={selected} options={options.map((option) => ({ value: option.id, label: option.label }))} onValueChange={(value) => setChoice(value ?? '')} />
         </>
       )}
       <ModalActions>
-        {resolutions.length > 0 ? (
+        {options.length > 0 ? (
           <>
             <Button variant="ghost" autoFocus onClick={() => setOpen(false)}>
               {t('Cancel')}
@@ -488,7 +481,7 @@ const formatDate = (date: string) => new Date(`${date}T00:00:00Z`).toLocaleDateS
 
 // The hero of a title has one shape for a movie and for a series. The parts below it are the ones that differ.
 // The children are the extra facts of a person. A photo of a person is not a poster, so it has its own size.
-function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, controls, children }: { header: Header; posterSize?: 'w342' | 'h632'; mediaType?: string; tmdbId?: number; controls?: ReactNode; children?: ReactNode }) {
+function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutions, controls, children }: { header: Header; posterSize?: 'w342' | 'h632'; mediaType?: string; tmdbId?: number; resolutions?: number[]; controls?: ReactNode; children?: ReactNode }) {
   return (
     <div className={pageWidth}>
       <Controls>{controls}</Controls>
@@ -503,6 +496,13 @@ function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, controls,
           {header.date && <Text variant="small">{formatDate(header.date)}</Text>}
           {header.overview && <Text>{header.overview}</Text>}
           {mediaType !== undefined && tmdbId !== undefined && <TitleLinks imdbId={header.imdbId} tmdbId={tmdbId} mediaType={mediaType} rating={header.rating} />}
+          {resolutions && resolutions.length > 0 && (
+            <div className="flex items-center gap-2">
+              {resolutions.map((resolution) => (
+                <Badge key={resolution}>{`${resolution}p`}</Badge>
+              ))}
+            </div>
+          )}
           {children && <Actions>{children}</Actions>}
         </div>
       </Backdrop>
@@ -636,6 +636,9 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
   const oneSeason = !title && seasonList.length === 1 ? seasonList[0]!.seasonNumber : null;
   // Search looks for what is missing, and Upgrade replaces a file that the library has. A series that lacks some episodes can need both.
   const hasFile = title ? (series ? (title.counts?.available ?? 0) > 0 : title.availability === 'available') : false;
+  // The qualities that an upgrade can reach, so the button knows whether it has an option before the dialog opens.
+  const upgrades = useQuery<{ qualities: UpgradeQuality[] }>({ queryKey: [`/library/${title?.key}/upgrades`], enabled: hasFile });
+  useLive('library.changed', () => void upgrades.refetch());
   // A title that was searched has a target in the queue, so it has no Search of its own.
   const searched = title !== undefined && title.queueStatus !== null && title.queueStatus !== 'available';
   // The facts of a title that was just added arrive after the add. The page keeps its content, and the control that
@@ -652,6 +655,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
         header={header}
         mediaType={header.mediaType}
         tmdbId={header.tmdbId}
+        resolutions={title?.resolutions}
         controls={
           pendingAdd && addLoading && (pendingAdd.kind === 'movie' || pendingAdd.season === null || oneSeason !== null) ? (
             <Button pending>{t('Add')}</Button>
@@ -664,7 +668,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
                   </Button>
                 </span>
               )}
-              {hasFile && <UpgradeDialog titleKey={title.key} />}
+              {hasFile && <UpgradeDialog titleKey={title.key} qualities={upgrades.data?.qualities} error={upgrades.error} />}
               <Button variant="danger" onClick={() => setPlan({ request: { action: 'remove', keys: [title.key] }, subject: title.title })}>
                 {t('Delete')}
               </Button>

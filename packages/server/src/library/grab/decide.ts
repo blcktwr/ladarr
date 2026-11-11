@@ -8,10 +8,10 @@ import type { RawRelease } from './torznab.ts';
 import { episodeEligibleAt } from '../../core/dates.ts';
 
 // What a search looks for. A season want accepts a pack only.
-// `upgradeResolution` is the resolution of a manual upgrade. The want then accepts a release of exactly that resolution.
+// `upgradeQuality` is the quality of a manual upgrade. The want then accepts a release of exactly that quality.
 export type Want =
-  | { kind: 'movie'; title: Title; upgradeResolution?: number }
-  | { kind: 'episode'; title: Title; season: number; number: number; upgradeResolution?: number }
+  | { kind: 'movie'; title: Title; upgradeQuality?: string }
+  | { kind: 'episode'; title: Title; season: number; number: number; upgradeQuality?: string }
   | { kind: 'season'; title: Title; season: number };
 
 export type Context = {
@@ -168,9 +168,9 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   const hash = release.infoHash;
   if (ctx.blocked(release, hash)) reject('blocklisted');
   if (hash && ctx.downloading(hash)) reject('already_downloading');
-  // A want with `upgradeResolution` is for a target that has a file. The release must have exactly the chosen resolution.
-  if (want.kind !== 'season' && want.upgradeResolution !== undefined) {
-    if (parsed.resolution !== want.upgradeResolution) reject('not_an_upgrade');
+  // A want with `upgradeQuality` is for a target that has a file. The release must have exactly the chosen quality.
+  if (want.kind !== 'season' && want.upgradeQuality !== undefined) {
+    if (qualityOf(parsed.source, parsed.resolution) !== want.upgradeQuality) reject('not_an_upgrade');
     // The file of the target holds one episode. A file for several episodes would leave the other episodes without a file.
     if (kind === 'multi') reject('upgrade_needs_single');
   } else if (want.kind === 'movie' && ctx.hasMovieFile(title) && !ctx.manual) reject('already_available');

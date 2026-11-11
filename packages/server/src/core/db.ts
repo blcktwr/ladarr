@@ -85,6 +85,8 @@ export type MediaFile = {
   source?: ReleaseSource | null;
   // The resolution of the release that gave the file. Null when the release does not say.
   resolution?: number | null;
+  // The torrent that gave the file. Scanned files and manual imports have none. An external torrent belongs to the user.
+  download?: { clientId: string; hash: string; external: boolean } | null;
 };
 
 // A library folder. `dev` is the device number at the time the user accepted the folder.

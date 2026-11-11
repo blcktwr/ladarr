@@ -174,21 +174,40 @@ test('a title that has no file has Search, and a title that has a file has Upgra
     const response = await route.fetch();
     const body = await response.json();
     body.title.availability = 'available';
+    body.title.resolutions = [2160, 1080];
     await route.fulfill({ response, json: body });
   });
-  await page.route(/\/library\/movie:2\/upgrades$/, (route) => route.fulfill({ json: { resolutions: [1080, 2160] } }));
+  await page.route(/\/library\/movie:2\/upgrades$/, (route) => route.fulfill({ json: { qualities: [{ id: 'webdl-1080', label: 'WEB-DL 1080p' }, { id: 'bluray-2160', label: 'BluRay 2160p' }] } }));
   await page.goto(`${URL_BASE}/catalog/movie/2`);
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Search', exact: true })).toHaveCount(0);
-  // Upgrade asks for a resolution first, then for a plan of the title.
+  await expect(page.getByText('2160p', { exact: true })).toBeVisible();
+  await expect(page.getByText('1080p', { exact: true })).toBeVisible();
+  // Upgrade asks for a quality first, then for a plan of the title.
   await page.getByRole('button', { name: 'Upgrade', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Search for upgrades' });
   await expect(dialog).toBeVisible();
-  await dialog.getByRole('combobox', { name: 'Resolution' }).click();
-  await page.getByRole('option', { name: '1080p' }).click();
-  const preview = page.waitForRequest((request) => request.url().endsWith('/library/search/preview') && request.postData()?.includes('"upgrades"') === true);
+  await dialog.getByRole('combobox', { name: 'Quality' }).click();
+  await page.getByRole('option', { name: 'WEB-DL 1080p' }).click();
+  const preview = page.waitForRequest((request) => request.url().endsWith('/library/search/preview') && request.postData()?.includes('"upgrades"') === true && request.postData()?.includes('"quality":"webdl-1080"') === true);
   await dialog.getByRole('button', { name: 'Search', exact: true }).click();
   await preview;
+});
+
+test('a title that has no better quality has Upgrade disabled', async ({ page }) => {
+  // The movie has a file, as the server sends it.
+  await page.route(/\/library\/movie:2$/, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.title.availability = 'available';
+    body.title.resolutions = [2160, 1080];
+    await route.fulfill({ response, json: body });
+  });
+  await page.route(/\/library\/movie:2\/upgrades$/, (route) => route.fulfill({ json: { qualities: [] } }));
+  await page.goto(`${URL_BASE}/catalog/movie/2`);
+  const upgrade = page.getByRole('button', { name: 'Upgrade', exact: true });
+  await expect(upgrade).toBeDisabled();
+  await expect(upgrade.locator('..')).toHaveAttribute('title', 'You already have the latest quality.');
 });
 
 test('Delete asks in an alert, and the page stays open as a title that is not in the catalog', async ({ page }) => {

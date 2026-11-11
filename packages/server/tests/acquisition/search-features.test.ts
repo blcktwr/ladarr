@@ -48,7 +48,7 @@ describe('upgrades', () => {
     expect(pipe!.tracker.state.downloads).toEqual([]);
   });
 
-  it('previews the files below the chosen resolution, and starts the search', async () => {
+  it('previews the files below the chosen quality, and starts the search', async () => {
     // The file is 720p, so the 1080p release is the chosen upgrade.
     const { film } = await libraryWithFile('webdl', { handlers: ({ db, finder }) => ({ [BULK_SEARCH_JOB]: librarySearchHandler({ finder, enqueue: (input) => enqueue(input) }) }) }, 720);
     pipe!.tracker.state.items = [{ title: WEBDL, size: webdlSize }];
@@ -56,29 +56,37 @@ describe('upgrades', () => {
 
     // A plan for missing files finds nothing: the movie has a file.
     expect((await api.post('/library/search/preview', { kind: 'search', keys: [film.key] })).body).toMatchObject({ planId: null });
-    const plan = (await api.post('/library/search/preview', { kind: 'upgrades', keys: [film.key], resolution: 1080 })).body;
+    const plan = (await api.post('/library/search/preview', { kind: 'upgrades', keys: [film.key], quality: 'webdl-1080' })).body;
     expect(plan).toMatchObject({ titles: 1, targets: 1 });
     expect((await api.post('/library/search', { planId: plan.planId })).status).toBe(202);
     const job = Object.values(pipe!.db.data.jobs).find((item) => item.type === BULK_SEARCH_JOB)!;
-    expect(job.payload).toMatchObject({ kind: 'upgrades', resolution: 1080 });
+    expect(job.payload).toMatchObject({ kind: 'upgrades', quality: 'webdl-1080' });
     expect(job.payload).not.toHaveProperty('manual');
     await until(() => pipe!.queue.get(film.key)?.stage === 'downloading');
     expect(pipe!.queue.get(film.key)!.attempts[0]!.reason).toBe('upgrade search');
     expect(pipe!.tracker.state.downloads).toEqual([WEBDL]);
   });
 
-  it.each([{}, { resolution: null }, { resolution: '1080' }, { resolution: 1080.5 }])('refuses the resolution %j', async (resolution) => {
+  it.each([{}, { quality: null }, { quality: 1080 }, { quality: '' }])('refuses the quality %j', async (quality) => {
     const { film } = await libraryWithFile('webdl');
     api = await pipe!.api();
-    const res = await api.post('/library/search/preview', { kind: 'upgrades', keys: [film.key], ...resolution });
+    const res = await api.post('/library/search/preview', { kind: 'upgrades', keys: [film.key], ...quality });
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'invalid_resolution' });
+    expect(res.body).toEqual({ error: 'invalid_quality' });
   });
 
-  it('answers 409 when no requested title can reach the resolution', async () => {
-    const { film } = await libraryWithFile('webdl', {}, 2160);
+  it('answers 409 when no requested title can reach the quality', async () => {
+    const { film } = await libraryWithFile('webdl', {}, 1080);
     api = await pipe!.api();
-    const res = await api.post('/library/search/preview', { kind: 'upgrades', keys: [film.key], resolution: 2160 });
+    const res = await api.post('/library/search/preview', { kind: 'upgrades', keys: [film.key], quality: 'webdl-1080' });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'no_better_qualities' });
+  });
+
+  it('answers 409 when the chosen quality is not in the chain of the title', async () => {
+    const { film } = await libraryWithFile('webdl', {}, 720);
+    api = await pipe!.api();
+    const res = await api.post('/library/search/preview', { kind: 'upgrades', keys: [film.key], quality: 'remux-1080' });
     expect(res.status).toBe(409);
     expect(res.body).toEqual({ error: 'no_better_qualities' });
   });
@@ -86,15 +94,15 @@ describe('upgrades', () => {
   it('refuses the upgrades filter that the library had before', async () => {
     await libraryWithFile('webdl', {}, 720);
     api = await pipe!.api();
-    const res = await api.post('/library/search/preview', { kind: 'upgrades', filter: 'upgrades', resolution: 1080 });
+    const res = await api.post('/library/search/preview', { kind: 'upgrades', filter: 'upgrades', quality: 'webdl-1080' });
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: 'invalid_filter' });
   });
 
   it.each([
-    ['higher', 'Movie.Name.2019.2160p.WEB-DL-GRP', 100 * 150 * MIB],
+    ['better', 'Movie.Name.2019.2160p.WEB-DL-GRP', 100 * 150 * MIB],
     ['lower', 'Movie.Name.2019.480p.WEB-DL-GRP', 100 * 30 * MIB],
-  ])('does not take a %s resolution than the chosen one', async (_name, name, size) => {
+  ])('does not take another quality than the chosen one: %s', async (_name, name, size) => {
     const { film } = await libraryWithFile('webdl', { handlers: ({ db, finder }) => ({ [BULK_SEARCH_JOB]: librarySearchHandler({ finder, enqueue: (input) => enqueue(input) }) }) }, 720);
     // The chain takes every WEB-DL resolution, so the release has a known quality.
     pipe!.db.data.profiles = { p: { id: 'p', name: 'All', items: [['webdl-2160'], ['webdl-1080'], ['webdl-720'], ['webdl-480']] } };
@@ -102,7 +110,7 @@ describe('upgrades', () => {
     pipe!.tracker.state.items = [{ title: name, size }];
     api = await pipe!.api();
 
-    const plan = (await api.post('/library/search/preview', { kind: 'upgrades', keys: [film.key], resolution: 1080 })).body;
+    const plan = (await api.post('/library/search/preview', { kind: 'upgrades', keys: [film.key], quality: 'webdl-1080' })).body;
     expect(plan).toMatchObject({ titles: 1, targets: 1 });
     expect((await api.post('/library/search', { planId: plan.planId })).status).toBe(202);
     await wait(150);
@@ -110,10 +118,19 @@ describe('upgrades', () => {
     expect(pipe!.tracker.state.downloads).toEqual([]);
   });
 
-  it('gives the resolutions that the title can upgrade to', async () => {
+  it('gives the qualities that the title can upgrade to', async () => {
     const { film } = await libraryWithFile('webdl', {}, 720);
     api = await pipe!.api();
-    expect((await api.get(`/library/${film.key}/upgrades`)).body).toEqual({ resolutions: [1080, 2160] });
+    expect((await api.get(`/library/${film.key}/upgrades`)).body).toEqual({
+      qualities: [
+        { id: 'webdl-1080', label: 'WEB-DL 1080p' },
+        { id: 'webrip-1080', label: 'WEBRip 1080p' },
+        { id: 'bluray-1080', label: 'BluRay 1080p' },
+        { id: 'webdl-2160', label: 'WEB-DL 2160p' },
+        { id: 'webrip-2160', label: 'WEBRip 2160p' },
+        { id: 'bluray-2160', label: 'BluRay 2160p' },
+      ],
+    });
     expect((await api.get('/library/movie:99/upgrades')).status).toBe(404);
   });
 

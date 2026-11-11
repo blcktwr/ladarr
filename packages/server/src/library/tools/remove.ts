@@ -1,6 +1,6 @@
 import { lstat, readdir, realpath, rmdir, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { type Db, db } from '../../core/db.ts';
+import { type Db, type MediaFile, db } from '../../core/db.ts';
 import type { Job } from '../../core/jobs.ts';
 import { deleteItemLog } from '../../core/log.ts';
 import { clearBlocklist } from '../grab/blocklist.ts';
@@ -8,23 +8,23 @@ import { inside } from '../imports/folder-files.ts';
 import type { Title } from '../library.ts';
 import { isActive, type Queue, type QueueEntry } from '../downloads/queue.ts';
 
-// The torrents that ladarr added for the removed targets, and that no target outside the removal still uses.
+// The torrents that ladarr added for the removed targets and files, and that no target outside the removal still uses.
 // A shared pack goes once. A torrent that the user attached stays.
-export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[]) {
+export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[], files: MediaFile[] = []) {
   const keyOf = (entry: QueueEntry) => (entry.clientId && entry.transferHash ? `${entry.clientId}\n${entry.transferHash}` : null);
   const used = new Set(remaining.flatMap((entry) => keyOf(entry) ?? []));
   const attached = new Set(removed.flatMap((entry) => (entry.release?.external ? (keyOf(entry) ?? []) : [])));
   const seen = new Set<string>();
   const refs: { clientId: string; hash: string }[] = [];
-  for (const entry of removed) {
-    if (entry.release?.external) continue;
-    const { clientId, transferHash } = entry;
-    if (!clientId || !transferHash) continue;
-    const id = `${clientId}\n${transferHash}`;
-    if (used.has(id) || attached.has(id) || seen.has(id)) continue;
+  const add = (clientId: string | null | undefined, hash: string | null | undefined, external: boolean) => {
+    if (!clientId || !hash || external) return;
+    const id = `${clientId}\n${hash}`;
+    if (used.has(id) || attached.has(id) || seen.has(id)) return;
     seen.add(id);
-    refs.push({ clientId, hash: transferHash });
-  }
+    refs.push({ clientId, hash });
+  };
+  for (const entry of removed) add(entry.clientId, entry.transferHash, entry.release?.external === true);
+  for (const file of files) add(file.download?.clientId, file.download?.hash, file.download?.external === true);
   return refs;
 }
 
@@ -103,12 +103,17 @@ export function dropSeason(key: string, season: number, queue?: Queue, cancelJob
 const versions = new Map<string, number>();
 export const filesVersion = (key: string) => versions.get(key) ?? 0;
 
-// Removes a file record and every link to it. The title keeps its other files.
+// Removes a file record and every link to it. The title keeps its other files, and a present file takes the primary place.
 export function forgetFile(title: Title, fileId: string) {
   versions.set(title.key, filesVersion(title.key) + 1);
   delete db.data.files[fileId];
-  if (title.fileId === fileId) title.fileId = null;
-  for (const episode of title.episodes) if (episode.fileId === fileId) episode.fileId = null;
+  const present = Object.values(db.data.files).filter((file) => file.titleKey === title.key && !file.missing);
+  if (title.fileId === fileId) title.fileId = present[0]?.id ?? null;
+  for (const episode of title.episodes) {
+    if (episode.fileId !== fileId) continue;
+    const file = present.find((item) => item.episodes.some((entry) => entry.season === episode.season && entry.number === episode.number));
+    episode.fileId = file?.id ?? null;
+  }
 }
 
 // What the preview saw on the disk. Null: the file was not there.

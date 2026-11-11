@@ -7,11 +7,11 @@ export const MAX_KEYS = 5_000;
 export const MAX_PLANS = 20;
 export const SAMPLE = 10;
 
-// A plan of the kind `upgrades` comes from the Upgrade button of a title page. It searches the files below a resolution
-// for a release of exactly that resolution. Other plans look for the missing files.
+// A plan of the kind `upgrades` comes from the Upgrade button of a title page. It searches the files below a quality
+// for a release of exactly that quality. Other plans look for the missing files.
 export type Kind = 'search' | 'upgrades';
 
-export type Plan = { keys: string[]; targets: number; kind: Kind; resolution: number; jobId: string | null };
+export type Plan = { keys: string[]; targets: number; kind: Kind; quality: string; jobId: string | null };
 
 // shortcut: plans stay in memory, so a restart drops them. The user starts the preview again.
 export const plans = new Map<string, Plan>();

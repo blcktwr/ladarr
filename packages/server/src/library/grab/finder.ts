@@ -841,8 +841,8 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
 
   // True while the target is still a target of the same upgrade search. The settings, the monitoring, and the file can
   // change while the indexers answer, so a caller asks again just before it takes a release.
-  const stillUpgrade = (title: Title, season: number | null, number: number | null, resolution: number) =>
-    db.data.titles[title.key] === title && manualUpgradeTargets(title, resolution).some((target) => target.season === season && target.number === number);
+  const stillUpgrade = (title: Title, season: number | null, number: number | null, quality: string) =>
+    db.data.titles[title.key] === title && manualUpgradeTargets(title, quality).some((target) => target.season === season && target.number === number);
 
   // A file is a target for an upgrade search when no entry of it is in the journey.
   const upgradeFree = (target: { title: Title; season: number | null; number: number | null }) => {
@@ -850,14 +850,14 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     return !entry || !isActive(entry);
   };
 
-  // Looks for a release of the chosen resolution for one file. It makes no queue entry until it finds a release to take.
-  async function upgradeTarget(target: ReturnType<typeof manualUpgradeTargets>[number], resolution: number, signal: AbortSignal) {
+  // Looks for a release of the chosen quality for one file. It makes no queue entry until it finds a release to take.
+  async function upgradeTarget(target: ReturnType<typeof manualUpgradeTargets>[number], quality: string, signal: AbortSignal) {
     const { title, season, number } = target;
     const scope: Scope = season === null ? { kind: 'movie' } : { kind: 'episode', season, number: number! };
-    const want: Want = season === null ? { kind: 'movie', title, upgradeResolution: resolution } : { kind: 'episode', title, season, number: number!, upgradeResolution: resolution };
+    const want: Want = season === null ? { kind: 'movie', title, upgradeQuality: quality } : { kind: 'episode', title, season, number: number!, upgradeQuality: quality };
     for (const name of titleNames(title)) {
       const found = await queryAll(title, scope, name, [], signal, { fresh: true });
-      if (!stillUpgrade(title, season, number, resolution)) break;
+      if (!stillUpgrade(title, season, number, quality)) break;
       const best = bestOf(found.releases.map((release) => decide(release, want, decideContext())));
       if (best) {
         const entry = queue.ensure(title.key, season, number);
@@ -868,16 +868,16 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     }
   }
 
-  // The files that a search of one resolution covers: no indexer to ask, or a file in the journey, gives none.
-  const upgradeFiles = (title: Title, resolution: number) => (usableIndexers(title).length > 0 ? manualUpgradeTargets(title, resolution).filter(upgradeFree) : []);
+  // The files that a search of one quality covers: no indexer to ask, or a file in the journey, gives none.
+  const upgradeFiles = (title: Title, quality: string) => (usableIndexers(title).length > 0 ? manualUpgradeTargets(title, quality).filter(upgradeFree) : []);
 
-  // The user asks for an upgrade of a title to one resolution. Each file below it is searched now.
-  async function upgradeTitle(key: string, signal: AbortSignal, resolution: number) {
+  // The user asks for an upgrade of a title to one quality. Each file below it is searched now.
+  async function upgradeTitle(key: string, signal: AbortSignal, quality: string) {
     const title = db.data.titles[key];
-    const targets = title ? upgradeFiles(title, resolution) : [];
+    const targets = title ? upgradeFiles(title, quality) : [];
     for (const target of targets) {
       signal.throwIfAborted();
-      await upgradeTarget(target, resolution, signal);
+      await upgradeTarget(target, quality, signal);
     }
     return targets.length;
   }
@@ -1124,7 +1124,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     for (const group of bySeason.values()) enqueueSearch({ titleKey: group[0]!.titleKey, season: group[0]!.season, entryIds: group.map((e) => e.id) });
   }
 
-  return { requestSearch, reserve, fallback, block, enqueueSearch, interactive, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, resolution: number) => upgradeFiles(title, resolution).length, clearCache: () => cache.clear() };
+  return { requestSearch, reserve, fallback, block, enqueueSearch, interactive, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
 }
 
 export type Finder = ReturnType<typeof createFinder>;

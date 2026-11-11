@@ -9,7 +9,7 @@ import { enqueue as enqueueJob, JobError } from '../../core/jobs.ts';
 import type { Episode, Title } from '../library.ts';
 import { catalog, itemFields, log } from '../../core/log.ts';
 import type { ImportStatus } from './status.ts';
-import { episodePath, folderName, moviePath } from '../naming.ts';
+import { episodePath, folderName, moviePath, versionedPath } from '../naming.ts';
 import { isSample, isVideoFile, parseEpisodes, titleNumbers } from '../parse.ts';
 import { parseRelease } from '../grab/release.ts';
 import { probeFile, type ProbeResult } from '../probe.ts';
@@ -360,19 +360,70 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     });
     if (!readable) return;
 
+    // The label of a version that the destination name does not give: its resolution, or else its source.
+    const versionLabel = (candidate: Candidate) => {
+      const release = candidate.entries.find((entry) => entry.release)?.release;
+      const parsed = release ? parseRelease(release.title) : parseRelease(basename(candidate.file.abs));
+      if (parsed.resolution !== null) return `${parsed.resolution}p`;
+      return parsed.source === 'unknown' ? 'version' : parsed.source;
+    };
+
+    const nameFree = async (candidate: Candidate, path: string) => {
+      if (candidates.some((other) => other !== candidate && other.dest === path)) return false;
+      if (Object.values(db.data.files).some((file) => file.titleKey === title.key && file.path === path)) return false;
+      return !(await lstat(join(rootReal!, path)).catch(() => undefined));
+    };
+
+    // A new version goes next to the file that holds the name. A taken name gets a number.
+    const versionDestination = async (candidate: Candidate, dest: string) => {
+      const label = versionLabel(candidate);
+      for (let n = 1; ; n++) {
+        const path = versionedPath(dest, n === 1 ? label : `${label} (${n})`);
+        if (await nameFree(candidate, path)) return path;
+      }
+    };
+
     const free = await perFile('destination_free', async (candidate) => {
       const dest = candidate.dest!;
-      const known = title.mediaType === 'movie' ? title.fileId : candidate.episodes.map((e) => e.fileId).find(Boolean);
-      const old = known ? db.data.files[known] : undefined;
+      const entry = candidate.entries.find((item) => item.clientId && item.transferHash);
+      const recordedAt = (path: string) => Object.values(db.data.files).find((file) => file.titleKey === title.key && file.path === path);
+      const fromSameTorrent = (file: MediaFile | undefined) => Boolean(file?.download && entry && file.download.clientId === entry.clientId && file.download.hash === entry.transferHash);
+      const currentIds = title.mediaType === 'movie' ? [title.fileId] : candidate.episodes.map((episode) => episode.fileId);
+      const same = currentIds.map((id) => (id ? db.data.files[id] : undefined)).find((file) => fromSameTorrent(file));
+      const replace = candidate.entries.some((item) => item.replaceDestination);
+      // A torrent that gave a file of this title already updates that file, so it does not add a second record.
+      if (same && same.path !== dest) {
+        const target = await lstat(join(rootReal!, same.path)).catch(() => undefined);
+        if (target?.isDirectory()) throw new ImportProblem('destination_exists', same.path);
+        candidate.dest = same.path;
+        candidate.replaces = same.path;
+        return;
+      }
+      const recorded = recordedAt(dest);
       const target = await lstat(join(rootReal!, dest)).catch(() => undefined);
-      // A file at the destination is safe to replace only when it is the file that the library has for this target.
-      if (target && !(old && old.path === dest && !old.missing)) {
-        // The user chose to replace the file that holds the name. A folder is never removed.
-        const replace = candidate.entries.some((entry) => entry.replaceDestination);
+      if ((same && same.path === dest) || (recorded && fromSameTorrent(recorded))) {
+        if (target?.isDirectory()) throw new ImportProblem('destination_exists', dest);
+        candidate.replaces = dest;
+        return;
+      }
+      // A recorded file at the destination stays. The new file takes a version name next to it.
+      if (recorded) {
+        if (target?.isDirectory()) throw new ImportProblem('destination_exists', dest);
+        if (replace) {
+          candidate.replaces = dest;
+          return;
+        }
+        if (!target) return;
+        candidate.dest = await versionDestination(candidate, dest);
+        candidate.replaces = null;
+        return;
+      }
+      // A file that the library does not know still blocks the destination, unless the user asked to replace it.
+      if (target) {
         if (!replace || target.isDirectory()) throw new ImportProblem('destination_exists', dest);
         await unlink(join(rootReal!, dest));
       }
-      candidate.replaces = old && !old.missing ? old.path : null;
+      candidate.replaces = null;
     });
     if (!free) return;
 
@@ -512,10 +563,14 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     // The source and the resolution of the release go with the file, so a later upgrade knows what the file is.
     const release = entriesOf(step.entryIds).find((entry) => entry.release)?.release;
     const parsed = release ? parseRelease(release.title) : null;
-    Object.assign(file, { sizeBytes: info.size, mtimeMs: info.mtimeMs, episodes: step.episodes, missing: false, source: parsed?.source ?? null, resolution: parsed?.resolution ?? null });
+    // The torrent that gave the file goes with it, so a removal can delete it later. A manual import has none.
+    const source = entriesOf(step.entryIds).find((entry) => entry.clientId && entry.transferHash);
+    const download = source ? { clientId: source.clientId!, hash: source.transferHash!, external: source.release?.external === true } : null;
+    Object.assign(file, { sizeBytes: info.size, mtimeMs: info.mtimeMs, episodes: step.episodes, missing: false, source: parsed?.source ?? null, resolution: parsed?.resolution ?? null, download });
     db.data.files[file.id] = file;
 
     const covered = title.mediaType === 'movie' ? [] : step.episodes.map((c) => title.episodes.find((e) => e.season === c.season && e.number === c.number)).filter((e): e is Episode => Boolean(e));
+    // A new version keeps the record of the file that it does not replace. An explicit replace removes it with its file.
     const previous = new Set<string>();
     if (title.mediaType === 'movie') {
       if (title.fileId && title.fileId !== file.id) previous.add(title.fileId);
@@ -526,10 +581,11 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
         episode.fileId = file.id;
       }
     }
-    // The old record goes when no episode points to it. Its file is removed or already gone.
-    for (const id of previous) {
-      const stillUsed = title.fileId === id || title.episodes.some((e) => e.fileId === id);
-      if (!stillUsed) delete db.data.files[id];
+    if (step.replaces && step.replaces !== step.dest) {
+      for (const id of previous) {
+        const stillUsed = title.fileId === id || title.episodes.some((e) => e.fileId === id);
+        if (!stillUsed) delete db.data.files[id];
+      }
     }
     title.folder ??= step.dest.split('/')[0]!;
     if (journal.sourceBase) settleQueue(title, step);

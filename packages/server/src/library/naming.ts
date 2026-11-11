@@ -1,3 +1,4 @@
+import { extname } from 'node:path';
 import type { Title } from './library.ts';
 import { parseEpisodes } from './parse.ts';
 
@@ -81,6 +82,12 @@ function render(template: string, values: Record<string, string>) {
 export function folderName(title: Title) {
   const year = title.meta.year ? ` (${title.meta.year})` : '';
   return sanitize(`${title.meta.title}${year}`) || `title-${title.tmdbId}`;
+}
+
+// Adds a version label before the extension: "Title (Year) - 1080p.ext".
+export function versionedPath(path: string, label: string) {
+  const extension = extname(path);
+  return `${path.slice(0, path.length - extension.length)} - ${label}${extension}`;
 }
 
 // The path of a movie file, relative to the root: "Title (Year)/Title (Year).ext".

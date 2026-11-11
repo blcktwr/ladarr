@@ -5,6 +5,7 @@ import type { Events } from '../core/events.ts';
 import { loadingTitleKeys, queueKey, type QueueEntry } from '../library/downloads/queue.ts';
 import { clock, summarize } from '../library/tools/api.ts';
 import { seriesCounts, type Override, type Title } from '../library/library.ts';
+import { qualityOfFile } from '../library/grab/upgrades.ts';
 
 const KEY = /^(movie|tv):[1-9]\d*$/;
 const SEASON = /^(0|[1-9]\d*)$/;
@@ -69,6 +70,17 @@ function queueStatusOf(titleKey: string) {
   return queueOrder.find((key) => counts[key]) ?? (counts.available ? 'available' : null);
 }
 
+// The resolutions of the files of the title that are on the disk, the highest first, without duplicates.
+function resolutionsOf(title: Title): number[] {
+  const resolutions = new Set<number>();
+  for (const file of Object.values(db.data.files)) {
+    if (file.titleKey !== title.key || file.missing) continue;
+    const { resolution } = qualityOfFile(file);
+    if (resolution !== null) resolutions.add(resolution);
+  }
+  return [...resolutions].sort((a, b) => b - a);
+}
+
 export function detail(title: Title): TitleDetail {
   const at = clock();
   const { meta } = title;
@@ -98,6 +110,7 @@ export function detail(title: Title): TitleDetail {
     metaLoadedAt: title.metaLoadedAt === null ? null : (title.metaLoadedAt ?? title.refreshedAt),
     episodesLoadedAt: title.episodesLoadedAt,
     seasons,
+    resolutions: resolutionsOf(title),
   };
 }
 

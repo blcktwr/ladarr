@@ -114,16 +114,20 @@ export async function scanTitle(key: string): Promise<ScanResult> {
 
   if (title.mediaType === 'movie') {
     const current = title.fileId ? db.data.files[title.fileId] : undefined;
+    const currentMissing = current?.missing ?? false;
     const sorted = [...videos].sort((a, b) => b.sizeBytes - a.sizeBytes);
     // The file that the library has stays, while it is on the disk. A bigger file does not replace it.
     const keep = current && sorted.find((found) => found.path === current.path);
     const chosen = keep ?? sorted[0];
     if (chosen) {
       const file = record(chosen, []);
-      if (title.fileId !== file.id && current) delete db.data.files[current.id];
+      // A missing file gives its place to the new file, so its record goes.
+      if (current && currentMissing && file.id !== current.id) delete db.data.files[current.id];
       title.fileId = file.id;
-      result.extraFiles = sorted.filter((found) => found !== chosen).map((found) => found.path);
     }
+    // A recorded version that is on the disk stays as another version.
+    for (const found of sorted) if (found !== chosen && byPath.has(found.path)) record(found, []);
+    result.extraFiles = sorted.filter((found) => found !== chosen && !byPath.has(found.path)).map((found) => found.path);
   } else {
     for (const found of videos) {
       const parsed = parseEpisodes(basename(found.path));
@@ -143,12 +147,17 @@ export async function scanTitle(key: string): Promise<ScanResult> {
         const other = episode.fileId ? db.data.files[episode.fileId] : undefined;
         return other && other.id !== own?.id && !other.missing;
       });
-      if (taken) {
+      // A recorded version stays, also when another file is the one of the episode.
+      if (taken && !own) {
         result.duplicates.push(found.path);
         continue;
       }
       const file = record(found, listed.map((episode) => ({ season: episode.season, number: episode.number })));
-      for (const episode of listed) episode.fileId = file.id;
+      // A recorded version becomes the file of an episode only when the file of that episode is gone.
+      for (const episode of listed) {
+        const current = episode.fileId ? db.data.files[episode.fileId] : undefined;
+        if (!current || current.missing) episode.fileId = file.id;
+      }
     }
   }
 
