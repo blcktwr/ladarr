@@ -1023,7 +1023,7 @@ function QueueView() {
           }}
         />
       )}
-      {deletion && <PlanDialog request={deletion.request} subject={deletion.subject} onClose={() => setDeletion(null)} onDone={() => refresh()} />}
+      {deletion && <PlanDialog request={deletion.request} subject={deletion.subject} deleteFilesDefault onClose={() => setDeletion(null)} onDone={() => refresh()} />}
     </div>
   );
 }

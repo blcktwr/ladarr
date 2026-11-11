@@ -9,14 +9,15 @@ import type { Events } from '../../core/events.ts';
 import { inside, listFiles } from '../imports/folder-files.ts';
 import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { filesByTitle } from './files.ts';
-import { dropSeason, dropTitle, forgetFile, retireFile, sameSeen, seeFile, pruneEmpty, type Seen } from './remove.ts';
+import { dropSeason, dropTitle, forgetFile, retireFile, sameSeen, seeFile, pruneEmpty, torrentsForRemoval, type Seen } from './remove.ts';
 import { refreshJob } from '../metadata.ts';
 import { log } from '../../core/log.ts';
 import { isActive, type Queue } from '../downloads/queue.ts';
+import type { Clients } from '../downloads/client-api.ts';
 import { checkRoot } from '../roots.ts';
 import type { Tmdb } from '../../metadata/tmdb.ts';
 
-type Deps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job; queue?: Queue; cancelJob?: (id: string) => void };
+type Deps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job; queue?: Queue; cancelJob?: (id: string) => void; clients?: Clients };
 
 const KEY = /^(movie|tv):[1-9]\d*$/;
 const ACTIONS: PlanAction[] = ['pause', 'resume', 'refresh', 'preset', 'remove', 'delete_files'];
@@ -65,13 +66,24 @@ function parse(body: unknown): PlanRequest | Failure {
 // What the preview saw. The apply checks that the library and the disk are still the same.
 type Stored = { preview: PlanPreview; seen: Map<string, Seen>; ids: Map<string, string[]> };
 
-export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob }: Deps) {
+export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, clients }: Deps) {
   const router = Router();
   // shortcut: plans stay in memory, so a restart drops them. The user starts the preview again.
   const plans = new Map<string, Stored>();
 
   const destructive = (request: PlanRequest) => request.action === 'delete_files' || (request.action === 'remove' && request.deleteFiles === true);
   const journalOf = (key: string) => Object.values(db.data.imports).some((journal) => journal.titleKey === key);
+
+  // Removes the torrents of a dropped title or season. A client that fails does not stop the removal.
+  async function removeTorrents(refs: { clientId: string; hash: string }[], deleteFiles: boolean) {
+    for (const ref of refs) {
+      try {
+        await clients?.get(ref.clientId)?.api.remove(ref.hash, deleteFiles);
+      } catch (error) {
+        log.warn('could not remove torrent', { clientId: ref.clientId, hash: ref.hash, error: String(error) });
+      }
+    }
+  }
 
   // The real path of the root, or the reason that the files cannot be touched now.
   async function rootOf(rootId: string): Promise<{ real: string } | { skip: PlanSkip }> {
@@ -262,11 +274,19 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob }: 
           }
         }
         if (season !== undefined) {
+          const removed = Object.values(db.data.queue).filter((entry) => entry.titleKey === row.key && entry.season === season);
+          const ids = new Set(removed.map((entry) => entry.id));
+          const refs = torrentsForRemoval(removed, Object.values(db.data.queue).filter((entry) => !ids.has(entry.id)));
           dropSeason(row.key, season, queue, cancelJob);
           title.seasonOverrides[String(season)] = 'unmonitored';
           for (const episode of title.episodes) if (episode.season === season) episode.override = null;
+          if (!kept) await removeTorrents(refs, request.deleteFiles === true);
         } else if (request.action === 'remove' && !kept) {
+          const removed = Object.values(db.data.queue).filter((entry) => entry.titleKey === row.key);
+          const ids = new Set(removed.map((entry) => entry.id));
+          const refs = torrentsForRemoval(removed, Object.values(db.data.queue).filter((entry) => !ids.has(entry.id)));
           dropTitle(row.key, queue, cancelJob);
+          await removeTorrents(refs, request.deleteFiles === true);
         }
         if (kept && !result.skipped.some((item) => item.key === row.key)) skip(row.key, 'files_not_deleted');
       }

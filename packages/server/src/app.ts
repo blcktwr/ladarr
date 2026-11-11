@@ -200,7 +200,7 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
     api.post('/library/search/preview', librarySearchPreview(services.finder));
     api.post('/library/search', librarySearchStart(enqueue));
   }
-  api.use('/library', libraryToolsRouter({ tmdb, events, enqueue, queue: services?.queue, cancelJob }));
+  api.use('/library', libraryToolsRouter({ tmdb, events, enqueue, queue: services?.queue, cancelJob, clients: services?.clients }));
   api.get('/library', libraryGet());
   api.post('/library', libraryAdd({ tmdb, events, enqueue }));
   api.get('/library/:key', titleParam(), libraryTitleGet());

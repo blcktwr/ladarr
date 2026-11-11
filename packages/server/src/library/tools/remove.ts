@@ -6,7 +6,27 @@ import { deleteItemLog } from '../../core/log.ts';
 import { clearBlocklist } from '../grab/blocklist.ts';
 import { inside } from '../imports/folder-files.ts';
 import type { Title } from '../library.ts';
-import { isActive, type Queue } from '../downloads/queue.ts';
+import { isActive, type Queue, type QueueEntry } from '../downloads/queue.ts';
+
+// The torrents that ladarr added for the removed targets, and that no target outside the removal still uses.
+// A shared pack goes once. A torrent that the user attached stays.
+export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[]) {
+  const keyOf = (entry: QueueEntry) => (entry.clientId && entry.transferHash ? `${entry.clientId}\n${entry.transferHash}` : null);
+  const used = new Set(remaining.flatMap((entry) => keyOf(entry) ?? []));
+  const attached = new Set(removed.flatMap((entry) => (entry.release?.external ? (keyOf(entry) ?? []) : [])));
+  const seen = new Set<string>();
+  const refs: { clientId: string; hash: string }[] = [];
+  for (const entry of removed) {
+    if (entry.release?.external) continue;
+    const { clientId, transferHash } = entry;
+    if (!clientId || !transferHash) continue;
+    const id = `${clientId}\n${transferHash}`;
+    if (used.has(id) || attached.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    refs.push({ clientId, hash: transferHash });
+  }
+  return refs;
+}
 
 // Removes the title, its file records, its targets, their logs, and its jobs. The files on the disk stay where they are.
 // `cancelJob` stops a job that runs now. Without it, the record goes and a running handler ends at its next check.

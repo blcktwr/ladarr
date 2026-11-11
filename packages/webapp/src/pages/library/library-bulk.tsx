@@ -123,19 +123,19 @@ const doneText = (request: PlanRequest, result: PlanResult, subject?: string | n
 
 // An alert that asks before an action. The plan is made when the user confirms, so the switch makes no request.
 // `subject` names the title of a single action in the alert that follows it.
-export function PlanDialog({ request, subject, onClose, onDone }: { request: PlanRequest | null; subject?: string | null; onClose: () => void; onDone: (result: PlanResult) => void }) {
+export function PlanDialog({ request, subject, onClose, onDone, deleteFilesDefault = false }: { request: PlanRequest | null; subject?: string | null; onClose: () => void; onDone: (result: PlanResult) => void; deleteFilesDefault?: boolean }) {
   const [deleteFiles, setDeleteFiles] = useState(false);
   const [result, setResult] = useState<PlanResult | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const queryClient = useQueryClient();
 
-  // A new request starts with no result, no error, and the files kept.
+  // A new request starts with no result, no error, and the files kept unless the caller asks otherwise.
   useEffect(() => {
     setResult(null);
     setError('');
-    setDeleteFiles(false);
-  }, [request]);
+    setDeleteFiles(deleteFilesDefault);
+  }, [request, deleteFilesDefault]);
 
   async function confirm() {
     if (!request) return;
