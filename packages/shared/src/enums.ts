@@ -19,6 +19,13 @@ export type Policy = 'all' | 'future';
 // A stage can be skipped when its work is not needed. A stage never shows progress that did not happen.
 export type QueueStage = 'queued' | 'searching' | 'fetching' | 'sending' | 'downloading' | 'validating' | 'importing' | 'available';
 
+// The stages whose target has the checks of an import.
+export const IMPORT_STAGES: readonly QueueStage[] = ['validating', 'importing'];
+
+// What a search wants: a movie, one episode, or a whole season.
+export const WANT_KIND = { movie: 'movie', episode: 'episode', season: 'season' } as const;
+export type WantKind = (typeof WANT_KIND)[keyof typeof WANT_KIND];
+
 // A branch is a state beside the journey. It does not move the entry forward.
 // "waiting" means that no release is eligible yet.
 export type QueueBranch = 'paused' | 'cancelled' | 'waiting';

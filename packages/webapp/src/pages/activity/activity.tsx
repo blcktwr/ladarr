@@ -1,4 +1,4 @@
-import type { ImportCheckId, QueueActionName } from '@ladarr/shared/enums';
+import type { QueueActionName } from '@ladarr/shared/enums';
 import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, LoaderCircle, Pause, Play, X } from 'lucide-react';
@@ -134,25 +134,6 @@ function FileDetails({ file }: { file: NonNullable<QueueEntryView['file']> }) {
 // The checks belong to a target that validates or imports. A target outside those stages has none.
 const hasChecks = (entry: QueueEntryView) => Boolean(entry.checks?.length);
 
-// The labels of the checks, in the order that the importer runs them. The server sends the same IDs.
-const checkLabels: Record<ImportCheckId, string> = {
-  download_complete: 'The download is complete.',
-  title_folder: 'The title and its library folder exist.',
-  root_available: 'The library folder is available.',
-  download_in_client: 'The download is in the client.',
-  download_readable: 'The download folder is readable.',
-  download_inside: 'The download folder is inside the downloads folder.',
-  files_found: 'The video files are found.',
-  destination_inside: 'The destination is inside the library folder.',
-  file_readable: 'The file is readable.',
-  destination_free: 'The destination name is free.',
-  names_unique: 'No two files have the same name.',
-  staged: 'The file is in the folder of the title.',
-  published: 'The file has its final name.',
-  committed: 'The library record is updated.',
-  retired: 'The replaced file is removed.',
-};
-
 // The checks that ladarr does before a target is complete, in the order that the server sends them.
 function ImportChecks({ entry }: { entry: QueueEntryView }) {
   if (!entry.checks?.length) return null;
@@ -169,7 +150,7 @@ function ImportChecks({ entry }: { entry: QueueEntryView }) {
           ) : (
             <Circle className="size-4.5 shrink-0 text-fog" role="img" aria-label={t('Waiting')} />
           )}
-          <Text variant="small">{t(checkLabels[check.id])}</Text>
+          <Text variant="small">{t(`import_check.${check.id}`)}</Text>
         </Row>
       ))}
     </List>

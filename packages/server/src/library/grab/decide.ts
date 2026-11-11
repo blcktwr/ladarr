@@ -1,4 +1,5 @@
 import { type Data, type Settings, db, profilesFor } from '../../core/db.ts';
+import { WANT_KIND } from '@ladarr/shared/enums';
 import type { Indexer } from './indexers.ts';
 import { isMonitored, type Episode, type Title } from '../library.ts';
 import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE, type Profile, type SizeLimits } from './quality.ts';
@@ -10,9 +11,9 @@ import { episodeEligibleAt } from '../../core/dates.ts';
 // What a search looks for. A season want accepts a pack only.
 // `upgradeQuality` is the quality of a manual upgrade. The want then accepts a release of exactly that quality.
 export type Want =
-  | { kind: 'movie'; title: Title; upgradeQuality?: string }
-  | { kind: 'episode'; title: Title; season: number; number: number; upgradeQuality?: string }
-  | { kind: 'season'; title: Title; season: number };
+  | { kind: typeof WANT_KIND.movie; title: Title; upgradeQuality?: string }
+  | { kind: typeof WANT_KIND.episode; title: Title; season: number; number: number; upgradeQuality?: string }
+  | { kind: typeof WANT_KIND.season; title: Title; season: number };
 
 export type Context = {
   settings: Settings;

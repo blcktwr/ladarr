@@ -1,6 +1,7 @@
 import { qualityLabel } from '../library/grab/quality.ts';
 import { parseRelease } from '../library/grab/release.ts';
 import type { Finder } from '../library/grab/finder.ts';
+import { IMPORT_STAGES } from '@ladarr/shared/enums';
 import { type Db, db } from '../core/db.ts';
 import type { Job } from '../core/jobs.ts';
 import { reasonInfo } from '../core/reasons.ts';
@@ -246,7 +247,7 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
     importResult: entry.importResult ?? null,
     import: importOf(importStatus, entry),
     // The checks belong to the import of the target. A target outside Validating and Importing has none.
-    checks: entry.stage === 'validating' || entry.stage === 'importing' ? (importStatus?.checksOf(entry.id) ?? null) : null,
+    checks: IMPORT_STAGES.includes(entry.stage) ? (importStatus?.checksOf(entry.id) ?? null) : null,
   };
   if (!detail) return base;
   return {

@@ -1,4 +1,4 @@
-import type { ImportCheckId, ImportCheckState } from '@ladarr/shared/enums';
+import { IMPORT_STAGES, type ImportCheckId, type ImportCheckState } from '@ladarr/shared/enums';
 import type { ImportCheck, RunStatus } from '@ladarr/shared/types';
 import { stat } from 'node:fs/promises';
 import { db } from '../../core/db.ts';
@@ -42,7 +42,7 @@ export function createImportStatus(events: Events, { pollMs = 500, now = Date.no
   function publishChecks(_key?: string) {
     const at = now();
     const entries = Object.values(db.data.queue).flatMap((entry) => {
-      if (entry.stage !== 'validating' && entry.stage !== 'importing') return [];
+      if (!IMPORT_STAGES.includes(entry.stage)) return [];
       const checks = listOf(entry.id);
       return checks ? [{ id: entry.id, stage: entry.stage, key: queueKey(entry), checks }] : [];
     });

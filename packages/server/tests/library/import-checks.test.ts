@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { QueueEntryView } from '@ladarr/shared/types';
 import type { ImportCheck } from '@ladarr/shared/types';
+import { IMPORT_CHECK_IDS as CHECK_IDS } from '@ladarr/shared/enums';
 import { unfinishedImports } from '../../src/library/imports/importer.ts';
 import { view } from '../../src/helpers/queue.ts';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
@@ -11,25 +12,6 @@ afterEach(async () => {
   await pipe?.stop();
   pipe = undefined;
 });
-
-// The order and IDs of the checks, from the plan.
-const CHECK_IDS = [
-  'download_complete',
-  'title_folder',
-  'root_available',
-  'download_in_client',
-  'download_readable',
-  'download_inside',
-  'files_found',
-  'destination_inside',
-  'file_readable',
-  'destination_free',
-  'names_unique',
-  'staged',
-  'published',
-  'committed',
-  'retired',
-] as const;
 
 // The payload of an `import.checks` event, from the plan. The API is not implemented yet, so the test has its own shape.
 type CheckEvent = { at: number; entries: { id: string; stage: string; key: string; checks: ImportCheck[] }[] };
