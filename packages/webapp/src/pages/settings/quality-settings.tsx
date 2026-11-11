@@ -17,6 +17,18 @@ const RESOLUTION_INFO: Record<number, string> = {
   480: 'Also called SD, for standard definition. The picture is 480 pixels high, as on a DVD. The files are the smallest. The picture is soft on large screens.',
 };
 
+// What each source means, and how it differs from the others.
+const SOURCE_INFO: Record<string, string> = {
+  remux: 'The complete picture of a Blu-ray disc, without compression. The quality is the best, and the files are the largest.',
+  bluray: 'A compressed copy of a Blu-ray disc. The quality is high, and the file is smaller than a remux file.',
+  webdl: 'A file from a streaming service, without compression. The picture keeps its quality, and the file is larger than a WEBRip file of the same resolution.',
+  webrip: 'A capture of a streaming service, usually compressed. The file is smaller than a WEB-DL file, and the picture has less detail.',
+  rawhd: 'A capture of a TV broadcast, without compression. The file is very large, and the picture keeps the quality of the broadcast.',
+  hdtv: 'A capture of a TV broadcast, usually compressed. The quality can change, and the picture can have the logo of the channel.',
+  sdtv: 'A capture of a TV broadcast in standard definition. The picture is soft on large screens.',
+  dvd: 'A copy of a DVD disc. The picture is not high definition, so it is soft on large screens.',
+};
+
 // A quality of the profile, the best first. `same` is true when it has the rank of the quality above it.
 type Slot = { id: string; same: boolean };
 type Draft = { name: string; slots: Slot[] };
@@ -151,15 +163,14 @@ function ProfileModal({ profile, qualities, open, onOpenChange, onSaved }: { pro
           minWidth="62rem"
           columns={[
             {
-              label: (
-                <div className="grid">
-                  <span>{t('Resolution')}</span>
-                  <Text variant="small">(MiB/min)</Text>
-                </div>
-              ),
+              label: t('Resolution'),
+              hideLabel: true,
               width: '10rem',
             },
-            ...sources.map((source) => ({ label: sourceName(source), width: '6.5rem' })),
+            ...sources.map((source) => ({
+              label: <span title={SOURCE_INFO[source] ? t(SOURCE_INFO[source]) : undefined}>{sourceName(source)}</span>,
+              width: '6.5rem',
+            })),
           ]}
           rows={resolutions.map((resolution) => {
             const rowQualities = sources
@@ -232,6 +243,9 @@ function ProfileModal({ profile, qualities, open, onOpenChange, onSaved }: { pro
         />
       </Section>
       <ModalActions>
+        <div className="mr-auto">
+          <Text variant="small">{t('The priority is given by the order in which you select.')}</Text>
+        </div>
         <Button pending={pending} onClick={save}>
           {t('Save')}
         </Button>
