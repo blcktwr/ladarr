@@ -31,7 +31,8 @@ export function AlertsFeed() {
     // The server sends the oldest alert first. The queue puts the newest in front, so they go in the other order.
     for (const item of [...data.alerts].reverse()) {
       if (opened.current.has(item.id)) continue;
-      const action = { label: t('Open settings'), onClick: () => void navigate('/settings') };
+      const settings = item.id === 'problem:client_missing' ? '/settings#connections' : '/settings';
+      const action = { label: t('Open settings'), onClick: () => void navigate(settings) };
       const toastId = alert.warn(t(item.title, item.params), t(item.message, item.params), { timeout: 0, action });
       opened.current.set(item.id, toastId);
     }

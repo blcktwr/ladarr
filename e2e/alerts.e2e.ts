@@ -59,7 +59,7 @@ test('the action of an alert opens its page', async ({ page, context }) => {
   const notices = page.getByRole('region', { name: 'Notifications' });
 
   await notices.getByText('Open settings', { exact: true }).click();
-  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page).toHaveURL(/\/settings#connections$/);
 
   // A new visit opens the alert again.
   await page.goto(URL_BASE);

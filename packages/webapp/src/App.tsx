@@ -53,7 +53,7 @@ function QueueStatus({ href, onOpen }: { href: string; onOpen: () => void }) {
   // The line is the only way to the queue, so it shows while the summary loads, and when the summary fails.
   if (!summary.data) return <ActivityLine status={t('Queue')} href={href} onClick={onOpen} />;
   // The queue cannot search or download without an indexer and a client.
-  if (!summary.data.indexers || !summary.data.hasClient) return <ActivityLine status={t('Setup needed')} alert href={href} onClick={onOpen} />;
+  if (!summary.data.indexers || !summary.data.hasClient) return <ActivityLine status={t('Download client required')} alert href={href} onClick={onOpen} />;
   // The user paused the queue, so the work waits.
   if (summary.data.paused) return <ActivityLine status={t('Paused')} state={{ icon: <Pause /> }} href={href} onClick={onOpen} />;
   // The job that the worker runs now is the current work, also when its target is not the first row of the page.

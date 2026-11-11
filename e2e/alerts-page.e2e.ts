@@ -114,5 +114,5 @@ test('the action of an alert opens its page', async ({ page, context }) => {
 
   const main = page.getByRole('main');
   await main.getByText('Open settings', { exact: true }).first().click();
-  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page).toHaveURL(/\/settings#connections$/);
 });

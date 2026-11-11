@@ -24,7 +24,7 @@ export function Alerts() {
     cells: [
       t(item.title, item.params),
       t(item.message, item.params),
-      <Link href="/settings">{t('Open settings')}</Link>,
+      <Link href={item.id === 'problem:client_missing' ? '/settings#connections' : '/settings'}>{t('Open settings')}</Link>,
     ],
   }));
 

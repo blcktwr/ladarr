@@ -20,7 +20,7 @@ export const es: Record<string, string> = {
   'Season {n}': 'Temporada {n}',
   'All caught up': 'Todo al día',
   'All items in queue are stuck': 'Todos los elementos de la cola están atascados',
-  'Setup needed': 'Falta configurar',
+  'Download client required': 'Se necesita un cliente de descargas',
   'Pages': 'Páginas',
 
   // Sign in
@@ -258,6 +258,7 @@ export const es: Record<string, string> = {
   'Installing update': 'Instalando actualización',
   'New version {version}': 'Nueva versión {version}',
   'You have the latest version.': 'Tienes la última versión.',
+  'You already have the latest quality.': 'Ya tienes la última calidad.',
   'Import backup': 'Importar backup',
   'Blocklist': 'Lista de bloqueo',
   'Choose backup file': 'Elegir archivo de respaldo',
@@ -828,7 +829,7 @@ export const es: Record<string, string> = {
   'The download client does not answer. The attempt runs again later.': 'El cliente de descargas no responde. El intento se repetirá más adelante.',
   'The download client rejects the login.': 'El cliente de descargas rechaza el inicio de sesión.',
   'The download client reports an error for this torrent.': 'El cliente de descargas informa un error para este torrent.',
-  'This torrent is in the client already and was not added by the app. You can attach it to this target.': 'Este torrent ya está en el cliente y no lo agregó la app. Puedes vincularlo a este objetivo.',
+  'This torrent is in the client already and was not added by the app.': 'Este torrent ya está en el cliente y no lo agregó la app.',
   'The torrent is not in the client now.': 'El torrent ya no está en el cliente.',
   'The release did not reach the client.': 'La versión no llegó al cliente.',
   'Several releases failed. Select a release by hand, or try again.': 'Varias versiones fallaron. Selecciona una versión a mano o inténtalo de nuevo.',
