@@ -6,7 +6,7 @@ name: ladarr-dev
 services:
   mount-data:
     image: node:26.9.0-alpine3.24
-    command: sh -c "mkdir -p /data/downloads /data/media/movies /data/media/tv && chown -R ${LADARR_UID:-1000}:${LADARR_GID:-1000} /data"
+    command: sh -c "mkdir -p /data/media/movies /data/media/tv /data/media/torrents && chown -R ${LADARR_UID:-1000}:${LADARR_GID:-1000} /data"
     volumes:
       - data:/data
 
@@ -25,6 +25,12 @@ services:
       # The dev database stays out of config/.
       - ${LADARR_DEV_CONFIG:-./config-dev}:/config
       - data:/data
+      # The save path that the client reports.
+      - type: volume
+        source: data
+        target: /downloads
+        volume:
+          subpath: media/torrents
     depends_on:
       mount-data:
         condition: service_completed_successfully
@@ -41,6 +47,12 @@ services:
       - qbittorrent-config:/config
       # The same volume as /data in ladarr. ladarr reads the save path from the client.
       - data:/data
+      # The default save path of the client is /downloads, which is /data/media/torrents.
+      - type: volume
+        source: data
+        target: /downloads
+        volume:
+          subpath: media/torrents
     ports:
       - "${QBITTORRENT_WEBUI_PORT:-8080}:${QBITTORRENT_WEBUI_PORT:-8080}"
       - "${QBITTORRENT_TORRENT_PORT:-6881}:${QBITTORRENT_TORRENT_PORT:-6881}"
@@ -48,7 +60,7 @@ services:
     depends_on:
       mount-data:
         condition: service_completed_successfully
-    # In qBittorrent, set the default save path to /data/downloads.
+    # The default save path of qBittorrent is /downloads, so no setting changes.
 
   jackett:
     image: lscr.io/linuxserver/jackett:latest
