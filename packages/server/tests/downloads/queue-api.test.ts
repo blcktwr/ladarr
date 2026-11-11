@@ -1,3 +1,5 @@
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { enqueue } from '../../src/core/jobs.ts';
 import { episode, indexer as indexerFixture, movie, title } from '../helpers/test-fixtures.ts';
@@ -602,6 +604,28 @@ describe('actions', () => {
     expect(refused.status).toBe(409);
     expect(refused.body.unsupported[0].reason).toContain('not paused');
     expect((await api!.post('/queue/actions', { action: 'explode', ids: ['movie:2'] })).status).toBe(400);
+  });
+
+  it('replaces the file that blocks the destination name when the user asks', async () => {
+    const film = await withMovie();
+    await api!.post('/queue/search', { titleKey: film.key });
+    const entry = pipe!.queue.get('movie:2')!;
+    await until(() => entry.stage === 'downloading');
+
+    const folder = join(pipe!.folders.movies, 'Movie Name (2019)');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'Movie Name (2019).mkv'), 'someone else');
+    pipe!.complete(NAME, { [`${NAME}.mkv`]: 'video-data' });
+
+    await until(() => entry.reason?.code === 'destination_exists');
+    expect(entry.reason?.detail).toBe('Movie Name (2019)/Movie Name (2019).mkv');
+    // A target that stopped before the check was kept still offers the fix.
+    entry.reason = { code: 'destination_exists' };
+
+    expect((await api!.post('/queue/actions', { action: 'replace', ids: ['movie:2'] })).status).toBe(200);
+    await until(() => entry.stage === 'available');
+    expect(entry.reason).toBeNull();
+    expect(readFileSync(join(folder, 'Movie Name (2019).mkv'), 'utf8')).toBe('video-data');
   });
 
   it('pauses and resumes the transfer in the client', async () => {

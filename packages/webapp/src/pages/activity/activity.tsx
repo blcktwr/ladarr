@@ -7,6 +7,7 @@ import { Link as RouterLink } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
 import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal, Pagination, Pane, Panel, Progress, Row, Section, Spinner, SubMenu, Table, Text, Thumbnail } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
+import { Confirm } from '../../components/confirm.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
 import { SeriesBlocklist } from './activity-blocklist.tsx';
 import { MatchDialog } from './activity-match.tsx';
@@ -59,12 +60,13 @@ const idle = (entry: QueueEntryView) => entry.reason !== null || entry.branch ==
 
 // The status at the top of a detail view: the indicator, the message that explains it, and a divider before the
 // content below. A series and a movie use this same block, so the two details keep the same spacing.
-function DetailStatus({ status, icon, message, divider = true, children }: { status: string; icon: string; message: string | null; divider?: boolean; children?: ReactNode }) {
+function DetailStatus({ status, icon, message, divider = true, action, children }: { status: string; icon: string; message: string | null; divider?: boolean; action?: ReactNode; children?: ReactNode }) {
   return (
     <div className="grid gap-4">
       <div className="grid gap-2">
         <StatusText small status={status} icon={icon} help={message ?? statusHelpText(icon)} />
         {message && <Text variant="small">{message}</Text>}
+        {action && <div className="flex justify-start mt-2">{action}</div>}
         {children}
       </div>
       {divider && <Divider />}
@@ -77,6 +79,14 @@ function DetailStatus({ status, icon, message, divider = true, children }: { sta
 function EntryStatus({ entry }: { entry: QueueEntryView }) {
   const key = shownKey(entry.key);
   return <StatusText small status={statusLabel(key)} icon={key} help={entry.reason ? t(entry.reason.message) : statusHelpText(entry.key)} />;
+}
+
+// A target that stopped because the destination name is taken. The user decides to replace the file, and the import
+// starts again. A target that stopped before the checks were kept has no list, so its reason is enough.
+function StuckFix({ entry, run }: { entry: QueueEntryView; run: Run }) {
+  const failed = !entry.checks?.length || entry.checks.some((check) => check.id === 'destination_free' && check.state === 'failed');
+  if (entry.reason?.code !== 'destination_exists' || !failed) return null;
+  return <Confirm label={t('Replace the file')} title={t('Replace the file?')} confirm={t('Replace')} onConfirm={() => void run('replace', [entry.id])} />;
 }
 
 // The comment of a release can hold more than one link, with text beside it. Each link opens in a new tab, and the
@@ -303,7 +313,7 @@ function downloadPercent(entry: QueueEntryView) {
 // the checks of the import, then the fields of its release. The label is off in the inspector of a movie, where the
 // heading of the panel says the name. The actions of an episode, such as the match of a file, follow its indicator.
 // An episode of a series shows the percent of its download in its name.
-function EntryDetails({ entry, label = true, inline = false, actions }: { entry: QueueEntryView; label?: boolean; inline?: boolean; actions?: ReactNode }) {
+function EntryDetails({ entry, label = true, inline = false, actions, fix }: { entry: QueueEntryView; label?: boolean; inline?: boolean; actions?: ReactNode; fix?: ReactNode }) {
   const percent = inline ? downloadPercent(entry) : null;
   const data = !inline && entry.release ? <ReleaseDetails release={entry.release} /> : inline && entry.file ? <FileDetails file={entry.file} /> : null;
   const name = label && <Text>{percent === null ? entry.label : <>{entry.label} <strong>({percent}%)</strong></>}</Text>;
@@ -319,6 +329,7 @@ function EntryDetails({ entry, label = true, inline = false, actions }: { entry:
           {name}
           <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
             <EntryStatus entry={entry} />
+            {fix}
             {actions}
           </div>
         </div>
@@ -330,7 +341,7 @@ function EntryDetails({ entry, label = true, inline = false, actions }: { entry:
   return (
     <div className="grid gap-4 w-full min-w-0">
       {name}
-      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={!checks && Boolean(data)}>
+      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={!checks && Boolean(data)} action={fix}>
         <TransferProgress entry={entry} />
       </DetailStatus>
       <ImportChecks entry={entry} />
@@ -496,6 +507,7 @@ function SeasonEpisodes({ season, entries, run, refresh, openLogs }: { season: n
               key="detail"
               entry={entry}
               inline
+              fix={<StuckFix entry={entry} run={run} />}
               actions={
                 <>
                   {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
@@ -629,10 +641,10 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
 }
 
 // The inspector of a movie: its status and its progress, with the match of a file when the target asks for it.
-function MovieDetail({ entry, refresh }: { entry: QueueEntryView; refresh: () => void }) {
+function MovieDetail({ entry, run, refresh }: { entry: QueueEntryView; run: Run; refresh: () => void }) {
   return (
     <div className="grid gap-3">
-      <EntryDetails entry={entry} label={false} />
+      <EntryDetails entry={entry} label={false} fix={<StuckFix entry={entry} run={run} />} />
       {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
     </div>
   );
@@ -665,7 +677,7 @@ function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDele
       {row.kind === 'group' ? (
         <GroupDetail key={`${row.key}|${filters.stage}`} group={row} filters={filters} run={run} refresh={refresh} openLogs={openLogs} />
       ) : (
-        <MovieDetail key={`${row.id}|${filters.stage}`} entry={row} refresh={refresh} />
+        <MovieDetail key={`${row.id}|${filters.stage}`} entry={row} run={run} refresh={refresh} />
       )}
     </div>
   );
@@ -735,6 +747,7 @@ const actionLabel: Record<QueueActionName, string> = {
   unpriority: 'Delete priority from',
   clear: 'Clear',
   remove_torrent: 'Delete the torrent of',
+  replace: 'Replace',
 };
 
 // A text for a screen reader that changes at most once in a while, so a burst of changes reads as one message.

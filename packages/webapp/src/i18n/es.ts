@@ -700,6 +700,8 @@ export const es: Record<string, string> = {
 
   // Row actions
   'Try again': 'Reintentar',
+  'Replace the file': 'Reemplazar el archivo',
+  'Replace the file?': '¿Reemplazar el archivo?',
 
   // Confirm
   '{action} 1 target?': '¿{action} 1 objetivo?',
@@ -709,6 +711,7 @@ export const es: Record<string, string> = {
   'Clear': 'Limpiar',
   'Clear all': 'Limpiar todo',
   'Delete the torrent of': 'Eliminar el torrent de',
+  'This target has no file to replace.': 'Este objetivo no tiene un archivo que reemplazar.',
   '{name} is one download for {count} targets. The action changes the whole download.': '{name} es una sola descarga para {count} objetivos. La acción cambia toda la descarga.',
   'The files stay on the disk.': 'Los archivos permanecen en el disco.',
   'And {count} more.': 'Y {count} más.',

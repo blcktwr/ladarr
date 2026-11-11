@@ -115,6 +115,8 @@ export type QueueEntry = {
   clientId: string | null;
   // Set when the user chose the file by hand. The import and the retries keep it.
   manualMatch: { file: string; covers: Covered[] } | null;
+  // Set when the user chose to replace the file that holds the destination name. The importer clears it.
+  replaceDestination?: boolean;
   importResult: ImportResult | null;
 };
 

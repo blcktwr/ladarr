@@ -136,6 +136,10 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
   const entriesOf = (ids: string[]) => ids.map((id) => queue.get(id)).filter((entry): entry is QueueEntry => Boolean(entry));
   const block = (entries: QueueEntry[], code: string, detail?: string) => {
     for (const entry of entries) {
+      if (entry.replaceDestination) {
+        entry.replaceDestination = undefined;
+        queue.touch(entry);
+      }
       catalog.warn('import_blocked', `Import blocked: ${code}${detail ? ` (${detail})` : ''}`, itemFields(entry), { code, detail: detail ?? null });
       queue.endAttempt(entry, 'failed', code);
       queue.move(entry, { reason: { code, ...(detail ? { detail } : {}) } }, 'import blocked', code);
@@ -153,6 +157,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       entry.clientId = null;
       entry.search = null;
       entry.importResult = null;
+      entry.replaceDestination = undefined;
       // The target starts a new try when the first search starts after this import.
       entry.attempt = 0;
       queue.move(entry, { stage: 'queued', branch: null, reason: null }, 'the pack does not cover the episode', 'file_not_found');
@@ -359,9 +364,14 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       const dest = candidate.dest!;
       const known = title.mediaType === 'movie' ? title.fileId : candidate.episodes.map((e) => e.fileId).find(Boolean);
       const old = known ? db.data.files[known] : undefined;
-      const exists = await lstat(join(rootReal!, dest)).then(() => true, () => false);
+      const target = await lstat(join(rootReal!, dest)).catch(() => undefined);
       // A file at the destination is safe to replace only when it is the file that the library has for this target.
-      if (exists && !(old && old.path === dest && !old.missing)) throw new ImportProblem('destination_exists');
+      if (target && !(old && old.path === dest && !old.missing)) {
+        // The user chose to replace the file that holds the name. A folder is never removed.
+        const replace = candidate.entries.some((entry) => entry.replaceDestination);
+        if (!replace || target.isDirectory()) throw new ImportProblem('destination_exists', dest);
+        await unlink(join(rootReal!, dest));
+      }
       candidate.replaces = old && !old.missing ? old.path : null;
     });
     if (!free) return;
@@ -525,6 +535,10 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     if (journal.sourceBase) settleQueue(title, step);
     for (const entry of entriesOf(step.entryIds)) {
       entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };
+      if (entry.replaceDestination) {
+        entry.replaceDestination = undefined;
+        queue.touch(entry);
+      }
       // A download import moves its targets to Available after every step is retired. A manual import and a rename
       // finish each target here.
       if (!journal.sourceBase) continue;

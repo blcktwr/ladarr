@@ -10,8 +10,8 @@ import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts'
 import { bySeasonNumber, label, lanePositions, shown } from '../../../helpers/queue.ts';
 
 export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
-  type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'clear' | 'remove_torrent';
-  const ACTIONS: Action[] = ['pause', 'resume', 'retry', 'priority', 'unpriority', 'clear', 'remove_torrent'];
+  type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'clear' | 'remove_torrent' | 'replace';
+  const ACTIONS: Action[] = ['pause', 'resume', 'retry', 'priority', 'unpriority', 'clear', 'remove_torrent', 'replace'];
 
   const jobsOf = (entry: QueueEntry) =>
     Object.values(db.data.jobs).filter((job) => {
@@ -46,6 +46,9 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
         const found = removal?.torrents.get(entry.transferHash);
         return found && !addedByApp(found.hash) ? 'This torrent was not added by the app. Delete it in the download client.' : null;
       }
+      case 'replace':
+        // A target that stopped on a taken destination name. The importer finds the exact file again.
+        return entry.reason?.code === 'destination_exists' ? null : 'This target has no file to replace.';
     }
   }
 
@@ -90,6 +93,12 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
           break;
         }
         case 'retry':
+          retry(entry);
+          break;
+        case 'replace':
+          // The importer sees the file at the destination and removes it before it stages the new one.
+          entry.replaceDestination = true;
+          queue.touch(entry);
           retry(entry);
           break;
         case 'priority': {
