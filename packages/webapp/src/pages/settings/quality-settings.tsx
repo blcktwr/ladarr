@@ -156,92 +156,97 @@ function ProfileModal({ profile, qualities, open, onOpenChange, onSaved }: { pro
     >
       {error && <Alert tone="danger">{error}</Alert>}
       <Field label={t('Name')} required value={draft.name} onValueChange={(name) => set({ name })} />
-      <Table
-        aria-label={t('Qualities')}
-        stickyFirst
-        minWidth="62rem"
-        columns={[
-          {
-            label: t('Resolution'),
-            hideLabel: true,
-            width: '10rem',
-          },
-          ...sources.map((source) => ({
-            label: <span title={SOURCE_INFO[source] ? t(SOURCE_INFO[source]) : undefined}>{sourceName(source)}</span>,
-            width: '6.5rem',
-          })),
-        ]}
-        rows={resolutions.flatMap((resolution) => {
-          const rowQualities = sources
-            .map((source) => qualityAt(source, resolution))
-            .filter((quality): quality is QualityRow => quality !== undefined);
-          const open = expanded === resolution && rowQualities.length > 0;
-          const row = {
-            key: String(resolution),
-            active: open,
-            cells: [
-              <div className="grid">
-                <div className="flex h-12 items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    iconOnly
-                    disabled={!rowQualities.length}
-                    aria-label={open ? t('Hide size limits for {resolution}p', { resolution }) : t('Show size limits for {resolution}p', { resolution })}
-                    onClick={() => setExpanded(open ? null : resolution)}
-                  >
-                    {open ? <ChevronDown /> : <ChevronRight />}
-                  </Button>
-                  {resolution}p
-                  {RESOLUTION_INFO[resolution] && <Hint label={t('About {resolution}p', { resolution })}>{t(RESOLUTION_INFO[resolution])}</Hint>}
-                </div>
-                {open && (
-                  <div className="mt-3 grid gap-2.5">
-                    {LIMITS.map((limit) => (
-                      <div key={limit.key} className="flex h-7 items-center justify-end">
-                        <Text variant="small">{t(limit.label)}</Text>
-                      </div>
-                    ))}
+      <div className="@container w-full">
+        <Table
+          aria-label={t('Qualities')}
+          stickyFirst
+          minWidth="62rem"
+          columns={[
+            {
+              label: t('Resolution'),
+              hideLabel: true,
+              width: '10rem',
+            },
+            ...sources.map((source) => ({
+              label: <span title={SOURCE_INFO[source] ? t(SOURCE_INFO[source]) : undefined}>{sourceName(source)}</span>,
+              width: '6.5rem',
+            })),
+          ]}
+          rows={resolutions.map((resolution) => {
+            const rowQualities = sources
+              .map((source) => qualityAt(source, resolution))
+              .filter((quality): quality is QualityRow => quality !== undefined);
+            const open = expanded === resolution && rowQualities.length > 0;
+            return {
+              key: String(resolution),
+              active: open,
+              cells: [
+                <div className={open ? 'relative mb-8 grid' : 'grid'}>
+                  <div className="flex h-12 items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      iconOnly
+                      disabled={!rowQualities.length}
+                      aria-label={open ? t('Hide size limits for {resolution}p', { resolution }) : t('Show size limits for {resolution}p', { resolution })}
+                      onClick={() => setExpanded(open ? null : resolution)}
+                    >
+                      {open ? <ChevronDown /> : <ChevronRight />}
+                    </Button>
+                    {resolution}p
+                    {RESOLUTION_INFO[resolution] && <Hint label={t('About {resolution}p', { resolution })}>{t(RESOLUTION_INFO[resolution])}</Hint>}
                   </div>
-                )}
-              </div>,
-              ...sources.map((source) => {
-                const quality = qualityAt(source, resolution);
-                if (!quality) return null;
-                const index = slots.findIndex((slot) => slot.id === quality.id);
-                return (
-                  <div className="grid">
-                    <div className="flex h-12 items-center gap-1">
-                      <Checkbox aria-label={quality.label} checked={index >= 0} onCheckedChange={() => toggle(quality.id)} />
-                      {index >= 0 && <Badge>{ranks[index]}</Badge>}
+                  {open && (
+                    <div className="mt-3 grid gap-2.5">
+                      {LIMITS.map((limit) => (
+                        <div key={limit.key} className="flex h-7 items-center justify-end">
+                          <Text variant="small">{t(limit.label)}</Text>
+                        </div>
+                      ))}
                     </div>
-                    {open && (
-                      <div className="mt-3 grid gap-2.5">
-                        {LIMITS.map((limit) => (
-                          <Field
-                            key={limit.key}
-                            size="sm"
-                            hideLabel
-                            width="xs"
-                            label={t(limit.name, { name: quality.label })}
-                            type="number"
-                            min="0"
-                            step="any"
-                            placeholder={limit.key === 'min' ? undefined : '∞'}
-                            value={current(quality)[limit.key]}
-                            onValueChange={(text) => setSize(quality.id, { ...current(quality), [limit.key]: text })}
-                          />
-                        ))}
+                  )}
+                  {open && (
+                    <div className="absolute left-0 top-full mt-3 flex w-[100cqw] justify-center">
+                      <Text variant="small">{t('Size limit (MiB per minute)')}</Text>
+                    </div>
+                  )}
+                </div>,
+                ...sources.map((source) => {
+                  const quality = qualityAt(source, resolution);
+                  if (!quality) return null;
+                  const index = slots.findIndex((slot) => slot.id === quality.id);
+                  return (
+                    <div className={open ? 'mb-8 grid' : 'grid'}>
+                      <div className="flex h-12 items-center gap-1">
+                        <Checkbox aria-label={quality.label} checked={index >= 0} onCheckedChange={() => toggle(quality.id)} />
+                        {index >= 0 && <Badge>{ranks[index]}</Badge>}
                       </div>
-                    )}
-                  </div>
-                );
-              }),
-            ],
-          };
-          // The note of the sizes is the last row of the group that the row opens.
-          return open ? [row, { key: `${resolution}-size-limit`, cells: [<Text variant="small">{t('Size limit (MiB per minute)')}</Text>] }] : [row];
-        })}
-      />
+                      {open && (
+                        <div className="mt-3 grid gap-2.5">
+                          {LIMITS.map((limit) => (
+                            <Field
+                              key={limit.key}
+                              size="sm"
+                              hideLabel
+                              width="xs"
+                              label={t(limit.name, { name: quality.label })}
+                              type="number"
+                              min="0"
+                              step="any"
+                              placeholder={limit.key === 'min' ? undefined : '∞'}
+                              value={current(quality)[limit.key]}
+                              onValueChange={(text) => setSize(quality.id, { ...current(quality), [limit.key]: text })}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }),
+              ],
+            };
+          })}
+        />
+      </div>
       <ModalActions>
         <div className="mr-auto">
           <Text variant="small">{t('The priority is given by the order in which you select.')}</Text>
