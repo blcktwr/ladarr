@@ -9,9 +9,6 @@ import { startFakeTmdb } from './fake-tmdb.ts';
 export const PORT = Number(process.env.LADARR_E2E_PORT ?? 3111);
 export const URL_BASE = `http://127.0.0.1:${PORT}`;
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-// The server reads the TMDB key from the build constant, not from the environment.
-const CONSTANTS = join(ROOT, 'packages/shared/src/constants.ts');
-const E2E_KEY = 'export const TMDB_API_KEY = "e2e-key";';
 export const MIB = 1024 * 1024;
 export const OWNER = { password: 'correct horse' };
 
@@ -38,11 +35,6 @@ export async function startStack() {
   const tmdb = await startFakeTmdb();
   const tracker = await startFakeTracker();
   const qbit = await startFakeQbit({ savePath: folders.downloads });
-  // The test occupies the constant for the run, and gives the file back at the end.
-  const constants = readFileSync(CONSTANTS, 'utf8');
-  const restoreConstants = () => writeFileSync(CONSTANTS, constants);
-  writeFileSync(CONSTANTS, `${E2E_KEY}\n`);
-  process.once('exit', restoreConstants);
   tracker.state.items = [
     { title: MOVIE_RELEASE, size: 100 * 120 * MIB },
     { title: SERIES_PACK, size: 3 * 60 * 45 * MIB },
@@ -106,8 +98,6 @@ export async function startStack() {
     tmdb.close();
     tracker.close();
     qbit.close();
-    restoreConstants();
-    process.off('exit', restoreConstants);
     rmSync(dir, { recursive: true, force: true });
   };
   try {
