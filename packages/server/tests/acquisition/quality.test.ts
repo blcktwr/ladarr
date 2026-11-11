@@ -22,7 +22,7 @@ type Sample = { name: string; preset: keyof typeof profiles; release: Release; r
 const samples: Sample[] = [
   { name: 'movie WEB-DL 1080p, 7 GiB', preset: 'p1080', release: release('webdl', 1080, 7), runtime: MOVIE, expected: [] },
   { name: 'movie WEB-DL 1080p, 1 GiB is a low-bitrate copy', preset: 'p1080', release: release('webdl', 1080, 1), runtime: MOVIE, expected: ['size_below_min'] },
-  { name: 'movie WEB-DL 1080p, 40 GiB is too large', preset: 'p1080', release: release('webdl', 1080, 40), runtime: MOVIE, expected: ['size_above_max'] },
+  { name: 'movie WEB-DL 1080p, 40 GiB has no maximum', preset: 'p1080', release: release('webdl', 1080, 40), runtime: MOVIE, expected: [] },
   { name: 'movie BluRay 1080p, 30 GiB', preset: 'p1080', release: release('bluray', 1080, 30), runtime: MOVIE, expected: [] },
   { name: 'movie BluRay 1080p, 4 GiB is a small encode', preset: 'p1080', release: release('bluray', 1080, 4), runtime: MOVIE, expected: ['size_below_min'] },
   { name: 'movie CAM', preset: 'p1080', release: release('cam', 1080, 3), runtime: MOVIE, expected: ['quality_rejected'] },
@@ -32,7 +32,7 @@ const samples: Sample[] = [
   { name: 'episode WEB-DL 2160p in the 1080p preset', preset: 'p1080', release: release('webdl', 2160, 6.5), runtime: EPISODE, expected: ['quality_not_in_profile'] },
   { name: 'episode HDTV 1080p', preset: 'p1080', release: release('hdtv', 1080, 2), runtime: EPISODE, expected: ['quality_not_in_profile'] },
   { name: 'season pack WEBRip 1080p, 25 GiB', preset: 'p1080', release: release('webrip', 1080, 25), runtime: PACK, expected: [] },
-  { name: 'season pack WEBRip 1080p, 80 GiB', preset: 'p1080', release: release('webrip', 1080, 80), runtime: PACK, expected: ['size_above_max'] },
+  { name: 'season pack WEBRip 1080p, 80 GiB has no maximum', preset: 'p1080', release: release('webrip', 1080, 80), runtime: PACK, expected: [] },
 ];
 
 describe('preset samples', () => {
@@ -42,20 +42,18 @@ describe('preset samples', () => {
 });
 
 describe('quality table', () => {
-  it('has version 3', () => {
-    expect(QUALITY_TABLE_VERSION).toBe(3);
+  it('has version 4', () => {
+    expect(QUALITY_TABLE_VERSION).toBe(4);
   });
 
-  it('keeps minimum below preferred below maximum where the table sets all three', () => {
-    for (const { min, preferred, max } of Object.values(sizes)) {
-      if (preferred === null || max === null) continue;
-      expect(min).toBeLessThan(preferred);
-      expect(preferred).toBeLessThan(max);
-    }
+  it('takes the minimum of the table and no other limit', () => {
+    expect(sizes['hdtv-720']).toEqual({ min: 17.1, preferred: null, max: null });
+    expect(sizes['webdl-1080']).toEqual({ min: 12.5, preferred: null, max: null });
+    expect(sizes['remux-2160']).toEqual({ min: 187.4, preferred: null, max: null });
   });
 
-  it('has no size limit for a quality that version 1 did not set', () => {
-    expect(sizes['hdtv-720']).toEqual({ min: 0, preferred: null, max: null });
+  it('has no size limit for a quality that the table does not list', () => {
+    expect(sizes['rawhd-1080']).toEqual({ min: 0, preferred: null, max: null });
     expect(Object.keys(sizes)).toHaveLength(QUALITIES.length);
   });
 
@@ -90,10 +88,10 @@ describe('a profile that the user makes', () => {
     expect(rank('webdl', 720)).toBeNull();
   });
 
-  it('uses the size of the quality of the release, and no size where the quality has none', () => {
+  it('uses the size of the quality of the release', () => {
     const tiny = (source: Release['source'], resolution: number) => evaluate(custom, sizes, release(source, resolution, 0.01), { runtimeMinutes: MOVIE }).rejections;
     expect(tiny('webdl', 1080)).toEqual(['size_below_min']);
-    expect(tiny('hdtv', 720)).toEqual([]);
+    expect(tiny('hdtv', 720)).toEqual(['size_below_min']);
   });
 
   it('takes the size that the user sets for a quality', () => {

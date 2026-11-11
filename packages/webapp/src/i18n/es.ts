@@ -124,6 +124,7 @@ export const es: Record<string, string> = {
   'The profile is not valid.': 'El perfil no es válido.',
   'The sizes are not in order. The minimum is the smallest, then the preferred size, then the maximum.': 'Los tamaños no están en orden. El mínimo es el más pequeño, luego el tamaño preferido y después el máximo.',
   'The priority is given by the order in which you select.': 'La prioridad está dada por el orden en el que seleccionas.',
+  'Size limit (MiB per minute)': 'Límite de tamaño (MiB por minuto)',
   'Set a library folder for this type in Settings.': 'Define una carpeta de biblioteca para este tipo en Configuración.',
   'TMDB does not answer. Try again later.': 'TMDB no responde. Inténtalo más tarde.',
   'TMDB rejects the API key.': 'TMDB rechaza la clave de API.',
@@ -655,8 +656,8 @@ export const es: Record<string, string> = {
   'Hide episodes': 'Ocultar episodios',
   'Show episodes of {name}': 'Mostrar episodios de {name}',
   'Hide episodes of {name}': 'Ocultar episodios de {name}',
-  'Show bitrates for {resolution}p': 'Mostrar tasas de bits para {resolution}p',
-  'Hide bitrates for {resolution}p': 'Ocultar tasas de bits para {resolution}p',
+  'Show size limits for {resolution}p': 'Mostrar límites de tamaño para {resolution}p',
+  'Hide size limits for {resolution}p': 'Ocultar límites de tamaño para {resolution}p',
   'About the status {status}': 'Sobre el estado {status}',
   'The target waits for its turn. The search starts when the turn comes.': 'El objetivo espera su turno. La búsqueda empieza cuando llega el turno.',
   'The indexers are asked for a release. Nothing to do.': 'Se pide un lanzamiento a los indexadores. No hay nada que hacer.',
@@ -700,7 +701,6 @@ export const es: Record<string, string> = {
   'Copying': 'Copiando',
 
   // Row actions
-  'Search now': 'Buscar ahora',
   'Try again': 'Reintentar',
 
   // Confirm

@@ -1,8 +1,8 @@
 import type { QualityProfile, SizeLimits } from '@ladarr/shared/types';
 
-// Version 3 of the quality table. Change the version when a number of the table or the list of qualities changes.
+// Version 4 of the quality table. Change the version when a number of the table or the list of qualities changes.
 // docs/quality-presets.md explains the rules.
-export const QUALITY_TABLE_VERSION = 3;
+export const QUALITY_TABLE_VERSION = 4;
 
 export type Source = 'webdl' | 'webrip' | 'bluray' | 'remux' | 'rawhd' | 'hdtv' | 'sdtv' | 'dvd';
 export type ReleaseSource = Source | 'cam' | 'telesync' | 'unknown';
@@ -35,16 +35,31 @@ export const isQualityId = (value: unknown): value is string => typeof value ===
 // The resolution of a quality. DVD has none.
 export const qualityResolution = (id: string) => QUALITIES.find((quality) => quality.id === id)?.resolution ?? null;
 
-// The sizes of version 1 of the table. A quality that is not here has no limit until the user sets one.
-const KNOWN_SIZES: Record<string, SizeLimits> = {
-  'webdl-1080': { min: 15, preferred: 60, max: 150 },
-  'webrip-1080': { min: 15, preferred: 55, max: 150 },
-  'bluray-1080': { min: 50.8, preferred: 120, max: 300 },
-  'webdl-2160': { min: 34.5, preferred: 150, max: 400 },
-  'webrip-2160': { min: 34.5, preferred: 140, max: 400 },
-  'bluray-2160': { min: 102, preferred: 300, max: 800 },
+// The minimums of the standard size table of TRaSH Guides. The table sets no maximum, so a quality has none either.
+// A quality that is not here, such as Raw-HD, has no limit until the user sets one.
+const MINIMUMS: Record<string, number> = {
+  dvd: 5,
+  'sdtv-480': 5,
+  'hdtv-720': 17.1,
+  'hdtv-1080': 33.8,
+  'hdtv-2160': 85,
+  'webdl-480': 5,
+  'webdl-720': 12.5,
+  'webdl-1080': 12.5,
+  'webdl-2160': 34.5,
+  'webrip-480': 5,
+  'webrip-720': 12.5,
+  'webrip-1080': 12.5,
+  'webrip-2160': 34.5,
+  'bluray-480': 5,
+  'bluray-576': 5,
+  'bluray-720': 25.7,
+  'bluray-1080': 50.8,
+  'bluray-2160': 102,
+  'remux-1080': 102,
+  'remux-2160': 187.4,
 };
-export const defaultSizes = (): Record<string, SizeLimits> => Object.fromEntries(QUALITIES.map(({ id }) => [id, { ...(KNOWN_SIZES[id] ?? { min: 0, preferred: null, max: null }) }]));
+export const defaultSizes = (): Record<string, SizeLimits> => Object.fromEntries(QUALITIES.map(({ id }) => [id, { min: MINIMUMS[id] ?? 0, preferred: null, max: null }]));
 
 // A profile lists the qualities that ladarr takes, the best first. The qualities of one group have the same rank.
 // A quality that is in no group is not taken.

@@ -171,12 +171,12 @@ function ProfileModal({ profile, qualities, open, onOpenChange, onSaved }: { pro
             width: '6.5rem',
           })),
         ]}
-        rows={resolutions.map((resolution) => {
+        rows={resolutions.flatMap((resolution) => {
           const rowQualities = sources
             .map((source) => qualityAt(source, resolution))
             .filter((quality): quality is QualityRow => quality !== undefined);
           const open = expanded === resolution && rowQualities.length > 0;
-          return {
+          const row = {
             key: String(resolution),
             active: open,
             cells: [
@@ -186,7 +186,7 @@ function ProfileModal({ profile, qualities, open, onOpenChange, onSaved }: { pro
                     variant="ghost"
                     iconOnly
                     disabled={!rowQualities.length}
-                    aria-label={open ? t('Hide bitrates for {resolution}p', { resolution }) : t('Show bitrates for {resolution}p', { resolution })}
+                    aria-label={open ? t('Hide size limits for {resolution}p', { resolution }) : t('Show size limits for {resolution}p', { resolution })}
                     onClick={() => setExpanded(open ? null : resolution)}
                   >
                     {open ? <ChevronDown /> : <ChevronRight />}
@@ -238,6 +238,8 @@ function ProfileModal({ profile, qualities, open, onOpenChange, onSaved }: { pro
               }),
             ],
           };
+          // The note of the sizes is the last row of the group that the row opens.
+          return open ? [row, { key: `${resolution}-size-limit`, cells: [<Text variant="small">{t('Size limit (MiB per minute)')}</Text>] }] : [row];
         })}
       />
       <ModalActions>

@@ -100,7 +100,8 @@ describe('policy', () => {
     expect(codes('Show.Name.S01E02.CAM-GRP', ep2)).toContain('quality_rejected');
     expect(codes('Show.Name.S01E02.720p.WEB-DL-GRP', ep2)).toContain('quality_not_in_profile');
     expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, {}, { sizeBytes: 10 * 1024 * 1024 })).toContain('size_below_min');
-    expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, {}, { sizeBytes: 90_000 * 1024 * 1024 })).toContain('size_above_max');
+    const capped = { quality: { ...emptyData(), qualitySizes: { ...defaultSizes(), 'webdl-1080': { min: 12.5, preferred: null, max: 150 } } } };
+    expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, capped, { sizeBytes: 90_000 * 1024 * 1024 })).toContain('size_above_max');
     const strict = { settings: { ...settings, audio: { language: 'es', strict: true } } };
     expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, strict)).toContain('audio_unverified');
     expect(codes('Show.Name.S01E02.GERMAN.1080p.WEB-DL-GRP', ep2, strict)).toContain('audio_language_missing');
@@ -134,7 +135,8 @@ describe('ranking', () => {
     const webrip = release('Show.Name.S01E02.1080p.WEBRip-B', { sizeBytes: 55 * 45 * MIB });
     const webdlBig = release('Show.Name.S01E02.1080p.WEB-DL-C', { sizeBytes: 140 * 45 * MIB });
     const webdlNear = release('Show.Name.S01E02.1080p.WEB-DL-D', { sizeBytes: 62 * 45 * MIB });
-    expect(pick([bluray, webrip, webdlBig, webdlNear])).toBe(webdlNear.guid);
+    const near = { quality: { ...emptyData(), qualitySizes: { ...defaultSizes(), 'webdl-1080': { min: 12.5, preferred: 60, max: null } } } };
+    expect(pick([bluray, webrip, webdlBig, webdlNear], near)).toBe(webdlNear.guid);
     expect(pick([bluray, webrip])).toBe(webrip.guid);
   });
 

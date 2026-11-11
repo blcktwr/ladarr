@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { emptyData, withDefaults, type Data } from '../../src/core/db.ts';
-import { QUALITIES } from '../../src/library/grab/quality.ts';
+import { QUALITIES, QUALITY_TABLE_VERSION } from '../../src/library/grab/quality.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { title } from '../helpers/test-fixtures.ts';
 
@@ -18,7 +18,7 @@ describe('quality profiles', () => {
   it('lists every quality with its sizes, and the profiles in the order of the chain', async () => {
     const { body } = await app.get('/quality');
     expect(body.qualities).toHaveLength(QUALITIES.length);
-    expect(body.qualities.find((quality: { id: string }) => quality.id === 'webdl-1080')).toMatchObject({ label: 'WEB-DL 1080p', sizes: { min: 15, preferred: 60, max: 150 } });
+    expect(body.qualities.find((quality: { id: string }) => quality.id === 'webdl-1080')).toMatchObject({ label: 'WEB-DL 1080p', sizes: { min: 12.5, preferred: null, max: null } });
     expect(ids(body)).toEqual(['p1080', 'p2160']);
   });
 
@@ -132,6 +132,24 @@ describe('sizes of a quality', () => {
 
   it('does not find a quality that is not on the list', async () => {
     expect((await app.fetchJson('PUT', '/quality/sizes/nope', { min: 1, preferred: null, max: null })).status).toBe(404);
+  });
+});
+
+describe('the sizes of the table', () => {
+  it('keeps the sizes of a file of the current table, with the values that a person set', () => {
+    const data = emptyData();
+    data.qualitySizes['hdtv-720'] = { min: 10, preferred: null, max: 50 };
+    const next = withDefaults(data);
+    expect(next.qualitySizes['hdtv-720']).toEqual({ min: 10, preferred: null, max: 50 });
+  });
+
+  it('replaces the sizes of a file of an older table, so an update takes priority', () => {
+    const old = emptyData() as Data & { qualitySizesVersion?: number };
+    old.qualitySizes['hdtv-720'] = { min: 10, preferred: null, max: 50 };
+    old.qualitySizesVersion = QUALITY_TABLE_VERSION - 1;
+    const next = withDefaults(old);
+    expect(next.qualitySizes['hdtv-720']).toEqual({ min: 17.1, preferred: null, max: null });
+    expect(next.qualitySizesVersion).toBe(QUALITY_TABLE_VERSION);
   });
 });
 

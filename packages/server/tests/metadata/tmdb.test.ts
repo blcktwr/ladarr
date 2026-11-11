@@ -329,11 +329,11 @@ describe('search route', () => {
     expect(body.results).toMatchObject([{ mediaType: 'movie', tmdbId: 603, year: 1999 }]);
   });
 
-  it('shows the oldest title first, and a title with no year last', async () => {
+  it('shows the newest title first, and a title with no year last', async () => {
     const { body } = await search('many');
     expect(body.results.map((result: { title: string; year: number | null }) => [result.title, result.year])).toEqual([
-      ['Old', 1980],
       ['New', 2024],
+      ['Old', 1980],
       ['Undated', null],
     ]);
   });

@@ -1,7 +1,7 @@
 import { db } from '../../core/db.ts';
 import type { RequestHandler } from 'express';
 import type { MediaType, Tmdb } from '../../metadata/tmdb.ts';
-import { inLibrary, notFoundAsEmpty, oldestFirst } from '../../helpers/search.ts';
+import { inLibrary, notFoundAsEmpty, newestFirst } from '../../helpers/search.ts';
 
 const MAX_QUERY = 200;
 
@@ -23,11 +23,11 @@ export function searchGet(tmdb: Tmdb | undefined): RequestHandler {
 
     const byTvdb = /^tvdb:(\d+)$/i.exec(query);
     if (byTvdb) {
-      const results = oldestFirst(await tmdb.findSeriesByTvdb(Number(byTvdb[1])).catch((err) => notFoundAsEmpty(err) ?? []));
+      const results = newestFirst(await tmdb.findSeriesByTvdb(Number(byTvdb[1])).catch((err) => notFoundAsEmpty(err) ?? []));
       // The caller must pick a match unless exactly one series has this ID.
       return void res.json({ results: map(results), needsMatch: results.length !== 1 });
     }
 
-    res.json({ results: map(oldestFirst(await tmdb.search(query))) });
+    res.json({ results: map(newestFirst(await tmdb.search(query))) });
   };
 }

@@ -337,7 +337,7 @@ function entryMenu(entry: QueueEntryView, run: Run, openLogs: (entry: QueueEntry
   const items: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] = [];
   const searching = entry.branch === 'waiting';
   // An episode has no search of its own.
-  if (entry.branch !== 'paused' && entry.reason?.action === 'retry' && !(searching && entry.number !== null)) items.push({ label: searching ? t('Search now') : t('Try again'), onClick: () => run('retry', [entry.id]) });
+  if (entry.branch !== 'paused' && entry.reason?.action === 'retry' && !(searching && entry.number !== null)) items.push({ label: searching ? t('Retry') : t('Try again'), onClick: () => run('retry', [entry.id]) });
   if (entry.lane !== null) items.push({ label: t('Remove priority'), onClick: () => run('unpriority', [entry.id]) });
   if (entry.key === 'available' || entry.key === 'cancelled') {
     if (entry.hasTorrent && !entry.attached) items.push({ label: t('Remove torrent'), onClick: () => run('remove_torrent', [entry.id]) });

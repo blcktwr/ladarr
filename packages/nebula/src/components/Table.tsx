@@ -17,6 +17,7 @@ type Column = {
 // A row of the table. A row with a click opens something, such as the episodes of a series.
 // A row can have a detail: content that opens under it, across all the columns, such as the episodes of a season.
 // An active row is open, so it takes the colour of a recess and reads apart from the closed rows.
+// A row with one cell goes across every column, such as a note at the end of the table.
 type Row = { key: string; cells: ReactNode[]; onClick?: () => void; detail?: ReactNode; active?: boolean };
 
 // The title shows above the table, and it is the name of the table. Without a title, aria-label is the name.
@@ -80,7 +81,11 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
 
   const cells = (row: Row) =>
     row.cells.map((content, index) => (
-      <td key={index} className={`${cell} h-16 py-2 ${columns[index]?.align === 'end' ? 'text-right' : 'text-left'} ${stickyFirst && index === 0 ? 'sticky left-0 z-10 bg-inherit' : ''}`}>
+      <td
+        key={index}
+        colSpan={row.cells.length === 1 ? columns.length : undefined}
+        className={`${cell} h-16 py-2 ${columns[index]?.align === 'end' ? 'text-right' : 'text-left'} ${stickyFirst && index === 0 && row.cells.length > 1 ? 'sticky left-0 z-10 bg-inherit' : ''}`}
+      >
         {content}
       </td>
     ));

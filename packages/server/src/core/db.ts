@@ -15,7 +15,7 @@ import type { ImportJournal } from '../library/imports/importer.ts';
 import type { VerificationState } from '../library/verification.ts';
 import type { SourceDownload, SourceEpisode } from '../migration/migration-source.ts';
 import { DEFAULT_NAMING, type NamingTemplates } from '../library/naming.ts';
-import { defaultProfiles, defaultSizes, type Profile, type ReleaseSource, type SizeLimits } from '../library/grab/quality.ts';
+import { defaultProfiles, defaultSizes, QUALITY_TABLE_VERSION, type Profile, type ReleaseSource, type SizeLimits } from '../library/grab/quality.ts';
 import type { WebhookState } from './webhook.ts';
 
 // Change this number when a new version cannot read the file of an old one, or the other way round.
@@ -105,6 +105,8 @@ export type Data = {
   // The IDs of the profiles, the best first. A search tries them in this order.
   profileOrder: string[];
   qualitySizes: Record<string, SizeLimits>;
+  // The version of the table that set the sizes. A new version replaces them, so an update takes priority.
+  qualitySizesVersion: number;
   roots: Record<string, Root>;
   // Keyed by media type and TMDB ID, for example "tv:1396".
   titles: Record<string, Title>;
@@ -162,6 +164,7 @@ export const emptyData = (): Data => ({
   profiles: defaultProfiles(),
   profileOrder: ['p1080', 'p2160'],
   qualitySizes: defaultSizes(),
+  qualitySizesVersion: QUALITY_TABLE_VERSION,
   roots: {},
   titles: {},
   ledger: {},
@@ -238,6 +241,8 @@ export function withDefaults(data: Data): Data {
   const webhooks = [...(data.webhooks ?? [])];
   if (oldWebhook?.url) for (const type of ['available', 'stuck'] as const) webhooks.push({ id: randomUUID(), type, url: oldWebhook.url });
   const seerr = { ...empty.seerr, ...(data.seerr ?? {}) };
+  // The sizes of an older table are the sizes of the newer table now.
+  const qualitySizes = data.qualitySizesVersion === QUALITY_TABLE_VERSION ? { ...defaultSizes(), ...(data.qualitySizes ?? {}) } : defaultSizes();
   const next: Data = {
     ...empty,
     ...rest,
@@ -247,7 +252,8 @@ export function withDefaults(data: Data): Data {
     profiles,
     profileOrder,
     // A quality that a newer version added gets the default sizes.
-    qualitySizes: { ...defaultSizes(), ...(data.qualitySizes ?? {}) },
+    qualitySizes,
+    qualitySizesVersion: QUALITY_TABLE_VERSION,
     webhooks,
     seerr,
   };
