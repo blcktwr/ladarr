@@ -38,8 +38,8 @@ test('a search on the selected titles', async ({ page }) => {
   await expect(dialog).toContainText('Nothing to search');
   await dialog.getByText('Close', { exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  // Only Search and Remove are left.
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  // Only Search and Delete are left.
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
   for (const name of ['Pause', 'Resume', 'Refresh metadata', 'Set quality', 'Clear selection']) await expect(page.getByRole('button', { name })).toHaveCount(0);
 });
 
@@ -70,9 +70,9 @@ test('Add on a title that is not in the catalog adds it', async ({ page }) => {
   await expect(page.getByRole('button', { name: /^Add / })).toHaveCount(0);
   await page.getByRole('link', { name: /Movie Name 2019 Movies$/ }).getByText('Movie Name', { exact: true }).click();
   await expect(page).toHaveURL(/\/catalog\/movie\/2$/);
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Add', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
   expect((await stack.call('GET', '/library/movie:2')).body.title.presetOverride).toBeNull();
 });
 
@@ -137,10 +137,10 @@ test('the page of a title shows the TMDB score, the cast, and the recommendation
   await page.getByRole('link', { name: /Bench Movie Alpha/ }).getByText('Bench Movie Alpha', { exact: true }).click();
   await expect(page).toHaveURL(/\/catalog\/movie\/900001$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Bench Movie Alpha (2019)' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   // The page stays at the same address, and it shows the actions of a title that is in the catalog now.
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/catalog\/movie\/900001$/);
   // A series with no cast and no recommendations has neither section.
   await page.goto(`${URL_BASE}/catalog/tv/1`);
@@ -156,15 +156,15 @@ test('a title that has no file has Search, and a title that has a file has Upgra
   // The title is paused, so a search has nothing to start.
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.getByRole('alert').getByText('Nothing to search')).toBeVisible();
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
-  const alert = page.getByRole('alertdialog', { name: 'Remove 1 title?' });
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  const alert = page.getByRole('alertdialog', { name: 'Delete 1 title?' });
   await expect(alert).toBeVisible();
   // The alert has the switch and the two buttons. The switch makes no request, so the button does not change.
   const plans: string[] = [];
   page.on('request', (request) => request.url().includes('/library/plans') && plans.push(request.url()));
   await alert.getByRole('switch', { name: 'Delete the files too' }).click();
-  await expect(alert.getByRole('button', { name: 'Remove', exact: true })).toBeEnabled();
-  await expect(alert.getByRole('button')).toHaveText(['Cancel', 'Remove']);
+  await expect(alert.getByRole('button', { name: 'Delete', exact: true })).toBeEnabled();
+  await expect(alert.getByRole('button')).toHaveText(['Cancel', 'Delete']);
   expect(plans).toEqual([]);
   await alert.getByRole('button', { name: 'Cancel' }).click();
   await expect(alert).toHaveCount(0);
@@ -178,7 +178,7 @@ test('a title that has no file has Search, and a title that has a file has Upgra
   });
   await page.route(/\/library\/movie:2\/upgrades$/, (route) => route.fulfill({ json: { resolutions: [1080, 2160] } }));
   await page.goto(`${URL_BASE}/catalog/movie/2`);
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Search', exact: true })).toHaveCount(0);
   // Upgrade asks for a resolution first, then for a plan of the title.
   await page.getByRole('button', { name: 'Upgrade', exact: true }).click();
@@ -191,24 +191,24 @@ test('a title that has no file has Search, and a title that has a file has Upgra
   await preview;
 });
 
-test('Remove asks in an alert, and the page stays open as a title that is not in the catalog', async ({ page }) => {
+test('Delete asks in an alert, and the page stays open as a title that is not in the catalog', async ({ page }) => {
   await page.goto(`${URL_BASE}/catalog/movie/900001`);
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
-  const alert = page.getByRole('alertdialog', { name: 'Remove 1 title?' });
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  const alert = page.getByRole('alertdialog', { name: 'Delete 1 title?' });
   await expect(alert.getByRole('switch', { name: 'Delete the files too' })).toBeVisible();
-  await alert.getByRole('button', { name: 'Remove', exact: true }).click();
+  await alert.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Bench Movie Alpha removed from the library')).toBeVisible();
   await expect(page).toHaveURL(/\/catalog\/movie\/900001$/);
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
 });
 
 test('removing a series tells the person that it is out of the library', async ({ page }) => {
   const added = await stack.call('POST', '/library', { mediaType: 'tv', tmdbId: 3, add: 'paused' });
   expect(added.status).toBe(201);
   await page.goto(`${URL_BASE}/catalog/tv/3`);
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
-  await page.getByRole('alertdialog', { name: 'Remove 1 title?' }).getByRole('button', { name: 'Remove', exact: true }).click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByRole('alertdialog', { name: 'Delete 1 title?' }).getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Two Seasons removed from the library')).toBeVisible();
   await expect(page.getByRole('button', { name: /^Add/ })).toBeVisible();
 });
@@ -225,7 +225,7 @@ test('an actor opens a page with the movies and the series of the actor', async 
   await expect(page.getByRole('button', { name: /^Add / })).toHaveCount(0);
   await page.getByRole('main').getByRole('link', { name: /Show Name/ }).getByText('Show Name', { exact: true }).click();
   await expect(page).toHaveURL(/\/catalog\/tv\/1$/);
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
 });
 
 test('the back button of a page opens the page before it, or the catalog', async ({ page }) => {

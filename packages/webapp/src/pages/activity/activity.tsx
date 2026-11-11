@@ -1,5 +1,5 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
-import type { LogEntry, LogsResponse, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary } from '@ladarr/shared/types';
+import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, Pause, Play } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
@@ -10,6 +10,7 @@ import { Alert } from '../../components/alert.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
 import { SeriesBlocklist } from './activity-blocklist.tsx';
 import { MatchDialog } from './activity-match.tsx';
+import { PlanDialog } from '../library/library-bulk.tsx';
 import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
 import { catalogPath, formatBytes, groupName, posterUrl, seasonName, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
@@ -347,9 +348,9 @@ function entryMenu(entry: QueueEntryView, run: Run, openLogs: (entry: QueueEntry
   const searching = entry.branch === 'waiting';
   // An episode has no search of its own.
   if (entry.branch !== 'paused' && entry.reason?.action === 'retry' && !(searching && entry.number !== null)) items.push({ label: searching ? t('Retry') : t('Try again'), onClick: () => run('retry', [entry.id]) });
-  if (entry.lane !== null) items.push({ label: t('Remove priority'), onClick: () => run('unpriority', [entry.id]) });
+  if (entry.lane !== null) items.push({ label: t('Delete priority'), onClick: () => run('unpriority', [entry.id]) });
   if (entry.key === 'available' || entry.key === 'cancelled') {
-    if (entry.hasTorrent && !entry.attached) items.push({ label: t('Remove torrent'), onClick: () => run('remove_torrent', [entry.id]) });
+    if (entry.hasTorrent && !entry.attached) items.push({ label: t('Delete torrent'), onClick: () => run('remove_torrent', [entry.id]) });
     if (!entry.clearedAt) items.push({ label: t('Clear from the list'), onClick: () => run('clear', [entry.id]) });
   }
   items.push({ label: t('Logs'), onClick: () => openLogs(entry) });
@@ -638,9 +639,13 @@ function MovieDetail({ entry, refresh }: { entry: QueueEntryView; refresh: () =>
 }
 
 // The inspector of the selected title: its name, its menu, and its progress. The body starts again when the selected
-// title changes, so a season of the title before does not stay open.
-function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
-  const items = row.kind === 'group' ? groupMenu(row, openGroupLogs) : entryMenu(row, run, openLogs);
+// title changes, so a season of the title before does not stay open. The last item of the menu deletes the title from
+// the library, with the same modal as the page of the title.
+function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDelete, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onDelete: (row: QueueRow) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
+  const items: { label: string; onClick: () => void; danger?: boolean }[] = [
+    ...(row.kind === 'group' ? groupMenu(row, openGroupLogs) : entryMenu(row, run, openLogs)),
+    { label: t('Delete'), danger: true, onClick: () => onDelete(row) },
+  ];
   return (
     <div className="grid gap-6 w-full min-w-0">
       {/* The list is under the inspector in a narrow window, so the panel has its own way back. */}
@@ -655,7 +660,7 @@ function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onBack
           <Text variant="heading" className="min-w-0">{nameOf(row)}</Text>
           <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
         </RouterLink>
-        {items.length > 0 && <ActionMenu label={t('Actions for {name}', { name: nameOf(row) })} items={items} />}
+        <ActionMenu label={t('Actions for {name}', { name: nameOf(row) })} items={items} />
       </div>
       {row.kind === 'group' ? (
         <GroupDetail key={`${row.key}|${filters.stage}`} group={row} filters={filters} run={run} refresh={refresh} openLogs={openLogs} />
@@ -727,9 +732,9 @@ const actionLabel: Record<QueueActionName, string> = {
   resume: 'Resume',
   retry: 'Try again',
   priority: 'Prioritize',
-  unpriority: 'Remove priority from',
+  unpriority: 'Delete priority from',
   clear: 'Clear',
-  remove_torrent: 'Remove the torrent of',
+  remove_torrent: 'Delete the torrent of',
 };
 
 // A text for a screen reader that changes at most once in a while, so a burst of changes reads as one message.
@@ -771,6 +776,7 @@ function QueueView() {
   const backButton = useRef<HTMLButtonElement | null>(null);
 
   const [preview, setPreview] = useState<{ body: Parameters<typeof send>[0]; data: QueueActionPreview } | null>(null);
+  const [deletion, setDeletion] = useState<{ request: PlanRequest; subject: string } | null>(null);
   const [logs, setLogs] = useState<QueueEntryView | null>(null);
   const [groupLogs, setGroupLogs] = useState<QueueGroupRow | null>(null);
   const [announcement, setAnnouncement] = useState('');
@@ -969,7 +975,7 @@ function QueueView() {
             {chosen ? (
               <>
                 <Pane className="w-full">
-                  <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onBack={back} backRef={backButton} />
+                  <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(row) => setDeletion({ request: { action: 'remove', keys: [row.titleKey] }, subject: row.title })} onBack={back} backRef={backButton} />
                 </Pane>
                 {chosen.kind === 'group' ? (
                   <>
@@ -1015,6 +1021,7 @@ function QueueView() {
           }}
         />
       )}
+      {deletion && <PlanDialog request={deletion.request} subject={deletion.subject} onClose={() => setDeletion(null)} onDone={() => refresh()} />}
     </div>
   );
 }

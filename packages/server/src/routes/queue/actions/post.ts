@@ -42,9 +42,9 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
         if (!entry.transferHash) return 'This target has no torrent.';
         if (sharing(entry).length > 0) return 'A target still uses this torrent.';
         // ladarr removes only a torrent that it added. A download that the user attached stays in the client.
-        if (removal?.attached.has(entry.transferHash)) return 'This torrent was not added by the app. Remove it in the download client.';
+        if (removal?.attached.has(entry.transferHash)) return 'This torrent was not added by the app. Delete it in the download client.';
         const found = removal?.torrents.get(entry.transferHash);
-        return found && !addedByApp(found.hash) ? 'This torrent was not added by the app. Remove it in the download client.' : null;
+        return found && !addedByApp(found.hash) ? 'This torrent was not added by the app. Delete it in the download client.' : null;
       }
     }
   }

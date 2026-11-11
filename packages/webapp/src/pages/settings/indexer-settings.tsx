@@ -263,7 +263,7 @@ export function Indexers() {
                 items={[
                   { label: t('Edit'), onClick: () => setEditing(row) },
                   { label: t('Test'), onClick: () => void runTest(row) },
-                  ...(row.manual ? [{ label: t('Remove'), danger: true, onClick: () => setRemoving(row) }] : []),
+                  ...(row.manual ? [{ label: t('Delete'), danger: true, onClick: () => setRemoving(row) }] : []),
                 ]}
               />,
             ],
@@ -273,7 +273,7 @@ export function Indexers() {
       {editing && (
         <IndexerForm indexer={editing} open onOpenChange={(next) => !next && setEditing(null)} onDone={done} />
       )}
-      <Confirm open={removing !== null} onOpenChange={(next) => !next && !removePending && setRemoving(null)} title={t('Remove {name}?', { name: removing?.name ?? '' })} confirm={t('Remove')} pending={removePending} onConfirm={() => removing && void remove(removing)} />
+      <Confirm open={removing !== null} onOpenChange={(next) => !next && !removePending && setRemoving(null)} title={t('Delete {name}?', { name: removing?.name ?? '' })} confirm={t('Delete')} pending={removePending} onConfirm={() => removing && void remove(removing)} />
     </div>
   );
 }

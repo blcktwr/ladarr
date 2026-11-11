@@ -122,7 +122,7 @@ export function radarrRoutes(deps: CompatDeps) {
   });
 
   // ladarr removes the record only. Radarr callers ask to delete the files too, so ladarr refuses the call.
-  router.delete('/movie/:id', (_req, res) => notSupported(res, 'A movie cannot be removed through this API. Remove it in the app.'));
+  router.delete('/movie/:id', (_req, res) => notSupported(res, 'A movie cannot be removed through this API. Delete it in the app.'));
 
   return router;
 }

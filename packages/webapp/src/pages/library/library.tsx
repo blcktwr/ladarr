@@ -372,7 +372,7 @@ function Seasons({ title, onAddSeason, onRemoveSeason }: { title: TitleDetail; o
         onToggle={() => toggle(season.seasonNumber)}
         add={
           seasonSelected(season) ? (
-            <Button iconOnly variant="danger" aria-label={t('Remove {season}', { season: seasonName(season.seasonNumber) })} onClick={() => onRemoveSeason(season.seasonNumber)}>
+            <Button iconOnly variant="danger" aria-label={t('Delete {season}', { season: seasonName(season.seasonNumber) })} onClick={() => onRemoveSeason(season.seasonNumber)}>
               <Trash2 />
             </Button>
           ) : (
@@ -666,7 +666,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
               )}
               {hasFile && <UpgradeDialog titleKey={title.key} />}
               <Button variant="danger" onClick={() => setPlan({ request: { action: 'remove', keys: [title.key] }, subject: title.title })}>
-                {t('Remove')}
+                {t('Delete')}
               </Button>
             </Actions>
           ) : series ? (

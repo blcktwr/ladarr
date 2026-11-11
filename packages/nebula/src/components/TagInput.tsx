@@ -96,7 +96,7 @@ export function TagInput({ label, value, onValueChange, options = [], placeholde
                     {textOf(item)}
                     <button
                       type="button"
-                      aria-label={`Remove ${textOf(item)}`}
+                      aria-label={`Delete ${textOf(item)}`}
                       disabled={disabled}
                       onClick={() => onValueChange(value.filter((selected) => selected !== item))}
                       className={`${key} ${ghost} flex items-center justify-center size-5 rounded-sm cursor-pointer disabled:cursor-not-allowed [&>svg]:size-3.5`}

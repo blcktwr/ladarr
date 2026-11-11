@@ -47,7 +47,7 @@ async function addFromSearch(page: Page, query: string, heading: string) {
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Added to the queue')).toBeVisible();
   await expect(page.getByRole('heading', { name: heading })).toBeVisible();
   // The page of the title has its action buttons when the title is in the catalog.
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
 }
 
 test('setup: owner, folders, download client, and indexer', async ({ page }) => {
@@ -184,8 +184,8 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   await expect(spare.getByText('Connected')).toBeVisible();
   await spare.getByRole('button', { name: 'Add', exact: true }).click();
   await clients.getByRole('button', { name: 'Actions for Spare' }).click();
-  await page.getByRole('menuitem', { name: 'Remove' }).click();
-  await page.getByRole('alertdialog', { name: 'Remove Spare?' }).getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await page.getByRole('alertdialog', { name: 'Delete Spare?' }).getByRole('button', { name: 'Delete' }).click();
   await expect(clients.getByRole('cell', { name: 'Spare', exact: true })).toHaveCount(0);
   await expect(clients.getByRole('cell', { name: 'Seedbox', exact: true })).toBeVisible();
 
@@ -234,17 +234,17 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   await page.getByRole('menuitem', { name: 'Test' }).click();
   await expect(notices.getByText('Connected to the indexer.').first()).toBeVisible();
   await indexers.getByRole('button', { name: 'Actions for Renamed' }).click();
-  await page.getByRole('menuitem', { name: 'Remove' }).click();
-  await page.getByRole('alertdialog', { name: 'Remove Renamed?' }).getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await page.getByRole('alertdialog', { name: 'Delete Renamed?' }).getByRole('button', { name: 'Delete' }).click();
   await expect(indexers.getByRole('cell', { name: 'Renamed', exact: true })).toHaveCount(0);
   await expect(indexersEmpty.getByText('No indexer is set.')).toBeVisible();
 
-  // The indexer manager pushes an indexer while Settings is open, and the list changes without a reload. The manager owns its fields: the menu has no Remove, and the form has the delay and the preferred languages.
+  // The indexer manager pushes an indexer while Settings is open, and the list changes without a reload. The manager owns its fields: the menu has no Delete, and the form has the delay and the preferred languages.
   const { apiKey } = await (await page.request.get(`${URL_BASE}/api/auth/api-key`)).json();
   await stack.pushIndexer(apiKey);
   await expect(indexers.getByRole('cell', { name: 'Tracker', exact: true })).toBeVisible();
   await indexers.getByRole('button', { name: 'Actions for Tracker' }).click();
-  await expect(page.getByRole('menuitem', { name: 'Remove' })).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: 'Delete' })).toHaveCount(0);
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const pushed = page.getByRole('dialog', { name: 'Edit an indexer' });
   await expect(pushed.getByLabel('Delay requests')).toBeVisible();
@@ -275,8 +275,8 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   await page.getByRole('menuitem', { name: 'Test' }).click();
   await expect(notices.getByText('The receiver accepted the test event.').first()).toBeVisible();
   await webhook.getByRole('button', { name: `Actions for ${webhookName}` }).click();
-  await page.getByRole('menuitem', { name: 'Remove' }).click();
-  await page.getByRole('alertdialog', { name: `Remove ${webhookName}?` }).getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await page.getByRole('alertdialog', { name: `Delete ${webhookName}?` }).getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByText('No webhook is set.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add webhook' })).toBeEnabled();
   receiver.close();

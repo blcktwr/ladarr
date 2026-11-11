@@ -46,11 +46,11 @@ test('the page of a series marks only the seasons that the user selected', async
   await expect(page.getByRole('button', { name: 'Add Season 2' })).toHaveCount(0);
 
   // A selected season has a trash instead. It asks about the files before it removes the season.
-  await expect(page.getByRole('button', { name: 'Remove Season 1' })).toBeVisible();
-  await page.getByRole('button', { name: 'Remove Season 1' }).click();
-  const remove = page.getByRole('alertdialog', { name: 'Remove Season 1?' });
+  await expect(page.getByRole('button', { name: 'Delete Season 1' })).toBeVisible();
+  await page.getByRole('button', { name: 'Delete Season 1' }).click();
+  const remove = page.getByRole('alertdialog', { name: 'Delete Season 1?' });
   await expect(remove.getByRole('switch', { name: 'Delete the files too' })).toBeVisible();
-  await remove.getByRole('button', { name: 'Remove', exact: true }).click();
+  await remove.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Add Season 1' })).toBeVisible();
 });
 
@@ -60,5 +60,5 @@ test('a series with one season adds without a modal', async ({ page, context }) 
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Added to the queue')).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
 });

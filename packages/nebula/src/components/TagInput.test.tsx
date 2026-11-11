@@ -22,7 +22,7 @@ describe('TagInput', () => {
     expect(screen.getByText('English')).toBeTruthy();
     expect(screen.getByText('Thai')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Thai' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Thai' }));
 
     expect(onValueChange).toHaveBeenCalledTimes(1);
     expect(onValueChange).toHaveBeenCalledWith(['en']);
@@ -125,7 +125,7 @@ describe('TagInput', () => {
     const input = screen.getByLabelText('Languages') as HTMLInputElement;
     expect(input.disabled).toBe(true);
 
-    const remove = screen.getByRole('button', { name: 'Remove Thai' }) as HTMLButtonElement;
+    const remove = screen.getByRole('button', { name: 'Delete Thai' }) as HTMLButtonElement;
     expect(remove.disabled).toBe(true);
   });
 });

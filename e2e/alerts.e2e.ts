@@ -118,8 +118,8 @@ test('the notice of a removal shows in front of the problems of the app', async 
   const notices = page.getByRole('region', { name: 'Notifications' });
   await expect(notices.getByText('No download client is set.')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
-  await page.getByRole('alertdialog', { name: 'Remove 1 title?' }).getByRole('button', { name: 'Remove', exact: true }).click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByRole('alertdialog', { name: 'Delete 1 title?' }).getByRole('button', { name: 'Delete', exact: true }).click();
   // The removal ends in a modal too, so its notice must stay in front of the problems that come back.
   await expect(notices.getByText('Two Seasons removed from the library')).toBeVisible();
 });

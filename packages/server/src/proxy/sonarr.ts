@@ -241,7 +241,7 @@ export function sonarrRoutes(deps: CompatDeps) {
   });
 
   // ladarr removes the record only. Sonarr callers ask to delete the files too, so ladarr refuses the call.
-  router.delete('/series/:id', (_req, res) => notSupported(res, 'A series cannot be removed through this API. Remove it in the app.'));
+  router.delete('/series/:id', (_req, res) => notSupported(res, 'A series cannot be removed through this API. Delete it in the app.'));
 
   router.get('/episode', (req, res) => {
     const title = own(parseId(req.query.seriesId));

@@ -176,7 +176,7 @@ export function Webhook() {
                       items={[
                         { label: t('Edit'), onClick: () => setEditing(webhook) },
                         { label: t('Test'), onClick: () => void runTest(webhook) },
-                        { label: t('Remove'), danger: true, onClick: () => setRemoving(webhook) },
+                        { label: t('Delete'), danger: true, onClick: () => setRemoving(webhook) },
                       ]}
                     />,
                   ],
@@ -193,8 +193,8 @@ export function Webhook() {
       <Confirm
         open={Boolean(removing)}
         onOpenChange={(next) => !next && !removePending && setRemoving(null)}
-        title={t('Remove {name}?', { name: removing ? name(removing) : '' })}
-        confirm={t('Remove')}
+        title={t('Delete {name}?', { name: removing ? name(removing) : '' })}
+        confirm={t('Delete')}
         pending={removePending}
         onConfirm={() => void remove()}
       />
