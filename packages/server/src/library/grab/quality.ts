@@ -35,8 +35,8 @@ export const isQualityId = (value: unknown): value is string => typeof value ===
 // The resolution of a quality. DVD has none.
 export const qualityResolution = (id: string) => QUALITIES.find((quality) => quality.id === id)?.resolution ?? null;
 
-// The minimums of the standard size table of TRaSH Guides. The table sets no maximum, so a quality has none either.
-// A quality that is not here, such as Raw-HD, has no limit until the user sets one.
+// The minimums of the standard size table of TRaSH Guides for a series. The table sets no maximum, so a quality has
+// none either. A quality that is not here, such as Raw-HD, has no limit until the user sets one.
 const MINIMUMS: Record<string, number> = {
   dvd: 5,
   'sdtv-480': 5,
@@ -59,7 +59,10 @@ const MINIMUMS: Record<string, number> = {
   'remux-1080': 102,
   'remux-2160': 187.4,
 };
-export const defaultSizes = (): Record<string, SizeLimits> => Object.fromEntries(QUALITIES.map(({ id }) => [id, { min: MINIMUMS[id] ?? 0, preferred: null, max: null }]));
+export const defaultSizes = (): Record<string, SizeLimits> => Object.fromEntries(QUALITIES.map(({ id }) => [id, { min: MINIMUMS[id] ?? null, preferred: null, max: null }]));
+
+// A movie has no size check until the user sets one.
+export const unlimitedSizes = (): Record<string, SizeLimits> => Object.fromEntries(QUALITIES.map(({ id }) => [id, { min: null, preferred: null, max: null }]));
 
 // A profile lists the qualities that ladarr takes, the best first. The qualities of one group have the same rank.
 // A quality that is in no group is not taken.
@@ -179,7 +182,7 @@ export function evaluate(
   if (runtimeMinutes && runtimeMinutes > 0) {
     mibPerMinute = release.sizeBytes / MIB / runtimeMinutes;
     if (limits) {
-      if (mibPerMinute < limits.min) rejections.push('size_below_min');
+      if (limits.min !== null && mibPerMinute < limits.min) rejections.push('size_below_min');
       if (limits.max !== null && mibPerMinute > limits.max) rejections.push('size_above_max');
     }
   } else {

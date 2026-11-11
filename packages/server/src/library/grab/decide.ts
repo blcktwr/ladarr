@@ -153,7 +153,9 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
         : covers.map((c) => runtimeOf(title.episodes.find((e) => e.season === c.season && e.number === c.number)));
   const runtimeMinutes = runtimes.length && runtimes.every((value): value is number => typeof value === 'number' && value > 0) ? runtimes.reduce((sum, value) => sum + value, 0) : null;
   const audio = parsed.audioLanguages?.filter((language) => language !== 'multi') ?? null;
-  const quality = evaluateChain(profiles, ctx.quality.qualitySizes, { source: parsed.source, resolution: parsed.resolution, sizeBytes: release.sizeBytes, audioLanguages: audio?.length ? audio : null }, { runtimeMinutes, audio: ctx.settings.audio });
+  // A movie and an episode check their size against different tables.
+  const sizes = want.kind === 'movie' ? ctx.quality.qualitySizes.movie : ctx.quality.qualitySizes.tv;
+  const quality = evaluateChain(profiles, sizes, { source: parsed.source, resolution: parsed.resolution, sizeBytes: release.sizeBytes, audioLanguages: audio?.length ? audio : null }, { runtimeMinutes, audio: ctx.settings.audio });
   // A manual choice may skip the preferences of the profile. It does not skip a camera copy of unknown source: the user sees the warning.
   if (!ctx.manual) rejections.push(...quality.rejections);
 

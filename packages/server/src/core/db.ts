@@ -15,13 +15,14 @@ import type { ImportJournal } from '../library/imports/importer.ts';
 import type { VerificationState } from '../library/verification.ts';
 import type { SourceDownload, SourceEpisode } from '../migration/migration-source.ts';
 import { DEFAULT_NAMING, type NamingTemplates } from '../library/naming.ts';
-import { defaultProfiles, defaultSizes, QUALITY_TABLE_VERSION, type Profile, type ReleaseSource, type SizeLimits } from '../library/grab/quality.ts';
+import { defaultProfiles, defaultSizes, QUALITY_TABLE_VERSION, unlimitedSizes, type Profile, type ReleaseSource, type SizeLimits } from '../library/grab/quality.ts';
 import type { WebhookState } from './webhook.ts';
 
 // Change this number when a new version cannot read the file of an old one, or the other way round.
 // Version 2 keeps the queue work in queue.json, so an older version must not open the new db.json.
 // Version 5 removes the region and the time zone from the settings.
-export const SCHEMA_VERSION = 5;
+// Version 6 splits the size limits of the qualities into one table for movies and one for series.
+export const SCHEMA_VERSION = 6;
 
 export type Settings = {
   setupCompleted: boolean;
@@ -100,11 +101,11 @@ export type Data = {
   jobSeq: number;
   prioritySeq: number;
   settings: Settings;
-  // The quality profiles, keyed by ID. The sizes are keyed by the ID of a quality. See quality.ts.
+  // The quality profiles, keyed by ID. The sizes are keyed by the media type and the ID of a quality. See quality.ts.
   profiles: Record<string, Profile>;
   // The IDs of the profiles, the best first. A search tries them in this order.
   profileOrder: string[];
-  qualitySizes: Record<string, SizeLimits>;
+  qualitySizes: Record<MediaType, Record<string, SizeLimits>>;
   // The version of the table that set the sizes. A new version replaces them, so an update takes priority.
   qualitySizesVersion: number;
   roots: Record<string, Root>;
@@ -163,7 +164,7 @@ export const emptyData = (): Data => ({
   },
   profiles: defaultProfiles(),
   profileOrder: ['p1080', 'p2160'],
-  qualitySizes: defaultSizes(),
+  qualitySizes: { movie: unlimitedSizes(), tv: defaultSizes() },
   qualitySizesVersion: QUALITY_TABLE_VERSION,
   roots: {},
   titles: {},
@@ -241,8 +242,17 @@ export function withDefaults(data: Data): Data {
   const webhooks = [...(data.webhooks ?? [])];
   if (oldWebhook?.url) for (const type of ['available', 'stuck'] as const) webhooks.push({ id: randomUUID(), type, url: oldWebhook.url });
   const seerr = { ...empty.seerr, ...(data.seerr ?? {}) };
-  // The sizes of an older table are the sizes of the newer table now.
-  const qualitySizes = data.qualitySizesVersion === QUALITY_TABLE_VERSION ? { ...defaultSizes(), ...(data.qualitySizes ?? {}) } : defaultSizes();
+  // The sizes of an older table are the sizes of the newer table now. The table of the series keeps the values that a
+  // person set. The table of the movies starts with no size limit.
+  type SizeTables = Data['qualitySizes'];
+  const storedSizes = data.qualitySizes as unknown as SizeTables | Record<string, SizeLimits> | undefined;
+  const split = storedSizes !== undefined && (Object.hasOwn(storedSizes, 'movie') || Object.hasOwn(storedSizes, 'tv'));
+  const tables = split ? (storedSizes as SizeTables) : null;
+  const oldTable = split ? undefined : (storedSizes as Record<string, SizeLimits> | undefined);
+  const qualitySizes: SizeTables =
+    data.qualitySizesVersion === QUALITY_TABLE_VERSION
+      ? { movie: { ...unlimitedSizes(), ...(tables?.movie ?? {}) }, tv: { ...defaultSizes(), ...(tables?.tv ?? oldTable ?? {}) } }
+      : { movie: unlimitedSizes(), tv: defaultSizes() };
   const next: Data = {
     ...empty,
     ...rest,

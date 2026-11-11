@@ -171,7 +171,8 @@ const releaseQuality = (release: QueueRejectedRelease) => [release.resolution ? 
 const sizeReason = (release: QueueRejectedRelease) => {
   const rejection = release.sizeRejection;
   if (!rejection) return null;
-  return `File size (${rejection.value.toFixed(1)} ${rejection.code === 'size_above_max' ? '>' : '<'} ${rejection.limit}) MiB/min`;
+  const value = `${rejection.value.toFixed(1)} ${rejection.code === 'size_above_max' ? '>' : '<'} ${rejection.limit} MiB/min`;
+  return rejection.code === 'size_above_max' ? `File size (${value})` : `File size below the minimum: ${value}`;
 };
 
 // The releases that a search found and rejected, with the button that takes one by hand.

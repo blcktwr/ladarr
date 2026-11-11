@@ -295,42 +295,83 @@ test('the quality profiles are an ordered priority chain', async ({ page }) => {
   await expect(moveDown('2160p')).toBeDisabled();
 });
 
-test('the bitrates of a resolution are in the dialog of the profile', async ({ page }) => {
+test('the file size limits are in the dialog of the profile', async ({ page }) => {
+  await page.goto(`${URL_BASE}/settings`);
+  await page.getByRole('tab', { name: 'Quality' }).click();
+  // The sizes are no longer a section of their own.
+  await expect(page.getByRole('region', { name: 'File size' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Actions for 1080p' }).click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit quality' });
+  // The sizes of a series are the ones of the default table, so the dialog starts with Series.
+  const media = dialog.getByRole('combobox', { name: 'Media' });
+  await expect(media).toContainText('Series');
+
+  await dialog.getByRole('button', { name: 'Show size limits for 1080p' }).click();
+  const minimum = dialog.getByRole('spinbutton', { name: 'Minimum for WEB-DL 1080p' });
+  await expect(minimum).toHaveValue('12.5');
+
+  // The table of movies has its own limits.
+  await media.click();
+  await page.getByRole('option', { name: 'Movies' }).click();
+  await expect(minimum).toHaveValue('');
+  await expect(minimum).toHaveAttribute('placeholder', '∞');
+  await media.click();
+  await page.getByRole('option', { name: 'Series' }).click();
+
+  try {
+    await minimum.fill('15.1');
+    await expect(minimum).toHaveValue('15.1');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(async () => (await stack.call('GET', '/quality')).body.sizes.tv['webdl-1080'].min).toBe(15.1);
+  } finally {
+    // The size belongs to the quality of the series table, so the test puts the default back for the next tests.
+    await stack.call('PUT', '/quality/sizes/tv/webdl-1080', { min: 12.5, preferred: null, max: null });
+  }
+});
+
+test('an empty size limit shows infinity and saves as no limit', async ({ page }) => {
   await page.goto(`${URL_BASE}/settings`);
   await page.getByRole('tab', { name: 'Quality' }).click();
   await page.getByRole('button', { name: 'Actions for 1080p' }).click();
-  await expect(page.getByRole('menuitem', { name: 'Bitrates' })).toHaveCount(0);
   await page.getByRole('menuitem', { name: 'Edit' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit quality' });
+  await dialog.getByRole('button', { name: 'Show size limits for 1080p' }).click();
 
-  const dialog = page.getByRole('dialog', { name: 'Edit 1080p' });
-  await dialog.getByRole('button', { name: 'Show bitrates for 1080p' }).click();
   const minimum = dialog.getByRole('spinbutton', { name: 'Minimum for WEB-DL 1080p' });
-  await expect(minimum).toHaveValue('15');
-  await minimum.fill('15.1');
-  await expect(minimum).toHaveValue('15.1');
-
   try {
+    await minimum.fill('');
+    await expect(minimum).toHaveAttribute('placeholder', '∞');
     await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect.poll(async () => (await stack.call('GET', '/quality')).body.sizes.tv['webdl-1080'].min).toBeNull();
+    // The empty minimum persists when the dialog opens again.
+    await page.getByRole('button', { name: 'Actions for 1080p' }).click();
+    await page.getByRole('menuitem', { name: 'Edit' }).click();
+    await dialog.getByRole('button', { name: 'Show size limits for 1080p' }).click();
+    await expect(minimum).toHaveValue('');
+    await expect(minimum).toHaveAttribute('placeholder', '∞');
+    await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
-    await expect.poll(async () => (await stack.call('GET', '/quality')).body.qualities.find((quality: { id: string }) => quality.id === 'webdl-1080').sizes.min).toBe(15.1);
   } finally {
-    // A size belongs to the quality, not to the profile, so the test puts the defaults back for the next tests.
-    await stack.call('PUT', '/quality/sizes/webdl-1080', { min: 15, preferred: 60, max: 150 });
+    // The size belongs to the quality of the series table, so the test puts the default back for the next tests.
+    await stack.call('PUT', '/quality/sizes/tv/webdl-1080', { min: 12.5, preferred: null, max: null });
   }
 });
 
 test('the table of the profile scrolls sideways under its first column', async ({ page }) => {
-  // A narrow window makes the table wider than the dialog, so it scrolls sideways.
+  // A narrow window makes the table wider than the page, so it scrolls sideways.
   await page.setViewportSize({ width: 800, height: 900 });
   await page.goto(`${URL_BASE}/settings`);
   await page.getByRole('tab', { name: 'Quality' }).click();
   await page.getByRole('button', { name: 'Actions for 1080p' }).click();
   await page.getByRole('menuitem', { name: 'Edit' }).click();
 
-  const dialog = page.getByRole('dialog', { name: 'Edit 1080p' });
+  const dialog = page.getByRole('dialog', { name: 'Edit quality' });
   const table = dialog.getByRole('table', { name: 'Qualities' });
   const header = (name: string) => table.getByRole('columnheader', { name, exact: true });
-  // The header of the first column holds the unit, so its name has more than "Resolution".
+  // The label of the first column is hidden, so its name starts with "Resolution".
   const resolutionHeader = table.getByRole('columnheader', { name: /^Resolution/ });
   await expect(resolutionHeader).toBeVisible();
   for (const name of ['Remux', 'BluRay', 'WEBRip', 'WEB-DL', 'Raw-HD', 'HDTV', 'SDTV', 'DVD']) {
@@ -338,8 +379,8 @@ test('the table of the profile scrolls sideways under its first column', async (
   }
   await expect(table.getByRole('row').filter({ hasText: '576p' })).toBeVisible();
 
-  await dialog.getByRole('button', { name: 'Show bitrates for 1080p' }).click();
-  // The table is wider than the dialog, so it scrolls sideways. The first column stays at the left edge.
+  await dialog.getByRole('button', { name: 'Show size limits for 1080p' }).click();
+  // The table is wider than the page, so it scrolls sideways. The first column stays at the left edge.
   const resolutionBefore = (await resolutionHeader.boundingBox())!.x;
   const sourceBefore = (await header('Remux').boundingBox())!.x;
   await table.evaluate((element) => { (element.parentElement as HTMLElement).scrollLeft = 400; });

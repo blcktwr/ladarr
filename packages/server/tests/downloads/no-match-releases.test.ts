@@ -21,6 +21,8 @@ const film = () => movie({ rootId: 'movie', manualRelease: true });
 async function rejectedFilm(items: { title: string; size: number }[]) {
   pipe = await startPipeline();
   api = await pipe.api();
+  // A movie has no size limit by default, so the search would take the TINY release. The test sets a limit to reject it.
+  pipe.db.data.qualitySizes.movie['webdl-1080'] = { min: 12.5, preferred: null, max: null };
   const m = film();
   pipe.db.data.titles[m.key] = m;
   pipe.tracker.state.items = items;

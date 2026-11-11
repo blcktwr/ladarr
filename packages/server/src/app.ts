@@ -140,7 +140,7 @@ import { qualityOrderPut } from './routes/quality/order/put.ts';
 import { qualityProfileDelete } from './routes/quality/profiles/[id]/delete.ts';
 import { qualityProfileUpdate } from './routes/quality/profiles/[id]/put.ts';
 import { qualityProfileCreate } from './routes/quality/profiles/post.ts';
-import { qualitySizesPut } from './routes/quality/sizes/[quality]/put.ts';
+import { qualitySizesPut } from './routes/quality/sizes/[media]/[quality]/put.ts';
 import type { Tmdb } from './metadata/tmdb.ts';
 import { webhookDelete } from './routes/webhook/[id]/delete.ts';
 import { webhookUpdate } from './routes/webhook/[id]/put.ts';
@@ -220,7 +220,7 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   api.put('/quality/order', qualityOrderPut());
   api.put('/quality/profiles/:id', qualityProfileUpdate());
   api.delete('/quality/profiles/:id', qualityProfileDelete());
-  api.put('/quality/sizes/:quality', qualitySizesPut());
+  api.put('/quality/sizes/:media/:quality', qualitySizesPut());
   const importStatus = services?.importStatus ?? createImportStatus(events);
   api.post('/import/source/detect', importSourceDetect({ tmdb, configDir }));
   api.post('/import/source/preview', importSourcePreview({ tmdb, configDir }));

@@ -17,6 +17,9 @@ test.beforeAll(async () => {
   stack = await startStack();
   cookie = await stack.createOwner();
   await configure(stack);
+  // A movie has no size limit by default. The TINY release must be rejected by its size again.
+  const sizes = await stack.call('PUT', '/quality/sizes/movie/webdl-1080', { min: 12.5, preferred: null, max: null });
+  if (sizes.status >= 300) throw new Error(`PUT /quality/sizes/movie/webdl-1080 answered ${sizes.status}: ${JSON.stringify(sizes.body)}`);
   stack.tracker.state.items = [
     { title: RELEASE, size: 60 * 100 * MIB },
     { title: TINY, size: 10 * MIB },
@@ -50,7 +53,7 @@ test('downloads a release that the automatic search rejected', async ({ page }) 
   const releaseLine = page.getByText('720p BluRay (5.9 GiB)').first();
   await expect(releaseLine).toBeVisible();
   // A release that the file size rejected shows the numbers of the check after its quality and size.
-  await expect(page.getByText('1080p WEB-DL (10.0 MiB) / File size (0.1 < 12.5) MiB/min')).toBeVisible();
+  await expect(page.getByText('1080p WEB-DL (10.0 MiB) / File size below the minimum: 0.1 < 12.5 MiB/min')).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: RELEASE }).first()).toContainText(RELEASE);
   await expect(page.getByText('The quality of the release is not in any quality profile of the title.')).toHaveCount(0);
   const download = page.getByRole('button', { name: /^Download 720p BluRay/ });

@@ -7,8 +7,9 @@ import { QUALITIES } from '../../library/grab/quality.ts';
 export function qualityGet(): RequestHandler {
   return (_req, res) => {
     res.json({
-      qualities: QUALITIES.map((quality) => ({ ...quality, sizes: db.data.qualitySizes[quality.id] })),
+      qualities: QUALITIES.map(({ id, label, source, resolution }) => ({ id, label, source, resolution })),
       profiles: profilesInOrder(db.data),
+      sizes: db.data.qualitySizes,
     } satisfies QualityResponse);
   };
 }

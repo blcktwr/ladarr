@@ -53,7 +53,7 @@ describe('quality table', () => {
   });
 
   it('has no size limit for a quality that the table does not list', () => {
-    expect(sizes['rawhd-1080']).toEqual({ min: 0, preferred: null, max: null });
+    expect(sizes['rawhd-1080']).toEqual({ min: null, preferred: null, max: null });
     expect(Object.keys(sizes)).toHaveLength(QUALITIES.length);
   });
 
@@ -98,6 +98,15 @@ describe('a profile that the user makes', () => {
     const own = { ...sizes, 'hdtv-720': { min: 10, preferred: null, max: 50 } };
     expect(evaluate(custom, own, release('hdtv', 720, 0.5), { runtimeMinutes: MOVIE }).rejections).toEqual(['size_below_min']);
     expect(evaluate(custom, own, release('hdtv', 720, 20), { runtimeMinutes: MOVIE }).rejections).toEqual(['size_above_max']);
+  });
+
+  it('does not check a minimum that is null, and still checks the maximum', () => {
+    const unlimited = { ...sizes, 'hdtv-720': { min: null, preferred: null, max: null } };
+    // 0.01 GiB is far below the default minimum of the quality.
+    const tiny = evaluate(custom, unlimited, release('hdtv', 720, 0.01), { runtimeMinutes: MOVIE });
+    expect(tiny.rejections).not.toContain('size_below_min');
+    const capped = { ...sizes, 'hdtv-720': { min: null, preferred: null, max: 1 } };
+    expect(evaluate(custom, capped, release('hdtv', 720, 20), { runtimeMinutes: MOVIE }).rejections).toContain('size_above_max');
   });
 
   it('ranks a file by its quality, and a file with no resolution by the best rank of its source', () => {

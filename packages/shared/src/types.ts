@@ -30,7 +30,7 @@ import type {
 export type EpisodeRef = { season: number; number: number };
 
 // MiB for each minute of runtime. A limit that is null is not checked.
-export type SizeLimits = { min: number; preferred: number | null; max: number | null };
+export type SizeLimits = { min: number | null; preferred: number | null; max: number | null };
 
 // A quality profile. The qualities of one group have the same rank.
 export type QualityProfile = { id: string; name: string; items: string[][] };
@@ -245,7 +245,7 @@ export type FolderListing = { path: string; parent: string | null; folders: stri
 
 export type PresetRow = { id: string; label: string };
 
-export type QualityRow = { id: string; label: string; source: string; resolution: number | null; sizes: SizeLimits };
+export type QualityRow = { id: string; label: string; source: string; resolution: number | null };
 // The qualities of a profile, the best group first. The qualities of one group have the same rank.
 export type ProfileData = QualityProfile;
 
@@ -272,7 +272,7 @@ export type SettingsSaved = { settings: SettingsData };
 // The setup needs the settings and the folders that exist.
 export type SetupData = { settings: SettingsData; roots: RootRow[] };
 
-export type QualityResponse = { qualities: QualityRow[]; profiles: ProfileData[] };
+export type QualityResponse = { qualities: QualityRow[]; profiles: ProfileData[]; sizes: Record<MediaType, Record<string, SizeLimits>> };
 
 // ---- backups, logs, and the state of the system ----
 
