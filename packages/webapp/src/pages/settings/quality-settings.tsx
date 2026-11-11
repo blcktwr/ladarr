@@ -101,7 +101,7 @@ const qualityAt = (qualities: QualityRow[], resolutions: number[], source: strin
 
 function ProfileModal({ profile, qualities, sizes, open, onOpenChange, onSaved }: { profile?: ProfileData; qualities: QualityRow[]; sizes: QualityResponse['sizes']; open: boolean; onOpenChange: (open: boolean) => void; onSaved: () => Promise<unknown> }) {
   const [draft, setDraft] = useState(() => toDraft(profile));
-  const [media, setMedia] = useState<MediaType>('tv');
+  const [media, setMedia] = useState<MediaType>('movie');
   const [limits, setLimits] = useState<Record<MediaType, Record<string, Sizes>>>(() => ({ movie: toSizesOf(qualities, sizes.movie), tv: toSizesOf(qualities, sizes.tv) }));
   const [expanded, setExpanded] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -123,7 +123,7 @@ function ProfileModal({ profile, qualities, sizes, open, onOpenChange, onSaved }
   useEffect(() => {
     if (!open) return;
     setDraft(toDraft(profile));
-    setMedia('tv');
+    setMedia('movie');
     setLimits({ movie: toSizesOf(qualities, sizes.movie), tv: toSizesOf(qualities, sizes.tv) });
     setExpanded(null);
     setError('');
