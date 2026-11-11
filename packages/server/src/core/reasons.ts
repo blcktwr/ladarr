@@ -18,7 +18,7 @@ export const REASONS: Record<string, ReasonInfo> = {
   client_unreachable: { message: 'The download client does not answer. The attempt runs again later.', action: 'none' },
   client_rejected: { message: 'The download client rejects the login.', action: 'settings', settings: 'client' },
   client_error: { message: 'The download client reports an error for this torrent.', action: 'retry' },
-  torrent_exists: { message: 'This torrent is in the client already and was not added by the app. You can attach it to this target.', action: 'attach' },
+  torrent_exists: { message: 'This torrent is in the client already and was not added by the app.', action: 'attach' },
   torrent_missing: { message: 'The torrent is not in the client now.', action: 'retry' },
   grab_failed: { message: 'The release did not reach the client.', action: 'retry' },
   too_many_attempts: { message: 'Several releases failed. Select a release by hand, or try again.', action: 'retry' },

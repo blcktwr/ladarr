@@ -77,5 +77,37 @@ test('shows the reason that stops an episode under its row', async ({ page, cont
   const episodes = page.getByRole('table', { name: 'Episodes of season 1' });
   await expect(episodes).toBeVisible();
   // The reason shows in the row, where the file name shows during validation.
-  await expect(episodes.getByText('This torrent is in the client already and was not added by the app. You can attach it to this target.')).toHaveCount(3);
+  await expect(episodes.getByText('This torrent is in the client already and was not added by the app.')).toHaveCount(3);
+});
+
+test('attaches the download that is in the client to an episode', async ({ page, context }) => {
+  await context.addCookies([{ ...cookie, url: URL_BASE }]);
+  await page.goto(`${URL_BASE}/activity`);
+  await page.locator('[data-row="season:tv:1|1"]').click();
+  const episodes = page.getByRole('table', { name: 'Episodes of season 1' });
+  const row = episodes.locator('[data-row="entry:tv:1:1x1"]');
+  // The reason of the episode offers the torrent that the client holds already.
+  const attach = row.getByRole('button', { name: 'Attach download' });
+  await expect(attach).toBeVisible();
+  await attach.click();
+  const panel = page.getByRole('dialog', { name: /Attach download to/ });
+  await expect(panel).toBeVisible();
+  // The torrent of the client is the one that stopped the episode. The option shows its size and progress too.
+  await panel.getByRole('combobox', { name: 'Download' }).click();
+  await page.getByRole('option', { name: new RegExp(SERIES_PACK) }).click();
+  await panel.getByRole('checkbox', { name: 'I added this download. It will not be removed from the client.' }).click();
+  await panel.getByRole('checkbox', { name: /^This download is/ }).click();
+  await panel.getByRole('button', { name: 'Attach download' }).click();
+  // The target downloads the torrent of the client now.
+  await expect(row).toContainText('Downloading');
+  // The entry holds the hash of the torrent, and the reason that stopped it is gone.
+  await expect
+    .poll(
+      async () => {
+        const item = (await stack.call('GET', '/queue/groups/tv:1')).body.items.find((entry: { number?: number }) => entry.number === 1);
+        return { hash: item?.transfer?.hash ?? null, reason: item?.reason?.code ?? null };
+      },
+      { timeout: 60_000 },
+    )
+    .toEqual({ hash: hashOf(SERIES_PACK), reason: null });
 });

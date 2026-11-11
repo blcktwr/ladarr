@@ -177,7 +177,7 @@ function AttachBody({ entry, onDone }: { entry: QueueEntryView; onDone: () => vo
 // Nebula has no dialog that a page opens from its own state. A side panel opens from its own button, and it closes when the button leaves the page.
 export function AttachDialog({ entry, onDone }: { entry: QueueEntryView; onDone: () => void }) {
   return (
-    <Panel label={t('Attach download to {label}', { label: entry.label })} trigger={<Button>{t('Attach download')}</Button>}>
+    <Panel label={t('Attach download to {label}', { label: entry.label })} trigger={<Button variant="danger">{t('Attach download')}</Button>}>
       <AttachBody entry={entry} onDone={onDone} />
     </Panel>
   );

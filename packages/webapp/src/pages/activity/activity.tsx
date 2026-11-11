@@ -11,6 +11,7 @@ import { Confirm } from '../../components/confirm.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
 import { SeriesBlocklist } from './activity-blocklist.tsx';
 import { MatchDialog } from './activity-match.tsx';
+import { AttachDialog } from './activity-client.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
 import { catalogPath, formatBytes, groupName, posterUrl, seasonName, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
@@ -83,9 +84,13 @@ function EntryStatus({ entry }: { entry: QueueEntryView }) {
 
 // A target that stopped because the destination name is taken. The user decides to replace the file, and the import
 // starts again. A target that stopped before the checks were kept has no list, so its reason is enough.
-function StuckFix({ entry, run }: { entry: QueueEntryView; run: Run }) {
+const canReplace = (entry: QueueEntryView) => {
   const failed = !entry.checks?.length || entry.checks.some((check) => check.id === 'destination_free' && check.state === 'failed');
-  if (entry.reason?.code !== 'destination_exists' || !failed) return null;
+  return entry.reason?.code === 'destination_exists' && failed;
+};
+
+function StuckFix({ entry, run }: { entry: QueueEntryView; run: Run }) {
+  if (!canReplace(entry)) return null;
   return <Confirm label={t('Replace the file')} title={t('Replace the file?')} confirm={t('Replace')} onConfirm={() => void run('replace', [entry.id])} />;
 }
 
@@ -322,6 +327,9 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
   // file. The list keeps the status and the hint.
   const reason = entry.reason ? t(entry.reason.message) : null;
   const checks = hasChecks(entry);
+  // The container of the action is not rendered when the action has no button to show.
+  const hasFix = canReplace(entry) || entry.reason?.action === 'attach';
+  const action = hasFix ? fix : undefined;
   if (inline) {
     return (
       <div className="grid gap-2 w-full min-w-0">
@@ -341,7 +349,7 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
   return (
     <div className="grid gap-4 w-full min-w-0">
       {name}
-      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={!checks && Boolean(data)} action={fix}>
+      <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={!checks && Boolean(data)} action={action}>
         <TransferProgress entry={entry} />
       </DetailStatus>
       <ImportChecks entry={entry} />
@@ -507,7 +515,12 @@ function SeasonEpisodes({ season, entries, run, refresh, openLogs }: { season: n
               key="detail"
               entry={entry}
               inline
-              fix={<StuckFix entry={entry} run={run} />}
+              fix={
+                <>
+                  <StuckFix entry={entry} run={run} />
+                  {entry.reason?.action === 'attach' && <AttachDialog entry={entry} onDone={refresh} />}
+                </>
+              }
               actions={
                 <>
                   {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
@@ -644,7 +657,16 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
 function MovieDetail({ entry, run, refresh }: { entry: QueueEntryView; run: Run; refresh: () => void }) {
   return (
     <div className="grid gap-3">
-      <EntryDetails entry={entry} label={false} fix={<StuckFix entry={entry} run={run} />} />
+      <EntryDetails
+        entry={entry}
+        label={false}
+        fix={
+          <>
+            <StuckFix entry={entry} run={run} />
+            {entry.reason?.action === 'attach' && <AttachDialog entry={entry} onDone={refresh} />}
+          </>
+        }
+      />
       {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
     </div>
   );
