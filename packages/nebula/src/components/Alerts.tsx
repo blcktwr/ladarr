@@ -110,7 +110,7 @@ export function Alerts({ children, limit = 3, timeout = 5000 }: { children: Reac
         <Toast.Portal>
           {/* The alerts stay in the store while an overlay is open, so they come back when it closes. The hidden live region reads nothing then. */}
           <div aria-hidden={underModal || undefined} className={underModal ? 'invisible' : undefined}>
-            <Toast.Viewport className="fixed z-50 bottom-6 right-6 w-[min(32rem,calc(100vw-3rem))] outline-none pointer-events-none">
+            <Toast.Viewport className="fixed z-50 bottom-6 left-1/2 -translate-x-1/2 w-[min(32rem,calc(100vw-3rem))] outline-none pointer-events-none">
               <Queue limit={limit} timeout={timeout} paused={underModal} />
             </Toast.Viewport>
           </div>
