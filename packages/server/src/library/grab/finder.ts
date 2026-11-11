@@ -423,6 +423,8 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
         .slice(0, MAX_CANDIDATES)
         .map((decision) => {
           const want = wantForRelease(title, decision.release, entry.season ?? undefined, entry.number ?? undefined);
+          const sizeCode = decision.rejections.find((code) => code === 'size_below_min' || code === 'size_above_max');
+          const sizeLimit = sizeCode === 'size_above_max' ? decision.limits?.max : decision.limits?.min;
           return {
             indexerId: decision.release.indexerId,
             guid: decision.release.guid,
@@ -437,6 +439,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
             kind: decision.kind,
             grabbable: want ? decide(decision.release, want, manualCtx).accepted : false,
             reasons: decision.rejections.map((code) => REJECTION_TEXT[code] ?? code),
+            sizeRejection: sizeCode && sizeLimit != null && decision.mibPerMinute !== null ? { code: sizeCode, value: decision.mibPerMinute, limit: sizeLimit } : null,
           };
         });
       Object.assign(entry.search!, { result: code === 'no_indexers' ? 'no_results' : code, accepted: 0, candidates: decisions.length, topRejections: rejections, nextAt: now() + RESEARCH_MS, rejected });

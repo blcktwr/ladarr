@@ -68,6 +68,8 @@ export type RejectedRelease = {
   kind: 'single' | 'multi' | 'pack';
   grabbable: boolean;
   reasons: string[];
+  // The size check that stopped the release, with the numbers. Null when the size did not stop it.
+  sizeRejection: { code: 'size_below_min' | 'size_above_max'; value: number; limit: number } | null;
 };
 
 export type SearchState = {

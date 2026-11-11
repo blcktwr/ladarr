@@ -5,6 +5,9 @@ test.setTimeout(90_000);
 
 // A 720p BluRay that the default 1080p/2160p profiles reject. The automatic search ends with every release rejected.
 const RELEASE = 'Movie.Name.2019.720p.BluRay.x264-LOW';
+// A 1080p WEB-DL of 10 MiB for a 100 minute movie. The quality is in the profile, but 0.1 MiB/min is below its
+// minimum of 12.5 MiB/min.
+const TINY = 'Movie.Name.2019.1080p.WEB-DL-TINY';
 // A release of another title. The search finds it, so the inspector lists it, but a manual grab cannot take it.
 const WRONG = 'Other.Movie.2019.1080p.BluRay-WRONG';
 
@@ -16,6 +19,7 @@ test.beforeAll(async () => {
   await configure(stack);
   stack.tracker.state.items = [
     { title: RELEASE, size: 60 * 100 * MIB },
+    { title: TINY, size: 10 * MIB },
     { title: WRONG, size: 100 * 120 * MIB },
   ];
   const movie = await stack.call('POST', '/library', { mediaType: 'movie', tmdbId: 2, add: 'all' });
@@ -45,6 +49,8 @@ test('downloads a release that the automatic search rejected', async ({ page }) 
   // size lie above the name of the release, so the reason that the quality is not in a profile is not repeated.
   const releaseLine = page.getByText('720p BluRay (5.9 GiB)').first();
   await expect(releaseLine).toBeVisible();
+  // A release that the file size rejected shows the numbers of the check after its quality and size.
+  await expect(page.getByText('1080p WEB-DL (10.0 MiB) / File size (0.1 < 12.5) MiB/min')).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: RELEASE }).first()).toContainText(RELEASE);
   await expect(page.getByText('The quality of the release is not in any quality profile of the title.')).toHaveCount(0);
   const download = page.getByRole('button', { name: /^Download 720p BluRay/ });

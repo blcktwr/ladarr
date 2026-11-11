@@ -167,6 +167,13 @@ const sourceLabel = (source: string) => sourceLabels[source] ?? (source === 'unk
 // The quality of a release as a person reads it: its resolution and its source.
 const releaseQuality = (release: QueueRejectedRelease) => [release.resolution ? `${release.resolution}p` : null, sourceLabel(release.source)].filter(Boolean).join(' ');
 
+// The size check that stopped a release, with the numbers that made it.
+const sizeReason = (release: QueueRejectedRelease) => {
+  const rejection = release.sizeRejection;
+  if (!rejection) return null;
+  return `File size (${rejection.value.toFixed(1)} ${rejection.code === 'size_above_max' ? '>' : '<'} ${rejection.limit}) MiB/min`;
+};
+
 // The releases that a search found and rejected, with the button that takes one by hand.
 function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; release: QueueRejectedRelease }[]; onDone: () => void }) {
   const [chosen, setChosen] = useState<{ entry: QueueEntryView; release: QueueRejectedRelease } | null>(null);
@@ -202,12 +209,13 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
           rows={items.map((item) => {
             const quality = releaseQuality(item.release);
             const size = formatBytes(item.release.sizeBytes);
+            const reason = sizeReason(item.release);
             return {
               key: `${item.release.indexerId}:${item.release.guid}`,
               cells: [
                 <div className="grid gap-1">
                   <Text variant="small">
-                    {quality} ({size})
+                    {quality} ({size}){reason ? ` / ${reason}` : ''}
                   </Text>
                   <Text>{item.release.title}</Text>
                 </div>,

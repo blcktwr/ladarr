@@ -221,6 +221,7 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
             kind: release.kind,
             grabbable: release.grabbable,
             reasons: release.reasons,
+            sizeRejection: release.sizeRejection,
           })),
         }
       : null,
