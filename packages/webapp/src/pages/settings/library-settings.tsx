@@ -1,9 +1,9 @@
 import type { MediaType } from '@ladarr/shared/enums';
-import type { FolderListing, RootRow, SettingsData, SettingsResponse } from '@ladarr/shared/types';
+import type { RootRow, SettingsData, SettingsResponse } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useId, useState } from 'react';
 import { api } from '../../lib/api.ts';
-import { Actions, Button, Dropdown, Field, Form, List, Row, Section, Spinner } from 'nebula';
+import { Button, Dropdown, Field, Form, Section, Spinner } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { describeError } from '../../lib/format.ts';
@@ -15,8 +15,6 @@ const mediaTypes = ['movie', 'tv'] as const;
 function Failure({ message }: { message: string }) {
   return <Alert tone="danger">{message}</Alert>;
 }
-
-const joinPath = (base: string, name: string) => `${base.replace(/\/$/, '')}/${name}`;
 
 function GeneralCard({ data, reload }: { data: SettingsResponse; reload: () => void }) {
   const { settings } = data;
@@ -49,25 +47,7 @@ function FoldersForm({ roots, defaults, reload }: { roots: RootRow[]; defaults: 
   const [paths, setPaths] = useState(() => ({ movie: saved('movie')?.path ?? '', tv: saved('tv')?.path ?? '' }));
   const [errors, setErrors] = useState<Partial<Record<MediaType, string>>>({});
   const [pending, setPending] = useState(false);
-  const [picking, setPicking] = useState<MediaType | null>(null);
-  const [dir, setDir] = useState('/');
-  const listing = useQuery<FolderListing>({ queryKey: [`/roots/browse?path=${encodeURIComponent(dir)}`], enabled: Boolean(picking) });
-  const folders = listing.data;
   const changed = mediaTypes.filter((type) => paths[type].trim() !== (saved(type)?.path ?? ''));
-
-  // The list under a field shows the folders of the server, from the top of the disk.
-  const browse = (type: MediaType) => {
-    setDir('/');
-    setPicking(type);
-  };
-  const openDir = (next: string) => setDir(next);
-  const choose = (path: string) => {
-    if (!picking) return;
-    const type = picking;
-    setPaths((current) => ({ ...current, [type]: path }));
-    setErrors((current) => ({ ...current, [type]: undefined }));
-    setPicking(null);
-  };
 
   async function save(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -102,55 +82,14 @@ function FoldersForm({ roots, defaults, reload }: { roots: RootRow[]; defaults: 
               width="full"
               label={t(type === 'movie' ? 'Movies folder' : 'Series folder')}
               required
-              readOnly
               error={errors[type]}
               value={paths[type]}
               placeholder="/data/media"
-              onClick={() => browse(type)}
-              action={
-                <Button type="button" variant="ghost" onClick={() => browse(type)}>
-                  {t('Browse')}
-                </Button>
-              }
+              onValueChange={(path) => {
+                setPaths((current) => ({ ...current, [type]: path }));
+                setErrors((current) => ({ ...current, [type]: undefined }));
+              }}
             />
-            {picking === type && (
-              <div className="grid grid-cols-[minmax(0,1fr)] justify-items-start gap-4 w-full">
-                <p>{folders ? folders.path : dir}</p>
-                {listing.error && !folders ? (
-                  <Alert tone="danger">{describeError(listing.error)}</Alert>
-                ) : listing.isFetching && !folders ? (
-                  <Spinner label={t('Loading')} />
-                ) : folders ? (
-                  <List>
-                    {folders.parent && (
-                      <Row actions={<Button type="button" variant="ghost" onClick={() => openDir(folders.parent!)}>{t('Up')}</Button>}>
-                        <span>..</span>
-                      </Row>
-                    )}
-                    {folders.folders.map((name) => (
-                      <Row
-                        key={name}
-                        actions={
-                          <Button type="button" variant="ghost" aria-label={t('Open {folder}', { folder: name })} onClick={() => openDir(joinPath(folders.path, name))}>
-                            {t('Open')}
-                          </Button>
-                        }
-                      >
-                        <span>{name}</span>
-                      </Row>
-                    ))}
-                  </List>
-                ) : null}
-                <Actions>
-                  <Button type="button" variant="ghost" onClick={() => setPicking(null)}>
-                    {t('Cancel')}
-                  </Button>
-                  <Button type="button" disabled={!folders} onClick={() => folders && choose(folders.path)}>
-                    {t('Choose')}
-                  </Button>
-                </Actions>
-              </div>
-            )}
           </Fragment>
         ))}
       </Form>
