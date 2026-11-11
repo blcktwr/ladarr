@@ -151,10 +151,10 @@ import { webhookTest } from './routes/webhook/test/post.ts';
 
 export type Services = { queue: Queue; finder: Finder; poller: Poller; clients: Clients; importStatus?: ImportStatus };
 
-type Options = { services?: Services; urlBase?: string; events?: Events; webDir?: string; heartbeat?: () => number; tmdb?: Tmdb; configDir?: string; backupDir?: string; enqueue?: (input: EnqueueInput) => ReturnType<typeof enqueueJob>; cancelJob?: (id: string) => void; persist?: () => void; restorer?: Restorer; indexers?: IndexerService; installUpdate?: () => Promise<{ version: string }>; pauseQueue?: () => Promise<void>; resumeQueue?: () => void; restart?: () => void };
+type Options = { services?: Services; urlBase?: string; events?: Events; webDir?: string; devOrigin?: string; heartbeat?: () => number; tmdb?: Tmdb; configDir?: string; backupDir?: string; enqueue?: (input: EnqueueInput) => ReturnType<typeof enqueueJob>; cancelJob?: (id: string) => void; persist?: () => void; restorer?: Restorer; indexers?: IndexerService; installUpdate?: () => Promise<{ version: string }>; pauseQueue?: () => Promise<void>; resumeQueue?: () => void; restart?: () => void };
 
 
-export function createApp({ services, urlBase = '', events = createEvents(), webDir, heartbeat, tmdb, configDir, backupDir, enqueue: enqueueInput, cancelJob, persist, restorer, indexers, installUpdate, pauseQueue, resumeQueue, restart }: Options = {}) {
+export function createApp({ services, urlBase = '', events = createEvents(), webDir, devOrigin, heartbeat, tmdb, configDir, backupDir, enqueue: enqueueInput, cancelJob, persist, restorer, indexers, installUpdate, pauseQueue, resumeQueue, restart }: Options = {}) {
   const enqueue = enqueueInput ?? ((input: EnqueueInput) => enqueueJob(input));
   const api = express.Router();
   // A change of the indexers or of the clients can lift the block of a target. The target goes on, and the pages read the new state.
@@ -315,6 +315,31 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
 
   const app = express();
   app.disable('x-powered-by');
+  // The page of a development build is on another port, so the browser needs the answer of a preflight before a call with credentials.
+  if (devOrigin) {
+    // The page can come from any host on the network, so the port of the page is the part that counts.
+    const pagePort = new URL(devOrigin).port;
+    app.use((req, res, next) => {
+      const origin = req.get('origin');
+      let page = false;
+      try {
+        page = origin !== undefined && new URL(origin).port === pagePort;
+      } catch {
+        // An origin that is not a URL is not the page.
+      }
+      if (page && origin) {
+        res.set('Access-Control-Allow-Origin', origin);
+        res.set('Access-Control-Allow-Credentials', 'true');
+        res.vary('Origin');
+      }
+      if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, PATCH, DELETE');
+        res.set('Access-Control-Allow-Headers', req.get('access-control-request-headers') ?? 'content-type, x-csrf-token, x-api-key');
+        return void res.sendStatus(204);
+      }
+      next();
+    });
+  }
   // The requests that one call of the API sends belong to it, so its lines of the log link to them.
   app.use((_req, _res, next) => withOutboundRequests(next));
   app.use((req, res, next) => {

@@ -11,7 +11,7 @@ export default defineConfig({
   // A fixed port, because other Vite apps use 5173. With strictPort, Vite stops if the port is busy and does not move to another one.
   server: {
     host: true,
-    port: 36590,
+    port: 3000,
     strictPort: true,
   },
 });

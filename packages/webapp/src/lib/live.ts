@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
 
+import { apiUrl } from './api.ts';
+
 // One connection serves every component, because a browser allows only a few for each site.
 const listeners = new Map<string, Set<(data?: unknown) => void>>();
 let source: EventSource | undefined;
 
 function connect() {
-  source = new EventSource('api/events');
+  source = new EventSource(apiUrl('/events'), { withCredentials: true });
   const resync = () => listeners.forEach((set) => set.forEach((listener) => listener()));
   // The server sends "resync" when the client missed events. Every listener loads its data again.
   source.addEventListener('resync', resync);

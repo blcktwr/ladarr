@@ -97,6 +97,7 @@ listen(
     urlBase: config.urlBase,
     events,
     webDir: config.webDir,
+    devOrigin: config.devOrigin,
     heartbeat: () => worker.heartbeat,
     tmdb,
     configDir: config.configDir,

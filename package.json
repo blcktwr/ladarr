@@ -10,7 +10,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run build -w @ladarr/webapp && LADARR_WEB_DIR=../webapp/dist PORT=3001 LADARR_COMPAT_PORTS=0 npm run dev -w @ladarr/server",
+    "dev": "concurrently -k -n web,api -c cyan,green \"npm run dev -w @ladarr/webapp\" \"LADARR_DEV_ORIGIN=http://localhost:3000 PORT=3001 LADARR_COMPAT_PORTS=0 npm run dev -w @ladarr/server\"",
     "build": "npm run build -w @ladarr/webapp",
     "typecheck": "tsc -p packages/shared && tsc -p packages/server && tsc -p packages/webapp && tsc -p e2e",
     "test": "vitest run",
