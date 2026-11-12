@@ -1,5 +1,6 @@
 import { Select } from '@base-ui/react/select';
 import { Check, ChevronDown } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { ghost, key, raised, sunk } from '../theme/stone.ts';
 
 const sizes = {
@@ -7,12 +8,12 @@ const sizes = {
   md: { trigger: 'min-w-50 h-11 px-3.5 gap-4', icon: '[&>svg]:size-4', item: 'h-10 px-3' },
 };
 
-type DropdownProps = Omit<Select.Root.Props<string>, 'children' | 'items'> & { options: { value: string; label?: string; disabled?: boolean }[]; label?: string; size?: keyof typeof sizes };
+type DropdownProps = Omit<Select.Root.Props<string>, 'children' | 'items'> & { options: { value: string; label?: ReactNode; disabled?: boolean }[]; label?: string; size?: keyof typeof sizes };
 
 // The trigger is a raised key, and it stays pressed in while its list is open. The list is a slab of stone over the page.
 // Its options are ghost keys, and the selected one stays pressed in. A disabled option only fades.
-// A long list is as tall as the space on the screen, and it scrolls inside.
-// options is a list of { value, label, disabled }. The label is the value when there is no label.
+// A long list is 20rem tall, or as tall as the space on the screen when that is less, and it scrolls inside.
+// options is a list of { value, label, disabled }. The label is the value when there is no label, and it can hold a node, such as a flag and a name.
 // label is a visible label above the trigger, as the label of a field. With a label, the dropdown also keeps the place of the error row of a Field.
 // Thus a Field and a Dropdown side by side have the same height, and their controls align.
 // size is sm or md. The default is md, the height of a key.
@@ -32,7 +33,7 @@ export function Dropdown({ options, label, size = 'md', ...props }: DropdownProp
       </div>
       <Select.Portal>
         <Select.Positioner alignItemWithTrigger={false} align="start" sideOffset={6}>
-          <Select.Popup className="box-border min-w-(--anchor-width) max-h-(--available-height) overflow-y-auto overscroll-contain p-1 rounded-lg outline-none bg-(image:--grain) bg-slab shadow-(--slab-shadow) text-ink">
+          <Select.Popup className="box-border min-w-(--anchor-width) max-h-[min(20rem,var(--available-height))] overflow-y-auto overscroll-contain p-1 rounded-lg outline-none bg-(image:--grain) bg-slab shadow-(--slab-shadow) text-ink">
             {options.map(({ value, label: text = value, disabled }) => (
               <Select.Item
                 key={value}

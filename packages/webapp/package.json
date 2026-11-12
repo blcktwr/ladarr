@@ -11,6 +11,7 @@
     "@ladarr/shared": "*",
     "@microlink/react-json-view": "1.31.46",
     "@tanstack/react-query": "5.105.0",
+    "flag-icons": "7.6.0",
     "lucide-react": "1.63.0",
     "nebula": "*",
     "react": "19.3.1",

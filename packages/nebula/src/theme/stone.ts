@@ -56,7 +56,11 @@ export const current = `${bar} after:top-[var(--bar-top,0px)] after:left-1/2 aft
 export const currentSide = `${bar} after:-left-1 after:top-1/2 after:w-1 after:h-6 after:-translate-y-1/2 after:rounded-r-sm`;
 
 // A recess that stays pressed in, such as the selected option of a list.
-export const sunk = 'bg-(--recess-sunk) shadow-(--recess-edge-sunk) text-ink pt-0.5';
+// A recess that stays pressed in, such as a block that holds an image.
+export const pressed = 'bg-(--recess-sunk) shadow-(--recess-edge-sunk) text-ink';
+
+// A recess that stays pressed in, such as the selected option of a list. Its label sinks with it.
+export const sunk = `${pressed} pt-0.5`;
 
 // A checkbox or a switch that is off: a slot in the stone, deeper than the pane. Pointing at it lightens the slot.
 export const off = 'bg-(--recess-sunk) shadow-(--recess-edge-sunk) pointed:bg-(--recess-lit) pointed:shadow-(--recess-edge-lit) pressed:bg-(--recess-sunk) pressed:shadow-(--recess-edge-sunk)';

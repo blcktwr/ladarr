@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "nebula/theme.css";
+@import "flag-icons/css/flag-icons.min.css";
 
 /* The page under the background. Its color shows when the window scrolls past the end and while the browser paints the page in tiles, so it must not be white. */
 html {

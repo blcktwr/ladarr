@@ -1,9 +1,11 @@
-import type { DiscoveryPage, DiscoverySort } from '@ladarr/shared/types';
-import { useInfiniteQuery } from '@tanstack/react-query';
-import { Dropdown, EmptyState, Gallery, Text } from 'nebula';
+import type { DiscoveryFilters, DiscoveryPage, DiscoverySort, WatchProvider, WatchRegion } from '@ladarr/shared/types';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { SlidersHorizontal } from 'lucide-react';
+import { Button, Dropdown, EmptyState, Field, Gallery, Panel, Text, Tile } from 'nebula';
 import { useEffect, useRef, useState } from 'react';
 import { LoadFailed, LoadingGallery } from '../../components/index.ts';
 import { api } from '../../lib/api.ts';
+import { posterUrl } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { ResultItem } from '../search/result-item.tsx';
 
@@ -15,14 +17,92 @@ const column = 'mx-auto w-[min(1200px,calc(100%-40px))]';
 // column does not fill goes in equal parts to each side (10rem per thumbnail and 1.5rem between them).
 const tiles = 'mx-auto w-[calc(round(down,calc(100%+1.5rem),11.5rem)-1.5rem)]';
 
+// The filters of the panel. An empty value leaves its filter out. The streaming services start in the United States.
+type Filters = { from: string; to: string; genre: string; region: string; providers: number[] };
+const noFilters: Filters = { from: '', to: '', genre: '', region: 'US', providers: [] };
+
+// The flag of a country, from flag-icons, and its name.
+const regionLabel = (region: WatchRegion) => (
+  <span className="flex items-center gap-2">
+    <span className={`fi fi-${region.code.toLowerCase()}`} />
+    {region.name}
+  </span>
+);
+
+// The filters of the discovery page. The genres of movies and series share one list, and the server maps each one to
+// the genre of the two media types. The streaming services belong to the country of the list.
+function FilterPanel({ filters, lists, providers, onChange }: { filters: Filters; lists?: DiscoveryFilters; providers?: WatchProvider[]; onChange: (filters: Filters) => void }) {
+  // A service that is on in the country turns on, and the others turn off. A new country starts with no service.
+  const toggleProvider = (id: number, checked: boolean) =>
+    onChange({
+      ...filters,
+      providers: checked ? [...filters.providers, id] : filters.providers.filter((other) => other !== id),
+    });
+
+  return (
+    <div className="grid gap-5">
+      <div className="grid gap-3">
+        <Text variant="heading">{t('Release date')}</Text>
+        <div className="grid grid-cols-2 gap-3">
+          <Field
+            label={t('From')}
+            type="date"
+            width="full"
+            value={filters.from}
+            onChange={(event) => onChange({ ...filters, from: event.target.value })}
+          />
+          <Field
+            label={t('To')}
+            type="date"
+            width="full"
+            value={filters.to}
+            onChange={(event) => onChange({ ...filters, to: event.target.value })}
+          />
+        </div>
+      </div>
+      <Dropdown
+        label={t('Genre')}
+        value={filters.genre}
+        options={[
+          { value: '', label: t('All genres') },
+          ...(lists?.genres ?? []).map((genre) => ({ value: genre.name, label: genre.name })),
+        ]}
+        onValueChange={(value) => onChange({ ...filters, genre: value ?? '' })}
+      />
+      <div className="grid gap-3">
+        <Text variant="heading">{t('Streaming services')}</Text>
+        <Dropdown
+          label={t('Country')}
+          value={filters.region}
+          options={(lists?.regions ?? []).map((region) => ({ value: region.code, label: regionLabel(region) }))}
+          onValueChange={(value) => onChange({ ...filters, region: value ?? 'US', providers: [] })}
+        />
+        <div className="grid grid-cols-5 gap-1.5">
+          {(providers ?? []).map((provider) => (
+            <Tile
+              key={provider.id}
+              label={provider.name}
+              image={posterUrl(provider.logoPath, 'w92')}
+              selected={filters.providers.includes(provider.id)}
+              onSelectedChange={() => toggleProvider(provider.id, !filters.providers.includes(provider.id))}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // The titles of TMDB that the catalog does not have yet. A poster opens the title page, and its button adds it.
 export function Discovery() {
   const [sort, setSort] = useState<DiscoverySort>('popularity.desc');
-  const { data, error, isFetchingNextPage, fetchNextPage, hasNextPage, refetch } = useInfiniteQuery({
-    queryKey: ['/discovery', sort],
-    queryFn: ({ pageParam }) => api<DiscoveryPage>(`/discovery?page=${pageParam}&sort=${sort}`),
-    initialPageParam: 1,
-    getNextPageParam: (last) => (last.page < last.totalPages ? last.page + 1 : undefined),
+  const [filters, setFilters] = useState<Filters>(noFilters);
+  // The lists of the filter panel load with the page, so the panel opens with them ready.
+  const lists = useQuery<DiscoveryFilters>({ queryKey: ['/discovery/filters'], staleTime: 5 * 60_000 });
+  const providers = useQuery<WatchProvider[]>({
+    queryKey: ['/discovery/providers', filters.region],
+    queryFn: () => api<WatchProvider[]>(`/discovery/providers?region=${filters.region}`),
+    staleTime: 5 * 60_000,
   });
   const sorts: { value: DiscoverySort; label: string }[] = [
     { value: 'popularity.asc', label: t('Popularity (asc)') },
@@ -32,6 +112,22 @@ export function Discovery() {
     { value: 'rating.asc', label: t('TMDB rating (asc)') },
     { value: 'rating.desc', label: t('TMDB rating (desc)') },
   ];
+  const params = new URLSearchParams({ sort });
+  if (filters.from) params.set('from', filters.from);
+  if (filters.to) params.set('to', filters.to);
+  if (filters.genre) params.set('genre', filters.genre);
+  // A watch provider needs the country of its list.
+  if (filters.providers.length) {
+    params.set('region', filters.region);
+    params.set('providers', filters.providers.join(','));
+  }
+  const query = `/discovery?${params.toString()}`;
+  const { data, error, isFetchingNextPage, fetchNextPage, hasNextPage, refetch } = useInfiniteQuery({
+    queryKey: [query],
+    queryFn: ({ pageParam }) => api<DiscoveryPage>(`${query}&page=${pageParam}`),
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.page < last.totalPages ? last.page + 1 : undefined),
+  });
   const pages = data?.pages ?? [];
   // Each row holds the results of every page that the page has.
   const rows = (pages[0]?.rows ?? []).map((row) => ({
@@ -55,7 +151,20 @@ export function Discovery() {
     <div className={page}>
       <div className={`${column} flex flex-wrap items-center justify-between gap-4`}>
         <Text variant="title">{t('Discovery')}</Text>
-        <Dropdown value={sort} options={sorts} onValueChange={(value) => setSort((value ?? 'popularity.desc') as DiscoverySort)} />
+        <div className="flex items-center gap-4">
+          <Dropdown value={sort} options={sorts} onValueChange={(value) => setSort((value ?? 'popularity.desc') as DiscoverySort)} />
+          <Panel
+            label={t('Filters')}
+            title={t('Filters')}
+            trigger={
+              <Button variant="ghost" iconOnly aria-label={t('Filters')}>
+                <SlidersHorizontal />
+              </Button>
+            }
+          >
+            <FilterPanel filters={filters} lists={lists.data} providers={providers.data} onChange={setFilters} />
+          </Panel>
+        </div>
       </div>
       {error && !data ? (
         <LoadFailed onRetry={() => void refetch()} />

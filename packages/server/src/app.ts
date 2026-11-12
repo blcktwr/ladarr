@@ -46,7 +46,9 @@ import { searchRecommendations } from './routes/search/[mediaType]/[tmdbId]/reco
 import { searchSeasons } from './routes/search/[mediaType]/[tmdbId]/seasons/get.ts';
 import { searchGet } from './routes/search/get.ts';
 import { searchPerson } from './routes/search/person/[id]/get.ts';
+import { discoveryFiltersGet } from './routes/discovery/filters/get.ts';
 import { discoveryGet } from './routes/discovery/get.ts';
+import { discoveryProvidersGet } from './routes/discovery/providers/get.ts';
 import { searchTarget } from './helpers/search.ts';
 import { settingsCompleteSetup } from './routes/settings/complete-setup/post.ts';
 import { settingsGet } from './routes/settings/get.ts';
@@ -187,6 +189,8 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   api.get('/events', eventsGet(events));
   const searchTargetHandler = searchTarget(tmdb);
   api.get('/discovery', discoveryGet(tmdb));
+  api.get('/discovery/filters', discoveryFiltersGet(tmdb));
+  api.get('/discovery/providers', discoveryProvidersGet(tmdb));
   api.get('/search', searchGet(tmdb));
   api.get('/search/person/:id', searchPerson(tmdb));
   api.get('/search/:mediaType/:tmdbId', searchTargetHandler, searchTitle(tmdb));

@@ -569,6 +569,14 @@ export const es: Record<string, string> = {
 
   // Discovery
   'Discovery': 'Descubrir',
+  'Filters': 'Filtros',
+  'Release date': 'Fecha de estreno',
+  'From': 'Desde',
+  'To': 'Hasta',
+  'Genre': 'Género',
+  'All genres': 'Todos los géneros',
+  'Streaming services': 'Servicios de streaming',
+  'Country': 'País',
   'Popularity (asc)': 'Popularidad (asc)',
   'Popularity (desc)': 'Popularidad (desc)',
   'Release date (asc)': 'Fecha de estreno (asc)',

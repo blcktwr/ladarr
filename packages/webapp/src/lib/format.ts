@@ -11,7 +11,7 @@ export const labels = <Key extends string>(map: Record<Key, string>) =>
 // A title key is "movie:603". The page of the title is /catalog/movie/603.
 export const catalogPath = (key: string) => `/catalog/${key.replace(':', '/')}`;
 
-export const posterUrl = (path: string | null, size: 'w185' | 'w342' | 'w1280' | 'h632' = 'w185') => (path ? `https://image.tmdb.org/t/p/${size}${path}` : undefined);
+export const posterUrl = (path: string | null, size: 'w92' | 'w185' | 'w342' | 'w1280' | 'h632' | 'original' = 'w185') => (path ? `https://image.tmdb.org/t/p/${size}${path}` : undefined);
 
 export const availabilityLabel: Record<Availability, string> = labels({
   waiting: 'Waiting for release',

@@ -37,17 +37,28 @@ export async function startFakeTmdb() {
         ],
       });
     }
-    // The discovery page. The movie list has a second page, and the rating has another movie first.
+    // The discovery page. The movie list has a second page, the rating has another movie first, and each filter adds a movie.
     if (path === '/discover/movie') {
       const page = url.searchParams.get('page') ?? '1';
       const topRated = url.searchParams.get('sort_by') === 'vote_average.desc';
-      return send({
-        page: Number(page),
-        total_pages: 2,
-        results: page === '2' ? [benchMovie(BENCH_MOVIE_ID + 1)] : topRated ? [MOVIE, benchMovie(BENCH_MOVIE_ID + 2)] : [MOVIE],
-      });
+      const providers = url.searchParams.get('with_watch_providers');
+      const genre = url.searchParams.get('with_genres');
+      const filtered = providers === '8'
+        ? { ...MOVIE, id: 4, title: 'Streaming Movie', original_title: 'Streaming Movie', release_date: '2002-01-01' }
+        : genre === '28'
+          ? { ...MOVIE, id: 5, title: 'Action Movie', original_title: 'Action Movie', release_date: '2001-01-01' }
+          : undefined;
+      const results = filtered
+        ? [MOVIE, filtered]
+        : page === '2' ? [benchMovie(BENCH_MOVIE_ID + 1)] : topRated ? [MOVIE, benchMovie(BENCH_MOVIE_ID + 2)] : [MOVIE];
+      return send({ page: Number(page), total_pages: filtered ? 1 : 2, results });
     }
     if (path === '/discover/tv') return send({ page: 1, total_pages: 1, results: [SERIES] });
+    // The filters of the discovery page.
+    if (path === '/genre/movie/list') return send({ genres: [{ id: 28, name: 'Action' }, { id: 35, name: 'Comedy' }] });
+    if (path === '/genre/tv/list') return send({ genres: [{ id: 10759, name: 'Action & Adventure' }, { id: 35, name: 'Comedy' }] });
+    if (path === '/watch/providers/regions') return send({ results: [{ iso_3166_1: 'US', english_name: 'United States' }, { iso_3166_1: 'ES', english_name: 'Spain' }] });
+    if (path === '/watch/providers/movie' || path === '/watch/providers/tv') return send({ results: [{ provider_id: 8, provider_name: 'Netflix', logo_path: null, display_priority: 1 }] });
     if (path === '/movie/2/credits') return send({ cast: [{ id: 11, name: 'Actor One', character: 'Role One', profile_path: null }, { id: 12, name: 'Actor Two', character: 'Role Two', profile_path: null }] });
     // The series has no cast, so its page has no cast section.
     if (path === '/tv/1/credits') return send({ cast: [] });

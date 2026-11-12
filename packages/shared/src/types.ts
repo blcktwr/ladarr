@@ -62,6 +62,18 @@ export type DiscoveryPage = { page: number; totalPages: number; rows: DiscoveryR
 // The order of the discovery lists. The server names the field of TMDB that each media type uses.
 export type DiscoverySort = 'popularity.asc' | 'popularity.desc' | 'release.asc' | 'release.desc' | 'rating.asc' | 'rating.desc';
 
+// A genre of the discovery filter. TMDB names the genres of movies and series differently, so the same genre holds the ID of each list. An ID is null when the list does not have the genre.
+export type DiscoveryGenre = { name: string; movie: number | null; tv: number | null };
+
+// A country of the watch providers, named as TMDB names it.
+export type WatchRegion = { code: string; name: string };
+
+// A streaming service of a country. The logo is a path of the TMDB image host.
+export type WatchProvider = { id: number; name: string; logoPath: string | null };
+
+// The lists of the filter panel of the discovery page.
+export type DiscoveryFilters = { genres: DiscoveryGenre[]; regions: WatchRegion[] };
+
 // The TMDB facts of a title that may not be in the library. The title page shows them for both.
 // The date is the release date of a movie, and the first air date of a series.
 export type TitlePreview = SearchResult & { date: string | null; backdropPath: string | null; rating: number | null; runtime: number | null; imdbId: string | null; tvdbId: number | null; providerStatus: string };

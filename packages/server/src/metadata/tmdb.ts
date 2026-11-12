@@ -1,5 +1,5 @@
 import type { MediaType } from '@ladarr/shared/enums';
-import type { CastMember, PersonCredits, SearchResult } from '@ladarr/shared/types';
+import type { CastMember, PersonCredits, SearchResult, WatchProvider, WatchRegion } from '@ladarr/shared/types';
 import { outboundFetch } from '../core/http.ts';
 import { JobError } from '../core/jobs.ts';
 
@@ -245,6 +245,40 @@ export function createTmdb({
     async discoverResults(mediaType: MediaType, params: Record<string, string> = {}): Promise<DiscoverPage> {
       const raw = (await get(`/discover/${mediaType}`, params)) as Raw;
       return { results: list(raw?.results).map((item) => searchResult(item, mediaType)), totalPages: numberOrNull(raw?.total_pages) ?? 1 };
+    },
+
+    // The genres of a media type, in the order of TMDB.
+    async genreList(mediaType: MediaType): Promise<{ id: number; name: string }[]> {
+      const raw = (await get(`/genre/${mediaType}/list`)) as Raw;
+      return list(raw?.genres).flatMap((genre) => {
+        const id = numberOrNull(genre?.id);
+        const name = text(genre?.name);
+        return id === null || !name ? [] : [{ id, name }];
+      });
+    },
+
+    // The countries that have watch providers, in alphabetical order.
+    async watchRegions(): Promise<WatchRegion[]> {
+      const raw = (await get('/watch/providers/regions')) as Raw;
+      return list(raw?.results)
+        .flatMap((region) => {
+          const code = text(region?.iso_3166_1);
+          const name = text(region?.english_name);
+          return code && name ? [{ code, name }] : [];
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+    },
+
+    // The watch providers of a country for one media type, in the order of priority of TMDB.
+    async watchProviders(mediaType: MediaType, region: string): Promise<(WatchProvider & { priority: number })[]> {
+      const raw = (await get(`/watch/providers/${mediaType}`, { watch_region: region })) as Raw;
+      return list(raw?.results)
+        .flatMap((provider) => {
+          const id = numberOrNull(provider?.provider_id);
+          const name = text(provider?.provider_name);
+          return id === null || !name ? [] : [{ id, name, logoPath: textOrNull(provider?.logo_path), priority: numberOrNull(provider?.display_priority) ?? 0 }];
+        })
+        .sort((a, b) => a.priority - b.priority);
     },
 
     // The raw TMDB methods below serve the Seerr compatibility API. They return the TMDB answer as it is.

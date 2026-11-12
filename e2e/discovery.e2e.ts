@@ -42,6 +42,31 @@ test('the Discovery item opens the page with a row for each list', async ({ page
   await page.getByRole('option', { name: 'TMDB rating (desc)' }).click();
   await expect(main.getByRole('link', { name: /Bench Movie Bravo/ })).toBeVisible();
 
+  // The genre of the filter panel reaches both lists.
+  await page.getByRole('button', { name: 'Filters' }).click();
+  await page.getByRole('combobox', { name: 'Genre' }).click();
+  await page.getByRole('option', { name: 'Action' }).click();
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(main.getByRole('link', { name: /Action Movie 2001/ })).toBeVisible();
+
+  // The country filters the services of the list.
+  await page.getByRole('button', { name: 'Filters' }).click();
+  const country = page.getByRole('combobox', { name: 'Country' });
+  await country.click();
+  await page.getByRole('option', { name: 'Spain' }).click();
+  await expect(country).toContainText('Spain');
+  await page.getByRole('button', { name: 'Close' }).click();
+
+  // A streaming service of the country filters the lists too.
+  await page.getByRole('button', { name: 'Filters' }).click();
+  await page.getByRole('combobox', { name: 'Genre' }).click();
+  await page.getByRole('option', { name: 'All genres' }).click();
+  const netflix = page.getByRole('button', { name: 'Netflix' });
+  await netflix.click();
+  await expect(netflix).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(main.getByRole('link', { name: /Streaming Movie 2002/ })).toBeVisible();
+
   // The poster of a title that is not in the catalog opens its page.
   await main.getByRole('link', { name: /Movie Name 2019/ }).first().click();
   await expect(page).toHaveURL(/\/catalog\/movie\/2$/);

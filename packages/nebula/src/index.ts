@@ -46,3 +46,4 @@ export { TagInput } from './components/TagInput.tsx';
 export type { TagOption } from './components/TagInput.tsx';
 export { Text } from './components/Text.tsx';
 export { Thumbnail } from './components/Thumbnail.tsx';
+export { Tile } from './components/Tile.tsx';
