@@ -149,12 +149,11 @@ export function Discovery() {
     getNextPageParam: (last) => (last.page < last.totalPages ? last.page + 1 : undefined),
   });
   const pages = data?.pages ?? [];
-  // Each row holds the results of every page that the page has.
-  const rows = (pages[0]?.rows ?? []).map((row) => ({
-    ...row,
-    results: pages.flatMap((page) => page.rows.find((other) => other.id === row.id)?.results ?? []),
-  }));
-  const shown = rows.filter((row) => row.results.length > 0);
+  // Each row holds the results of every page that the page has. The lists share one gallery, so the rows of the page
+  // fill from the left also when a list does not end at the end of a row.
+  const shown = (pages[0]?.rows ?? []).flatMap(
+    (row) => pages.flatMap((page) => page.rows.find((other) => other.id === row.id)?.results ?? []),
+  );
   // The end of the page takes the next page before it reaches the screen.
   const more = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -195,15 +194,13 @@ export function Discovery() {
       ) : shown.length === 0 ? (
         <EmptyState>{t('No titles.')}</EmptyState>
       ) : (
-        shown.map((row) => (
-          <div key={row.id} className={tiles}>
-            <Gallery>
-              {row.results.map((result) => (
-                <ResultItem key={`${result.mediaType}:${result.tmdbId}`} result={result} />
-              ))}
-            </Gallery>
-          </div>
-        ))
+        <div className={tiles}>
+          <Gallery>
+            {shown.map((result) => (
+              <ResultItem key={`${result.mediaType}:${result.tmdbId}`} result={result} />
+            ))}
+          </Gallery>
+        </div>
       )}
       {hasNextPage && <div ref={more} aria-hidden="true" className="h-px" />}
     </div>
