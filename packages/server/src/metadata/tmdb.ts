@@ -142,6 +142,9 @@ function titleMeta(raw: Raw, mediaType: MediaType): TitleMeta {
   };
 }
 
+// The genre lists, the countries, and the watch providers of a country barely change, so they stay a day.
+const LIST_TTL = 24 * 60 * 60_000;
+
 export function createTmdb({
   apiKey,
   fetch: fetchImpl = fetch,
@@ -249,7 +252,7 @@ export function createTmdb({
 
     // The genres of a media type, in the order of TMDB.
     async genreList(mediaType: MediaType): Promise<{ id: number; name: string }[]> {
-      const raw = (await get(`/genre/${mediaType}/list`)) as Raw;
+      const raw = (await get(`/genre/${mediaType}/list`, {}, LIST_TTL)) as Raw;
       return list(raw?.genres).flatMap((genre) => {
         const id = numberOrNull(genre?.id);
         const name = text(genre?.name);
@@ -259,7 +262,7 @@ export function createTmdb({
 
     // The countries that have watch providers, in alphabetical order.
     async watchRegions(): Promise<WatchRegion[]> {
-      const raw = (await get('/watch/providers/regions')) as Raw;
+      const raw = (await get('/watch/providers/regions', {}, LIST_TTL)) as Raw;
       return list(raw?.results)
         .flatMap((region) => {
           const code = text(region?.iso_3166_1);
@@ -271,7 +274,7 @@ export function createTmdb({
 
     // The watch providers of a country for one media type, in the order of priority of TMDB.
     async watchProviders(mediaType: MediaType, region: string): Promise<(WatchProvider & { priority: number })[]> {
-      const raw = (await get(`/watch/providers/${mediaType}`, { watch_region: region })) as Raw;
+      const raw = (await get(`/watch/providers/${mediaType}`, { watch_region: region }, LIST_TTL)) as Raw;
       return list(raw?.results)
         .flatMap((provider) => {
           const id = numberOrNull(provider?.provider_id);

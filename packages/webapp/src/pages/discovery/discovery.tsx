@@ -1,9 +1,9 @@
-import type { DiscoveryFilters, DiscoveryPage, DiscoverySort, WatchProvider, WatchRegion } from '@ladarr/shared/types';
+import type { DiscoveryFilters, DiscoveryPage, DiscoverySort, WatchProvider } from '@ladarr/shared/types';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { SlidersHorizontal } from 'lucide-react';
-import { Button, Dropdown, EmptyState, Field, Gallery, Panel, Text, Tile } from 'nebula';
+import { Button, Dropdown, EmptyState, Field, Gallery, Panel, SearchField, Spinner, Text, Tile } from 'nebula';
 import { useEffect, useRef, useState } from 'react';
-import { LoadFailed, LoadingGallery } from '../../components/index.ts';
+import { LoadFailed } from '../../components/index.ts';
 import { api } from '../../lib/api.ts';
 import { posterUrl } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
@@ -21,17 +21,19 @@ const tiles = 'mx-auto w-[calc(round(down,calc(100%+1.5rem),11.5rem)-1.5rem)]';
 type Filters = { from: string; to: string; genre: string; region: string; providers: number[] };
 const noFilters: Filters = { from: '', to: '', genre: '', region: 'US', providers: [] };
 
-// The flag of a country, from flag-icons, and its name.
-const regionLabel = (region: WatchRegion) => (
-  <span className="flex items-center gap-2">
-    <span className={`fi fi-${region.code.toLowerCase()}`} />
-    {region.name}
-  </span>
-);
+// A country can have hundreds of services, so the panel shows a part of them at a time.
+const servicesShown = 40;
+
+// The filter lists change rarely, so the page keeps them for a day.
+const listsTtl = 24 * 60 * 60_000;
 
 // The filters of the discovery page. The genres of movies and series share one list, and the server maps each one to
 // the genre of the two media types. The streaming services belong to the country of the list.
 function FilterPanel({ filters, lists, providers, onChange }: { filters: Filters; lists?: DiscoveryFilters; providers?: WatchProvider[]; onChange: (filters: Filters) => void }) {
+  const [search, setSearch] = useState('');
+  const [shown, setShown] = useState(servicesShown);
+  const term = search.trim().toLowerCase();
+  const matches = (providers ?? []).filter((provider) => provider.name.toLowerCase().includes(term));
   // A service that is on in the country turns on, and the others turn off. A new country starts with no service.
   const toggleProvider = (id: number, checked: boolean) =>
     onChange({
@@ -41,27 +43,25 @@ function FilterPanel({ filters, lists, providers, onChange }: { filters: Filters
 
   return (
     <div className="grid gap-5">
-      <div className="grid gap-3">
-        <Text variant="heading">{t('Release date')}</Text>
-        <div className="grid grid-cols-2 gap-3">
-          <Field
-            label={t('From')}
-            type="date"
-            width="full"
-            value={filters.from}
-            onChange={(event) => onChange({ ...filters, from: event.target.value })}
-          />
-          <Field
-            label={t('To')}
-            type="date"
-            width="full"
-            value={filters.to}
-            onChange={(event) => onChange({ ...filters, to: event.target.value })}
-          />
-        </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t('From')}
+          type="date"
+          width="full"
+          value={filters.from}
+          onChange={(event) => onChange({ ...filters, from: event.target.value })}
+        />
+        <Field
+          label={t('To')}
+          type="date"
+          width="full"
+          value={filters.to}
+          onChange={(event) => onChange({ ...filters, to: event.target.value })}
+        />
       </div>
       <Dropdown
         label={t('Genre')}
+        width="full"
         value={filters.genre}
         options={[
           { value: '', label: t('All genres') },
@@ -70,15 +70,29 @@ function FilterPanel({ filters, lists, providers, onChange }: { filters: Filters
         onValueChange={(value) => onChange({ ...filters, genre: value ?? '' })}
       />
       <div className="grid gap-3">
-        <Text variant="heading">{t('Streaming services')}</Text>
         <Dropdown
           label={t('Country')}
+          width="full"
+          reserve={false}
           value={filters.region}
-          options={(lists?.regions ?? []).map((region) => ({ value: region.code, label: regionLabel(region) }))}
-          onValueChange={(value) => onChange({ ...filters, region: value ?? 'US', providers: [] })}
+          options={(lists?.regions ?? []).map((region) => ({ value: region.code, label: region.name }))}
+          onValueChange={(value) => {
+            onChange({ ...filters, region: value ?? 'US', providers: [] });
+            setSearch('');
+            setShown(servicesShown);
+          }}
+        />
+        <SearchField
+          aria-label={t('Search services')}
+          placeholder={t('Search services')}
+          value={search}
+          onChange={(value) => {
+            setSearch(value);
+            setShown(servicesShown);
+          }}
         />
         <div className="grid grid-cols-5 gap-1.5">
-          {(providers ?? []).map((provider) => (
+          {matches.slice(0, shown).map((provider) => (
             <Tile
               key={provider.id}
               label={provider.name}
@@ -88,6 +102,11 @@ function FilterPanel({ filters, lists, providers, onChange }: { filters: Filters
             />
           ))}
         </div>
+        {matches.length > shown && (
+          <Button variant="ghost" className="justify-self-start" onClick={() => setShown(shown + servicesShown)}>
+            {t('Show more')}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -97,12 +116,13 @@ function FilterPanel({ filters, lists, providers, onChange }: { filters: Filters
 export function Discovery() {
   const [sort, setSort] = useState<DiscoverySort>('popularity.desc');
   const [filters, setFilters] = useState<Filters>(noFilters);
-  // The lists of the filter panel load with the page, so the panel opens with them ready.
-  const lists = useQuery<DiscoveryFilters>({ queryKey: ['/discovery/filters'], staleTime: 5 * 60_000 });
+  // The lists of the filter panel load with the page, so the panel opens with them ready. The server keeps them for a
+  // day, so the page asks for them again only after that.
+  const lists = useQuery<DiscoveryFilters>({ queryKey: ['/discovery/filters'], staleTime: listsTtl });
   const providers = useQuery<WatchProvider[]>({
     queryKey: ['/discovery/providers', filters.region],
     queryFn: () => api<WatchProvider[]>(`/discovery/providers?region=${filters.region}`),
-    staleTime: 5 * 60_000,
+    staleTime: listsTtl,
   });
   const sorts: { value: DiscoverySort; label: string }[] = [
     { value: 'popularity.asc', label: t('Popularity (asc)') },
@@ -155,9 +175,9 @@ export function Discovery() {
           <Dropdown value={sort} options={sorts} onValueChange={(value) => setSort((value ?? 'popularity.desc') as DiscoverySort)} />
           <Panel
             label={t('Filters')}
-            title={t('Filters')}
+            title={t('Apply filter')}
             trigger={
-              <Button variant="ghost" iconOnly aria-label={t('Filters')}>
+              <Button iconOnly aria-label={t('Filters')}>
                 <SlidersHorizontal />
               </Button>
             }
@@ -169,8 +189,8 @@ export function Discovery() {
       {error && !data ? (
         <LoadFailed onRetry={() => void refetch()} />
       ) : !data ? (
-        <div className={tiles}>
-          <LoadingGallery />
+        <div className="grid min-h-96 place-items-center">
+          <Spinner size="lg" label={t('Loading')} />
         </div>
       ) : shown.length === 0 ? (
         <EmptyState>{t('No titles.')}</EmptyState>

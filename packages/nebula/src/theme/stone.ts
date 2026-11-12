@@ -55,7 +55,6 @@ export const current = `${bar} after:top-[var(--bar-top,0px)] after:left-1/2 aft
 // The current item of a side menu: the bar touches the left edge of the list, past the 4px padding of the list, with round right corners.
 export const currentSide = `${bar} after:-left-1 after:top-1/2 after:w-1 after:h-6 after:-translate-y-1/2 after:rounded-r-sm`;
 
-// A recess that stays pressed in, such as the selected option of a list.
 // A recess that stays pressed in, such as a block that holds an image.
 export const pressed = 'bg-(--recess-sunk) shadow-(--recess-edge-sunk) text-ink';
 

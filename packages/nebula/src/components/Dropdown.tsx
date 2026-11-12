@@ -8,20 +8,30 @@ const sizes = {
   md: { trigger: 'min-w-50 h-11 px-3.5 gap-4', icon: '[&>svg]:size-4', item: 'h-10 px-3' },
 };
 
-type DropdownProps = Omit<Select.Root.Props<string>, 'children' | 'items'> & { options: { value: string; label?: ReactNode; disabled?: boolean }[]; label?: string; size?: keyof typeof sizes };
+const widths = { md: 'justify-items-start', full: 'w-full justify-items-stretch' };
+
+type DropdownProps = Omit<Select.Root.Props<string>, 'children' | 'items'> & {
+  options: { value: string; label?: ReactNode; disabled?: boolean }[];
+  label?: string;
+  size?: keyof typeof sizes;
+  width?: keyof typeof widths;
+  // The dropdown keeps the place of the error row of a Field under its trigger, so it aligns with a Field beside it.
+  reserve?: boolean;
+};
 
 // The trigger is a raised key, and it stays pressed in while its list is open. The list is a slab of stone over the page.
 // Its options are ghost keys, and the selected one stays pressed in. A disabled option only fades.
 // A long list is 20rem tall, or as tall as the space on the screen when that is less, and it scrolls inside.
 // options is a list of { value, label, disabled }. The label is the value when there is no label, and it can hold a node, such as a flag and a name.
 // label is a visible label above the trigger, as the label of a field. With a label, the dropdown also keeps the place of the error row of a Field.
-// Thus a Field and a Dropdown side by side have the same height, and their controls align.
+// Thus a Field and a Dropdown side by side have the same height, and their controls align. reserve=false leaves that row out, for a dropdown that stands alone.
 // size is sm or md. The default is md, the height of a key.
-export function Dropdown({ options, label, size = 'md', ...props }: DropdownProps) {
+// width is md, the width of its content, or full for the width of its container.
+export function Dropdown({ options, label, size = 'md', width = 'md', reserve = true, ...props }: DropdownProps) {
   const look = sizes[size];
   return (
     <Select.Root {...props} items={options.map(option => ({ value: option.value, label: option.label ?? option.value }))}>
-      <div className="grid content-start justify-items-start gap-2">
+      <div className={`grid content-start gap-2 ${widths[width]}`}>
         {label && <Select.Label className="text-ink text-[13px]/none font-[550]">{label}</Select.Label>}
         <Select.Trigger className={({ open }) => `${key} ${open ? sunk : raised} inline-flex items-center justify-between ${look.trigger} rounded-md cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-3 data-disabled:opacity-35 data-disabled:struck data-disabled:cursor-not-allowed`}>
           <Select.Value />
@@ -29,7 +39,7 @@ export function Dropdown({ options, label, size = 'md', ...props }: DropdownProp
             <ChevronDown />
           </Select.Icon>
         </Select.Trigger>
-        {label && <div className="h-3.5" />}
+        {label && reserve && <div className="h-3.5" />}
       </div>
       <Select.Portal>
         <Select.Positioner alignItemWithTrigger={false} align="start" sideOffset={6}>
@@ -39,10 +49,10 @@ export function Dropdown({ options, label, size = 'md', ...props }: DropdownProp
                 key={value}
                 value={value}
                 disabled={disabled}
-                className={({ selected }) => `${key} ${selected ? sunk : ghost} group flex items-center justify-between gap-6 w-full ${look.item} rounded-[5px] cursor-pointer data-disabled:opacity-35 data-disabled:cursor-not-allowed`}
+                className={({ selected }) => `${key} ${selected ? sunk : ghost} flex items-center justify-between gap-6 w-full ${look.item} rounded-[5px] cursor-pointer data-disabled:opacity-35 data-disabled:cursor-not-allowed`}
               >
                 <Select.ItemText>{text}</Select.ItemText>
-                <Select.ItemIndicator keepMounted className={`flex text-accent invisible group-data-selected:visible ${look.icon}`}>
+                <Select.ItemIndicator className={`flex text-accent ${look.icon}`}>
                   <Check />
                 </Select.ItemIndicator>
               </Select.Item>

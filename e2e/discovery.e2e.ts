@@ -64,6 +64,14 @@ test('the Discovery item opens the page with a row for each list', async ({ page
   const netflix = page.getByRole('button', { name: 'Netflix' });
   await netflix.click();
   await expect(netflix).toHaveAttribute('aria-pressed', 'true');
+
+  // The search of the panel finds a service by its name.
+  const search = page.getByRole('searchbox', { name: 'Search services' });
+  await search.fill('Net');
+  await expect(netflix).toBeVisible();
+  await search.fill('Hulu');
+  await expect(netflix).toBeHidden();
+  await search.fill('');
   await page.getByRole('button', { name: 'Close' }).click();
   await expect(main.getByRole('link', { name: /Streaming Movie/ })).toBeVisible();
 

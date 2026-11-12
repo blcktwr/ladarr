@@ -50,7 +50,7 @@ export function Panel({ trigger, label, title, size = 'md', children, open, onOp
         {trigger && <Dialog.Trigger render={trigger} aria-label={label} />}
         <Dialog.Portal>
           <Dialog.Backdrop className={veil} />
-          <Dialog.Popup aria-label={label} style={{ width }} className="fixed inset-y-0 right-0 box-border flex flex-col gap-4 max-w-full overflow-y-auto p-4 outline-none bg-(image:--grain) bg-slab shadow-(--panel-shadow) text-ink">
+          <Dialog.Popup aria-label={label} style={{ width }} className="fixed inset-y-0 right-0 box-border flex flex-col gap-4 max-w-full overflow-y-auto p-4 outline-none bg-(image:--grain) bg-pane shadow-(--panel-shadow) text-ink">
             <div className="flex items-center gap-4">
               {title !== undefined && <Text variant="heading" className="min-w-0">{title}</Text>}
               <Dialog.Close className="ml-auto shrink-0" render={<Button variant="ghost" iconOnly aria-label="Close" />}><X /></Dialog.Close>
