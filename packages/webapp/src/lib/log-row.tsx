@@ -99,7 +99,9 @@ function LinkedRequest({ ids, label }: { ids: string[]; label?: string }) {
           {error && !data ? (
             <LoadFailed onRetry={refetch} />
           ) : isFetching && !data ? (
-            <Spinner label={t('Loading')} />
+            <div className="grid place-items-center">
+              <Spinner label={t('Loading')} />
+            </div>
           ) : !data?.entries.length ? (
             <EmptyState>{t('No request entries.')}</EmptyState>
           ) : (

@@ -154,7 +154,13 @@ function SetupGate({ children }: { children: ReactNode }) {
       </Pane>
     );
   }
-  if (!settings.data || !roots.data) return <Spinner label={t('Loading')} />;
+  if (!settings.data || !roots.data) {
+    return (
+      <div className="grid min-h-screen place-items-center">
+        <Spinner label={t('Loading')} />
+      </div>
+    );
+  }
   if (!settings.data.settings.setupCompleted) {
     // The setup runs at its own address, so the catalog never shows before the setup is complete.
     if (pathname !== '/setup') return <Navigate to="/setup" replace />;

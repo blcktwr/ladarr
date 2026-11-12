@@ -98,7 +98,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
       </Pane>
     );
   }
-  if (!status) return <Spinner label={t('Loading')} />;
+  if (!status) {
+    return (
+      <div className="grid min-h-screen place-items-center">
+        <Spinner label={t('Loading')} />
+      </div>
+    );
+  }
   if (editingAccess || !status.authenticated) {
     const setup = editingAccess || status.setupRequired;
     // The first run is the setup, and it has its own address.
