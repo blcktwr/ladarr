@@ -49,7 +49,7 @@ function SearchButton({ result }: { result: SearchResult }) {
 }
 
 // The poster opens the page of the title, in the catalog or not. With onSelectedChange, the poster can also be selected.
-// The caption under the poster says whether the catalog has the title.
+// The poster has no text under it; its title stays for a screen reader.
 export function ResultItem({ result, size, selected, onSelectedChange }: { result: SearchResult; size?: 'sm' | 'md'; selected?: boolean; onSelectedChange?: (selected: boolean) => void }) {
   // A series in the library is anime only when its type says so. A title that is not in the library is a series.
   const type = contentType(result.mediaType, result.seriesType);
@@ -59,8 +59,8 @@ export function ResultItem({ result, size, selected, onSelectedChange }: { resul
         size={size}
         image={posterUrl(result.posterPath, 'w342') ?? ''}
         title={result.title}
-        status={t(result.libraryKey ? 'In catalog' : 'Available')}
         type={type}
+        noCaption
         selected={selected}
         onSelectedChange={onSelectedChange}
         overlay={<SearchButton result={result} />}

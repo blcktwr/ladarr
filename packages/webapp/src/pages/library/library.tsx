@@ -99,7 +99,9 @@ function LibraryList() {
           <Text variant="title">{t('Catalog')}</Text>
         </div>
         <div className={catalogTiles}>
-          <LoadingGallery />
+          <div className="grid min-h-96 place-items-center">
+            <Spinner size="lg" label={t('Loading')} />
+          </div>
         </div>
       </div>
     );
@@ -870,7 +872,9 @@ function PersonPage() {
       )}
       <div className={column}>
         {!data ? (
-          <LoadingGallery />
+          <div className="grid min-h-96 place-items-center">
+            <Spinner size="lg" label={t('Loading')} />
+          </div>
         ) : data.credits.length === 0 ? (
           <EmptyState>{t('No movies or series.')}</EmptyState>
         ) : (
