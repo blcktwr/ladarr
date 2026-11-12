@@ -80,4 +80,8 @@ test('the Discovery item opens the page with a row for each list', async ({ page
   await expect(page).toHaveURL(/\/catalog\/movie\/2$/);
   await expect(main.getByRole('heading', { name: 'Movie Name (2019)' })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Add', exact: true }).first()).toBeVisible();
+
+  // The section menu keeps Discovery selected on the page of the title.
+  await expect(links.nth(0)).toHaveAttribute('aria-current', 'page');
+  await expect(links.nth(1)).not.toHaveAttribute('aria-current', 'page');
 });

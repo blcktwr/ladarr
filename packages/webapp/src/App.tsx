@@ -2,7 +2,7 @@ import type { PresetRow, QueueRow, QueueSummary, RootRow, SettingsData } from '@
 import { useQuery } from '@tanstack/react-query';
 import { Activity as ActivityLine, Background, Navbar, Pane, SearchField, Spinner } from 'nebula';
 import { Check, Compass, Pause } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useHref, useLocation, useNavigate } from 'react-router';
 import { AuthGate } from './pages/auth/auth.tsx';
 import { AlertsFeed, AlertsIcon, CatalogIcon, LoadFailed, SettingsIcon } from './components/index.ts';
@@ -26,6 +26,9 @@ const sections = [
   { path: '/settings', label: 'Settings', icon: <SettingsIcon />, page: <Settings /> },
   { path: '/alerts', label: '', icon: <AlertsIcon />, page: <Alerts /> },
 ];
+
+// The page of a title opens under the address of the catalog.
+const titlePage = /^\/catalog\/(movie|tv)\/\d+\/?$/;
 
 // The stages that mean work for the queue. The active stages come first, so a long download does not hide
 // the work that changes. The search comes before the fetch of its release, because the fetch belongs to it.
@@ -94,8 +97,16 @@ function Shell() {
     return () => clearTimeout(timer);
   }, [query]);
   const onActivity = pathname.startsWith('/activity');
+  // The page of a title has the address of the catalog, whatever section opened it, so the menu keeps the section that
+  // the person was on while the page is open.
+  const onTitle = titlePage.test(pathname);
+  const section = onTitle ? undefined : sections.find((s) => pathname.startsWith(s.path))?.path;
+  const lastSection = useRef('/catalog');
+  useEffect(() => {
+    if (section && section !== '/alerts') lastSection.current = section;
+  }, [section]);
   // No menu link is selected on the Activity page, or on the Alerts page, whose item is an icon only.
-  const selected = onActivity || pathname.startsWith('/alerts') ? '' : (sections.find((s) => pathname.startsWith(s.path))?.path ?? '/catalog');
+  const selected = onActivity || pathname.startsWith('/alerts') ? '' : (section ?? (onTitle ? lastSection.current : '/catalog'));
 
   return (
     <>
