@@ -47,7 +47,7 @@ test('the Discovery item opens the page with a row for each list', async ({ page
   await page.getByRole('combobox', { name: 'Genre' }).click();
   await page.getByRole('option', { name: 'Action' }).click();
   await page.getByRole('button', { name: 'Close' }).click();
-  await expect(main.getByRole('link', { name: /Action Movie 2001/ })).toBeVisible();
+  await expect(main.getByRole('link', { name: /Action Movie/ })).toBeVisible();
 
   // The country filters the services of the list.
   await page.getByRole('button', { name: 'Filters' }).click();
@@ -65,10 +65,10 @@ test('the Discovery item opens the page with a row for each list', async ({ page
   await netflix.click();
   await expect(netflix).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Close' }).click();
-  await expect(main.getByRole('link', { name: /Streaming Movie 2002/ })).toBeVisible();
+  await expect(main.getByRole('link', { name: /Streaming Movie/ })).toBeVisible();
 
   // The poster of a title that is not in the catalog opens its page.
-  await main.getByRole('link', { name: /Movie Name 2019/ }).first().click();
+  await main.getByRole('link', { name: /Movie Name/ }).first().click();
   await expect(page).toHaveURL(/\/catalog\/movie\/2$/);
   await expect(main.getByRole('heading', { name: 'Movie Name (2019)' })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Add', exact: true }).first()).toBeVisible();

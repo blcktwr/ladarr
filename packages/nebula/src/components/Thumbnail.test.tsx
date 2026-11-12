@@ -38,4 +38,33 @@ describe('Thumbnail', () => {
 
     expect(container.querySelector('figure')!.className).toContain('opacity-30');
   });
+
+  it('shows the title and the year without a status', () => {
+    const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} />);
+
+    expect(container.querySelector('.truncate')!.textContent).toBe('Dune');
+    expect(container.querySelector('figcaption')!.textContent).toContain('2021');
+  });
+
+  it('shows the status in place of the title and the year', () => {
+    const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} status="In catalog" />);
+
+    expect(container.querySelector('.truncate')!.textContent).toBe('In catalog');
+    expect(container.querySelector('figcaption')!.textContent).not.toContain('2021');
+  });
+
+  it('keeps the title for a screen reader when the status shows', () => {
+    const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} status="In catalog" />);
+
+    expect(container.querySelector('.sr-only')!.textContent).toBe('Dune');
+  });
+
+  it('shows no text under the poster without a caption', () => {
+    const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} noCaption />);
+
+    const caption = container.querySelector('figcaption')!;
+    expect(caption.querySelector('.truncate')).toBeNull();
+    expect(caption.textContent).not.toContain('2021');
+    expect(caption.querySelector('.sr-only')!.textContent).toBe('Dune');
+  });
 });

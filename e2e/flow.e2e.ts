@@ -331,7 +331,7 @@ test('movie: add, search, download, restart, import', async ({ page }) => {
   expect(stack.qbit.torrents.has(hash)).toBe(true);
 
   await section(page, 'Catalog');
-  const poster = page.getByRole('main').getByRole('link', { name: 'Movie Name 2019 Movies', exact: true });
+  const poster = page.getByRole('main').getByRole('link', { name: 'Movie Name Movies', exact: true });
   await expect(poster).toBeVisible();
   // The poster shows the type and no availability badge.
   await expect(poster).toContainText('Movies');
@@ -394,7 +394,7 @@ test('series: add, season pack, crash, import', async ({ page }) => {
   for (const file of files) expect(existsSync(file), file).toBe(true);
 
   await section(page, 'Catalog');
-  await page.getByRole('link', { name: 'Show Name 2020 Series', exact: true }).click();
+  await page.getByRole('link', { name: 'Show Name Series', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Show Name (2020)' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'TMDB 8.1' })).toHaveAttribute('href', 'https://www.themoviedb.org/tv/1');
   await expect(page.getByRole('link', { name: 'IMDb' })).toHaveAttribute('href', 'https://www.imdb.com/title/tt0000001/');

@@ -11,9 +11,10 @@ const sizes = { xs: 'w-20', sm: 'w-32', md: 'w-40', lg: 'w-56' };
 type Content = {
   // The poster. It is at 2:3, and it fills that box. An empty image shows the bare block.
   image: string;
+  // The name of the title or of the person. It shows under the poster, and it stays for a screen reader when the caption shows a status or nothing.
   title: string;
   // A number for a film, or a text for a series, such as 2019–2023.
-  year: number | string;
+  year?: number | string;
 };
 
 // While loading is on, the content is not necessary.
@@ -22,6 +23,10 @@ type ThumbnailProps = (Content | ({ loading: true } & Partial<Content>)) & {
   loading?: boolean;
   // The type of content, such as Movies, Series or Anime. It shows as a bookmark at the top left corner of the poster, with its text from top to bottom.
   type?: string;
+  // The state of the title, such as In catalog. It takes the place of the title and the year under the poster, and the title stays for a screen reader.
+  status?: string;
+  // With noCaption, the poster has no text under it. The title stays for a screen reader.
+  noCaption?: boolean;
   // Elements that show over the poster, on a scrim, when the pointer or the focus is on the poster. They are at the bottom center, such as buttons.
   overlay?: ReactNode;
   // With onSelectedChange, a checkbox at the top right corner of the poster selects it. The checkbox shows when the pointer or the focus is on the poster. While it is on, it always shows.
@@ -33,11 +38,12 @@ type ThumbnailProps = (Content | ({ loading: true } & Partial<Content>)) & {
   className?: string;
 };
 
-// A poster of a film or a series, with its title and its year under it, and its type on a bookmark at the top left corner.
+// A poster of a film or a series, with a caption under it and its type on a bookmark at the top left corner. The caption
+// shows the title and the year, or a status, or nothing; an empty caption keeps the title for a screen reader.
 // The poster is a block of stone. While the image loads, the mark of the app shows on the block under the skeleton. Then the image fades in. Without an image, the mark stays. If the image does not load, the bare block stays.
-// The title has one row, and a long title is cut, so the years of a row of posters stay on one line. The pointer on the title shows all of it.
+// The title has one row, and a long title is cut, so the years of a row of posters stay on one line. The pointer on the title shows all of it. The status has one row too.
 // className is for layout only, such as a margin.
-export function Thumbnail({ image = '', title = '', year = '', loading = false, type, overlay, selected = false, onSelectedChange, size = 'md', dimmed = false, className = '' }: ThumbnailProps) {
+export function Thumbnail({ image = '', title = '', year = '', loading = false, type, status, noCaption = false, overlay, selected = false, onSelectedChange, size = 'md', dimmed = false, className = '' }: ThumbnailProps) {
   // The image that ended its load, so a new image starts with the skeleton.
   const [done, setDone] = useState('');
   const ready = done === image;
@@ -92,9 +98,15 @@ export function Thumbnail({ image = '', title = '', year = '', loading = false, 
           </>
         ) : (
           <>
-            <span title={title} className="truncate text-ink text-[15px]/5 font-medium">{title}</span>
-            <span className="text-fog text-[13px]/none">{year}</span>
-            {/* The bookmark hangs from the top edge of the poster, with a notch in the bottom edge. It is in the caption, after the year, so its text names the figure after the title and the year. */}
+            {/* With the status under the poster, or with no caption, the title stays for a screen reader. */}
+            {noCaption || status ? (
+              <span className="sr-only">{title}</span>
+            ) : (
+              <span title={title} className="truncate text-ink text-[15px]/5 font-medium">{title}</span>
+            )}
+            {!noCaption && status && <span className="truncate text-ink text-[15px]/5 font-medium">{status}</span>}
+            {!noCaption && !status && year !== undefined && <span className="text-fog text-[13px]/none">{year}</span>}
+            {/* The bookmark hangs from the top edge of the poster, with a notch in the bottom edge. It is in the caption, after its text, so it names the figure after the title and the year. */}
             {type && (
               <span className={`${bookmark} absolute top-0 left-1.5 flex w-6 min-h-14 items-center justify-center pt-2 pb-4 rounded-b-sm text-center text-[11px]/none font-[550] tracking-[.02em] [writing-mode:vertical-rl] [clip-path:polygon(0_0,100%_0,100%_100%,50%_calc(100%_-_0.5rem),0_100%)]`}>
                 <span className="rotate-180">{type}</span>

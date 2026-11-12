@@ -41,8 +41,8 @@ function TitlePoster({ title, selected, onSelectedChange }: { title: TitleSummar
       <Thumbnail
         image={posterUrl(title.posterPath, 'w342') ?? ''}
         title={title.title}
-        year={title.year ?? ''}
         type={contentType(title.mediaType, title.seriesType)}
+        noCaption
         selected={selected}
         onSelectedChange={onSelectedChange}
         dimmed={title.availability === 'waiting'}

@@ -31,8 +31,8 @@ const open = (path: string, ready: (page: Page) => Promise<unknown>): Opener => 
 };
 
 const seriesPage = open('/catalog/tv/1', (page) => expect(page.getByRole('heading', { name: 'Show Name (2020)' })).toBeVisible());
-// The name of a result link starts with the name of its add button.
-const resultLink = (page: Page) => page.getByRole('link', { name: /Movie Name 2019 Movies$/ });
+// The name of a result link starts with the name of its add button, and ends with the status and the type of the title.
+const resultLink = (page: Page) => page.getByRole('link', { name: /Movie Name Available Movies$/ });
 const searchPage = open('/search?q=Movie', (page) => expect(resultLink(page)).toBeVisible());
 const activityPage = open('/activity', (page) => expect(page.getByRole('table', { name: 'Queue' })).toBeVisible());
 // A category of Settings. Each one has its own page for the checks.
@@ -46,7 +46,7 @@ const groupRow = (page: Page) => page.locator('[data-row="group:tv:1:1"]');
 
 // Pages that need a signed-in owner. The name tells what the user sees.
 const PAGES: [string, Opener][] = [
-  ['catalog', open('/catalog', (page) => expect(page.getByRole('link', { name: 'Show Name 2020 Series', exact: true })).toBeVisible())],
+  ['catalog', open('/catalog', (page) => expect(page.getByRole('link', { name: 'Show Name Series', exact: true })).toBeVisible())],
   [
     'series',
     async (page) => {
@@ -276,7 +276,7 @@ function recordMotion() {
 
 // A walk through the parts of the app that move: tabs, the inspector of the queue, a menu, a dialog, and an alert dialog.
 async function walk(page: Page) {
-  await open('/catalog', (p) => expect(p.getByRole('link', { name: 'Show Name 2020 Series', exact: true })).toBeVisible())(page);
+  await open('/catalog', (p) => expect(p.getByRole('link', { name: 'Show Name Series', exact: true })).toBeVisible())(page);
   await page.locator('a[href$="/activity"]').click();
   // A season opens and closes in the inspector, and the menu of the series opens the log of the title.
   await page.getByRole('button', { name: 'Show episodes of Season 1' }).click();

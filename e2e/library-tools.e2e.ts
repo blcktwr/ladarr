@@ -68,7 +68,7 @@ test('Add on a title that is not in the catalog adds it', async ({ page }) => {
   await page.goto(`${URL_BASE}/search?q=Movie`);
   // The posters have no button that adds a title.
   await expect(page.getByRole('button', { name: /^Add / })).toHaveCount(0);
-  await page.getByRole('link', { name: /Movie Name 2019 Movies$/ }).getByText('Movie Name', { exact: true }).click();
+  await page.getByRole('link', { name: /Movie Name Available Movies$/ }).getByText('Movie Name', { exact: true }).click();
   await expect(page).toHaveURL(/\/catalog\/movie\/2$/);
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Add', exact: true }).click();
@@ -78,8 +78,8 @@ test('Add on a title that is not in the catalog adds it', async ({ page }) => {
 
 test('the catalog shows the type of a title on its poster', async ({ page }) => {
   await page.goto(URL_BASE);
-  const movie = page.getByRole('main').getByRole('link', { name: 'Movie Name 2019 Movies', exact: true });
-  const show = page.getByRole('main').getByRole('link', { name: 'Show Name 2020 Series', exact: true });
+  const movie = page.getByRole('main').getByRole('link', { name: 'Movie Name Movies', exact: true });
+  const show = page.getByRole('main').getByRole('link', { name: 'Show Name Series', exact: true });
   await expect(movie).toBeVisible();
   await expect(show).toBeVisible();
   await expect(movie).toContainText('Movies');
@@ -95,7 +95,7 @@ test('the catalog shows the type of a title on its poster', async ({ page }) => 
   if (patched.status >= 300) throw new Error(`PATCH /library/tv:1 answered ${patched.status}: ${JSON.stringify(patched.body)}`);
   try {
     await page.reload();
-    const anime = page.getByRole('main').getByRole('link', { name: 'Show Name 2020 Anime', exact: true });
+    const anime = page.getByRole('main').getByRole('link', { name: 'Show Name Anime', exact: true });
     await expect(anime).toBeVisible();
   } finally {
     const restored = await stack.call('PATCH', '/library/tv:1', { seriesType: 'standard' });
