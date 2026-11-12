@@ -191,7 +191,7 @@
     --key-sunk: #e3e7e7;
     --key-edge: inset 0 1px 0 #ffffff, 0 3px 0 #8f9999, 0 0 0 1px var(--color-outline), 0 4px 8px rgb(0 0 0 / 50%);
     /* A tag on a poster, such as the type of content. The line follows the notch, and the shadow sits below it. */
-    --bookmark-line: rgb(0 0 0 / 45%);
+    --bookmark-line: rgb(0 0 0 / 35%);
     --bookmark-shadow-near: 1px 2px 2px rgb(0 0 0 / 28%);
     --bookmark-shadow-far: 2px 6px 10px rgb(0 0 0 / 22%);
     /* A key made of red, for an action that destroys data. It has the relief of a key. */
