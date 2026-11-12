@@ -246,6 +246,23 @@ describe('safety of the grab', () => {
     expect(pipe.qbit.calls.filter((c) => c.path === 'torrents/add')).toHaveLength(1);
   });
 
+  it('waits for the client to list the torrent that it accepted', async () => {
+    pipe = await startPipeline();
+    const film = movie({ rootId: 'movie', manualRelease: true });
+    pipe.db.data.titles[film.key] = film;
+    const name = 'Movie.Name.2019.1080p.BluRay-GRP';
+    pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
+    pipe.qbit.control.listDelayMs = 30;
+    const [entry] = pipe.finder.requestSearch(film.key);
+    await until(() => entry!.stage === 'downloading');
+    expect(entry!.reason).toBeNull();
+    expect(entry!.branch).toBeNull();
+    expect(entry!.attempts).toHaveLength(1);
+    // The try does not fail while the client lists the torrent.
+    expect(entry!.history.filter((event) => event.cause === 'grab will be tried again')).toEqual([]);
+    expect(pipe.qbit.calls.filter((c) => c.path === 'torrents/add')).toHaveLength(1);
+  });
+
   it('never sends a release that fails before the add', async () => {
     pipe = await startPipeline();
     const film = movie({ rootId: 'movie', manualRelease: true });

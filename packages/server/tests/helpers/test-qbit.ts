@@ -58,7 +58,11 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
     loginFails: 0,
     // Waits before it answers /torrents/info, like a slow client.
     delayInfoMs: 0,
+    // Waits after the answer to /torrents/add before the new torrent shows in /torrents/info, like a real client.
+    listDelayMs: 0,
   };
+  // The time when each torrent that a delayed add sent shows up in the list.
+  const hiddenUntil = new Map<string, number>();
 
   const server: Server = createServer(async (req, res) => {
     const url = new URL(req.url!, 'http://x');
@@ -133,6 +137,7 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
         // The work is done, and the answer never comes.
         return void setTimeout(() => res.destroy(), 50);
       }
+      if (!existing && control.listDelayMs) hiddenUntil.set(hash, Date.now() + control.listDelayMs);
       return send(200, existing ? 'Fails.' : 'Ok.');
     }
     if (path === 'torrents/info') {
@@ -140,7 +145,8 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
       const wanted = url.searchParams.get('hashes')?.split('|');
       const category = url.searchParams.get('category');
       const tag = url.searchParams.get('tag');
-      return send(200, [...torrents.values()].filter((t) => (!wanted || wanted.includes(t.hash)) && (category === null || t.category === category) && (tag === null || t.tags.split(',').some((own) => own.trim() === tag))).map((t) => ({ ...t, total_size: t.size, amount_left: Math.round(t.size * (1 - t.progress)), upspeed: 0 })));
+      const listed = [...torrents.values()].filter((t) => (hiddenUntil.get(t.hash) ?? 0) <= Date.now());
+      return send(200, listed.filter((t) => (!wanted || wanted.includes(t.hash)) && (category === null || t.category === category) && (tag === null || t.tags.split(',').some((own) => own.trim() === tag))).map((t) => ({ ...t, total_size: t.size, amount_left: Math.round(t.size * (1 - t.progress)), upspeed: 0 })));
     }
     if (path === 'torrents/files') {
       const torrent = torrents.get(url.searchParams.get('hash') ?? '');

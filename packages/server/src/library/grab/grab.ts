@@ -176,8 +176,12 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
       }
       throw new JobError(error.code === 'unreachable' ? 'uncertain' : 'outage', error.message);
     }
-    const added = await api.find(hash!);
-    if (added) return adopt(added);
+    // The client answers the add before it lists the torrent, so the reader waits for the list.
+    for (let i = 0; i < 3; i++) {
+      if (i) await sleep(reconcileMs);
+      const added = await api.find(hash!);
+      if (added) return adopt(added);
+    }
     throw new JobError('uncertain', 'The client accepted the torrent but does not list it.');
   }
 
