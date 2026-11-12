@@ -10,6 +10,9 @@ export type ReleaseKind = 'premiere' | 'theatrical_limited' | 'theatrical' | 'di
 export type ReleaseDate = { region: string; kind: ReleaseKind; date: string };
 export type SeasonSummary = { seasonNumber: number; episodeCount: number; airDate: string | null };
 
+// One page of a discover list, with the number of pages that TMDB has.
+export type DiscoverPage = { results: SearchResult[]; totalPages: number };
+
 // The TMDB facts about a title. A refresh replaces all of it, so it never holds a choice of the user.
 export type TitleMeta = SearchResult & {
   originalTitle: string;
@@ -236,6 +239,12 @@ export function createTmdb({
       return list(raw?.results).flatMap((item) =>
         item?.media_type === 'movie' || item?.media_type === 'tv' ? [searchResult(item, item.media_type)] : [],
       );
+    },
+
+    // The titles of a discover list, in the order of TMDB.
+    async discoverResults(mediaType: MediaType, params: Record<string, string> = {}): Promise<DiscoverPage> {
+      const raw = (await get(`/discover/${mediaType}`, params)) as Raw;
+      return { results: list(raw?.results).map((item) => searchResult(item, mediaType)), totalPages: numberOrNull(raw?.total_pages) ?? 1 };
     },
 
     // The raw TMDB methods below serve the Seerr compatibility API. They return the TMDB answer as it is.

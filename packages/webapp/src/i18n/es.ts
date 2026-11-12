@@ -567,6 +567,16 @@ export const es: Record<string, string> = {
   'No file needs a new name.': 'Ningún archivo necesita un nombre nuevo.',
   'Rename': 'Renombrar',
 
+  // Discovery
+  'Discovery': 'Descubrir',
+  'Popularity (asc)': 'Popularidad (asc)',
+  'Popularity (desc)': 'Popularidad (desc)',
+  'Release date (asc)': 'Fecha de estreno (asc)',
+  'Release date (desc)': 'Fecha de estreno (desc)',
+  'TMDB rating (asc)': 'Puntuación de TMDB (asc)',
+  'TMDB rating (desc)': 'Puntuación de TMDB (desc)',
+  'No titles.': 'No hay títulos.',
+
   // Library list and title page
   'No titles match this filter.': 'Ningún título coincide con este filtro.',
   'Your catalog is empty. Search for a title to add it.': 'Tu catálogo está vacío. Busca un título para agregarlo.',

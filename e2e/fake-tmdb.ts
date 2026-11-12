@@ -37,6 +37,17 @@ export async function startFakeTmdb() {
         ],
       });
     }
+    // The discovery page. The movie list has a second page, and the rating has another movie first.
+    if (path === '/discover/movie') {
+      const page = url.searchParams.get('page') ?? '1';
+      const topRated = url.searchParams.get('sort_by') === 'vote_average.desc';
+      return send({
+        page: Number(page),
+        total_pages: 2,
+        results: page === '2' ? [benchMovie(BENCH_MOVIE_ID + 1)] : topRated ? [MOVIE, benchMovie(BENCH_MOVIE_ID + 2)] : [MOVIE],
+      });
+    }
+    if (path === '/discover/tv') return send({ page: 1, total_pages: 1, results: [SERIES] });
     if (path === '/movie/2/credits') return send({ cast: [{ id: 11, name: 'Actor One', character: 'Role One', profile_path: null }, { id: 12, name: 'Actor Two', character: 'Role Two', profile_path: null }] });
     // The series has no cast, so its page has no cast section.
     if (path === '/tv/1/credits') return send({ cast: [] });

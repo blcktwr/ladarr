@@ -53,6 +53,15 @@ export type SearchResult = {
   seriesType?: 'standard' | 'anime' | null;
 };
 
+// A list of the discovery page. The page names the row and keeps its order.
+export type DiscoveryRow = { id: 'movies' | 'series'; results: SearchResult[] };
+
+// A page of the discovery lists. The page reads the next one while page < totalPages.
+export type DiscoveryPage = { page: number; totalPages: number; rows: DiscoveryRow[] };
+
+// The order of the discovery lists. The server names the field of TMDB that each media type uses.
+export type DiscoverySort = 'popularity.asc' | 'popularity.desc' | 'release.asc' | 'release.desc' | 'rating.asc' | 'rating.desc';
+
 // The TMDB facts of a title that may not be in the library. The title page shows them for both.
 // The date is the release date of a movie, and the first air date of a series.
 export type TitlePreview = SearchResult & { date: string | null; backdropPath: string | null; rating: number | null; runtime: number | null; imdbId: string | null; tvdbId: number | null; providerStatus: string };

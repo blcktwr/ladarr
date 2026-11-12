@@ -1,12 +1,13 @@
 import type { PresetRow, QueueRow, QueueSummary, RootRow, SettingsData } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
 import { Activity as ActivityLine, Background, Navbar, Pane, SearchField, Spinner } from 'nebula';
-import { Check, Pause } from 'lucide-react';
+import { Check, Compass, Pause } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useHref, useLocation, useNavigate } from 'react-router';
 import { AuthGate } from './pages/auth/auth.tsx';
 import { AlertsFeed, AlertsIcon, CatalogIcon, LoadFailed, SettingsIcon } from './components/index.ts';
 import { Alerts } from './pages/alerts/alerts.tsx';
+import { Discovery } from './pages/discovery/discovery.tsx';
 import { Library } from './pages/library/library.tsx';
 import { Activity } from './pages/activity/activity.tsx';
 import { SearchPage } from './pages/search/search.tsx';
@@ -20,6 +21,7 @@ import logo from './assets/logo.svg';
 
 // The menu. Activity is not in it: the queue status at the start of the navbar opens that page.
 const sections = [
+  { path: '/discovery', label: 'Discovery', icon: <Compass />, page: <Discovery /> },
   { path: '/catalog', label: 'Catalog', icon: <CatalogIcon />, page: <Library /> },
   { path: '/settings', label: 'Settings', icon: <SettingsIcon />, page: <Settings /> },
   { path: '/alerts', label: '', icon: <AlertsIcon />, page: <Alerts /> },
