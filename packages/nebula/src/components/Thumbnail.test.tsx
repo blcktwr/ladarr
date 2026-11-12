@@ -59,6 +59,42 @@ describe('Thumbnail', () => {
     expect(container.querySelector('.sr-only')!.textContent).toBe('Dune');
   });
 
+  it('shows a state icon in the bookmark when it has a type and a state', () => {
+    const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} type="Movies" state="searching" stateLabel="Searching" />);
+
+    expect(container.querySelector('figcaption svg')).toBeTruthy();
+  });
+
+  it('gives the state label for a screen reader', () => {
+    const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} type="Movies" state="searching" stateLabel="Searching" />);
+
+    expect(container.querySelector('figcaption')!.textContent).toContain('Searching');
+  });
+
+  it('shows no state icon with a type and no state', () => {
+    const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} type="Movies" />);
+
+    expect(container.querySelector('figcaption svg')).toBeNull();
+  });
+
+  it('shows no state icon while it loads', () => {
+    const { container } = render(<Thumbnail loading title="Dune" year={2021} type="Movies" state="searching" stateLabel="Searching" />);
+
+    expect(container.querySelector('figcaption svg')).toBeNull();
+  });
+
+  it('shows no state icon without a type', () => {
+    const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} state="searching" stateLabel="Searching" />);
+
+    expect(container.querySelector('figcaption svg')).toBeNull();
+  });
+
+  it('keeps the type on the bookmark while the state shows', () => {
+    const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} type="Movies" state="searching" stateLabel="Searching" />);
+
+    expect(container.querySelector('figcaption')!.textContent).toContain('Movies');
+  });
+
   it('shows no text under the poster without a caption', () => {
     const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} noCaption />);
 

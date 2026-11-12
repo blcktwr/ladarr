@@ -9,9 +9,12 @@ export const key = `box-border text-[15px]/none ${label}`;
 // A raised block of stone that does not react, such as a poster.
 export const block = 'bg-(image:--stone) shadow-(--edge) text-ink';
 
-// A tag that hangs on a poster, such as the type of content: a key of the accent with a notch in its bottom edge.
-// The shadow follows the notch, so the tag looks cut from the poster and not like a box.
-export const bookmark = 'bg-(image:--key) shadow-(--bookmark-edge) text-night text-shadow-(--emboss) [filter:drop-shadow(var(--bookmark-shadow))]';
+// A tag that hangs on a poster, such as the type of content. It is a line of the theme around a face 1px inside, so
+// the line follows the notch. Add the notch to the class of both parts.
+export const bookmark = 'bg-(--bookmark-line) text-night text-shadow-none';
+export const bookmarkFace = 'bg-(image:--key)';
+// The shadow sits on a wrapper: the clip of the shape would clip its own shadow.
+export const bookmarkShadow = '[filter:drop-shadow(var(--bookmark-shadow-near))_drop-shadow(var(--bookmark-shadow-far))]';
 
 // A raised block that lightens when pointed at and sinks into the wall when pressed.
 export const raised = `${block} pointed:bg-(image:--stone-lit) pointed:shadow-(--edge-lit) pointed:text-ink-strong pressed:bg-none pressed:bg-(--stone-sunk) pressed:shadow-(--edge-sunk) pressed:text-ink-strong`;

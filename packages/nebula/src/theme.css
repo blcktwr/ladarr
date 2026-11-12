@@ -190,9 +190,10 @@
     --key: linear-gradient(#ffffff, #e3e7e7);
     --key-sunk: #e3e7e7;
     --key-edge: inset 0 1px 0 #ffffff, 0 3px 0 #8f9999, 0 0 0 1px var(--color-outline), 0 4px 8px rgb(0 0 0 / 50%);
-    /* A tag on a poster, such as the type of content. The shadow follows its notch. */
-    --bookmark-edge: inset 0 1px 0 #ffffff;
-    --bookmark-shadow: 0 0 1px rgb(0 0 0 / 70%), 0 1px 0 rgb(0 0 0 / 45%), 0 3px 6px rgb(0 0 0 / 35%);
+    /* A tag on a poster, such as the type of content. The line follows the notch, and the shadow sits below it. */
+    --bookmark-line: rgb(0 0 0 / 45%);
+    --bookmark-shadow-near: 1px 2px 2px rgb(0 0 0 / 28%);
+    --bookmark-shadow-far: 2px 6px 10px rgb(0 0 0 / 22%);
     /* A key made of red, for an action that destroys data. It has the relief of a key. */
     --danger: linear-gradient(#d93a30, #aa221b);
     --danger-lit: linear-gradient(#e44a3f, #b82a22);
@@ -275,8 +276,9 @@
     --key: linear-gradient(#34383a, #000000);
     --key-sunk: #000000;
     --key-edge: inset 0 1px 0 rgb(255 255 255 / 25%), 0 3px 0 #000000, 0 0 0 1px #000000, 0 4px 8px rgb(0 0 0 / 20%);
-    --bookmark-edge: inset 0 1px 0 rgb(255 255 255 / 25%);
-    --bookmark-shadow: 0 0 1px rgb(0 0 0 / 25%), 0 1px 0 rgb(0 0 0 / 12%), 0 3px 6px rgb(0 0 0 / 12%);
+    --bookmark-line: rgb(255 255 255 / 35%);
+    --bookmark-shadow-near: 1px 2px 2px rgb(0 0 0 / 12%);
+    --bookmark-shadow-far: 2px 6px 10px rgb(0 0 0 / 10%);
     --danger-edge: inset 0 1px 0 rgb(255 255 255 / 40%), 0 3px 0 #6e1812, 0 0 0 1px #6e1812, 0 4px 8px rgb(0 0 0 / 20%);
     --success-edge: inset 0 1px 0 rgb(255 255 255 / 30%), 0 3px 0 #17452b, 0 0 0 1px #17452b, 0 4px 8px rgb(0 0 0 / 20%);
     --warning-edge: inset 0 1px 0 rgb(255 255 255 / 40%), 0 3px 0 #7d5516, 0 0 0 1px #7d5516, 0 4px 8px rgb(0 0 0 / 20%);

@@ -1,7 +1,8 @@
 import { ApiError } from './api.ts';
 import { t } from '../i18n/index.ts';
 import type { Availability, MediaType, RootProblem } from '@ladarr/shared/enums';
-import type { QueueGroupRow } from '@ladarr/shared/types';
+import type { QueueGroupRow, TitleSummary } from '@ladarr/shared/types';
+import type { ThumbnailState } from 'nebula';
 
 // A map of labels. The text goes through t() when a page reads it, so a map made at import time follows the language.
 export const labels = <Key extends string>(map: Record<Key, string>) =>
@@ -135,6 +136,26 @@ const statusTexts: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 export const statusLabel = (key: string) => (Object.hasOwn(statusTexts, key) ? t(statusTexts[key]!) : key);
+
+// The queue state that the bookmark of a poster shows. A state that has no icon in the design does not show one.
+const bookmarkStates: Record<string, ThumbnailState> = {
+  searching: 'searching',
+  downloading: 'downloading',
+  validating: 'validating',
+  importing: 'importing',
+  queued: 'waiting',
+  stuck: 'stuck',
+  available: 'available',
+};
+
+// The state of a title, and its name. The queue wins over the availability of the title.
+export function posterState(title: Pick<TitleSummary, 'availability' | 'queueStatus'>): { state: ThumbnailState; label: string } | null {
+  const state = title.queueStatus ? bookmarkStates[title.queueStatus] : undefined;
+  if (state) return { state, label: statusLabel(title.queueStatus!) };
+  if (title.availability === 'available') return { state: 'available', label: availabilityLabel.available };
+  if (title.availability === 'waiting') return { state: 'waiting', label: availabilityLabel.waiting };
+  return null;
+}
 
 // The counts of a series or a season follow the same keys, so one stage is one count.
 export function shownCounts(counts: Record<string, number>) {

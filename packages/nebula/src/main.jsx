@@ -152,8 +152,8 @@ const ThumbnailSample = () => {
   const [second, setSecond] = useState(true);
   return (
     <Gallery>
-      <Thumbnail image={poster(200)} title="Title" year={2024} type="Movies" selected={first} onSelectedChange={setFirst} overlay={<><Button iconOnly aria-label="Play"><Play /></Button><Button iconOnly aria-label="Add"><Plus /></Button></>} />
-      <Thumbnail image={poster(30)} title="A title that is long enough to be cut" year="2019–2023" type="Series" selected={second} onSelectedChange={setSecond} />
+      <Thumbnail image={poster(200)} title="Title" year={2024} type="Movies" state="downloading" stateLabel="Downloading" selected={first} onSelectedChange={setFirst} overlay={<><Button iconOnly aria-label="Play"><Play /></Button><Button iconOnly aria-label="Add"><Plus /></Button></>} />
+      <Thumbnail image={poster(30)} title="A title that is long enough to be cut" year="2019–2023" type="Series" state="available" stateLabel="Available" selected={second} onSelectedChange={setSecond} />
       <Thumbnail image={poster(120)} title="Title" year={2024} size="sm" />
       <Thumbnail image={poster(300)} title="Title" year={2024} size="xs" />
       <Thumbnail loading />

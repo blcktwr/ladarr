@@ -97,6 +97,8 @@ export type TitleSummary = {
   // Series only. It is null for a movie.
   seriesType: 'standard' | 'anime' | null;
   availability: Availability;
+  // The status of the title in the queue, or null when the queue has no target for it.
+  queueStatus: string | null;
   // Series only.
   counts: EpisodeCounts | null;
   // Movies only. The time of the first digital or physical release in any region, or null.
@@ -106,8 +108,6 @@ export type TitleSummary = {
 export type SeasonRow = { seasonNumber: number; episodeCount: number; counts: EpisodeCounts; override: Override | null };
 
 export type TitleDetail = TitleSummary & {
-  // The status of the title in the queue, or null when the queue has no target for it.
-  queueStatus: string | null;
   overview: string;
   aliases: string[];
   // The release date of a movie, and the first air date of a series.

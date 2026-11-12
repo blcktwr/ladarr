@@ -10,7 +10,7 @@ import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, Empty
 import { Alert } from '../../components/alert.tsx';
 import { Link, LoadFailed, LoadingGallery, pageWidth } from '../../components/index.ts';
 import { ModalActions } from '../../components/modal-actions.tsx';
-import { catalogPath, contentType, posterUrl, describeError, shownKey, statusLabel } from '../../lib/format.ts';
+import { catalogPath, contentType, posterUrl, describeError, posterState, shownKey, statusLabel } from '../../lib/format.ts';
 import { t, getLanguage } from '../../i18n/index.ts';
 import { useLive } from '../../lib/live.ts';
 import { StatusText } from '../../lib/status.tsx';
@@ -36,12 +36,15 @@ const catalogColumn = 'mx-auto w-[min(1200px,calc(100%-40px))]';
 const catalogTiles = 'mx-auto w-[calc(round(down,calc(100%+1.5rem),11.5rem)-1.5rem)]';
 
 function TitlePoster({ title, selected, onSelectedChange }: { title: TitleSummary; selected: boolean; onSelectedChange: (selected: boolean) => void }) {
+  const state = posterState(title);
   return (
     <RouterLink to={catalogPath(title.key)}>
       <Thumbnail
         image={posterUrl(title.posterPath, 'w342') ?? ''}
         title={title.title}
         type={contentType(title.mediaType, title.seriesType)}
+        state={state?.state}
+        stateLabel={state?.label}
         noCaption
         selected={selected}
         onSelectedChange={onSelectedChange}

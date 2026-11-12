@@ -491,6 +491,31 @@ describe('library API', () => {
     }
   });
 
+  it('shows the queue status of each title in the list', async () => {
+    const ids = ['tv:1396', 'movie:603'];
+    const entry = (id: string, extra: object) => {
+      app.db.data.queue[id] = { id, titleKey: id, season: null, number: null, stage: 'queued', branch: null, reason: null, attempt: 1, clearedAt: null, ...extra } as never;
+    };
+    try {
+      for (const id of ids) delete app.db.data.queue[id];
+      const without = (await app.get('/library?limit=50')).body;
+      expect(without.items.map((i: { key: string; queueStatus: string | null }) => [i.key, i.queueStatus])).toEqual([
+        ['tv:1396', null],
+        ['movie:603', null],
+      ]);
+
+      entry('tv:1396', { stage: 'searching' });
+      const searching = (await app.get('/library?limit=50')).body;
+      expect(searching.items.find((i: { key: string }) => i.key === 'tv:1396').queueStatus).toBe('searching');
+      expect(searching.items.find((i: { key: string }) => i.key === 'movie:603').queueStatus).toBeNull();
+
+      entry('tv:1396', { stage: 'downloading' });
+      expect((await app.get('/library?limit=50')).body.items.find((i: { key: string }) => i.key === 'tv:1396').queueStatus).toBe('downloading');
+    } finally {
+      for (const id of ids) delete app.db.data.queue[id];
+    }
+  });
+
   it('keeps the Future policy and the exceptions of the user on a refresh', async () => {
     await app.patch('/library/tv:1396/episodes/1/2', { override: 'monitored' });
     await app.patch('/library/tv:1396/seasons/0', { override: 'monitored' });
