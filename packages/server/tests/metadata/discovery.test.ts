@@ -214,6 +214,43 @@ describe('discovery route', () => {
     expect(moviesRow!.results.find((result) => result.tmdbId === 603)).toMatchObject({ libraryKey: 'movie:603', seriesType: null });
     expect(seriesRow!.results.find((result) => result.tmdbId === 1396)).toMatchObject({ libraryKey: 'tv:1396', seriesType: 'anime' });
   });
+
+  it('leaves the state empty for a title that is not in the library', async () => {
+    const { body } = await discovery();
+    const [moviesRow, seriesRow] = body.rows;
+    expect(moviesRow!.results.find((result) => result.tmdbId === 603)).toMatchObject({ queueStatus: null, availability: null });
+    expect(seriesRow!.results.find((result) => result.tmdbId === 1396)).toMatchObject({ queueStatus: null, availability: null });
+  });
+
+  it('carries the availability of a title that is in the library and out of the queue', async () => {
+    // The release date is in the past, so the movie is missing until it has a file.
+    db.data.titles['movie:603'] = movie({ key: 'movie:603', tmdbId: 603, meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
+
+    const { body } = await discovery();
+    expect(body.rows[0]!.results.find((result) => result.tmdbId === 603)).toMatchObject({ queueStatus: null, availability: 'missing' });
+  });
+
+  it('carries the queue status of a title that is in the queue', async () => {
+    db.data.titles['movie:603'] = movie({ key: 'movie:603', tmdbId: 603, meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
+    db.data.queue['movie:603'] = { id: 'movie:603', titleKey: 'movie:603', season: null, number: null, stage: 'downloading', branch: null, reason: null, attempt: 1, clearedAt: null } as never;
+    try {
+      const { body } = await discovery();
+      expect(body.rows[0]!.results.find((result) => result.tmdbId === 603)).toMatchObject({ queueStatus: 'downloading', availability: 'missing' });
+    } finally {
+      delete db.data.queue['movie:603'];
+    }
+  });
+
+  it('carries the state of a series in the series row', async () => {
+    db.data.titles['tv:1396'] = title({ key: 'tv:1396', tmdbId: 1396 });
+    db.data.queue['tv:1396'] = { id: 'tv:1396', titleKey: 'tv:1396', season: null, number: null, stage: 'searching', branch: null, reason: null, attempt: 1, clearedAt: null } as never;
+    try {
+      const { body } = await discovery();
+      expect(body.rows[1]!.results.find((result) => result.tmdbId === 1396)).toMatchObject({ queueStatus: 'searching', availability: 'waiting' });
+    } finally {
+      delete db.data.queue['tv:1396'];
+    }
+  });
 });
 
 describe('discovery with an unknown sort', () => {
@@ -325,6 +362,65 @@ describe('discovery filter params', () => {
       await fetch(`${base}/discovery?from=none&to=2010`, { headers: { cookie } });
       expect(calls.every((url) => url.searchParams.get('primary_release_date.gte') === null)).toBe(true);
       expect(calls.every((url) => url.searchParams.get('first_air_date.lte') === null)).toBe(true);
+    });
+  });
+});
+
+describe('discovery type param', () => {
+  it('answers the movie row only for type=movie', async () => {
+    await withApp(async ({ base, cookie }) => {
+      const res = await fetch(`${base}/discovery?type=movie`, { headers: { cookie } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as DiscoveryBody;
+      expect(body.rows.map((row) => row.id)).toEqual(['movies']);
+      expect(body.rows[0]!.results.map((result) => result.title)).toEqual(['The Matrix']);
+    });
+  });
+
+  it('answers the series row only for type=tv', async () => {
+    await withApp(async ({ base, cookie }) => {
+      const res = await fetch(`${base}/discovery?type=tv`, { headers: { cookie } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as DiscoveryBody;
+      expect(body.rows.map((row) => row.id)).toEqual(['series']);
+      expect(body.rows[0]!.results.map((result) => result.title)).toEqual(['Breaking Bad']);
+    });
+  });
+
+  it('does not request the list that is left out', async () => {
+    await withApp(async ({ base, cookie, calls }) => {
+      await fetch(`${base}/discovery?type=movie`, { headers: { cookie } });
+      expect(calls.map((url) => url.pathname)).toEqual(['/3/discover/movie']);
+    });
+    await withApp(async ({ base, cookie, calls }) => {
+      await fetch(`${base}/discovery?type=tv`, { headers: { cookie } });
+      expect(calls.map((url) => url.pathname)).toEqual(['/3/discover/tv']);
+    });
+  });
+
+  it('takes the total pages from the list that answers', async () => {
+    const fake = fakeTmdb({
+      '/discover/movie': () => json({ total_pages: 3, results: [] }),
+      '/discover/tv': () => json({ total_pages: 7, results: [] }),
+    });
+    const { base, cookie, close } = await start({ tmdb: client(fake.send) });
+    try {
+      const movies = (await (await fetch(`${base}/discovery?type=movie`, { headers: { cookie } })).json()) as DiscoveryBody;
+      const series = (await (await fetch(`${base}/discovery?type=tv`, { headers: { cookie } })).json()) as DiscoveryBody;
+      expect(movies.totalPages).toBe(3);
+      expect(series.totalPages).toBe(7);
+    } finally {
+      close();
+    }
+  });
+
+  it('answers both rows for a type that is not a media type', async () => {
+    await withApp(async ({ base, cookie, calls }) => {
+      const res = await fetch(`${base}/discovery?type=none`, { headers: { cookie } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as DiscoveryBody;
+      expect(body.rows.map((row) => row.id)).toEqual(['movies', 'series']);
+      expect(calls.map((url) => url.pathname)).toEqual(['/3/discover/movie', '/3/discover/tv']);
     });
   });
 });

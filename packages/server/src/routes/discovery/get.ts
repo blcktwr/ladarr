@@ -31,6 +31,9 @@ const regionOf = (value: unknown) => {
 const providersOf = (value: unknown) =>
   typeof value === 'string' ? value.split(',').flatMap((id) => (/^\d+$/.test(id) ? [id] : [])) : [];
 
+// The list that the page asks for. A type that the page does not know leaves the two lists in.
+const typeOf = (value: unknown) => (value === 'movie' || value === 'tv' ? (value as MediaType) : undefined);
+
 // The lists of the discovery page, in the order of the page. A filter that the page does not know is left out.
 export function discoveryGet(tmdb: Tmdb | undefined): RequestHandler {
   const map = inLibrary();
@@ -58,15 +61,15 @@ export function discoveryGet(tmdb: Tmdb | undefined): RequestHandler {
       ...(genre?.[mediaType] ? { with_genres: String(genre[mediaType]) } : {}),
       ...(providers.length ? { with_watch_providers: providers.join('|'), watch_region: region } : {}),
     });
-    const [movies, series] = await Promise.all([
-      tmdb.discoverResults('movie', params('movie')),
-      tmdb.discoverResults('tv', params('tv')),
-    ]);
-    const rows: DiscoveryRow[] = [
-      { id: 'movies', results: map(movies.results) },
-      { id: 'series', results: map(series.results) },
-    ];
-    const body: DiscoveryPage = { page, totalPages: Math.max(movies.totalPages, series.totalPages), rows };
+    // The type menu asks for one list, or for both.
+    const type = typeOf(req.query.type);
+    const lists = type ? [type] : (['movie', 'tv'] as MediaType[]);
+    const answers = await Promise.all(lists.map((mediaType) => tmdb.discoverResults(mediaType, params(mediaType))));
+    const rows: DiscoveryRow[] = lists.map((mediaType, index) => ({
+      id: mediaType === 'movie' ? 'movies' : 'series',
+      results: map(answers[index]!.results),
+    }));
+    const body: DiscoveryPage = { page, totalPages: Math.max(...answers.map((answer) => answer.totalPages)), rows };
     res.json(body);
   };
 }

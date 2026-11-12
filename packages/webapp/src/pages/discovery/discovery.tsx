@@ -1,7 +1,7 @@
 import type { DiscoveryFilters, DiscoveryPage, DiscoverySort, WatchProvider } from '@ladarr/shared/types';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { SlidersHorizontal } from 'lucide-react';
-import { Button, Dropdown, EmptyState, Field, Gallery, Panel, SearchField, Spinner, Text, Tile } from 'nebula';
+import { Button, Dropdown, EmptyState, Field, Gallery, Panel, SearchField, Spinner, SubMenu, Text, Tile } from 'nebula';
 import { useEffect, useRef, useState } from 'react';
 import { LoadFailed } from '../../components/index.ts';
 import { api } from '../../lib/api.ts';
@@ -115,6 +115,8 @@ function FilterPanel({ filters, lists, providers, onChange }: { filters: Filters
 // The titles of TMDB that the catalog does not have yet. A poster opens the title page, and its button adds it.
 export function Discovery() {
   const [sort, setSort] = useState<DiscoverySort>('popularity.desc');
+  // The type menu shows one list, or the two of them.
+  const [type, setType] = useState<'all' | 'movie' | 'tv'>('all');
   const [filters, setFilters] = useState<Filters>(noFilters);
   // The lists of the filter panel load with the page, so the panel opens with them ready. The server keeps them for a
   // day, so the page asks for them again only after that.
@@ -133,6 +135,7 @@ export function Discovery() {
     { value: 'rating.desc', label: t('TMDB rating (desc)') },
   ];
   const params = new URLSearchParams({ sort });
+  if (type !== 'all') params.set('type', type);
   if (filters.from) params.set('from', filters.from);
   if (filters.to) params.set('to', filters.to);
   if (filters.genre) params.set('genre', filters.genre);
@@ -170,7 +173,17 @@ export function Discovery() {
     <div className={page}>
       <div className={`${column} flex flex-wrap items-center justify-between gap-4`}>
         <Text variant="title">{t('Discovery')}</Text>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <SubMenu
+            aria-label={t('Type')}
+            value={type}
+            onValueChange={(key) => setType(key as typeof type)}
+            items={[
+              { value: 'all', label: t('All') },
+              { value: 'movie', label: t('Movies') },
+              { value: 'tv', label: t('Series') },
+            ]}
+          />
           <Dropdown value={sort} options={sorts} onValueChange={(value) => setSort((value ?? 'popularity.desc') as DiscoverySort)} />
           <Panel
             label={t('Filters')}

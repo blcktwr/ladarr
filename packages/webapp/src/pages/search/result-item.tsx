@@ -3,7 +3,7 @@ import { Button, Thumbnail, alert } from 'nebula';
 import { useState } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
-import { catalogPath, contentType, posterUrl, describeError } from '../../lib/format.ts';
+import { catalogPath, contentType, posterState, posterUrl, describeError } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { useQueueNotice } from '../../lib/queue-notice.ts';
 
@@ -53,6 +53,7 @@ function SearchButton({ result }: { result: SearchResult }) {
 export function ResultItem({ result, size, selected, onSelectedChange }: { result: SearchResult; size?: 'sm' | 'md'; selected?: boolean; onSelectedChange?: (selected: boolean) => void }) {
   // A series in the library is anime only when its type says so. A title that is not in the library is a series.
   const type = contentType(result.mediaType, result.seriesType);
+  const state = posterState(result);
   return (
     <RouterLink to={catalogPath(`${result.mediaType}:${result.tmdbId}`)}>
       <Thumbnail
@@ -60,6 +61,8 @@ export function ResultItem({ result, size, selected, onSelectedChange }: { resul
         image={posterUrl(result.posterPath, 'w342') ?? ''}
         title={result.title}
         type={type}
+        state={state?.state}
+        stateLabel={state?.label}
         noCaption
         selected={selected}
         onSelectedChange={onSelectedChange}

@@ -138,9 +138,9 @@ export function Thumbnail({ image = '', title = '', year = '', loading = false, 
             )}
             {!noCaption && status && <span className="truncate text-ink text-[15px]/5 font-medium">{status}</span>}
             {!noCaption && !status && year !== undefined && <span className="text-fog text-[13px]/none">{year}</span>}
-            {/* The bookmark hangs from the top edge of the poster, with a notch in the bottom edge. It is in the caption, after its text, so it names the figure after the title and the year. The line is a face 1px inside the shape, so it follows the notch, and the shadow sits on the wrapper, outside the clip. */}
+            {/* The bookmark hangs from the top edge of the poster, with a notch in the bottom edge. It is in the caption, after its text, so it names the figure after the title and the year. The line is a face 1px inside the shape, so it follows the notch, and the shadow sits on the wrapper, outside the clip. The state shows as a tooltip when the pointer is on it. */}
             {type && (
-              <span className={`${bookmarkShadow} absolute top-0 left-1.5 w-7`}>
+              <span className={`${bookmarkShadow} absolute top-0 left-1.5 w-7`} title={state && stateLabel ? stateLabel : undefined}>
                 <span className={`${bookmark} relative flex w-full min-h-14 flex-col items-center ${StateIcon ? 'justify-between' : 'justify-center'} gap-2 pt-2 pb-4 text-center text-[11px]/none font-[550] tracking-[.02em] ${notch}`}>
                   <span aria-hidden="true" className={`${bookmarkFace} absolute top-0 right-px bottom-px left-px ${notch}`} />
                   <span className="relative rotate-180 [writing-mode:vertical-rl]">{type}</span>

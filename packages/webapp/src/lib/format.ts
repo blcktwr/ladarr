@@ -140,6 +140,8 @@ export const statusLabel = (key: string) => (Object.hasOwn(statusTexts, key) ? t
 // The queue state that the bookmark of a poster shows. A state that has no icon in the design does not show one.
 const bookmarkStates: Record<string, ThumbnailState> = {
   searching: 'searching',
+  // The search found no release. The target still waits in the queue for the next search, so it searches.
+  not_found: 'searching',
   downloading: 'downloading',
   validating: 'validating',
   importing: 'importing',
@@ -148,10 +150,21 @@ const bookmarkStates: Record<string, ThumbnailState> = {
   available: 'available',
 };
 
-// The state of a title, and its name. The queue wins over the availability of the title.
-export function posterState(title: Pick<TitleSummary, 'availability' | 'queueStatus'>): { state: ThumbnailState; label: string } | null {
+// The stage that a status belongs to, when the status names the result of its work. The bookmark names the stage and
+// the result in parentheses, such as Waiting (Not found).
+const statusStages: Record<string, string> = { not_found: 'queued', no_match: 'queued' };
+
+// The name of a status, with the stage that it belongs to. The result of the search stays in lowercase.
+const statusName = (status: string) => {
+  const stage = statusStages[status];
+  return stage ? `${statusLabel(stage)} (${statusLabel(status).toLowerCase()})` : statusLabel(status);
+};
+
+// The state of a title, and its name. The queue wins over the availability of the title. A title that is not in the
+// library has neither, so it shows no state.
+export function posterState(title: { availability?: Availability | null; queueStatus?: string | null }): { state: ThumbnailState; label: string } | null {
   const state = title.queueStatus ? bookmarkStates[title.queueStatus] : undefined;
-  if (state) return { state, label: statusLabel(title.queueStatus!) };
+  if (state) return { state, label: statusName(title.queueStatus!) };
   if (title.availability === 'available') return { state: 'available', label: availabilityLabel.available };
   if (title.availability === 'waiting') return { state: 'waiting', label: availabilityLabel.waiting };
   return null;

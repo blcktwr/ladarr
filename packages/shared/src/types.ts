@@ -51,6 +51,9 @@ export type SearchResult = {
   libraryKey?: string | null;
   // The type of a series in the library. It is null for a movie, and for a title that is not in the library.
   seriesType?: 'standard' | 'anime' | null;
+  // The state of a title in the library, for the bookmark of its poster. Both are null for a title that is not in the library.
+  queueStatus?: string | null;
+  availability?: Availability | null;
 };
 
 // A list of the discovery page. The page names the row and keeps its order.
