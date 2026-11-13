@@ -1,11 +1,11 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
-import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary } from '@ladarr/shared/types';
+import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary, QueueTorrent } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, LoaderCircle, Pause, Play, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, FileText, FileVideo, Info, LoaderCircle, Pause, Play, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
-import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal, Pagination, Pane, Panel, Progress, Row, Section, Spinner, SubMenu, Table, Text, Thumbnail } from 'nebula';
+import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal, Pagination, Pane, Panel, Progress, Row, Section, Spinner, SubMenu, Table, Text, Thumbnail, Tree, type TreeNode } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { Confirm } from '../../components/confirm.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
@@ -15,7 +15,7 @@ import { AttachDialog } from './activity-client.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
 import { catalogPath, formatBytes, groupName, posterUrl, seasonName, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
-import { t } from '../../i18n/index.ts';
+import { t, getLanguage } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
 import { commentParts } from '../../lib/links.ts';
 import { useLive } from '../../lib/live.ts';
@@ -114,12 +114,96 @@ function CommentText({ text }: { text: string }) {
   );
 }
 
-// The release of a target: its name, its quality, and its size.
-function ReleaseDetails({ release }: { release: NonNullable<QueueEntryView['release']> }) {
+// The files of the torrent as a tree: the folders keep their files, and each level shows its files before its folders.
+function torrentTree(data: QueueTorrent): TreeNode[] {
+  const items: TreeNode[] = [];
+  const folders = new Map<string, TreeNode>();
+  for (const file of data.files) {
+    const parts = file.path.split('/');
+    const start = parts.length > 1 && parts[0] === data.name ? 1 : 0;
+    let children = items;
+    for (let index = start; index < parts.length - 1; index++) {
+      const key = parts.slice(0, index + 1).join('/');
+      let folder = folders.get(key);
+      if (!folder) {
+        folder = { key, name: parts[index]!, children: [] };
+        folders.set(key, folder);
+        children.push(folder);
+      }
+      children = folder.children!;
+    }
+    children.push({
+      key: file.path,
+      name: parts[parts.length - 1]!,
+      size: formatBytes(file.sizeBytes),
+      icon: /\.(mkv|mp4|m4v|avi|mov|wmv|ts|webm)$/i.test(file.path) ? <FileVideo /> : <FileText />,
+    });
+  }
+  const filesFirst = (nodes: TreeNode[]) => {
+    nodes.sort((a, b) => Number(a.children !== undefined) - Number(b.children !== undefined));
+    for (const node of nodes) if (node.children) filesFirst(node.children);
+  };
+  filesFirst(items);
+  return items;
+}
+
+// What the .torrent of the release holds: what the file says about itself, and its files. The modal is the pane, so the
+// blocks follow each other with a groove between them, and no other box goes inside.
+function TorrentInfo({ entryId }: { entryId: string }) {
+  const { data, error } = useQuery<QueueTorrent>({ queryKey: [`/queue/entries/${entryId}/torrent`] });
+  // The alert of the app shows under the modal, so the error shows in the modal.
+  if (error) return <p role="alert">{t('The file list of the torrent is not available.')}</p>;
+  if (!data) {
+    // The wheel turns over a box of its own size, and its corners go past that box. Clipping them keeps the page still.
+    return (
+      <div className="grid place-items-center w-full overflow-hidden">
+        <Spinner label={t('Loading files')} />
+      </div>
+    );
+  }
+  return (
+    <>
+      <Details
+        columns={4}
+        items={[
+          { label: t('Name'), value: data.name, wide: true },
+          ...(data.pieceCount !== null ? [{ label: t('Piece count'), value: data.pieceCount }] : []),
+          ...(data.pieceLength !== null ? [{ label: t('Piece size'), value: formatBytes(data.pieceLength) }] : []),
+          { label: t('Size'), value: formatBytes(data.totalBytes) },
+          { label: t('Files'), value: data.files.length },
+          ...(data.source ? [{ label: t('Source'), value: data.source }] : []),
+          ...(data.createdBy ? [{ label: t('Created by'), value: data.createdBy }] : []),
+          ...(data.createdAt ? [{ label: t('Creation date'), value: new Date(data.createdAt).toLocaleDateString(getLanguage()) }] : []),
+          ...(data.private ? [{ label: t('Privacy'), value: t('Private torrent') }] : []),
+          ...(data.comment ? [{ label: t('Comment'), value: <CommentText text={data.comment} />, wide: true }] : []),
+        ]}
+      />
+      <Divider />
+      <Section title={t('Files')}>
+        <Tree aria-label={t('Files in the torrent')} items={torrentTree(data)} />
+      </Section>
+    </>
+  );
+}
+
+// The release of a target: its name, its quality, and its size. The button at the end of the name opens what the .torrent
+// of the release holds.
+function ReleaseDetails({ entryId, release }: { entryId: string; release: NonNullable<QueueEntryView['release']> }) {
   return (
     <Details
       items={[
-        { label: t('Release'), value: release.title, wide: true },
+        {
+          label: t('Release'),
+          value: (
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0">{release.title}</span>
+              <Modal trigger={<Button iconOnly variant="ghost" aria-label={t('Files in the torrent')}><Info /></Button>} title={t('Torrent')} width="lg">
+                <TorrentInfo entryId={entryId} />
+              </Modal>
+            </div>
+          ),
+          wide: true,
+        },
         ...(release.quality ? [{ label: t('Quality'), value: release.quality }] : []),
         { label: t('Size'), value: formatBytes(release.sizeBytes) },
         ...(release.comment ? [{ label: t('Comment'), value: <CommentText text={release.comment} />, wide: true }] : []),
@@ -304,7 +388,7 @@ function downloadPercent(entry: QueueEntryView) {
 // An episode of a series shows the percent of its download in its name.
 function EntryDetails({ entry, label = true, inline = false, actions, fix }: { entry: QueueEntryView; label?: boolean; inline?: boolean; actions?: ReactNode; fix?: ReactNode }) {
   const percent = inline ? downloadPercent(entry) : null;
-  const data = !inline && entry.release ? <ReleaseDetails release={entry.release} /> : inline && entry.file ? <FileDetails file={entry.file} /> : null;
+  const data = !inline && entry.release ? <ReleaseDetails entryId={entry.id} release={entry.release} /> : inline && entry.file ? <FileDetails file={entry.file} /> : null;
   const name = label && <Text>{percent === null ? entry.label : <>{entry.label} <strong>({percent}%)</strong></>}</Text>;
   const status = shownKey(entry.key);
   // The reason shows under the status of a movie, and under the status of an episode that a problem stops, above its
@@ -589,6 +673,8 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   const releases = new Map<string, NonNullable<QueueEntryView['release']>>();
   for (const entry of entries) if (entry.release) releases.set(`${entry.release.title}|${entry.release.sizeBytes}`, entry.release);
   const unique = [...releases.values()];
+  // The target that carries the release of the series. The .torrent of the release is the same for every episode of a pack.
+  const releaseEntry = entries.find((entry) => entry.release);
   const qualities = [...new Set(unique.flatMap((release) => (release.quality ? [release.quality] : [])))];
   // The target of the checklist: an episode with checks that moves, or one that a reason stopped. Every target of a
   // pack carries the same list.
@@ -611,8 +697,8 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
         {importing && unique.length > 0 && <Divider />}
         {unique.length > 0 && (
           <div>
-            {unique.length === 1 ? (
-              <ReleaseDetails release={unique[0]!} />
+            {unique.length === 1 && releaseEntry ? (
+              <ReleaseDetails entryId={releaseEntry.id} release={unique[0]!} />
             ) : (
               <Details
                 items={[

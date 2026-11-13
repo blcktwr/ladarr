@@ -101,6 +101,7 @@ import { queueEntryGet } from './routes/queue/entries/[id]/get.ts';
 import { queueEntryFilesGet } from './routes/queue/entries/[id]/files/get.ts';
 import { queueEntryMatchPost } from './routes/queue/entries/[id]/match/post.ts';
 import { queueEntryReleaseGrabPost } from './routes/queue/entries/[id]/releases/grab/post.ts';
+import { queueEntryTorrentGet } from './routes/queue/entries/[id]/torrent/get.ts';
 import { queueGet } from './routes/queue/get.ts';
 import { queueGroupGet } from './routes/queue/groups/[titleKey]/get.ts';
 import { queueJobDelete } from './routes/queue/jobs/[id]/delete.ts';
@@ -297,6 +298,7 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
     api.post('/queue/entries/:id/releases/grab', queueEntryReleaseGrabPost(services.queue, services.finder));
     api.post('/queue/actions', queueActionsPost(services.queue, services.finder, services.poller, services.clients, enqueue));
     api.get('/queue/entries/:id/files', queueEntryFilesGet(services.clients));
+    if (indexers) api.get('/queue/entries/:id/torrent', queueEntryTorrentGet(indexers));
     api.post('/queue/entries/:id/match', queueEntryMatchPost(services.queue, services.finder, services.clients, enqueue));
     const attachCache = createAttachCache();
     api.get('/queue/entries/:id/client', queueEntryClientGet(services.clients, attachCache));

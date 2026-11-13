@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { infoHashOf, magnetHash, torrentComment } from '../../src/library/grab/torrent.ts';
+import { infoHashOf, magnetHash, torrentComment, torrentInfo } from '../../src/library/grab/torrent.ts';
 
 describe('infoHashOf', () => {
   const info = Buffer.from('d6:lengthi1000e4:name4:file12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe');
@@ -45,6 +45,54 @@ describe('torrentComment', () => {
   it('rejects data that is not a torrent', () => {
     for (const bad of ['', 'not a torrent', 'd8:announce3:abc', 'd4:info', 'i42e', 'd7:comment2:hi']) {
       expect(() => torrentComment(Buffer.from(bad))).toThrow('invalid torrent');
+    }
+  });
+});
+
+describe('torrentInfo', () => {
+  // A torrent whose top-level dictionary holds the fields that its writer added.
+  const torrent = (info: string, extra = '') => Buffer.from(`d8:announce20:http://tracker/a?x=y4:info${info}${extra}e`);
+  const single = 'd6:lengthi1000e4:name4:file12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe';
+  // Two files, one of them in a folder. The path of each file starts with the name of the torrent.
+  const multiple = 'd5:filesld6:lengthi1000e4:pathl5:a.mkveed6:lengthi2000e4:pathl1:d5:b.mkveee4:name4:show12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe';
+  const extra = '10:created by4:tool13:creation datei1700000000e7:comment2:hi';
+
+  it('gives the name, the files, and their total size', () => {
+    expect(torrentInfo(torrent(multiple))).toEqual({
+      name: 'show',
+      hash: createHash('sha1').update(multiple).digest('hex'),
+      files: [
+        { path: 'show/a.mkv', sizeBytes: 1000 },
+        { path: 'show/d/b.mkv', sizeBytes: 2000 },
+      ],
+      totalBytes: 3000,
+      comment: null,
+      source: null,
+      createdBy: null,
+      createdAt: null,
+      pieceLength: 16384,
+      pieceCount: 1,
+      private: false,
+    });
+  });
+
+  it('gives the one file of a torrent that has no file list', () => {
+    expect(torrentInfo(torrent(single)).files).toEqual([{ path: 'file', sizeBytes: 1000 }]);
+  });
+
+  it('gives the fields that the writer added, with the date in milliseconds', () => {
+    expect(torrentInfo(torrent(multiple, extra))).toMatchObject({ comment: 'hi', createdBy: 'tool', createdAt: 1700000000000 });
+  });
+
+  it('gives the privacy and the source', () => {
+    const info = 'd6:lengthi1000e4:name4:file12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAA7:privatei1e6:source4:teame';
+    const top = `d8:announce20:http://tracker/a?x=y4:info${info}e`;
+    expect(torrentInfo(Buffer.from(top))).toMatchObject({ private: true, source: 'team' });
+  });
+
+  it('rejects data that is not a torrent', () => {
+    for (const bad of ['', 'd8:announce3:abce', 'd4:infoi1ee', 'd4:infod6:lengthi1eee']) {
+      expect(() => torrentInfo(Buffer.from(bad))).toThrow('invalid torrent');
     }
   });
 });

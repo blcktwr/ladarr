@@ -21,6 +21,13 @@ export type GrabberDeps = {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// The indexer of a release can be gone, for example when the user adds it again. The link is complete, so an indexer with the same host downloads it.
+export function downloaderOf(link: string) {
+  const list = Object.values(db.data.indexers);
+  const origin = new URL(link).origin;
+  return list.find((indexer) => new URL(indexer.baseUrl).origin === origin) ?? list[0];
+}
+
 // What the user reads when a try fails. The codes are stable. The texts are in the user interface.
 export function reasonOf(error: unknown) {
   if (error instanceof ClientError) return { code: error.code === 'rejected' ? 'client_rejected' : 'client_unreachable' };
@@ -49,13 +56,6 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
         return parsed && { season: parsed.season, numbers: titleNumbers(parsed, title?.episodes ?? []) };
       });
     return entries.filter((entry) => !held.some((found) => found?.season === entry.season && found.numbers.includes(entry.number!)));
-  }
-
-  // The indexer of a release can be gone, for example when the user adds it again. The link is complete, so an indexer with the same host downloads it.
-  function downloaderOf(link: string) {
-    const list = Object.values(db.data.indexers);
-    const origin = new URL(link).origin;
-    return list.find((indexer) => new URL(indexer.baseUrl).origin === origin) ?? list[0];
   }
 
   async function grab(entries: QueueEntry[], signal: AbortSignal) {

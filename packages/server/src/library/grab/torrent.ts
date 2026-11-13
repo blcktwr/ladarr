@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { QueueTorrent } from '@ladarr/shared/types';
 
 const MAX_DEPTH = 16;
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -108,4 +109,34 @@ export function torrentFiles(torrent: Buffer): { path: string; length: number }[
     if (!Array.isArray(file?.path) || !file.path.every((part) => typeof part === 'string')) throw new Error('invalid torrent');
     return { path: [info.name, ...file.path].join('/'), length: Number(file.length) || 0 };
   });
+}
+
+const text = (value: unknown) => (typeof value === 'string' && value.length > 0 ? value : null);
+
+// What a torrent says about itself, as the tools of the protocol show it.
+export function torrentInfo(torrent: Buffer): QueueTorrent {
+  const top = decode(torrent, 0).value as {
+    comment?: unknown;
+    'created by'?: unknown;
+    'creation date'?: unknown;
+    info?: { name?: unknown; 'piece length'?: unknown; private?: unknown; source?: unknown };
+  };
+  const info = top.info;
+  if (!info || typeof info.name !== 'string') throw new Error('invalid torrent');
+  const files = torrentFiles(torrent).map((file) => ({ path: file.path, sizeBytes: file.length }));
+  const totalBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
+  const pieceLength = typeof info['piece length'] === 'number' && info['piece length'] > 0 ? info['piece length'] : null;
+  return {
+    name: info.name,
+    hash: infoHashOf(torrent),
+    files,
+    totalBytes,
+    comment: text(top.comment),
+    source: text(info.source),
+    createdBy: text(top['created by']),
+    createdAt: typeof top['creation date'] === 'number' ? top['creation date'] * 1000 : null,
+    pieceLength,
+    pieceCount: pieceLength ? Math.ceil(totalBytes / pieceLength) : null,
+    private: info.private === 1,
+  };
 }

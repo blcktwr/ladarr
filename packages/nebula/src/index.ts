@@ -49,3 +49,4 @@ export { Text } from './components/Text.tsx';
 export { Thumbnail } from './components/Thumbnail.tsx';
 export type { ThumbnailState } from './components/Thumbnail.tsx';
 export { Tile } from './components/Tile.tsx';
+export { Tree, type TreeNode } from './components/Tree.tsx';

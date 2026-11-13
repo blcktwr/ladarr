@@ -651,6 +651,25 @@ export type QueuePackFiles = {
   entries: { id: string; label: string; season: number | null; number: number | null }[];
 };
 
+// The files that the .torrent of a release holds, and what the file says about itself. The server reads them from the
+// indexer, so the client is not needed.
+export type QueueTorrent = {
+  name: string;
+  // The info hash of the torrent, in hexadecimal.
+  hash: string;
+  files: { path: string; sizeBytes: number }[];
+  totalBytes: number;
+  // The fields that the writer of the torrent added. Absent in most torrents.
+  comment: string | null;
+  source: string | null;
+  createdBy: string | null;
+  // Milliseconds, or null when the file has no date.
+  createdAt: number | null;
+  pieceLength: number | null;
+  pieceCount: number | null;
+  private: boolean;
+};
+
 // --- Indexers and client -------------------------------------------------------------------
 
 export type IndexerHealth = { okAt: number | null; failedAt: number | null; failures: number; retryAt: number; error: string | null };

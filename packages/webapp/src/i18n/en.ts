@@ -9,7 +9,7 @@ export const en: Record<string, string> = {
   'import_check.download_inside': 'The download folder is inside the downloads folder.',
   'import_check.files_found': 'The video files are found.',
   'import_check.destination_inside': 'The destination is inside the library folder.',
-  'import_check.file_readable': 'The file is readable.',
+  'import_check.file_readable': 'All files are readable and exists',
   'import_check.destination_free': 'The destination name is free.',
   'import_check.names_unique': 'No two files have the same name.',
   'import_check.staged': 'The file is in the folder of the title.',

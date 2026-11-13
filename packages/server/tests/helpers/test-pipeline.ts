@@ -178,6 +178,7 @@ export async function startPipeline(options: Options = {}) {
     db,
     queue,
     finder,
+    indexers,
     poller,
     worker: real,
     events,
