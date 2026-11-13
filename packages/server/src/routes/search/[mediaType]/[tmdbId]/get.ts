@@ -15,6 +15,8 @@ export function searchTitle(tmdb: Tmdb | undefined): RequestHandler {
         backdropPath: meta.backdropPath,
         rating: meta.rating,
         runtime: meta.runtime,
+        genres: meta.genres ?? [],
+        certification: meta.certification ?? null,
         imdbId: meta.imdbId,
         tvdbId: meta.tvdbId,
         providerStatus: meta.status,

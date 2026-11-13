@@ -27,6 +27,10 @@ export type TitleMeta = SearchResult & {
   runtime: number | null;
   imdbId: string | null;
   tvdbId: number | null;
+  // The names of the genres of TMDB, and the certification of the country of origin. A title from an older version has
+  // neither.
+  genres?: string[];
+  certification?: string | null;
   releaseDates: ReleaseDate[];
   seasons: SeasonSummary[];
 };
@@ -93,6 +97,18 @@ function searchResult(raw: Raw, mediaType: MediaType): SearchResult {
   };
 }
 
+// The certification belongs to a country, and TMDB has one for each. The title shows the one of its country of origin.
+// A movie keeps it with the release dates of each country, and a series in its content ratings.
+function certificationOf(raw: Raw, mediaType: MediaType): string | null {
+  const country = list(raw.origin_country)[0];
+  if (typeof country !== 'string') return null;
+  const entries =
+    mediaType === 'movie'
+      ? list(raw.release_dates?.results).filter((region) => region?.iso_3166_1 === country).flatMap((region) => list(region?.release_dates))
+      : list(raw.content_ratings?.results).filter((region) => region?.iso_3166_1 === country);
+  return entries.map((entry) => text(mediaType === 'movie' ? entry?.certification : entry?.rating)).find((value) => value) ?? null;
+}
+
 function titleMeta(raw: Raw, mediaType: MediaType): TitleMeta {
   const base = searchResult(raw, mediaType);
   const date = textOrNull(mediaType === 'movie' ? raw.release_date : raw.first_air_date);
@@ -127,6 +143,8 @@ function titleMeta(raw: Raw, mediaType: MediaType): TitleMeta {
     runtime: numberOrNull(runtime) || null,
     imdbId: textOrNull(ids.imdb_id ?? raw.imdb_id),
     tvdbId: numberOrNull(ids.tvdb_id),
+    genres: list(raw.genres).map((genre) => text(genre?.name)).filter(Boolean),
+    certification: certificationOf(raw, mediaType),
     releaseDates: list(raw.release_dates?.results).flatMap((region) =>
       list(region?.release_dates).flatMap((entry) => {
         const kind = RELEASE_KINDS[Number(entry?.type) - 1];
@@ -220,7 +238,7 @@ export function createTmdb({
 
   // Pass ttl 0 to skip the cache.
   async function details(mediaType: MediaType, id: number, ttl = ttlMs): Promise<TitleMeta> {
-    const append = mediaType === 'movie' ? 'release_dates,external_ids,alternative_titles' : 'external_ids,alternative_titles';
+    const append = mediaType === 'movie' ? 'release_dates,external_ids,alternative_titles' : 'external_ids,alternative_titles,content_ratings';
     return titleMeta(await get(`/${mediaType}/${id}`, { append_to_response: append }, ttl), mediaType);
   }
 

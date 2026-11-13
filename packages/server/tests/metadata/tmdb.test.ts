@@ -140,6 +140,55 @@ describe('tmdb client', () => {
     expect(meta.aliasRegions).toEqual({ Matrix: ['MX', 'ES'], 'The Matrix': ['US'] });
   });
 
+  it('reads the genres and the certification of the country of origin of a movie', async () => {
+    const { send } = fakeTmdb({
+      '/movie/603': () =>
+        json({
+          ...movie,
+          origin_country: ['US'],
+          genres: [{ id: 28, name: 'Action' }, { id: 878, name: 'Science Fiction' }],
+          release_dates: {
+            results: [
+              { iso_3166_1: 'GB', release_dates: [{ type: 3, release_date: '1999-06-11T00:00:00.000Z', certification: '15' }] },
+              {
+                iso_3166_1: 'US',
+                release_dates: [
+                  { type: 5, release_date: '', certification: '' },
+                  { type: 3, release_date: '1999-03-31T00:00:00.000Z', certification: 'R' },
+                ],
+              },
+            ],
+          },
+        }),
+    });
+    const meta = await client(send).details('movie', 603);
+    expect(meta.genres).toEqual(['Action', 'Science Fiction']);
+    expect(meta.certification).toBe('R');
+  });
+
+  it('leaves the genres and the certification empty when TMDB has none', async () => {
+    const { send } = fakeTmdb({ '/movie/603': () => json({ ...movie, origin_country: ['ES'] }) });
+    const meta = await client(send).details('movie', 603);
+    expect(meta.genres).toEqual([]);
+    expect(meta.certification).toBeNull();
+  });
+
+  it('reads the certification of a series from the content ratings of its country of origin', async () => {
+    const { send, calls } = fakeTmdb({
+      '/tv/1396': () =>
+        json({
+          ...series,
+          origin_country: ['US'],
+          genres: [{ id: 18, name: 'Drama' }],
+          content_ratings: { results: [{ iso_3166_1: 'GB', rating: '18' }, { iso_3166_1: 'US', rating: 'TV-MA' }] },
+        }),
+    });
+    const meta = await client(send).details('tv', 1396);
+    expect(calls[0]!.searchParams.get('append_to_response')).toContain('content_ratings');
+    expect(meta.genres).toEqual(['Drama']);
+    expect(meta.certification).toBe('TV-MA');
+  });
+
   it('reads a series, keeps the TVDB ID apart, and treats a zero rating or runtime as unknown', async () => {
     const { send } = fakeTmdb({ '/tv/1396': () => json(series) });
     const meta = await client(send).details('tv', 1396);

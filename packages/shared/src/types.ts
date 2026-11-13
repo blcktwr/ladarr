@@ -79,7 +79,8 @@ export type DiscoveryFilters = { genres: DiscoveryGenre[]; regions: WatchRegion[
 
 // The TMDB facts of a title that may not be in the library. The title page shows them for both.
 // The date is the release date of a movie, and the first air date of a series.
-export type TitlePreview = SearchResult & { date: string | null; backdropPath: string | null; rating: number | null; runtime: number | null; imdbId: string | null; tvdbId: number | null; providerStatus: string };
+// The certification belongs to the country of origin of the title.
+export type TitlePreview = SearchResult & { date: string | null; backdropPath: string | null; rating: number | null; runtime: number | null; genres: string[]; certification: string | null; imdbId: string | null; tvdbId: number | null; providerStatus: string };
 
 export type CastMember = { id: number; name: string; character: string; profilePath: string | null };
 
@@ -117,6 +118,8 @@ export type TitleDetail = TitleSummary & {
   date: string | null;
   rating: number | null;
   runtime: number | null;
+  genres: string[];
+  certification: string | null;
   imdbId: string | null;
   tvdbId: number | null;
   backdropPath: string | null;

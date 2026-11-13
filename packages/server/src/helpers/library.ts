@@ -76,6 +76,8 @@ export function detail(title: Title): TitleDetail {
     date: meta.date,
     rating: meta.rating,
     runtime: meta.runtime,
+    genres: meta.genres ?? [],
+    certification: meta.certification ?? null,
     imdbId: meta.imdbId,
     tvdbId: meta.tvdbId,
     backdropPath: meta.backdropPath,

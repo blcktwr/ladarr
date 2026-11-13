@@ -447,7 +447,7 @@ function PreviewSeasons({ tmdbId, onAddSeason, pending }: { tmdbId: number; onAd
 }
 
 // The facts that the header of a title shows. A title in the library and a title that is not in it both have them.
-type Header = { title: string; year: number | null; overview: string; posterPath: string | null; backdropPath: string | null; rating: number | null; runtime: number | null; imdbId: string | null; tvdbId: number | null; date: string | null };
+type Header = { title: string; year: number | null; overview: string; posterPath: string | null; backdropPath: string | null; rating: number | null; runtime: number | null; genres: string[]; certification: string | null; imdbId: string | null; tvdbId: number | null; date: string | null };
 
 // The row over the backdrop: the back button, and at the right the button that adds the title or the buttons of its actions.
 function Controls({ children }: { children?: ReactNode }) {
@@ -484,9 +484,19 @@ function TitleLinks({ imdbId, tmdbId, mediaType, rating }: { imdbId: string | nu
 // A TMDB date is a day with no time zone. UTC keeps the browser from moving it to the day before.
 const formatDate = (date: string) => new Date(`${date}T00:00:00Z`).toLocaleDateString(getLanguage(), { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' });
 
+// The facts under the title: the certification, the runtime of a movie, and the genres. The runtime of a series is the
+// one of its episodes, so the title does not show it.
+const factsOf = (header: Header, mediaType?: string) =>
+  [
+    header.certification ?? '',
+    mediaType === 'movie' && header.runtime ? t('{minutes} min', { minutes: header.runtime }) : '',
+    header.genres.join(', '),
+  ].filter(Boolean);
+
 // The hero of a title has one shape for a movie and for a series. The parts below it are the ones that differ.
 // The children are the extra facts of a person. A photo of a person is not a poster, so it has its own size.
 function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutions, controls, children }: { header: Header; posterSize?: 'w342' | 'h632'; mediaType?: string; tmdbId?: number; resolutions?: number[]; controls?: ReactNode; children?: ReactNode }) {
+  const facts = factsOf(header, mediaType);
   return (
     <div className={pageWidth}>
       <Controls>{controls}</Controls>
@@ -498,9 +508,10 @@ function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutio
         </div>
         <div className="grid gap-3 grow basis-64 min-w-0 self-center">
           <Text variant="title">{`${header.title}${header.year ? ` (${header.year})` : ''}`}</Text>
-          {header.date && <Text variant="small">{formatDate(header.date)}</Text>}
+          {facts.length > 0 && <Text>{facts.join(' | ')}</Text>}
           {header.overview && <Text>{header.overview}</Text>}
           {mediaType !== undefined && tmdbId !== undefined && <TitleLinks imdbId={header.imdbId} tmdbId={tmdbId} mediaType={mediaType} rating={header.rating} />}
+          {header.date && <Text variant="small">{formatDate(header.date)}</Text>}
           {resolutions && resolutions.length > 0 && (
             <div className="flex items-center gap-2">
               {resolutions.map((resolution) => (
@@ -865,7 +876,7 @@ function PersonPage() {
     <>
       {data ? (
         <TitleHeader
-          header={{ title: data.person.name, year: null, overview: data.person.alsoKnownAs.length > 0 ? t('Also known as: {names}', { names: data.person.alsoKnownAs.join(', ') }) : '', posterPath: data.person.profilePath, backdropPath: null, rating: null, runtime: null, imdbId: null, tvdbId: null, date: null }}
+          header={{ title: data.person.name, year: null, overview: data.person.alsoKnownAs.length > 0 ? t('Also known as: {names}', { names: data.person.alsoKnownAs.join(', ') }) : '', posterPath: data.person.profilePath, backdropPath: null, rating: null, runtime: null, genres: [], certification: null, imdbId: null, tvdbId: null, date: null }}
           posterSize="h632"
         >
           {data.person.popularity !== null && <Badge>{t('Popularity {value}', { value: data.person.popularity.toFixed(1) })}</Badge>}
