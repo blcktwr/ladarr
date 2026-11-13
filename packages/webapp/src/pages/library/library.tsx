@@ -10,7 +10,7 @@ import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, Empty
 import { Alert } from '../../components/alert.tsx';
 import { Link, LoadFailed, LoadingGallery, pageWidth } from '../../components/index.ts';
 import { ModalActions } from '../../components/modal-actions.tsx';
-import { catalogPath, contentType, posterUrl, describeError, posterState, shownKey, statusLabel } from '../../lib/format.ts';
+import { availabilityLabel, catalogPath, contentType, posterUrl, describeError, posterState, shownKey, statusLabel } from '../../lib/format.ts';
 import { t, getLanguage } from '../../i18n/index.ts';
 import { useLive } from '../../lib/live.ts';
 import { StatusText } from '../../lib/status.tsx';
@@ -684,8 +684,8 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
           ) : title ? (
             <Actions>
               {title.availability !== 'available' && !searched && (
-                <span title={series && title.availability === 'waiting' ? t('Not aired') : undefined}>
-                  <Button disabled={series && title.availability === 'waiting'} onClick={() => void run(() => search({ titleKey: title.key }))}>
+                <span title={title.availability === 'waiting' ? (series ? t('Not aired') : availabilityLabel.waiting) : undefined}>
+                  <Button disabled={title.availability === 'waiting'} onClick={() => void run(() => search({ titleKey: title.key }))}>
                     {t('Search')}
                   </Button>
                 </span>
