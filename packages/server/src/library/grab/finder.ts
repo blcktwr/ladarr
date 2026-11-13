@@ -8,7 +8,7 @@ import { explainProfile } from './quality.ts';
 import { enqueue as enqueueJob, JobError, prioritize, type EnqueueInput, type Job } from '../../core/jobs.ts';
 import { isMonitored, movieEligibleAt, type Episode, type Title } from '../library.ts';
 import { catalog, itemFields, titleFields } from '../../core/log.ts';
-import { entryId, isActive, type Queue, type QueueEntry, type ReleaseRef, type SearchState } from '../downloads/queue.ts';
+import { entryId, isActive, queueKey, type Queue, type QueueEntry, type ReleaseRef, type SearchState } from '../downloads/queue.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import type { IndexerService, RawRelease, SearchQuery } from './torznab.ts';
 import { manualUpgradeTargets } from './upgrades.ts';
@@ -993,6 +993,13 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
   function sweep() {
     const t = now();
     repairBlocked();
+    // A group where every target found no release goes last: a new release is its only next step, so another group
+    // with work gets the indexers first. The sort is stable, so the other groups keep their order.
+    const foundNothing = (group: { entryIds: string[] }) => group.entryIds.every((id) => {
+      const entry = db.data.queue[id];
+      return entry !== undefined && queueKey(entry) === 'not_found';
+    });
+    const lastIfNotFound = <T extends { entryIds: string[] }>(list: T[]) => list.sort((a, b) => Number(foundNothing(a)) - Number(foundNothing(b)));
     // Every target that waits keeps its next search in the queue, so the future work is visible at once.
     const waiting = new Map<string, { titleKey: string; season: number | null; entryIds: string[]; nextAt: number }>();
     for (const entry of Object.values(db.data.queue)) {
@@ -1016,7 +1023,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       });
       if (!wanted) delete db.data.jobs[job.id];
     }
-    for (const { titleKey, season, entryIds, nextAt } of waiting.values()) enqueueSearch({ titleKey, season, entryIds }, { runAt: nextAt, afterRun: true });
+    for (const { titleKey, season, entryIds, nextAt } of lastIfNotFound([...waiting.values()])) enqueueSearch({ titleKey, season, entryIds }, { runAt: nextAt, afterRun: true });
 
     // The targets that are due, a season at a time. One request covers the season and its pack, also when it arrives later.
     const again = new Map<string, { titleKey: string; season: number | null; entryIds: string[] }>();
@@ -1027,7 +1034,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       group.entryIds.push(entry.id);
       again.set(key, group);
     }
-    for (const { titleKey, season, entryIds } of again.values()) requestSearch(titleKey, { season: season ?? undefined, reason: 'search again', only: new Set(entryIds) });
+    for (const { titleKey, season, entryIds } of lastIfNotFound([...again.values()])) requestSearch(titleKey, { season: season ?? undefined, reason: 'search again', only: new Set(entryIds) });
 
     // Every target that is due and has no entry gets a search, however old the episode or the release is. A title
     // that was paused, or an app that was off, does not lose its old missing targets. A cancelled target stays out.

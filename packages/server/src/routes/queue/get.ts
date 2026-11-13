@@ -25,12 +25,14 @@ export function queueGet(poller: Poller, importStatus: ImportStatus | undefined)
     // Counts of a group cover all its entries in the view. A filter picks the groups that have a matching entry.
     // The progress of a group is that of its least advanced target, so the number of episodes does not matter. Two
     // rows at the same place order by the part that their least advanced downloading target has of its file.
-    const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number; part: number; download: number; ready: boolean; searching: boolean; upcoming: boolean }>();
+    const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number; part: number; download: number; ready: boolean; searching: boolean; upcoming: boolean; notFound: boolean }>();
     for (const entry of all) {
       if (!shown(entry) || (!f.cleared && entry.clearedAt)) continue;
       const key = entry.season === null ? entry.id : `${entry.titleKey}:${entry.season}`;
-      const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY, part: -1, download: -1, ready: false, searching: false, upcoming: isUpcoming(titleOf(entry)!) };
+      const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY, part: -1, download: -1, ready: false, searching: false, upcoming: isUpcoming(titleOf(entry)!), notFound: false };
       group.entries.push(entry);
+      // A target that found no release waits for a new release, so its row goes after the rows that still have work.
+      if (queueKey(entry) === 'not_found') group.notFound = true;
       if (matches(entry, f)) group.matching++;
       group.first = Math.min(group.first, entry.createdAt);
       // An available target is finished. It does not hold the group back.
@@ -58,10 +60,11 @@ export function queueGet(poller: Poller, importStatus: ImportStatus | undefined)
       if (!title) continue;
       const matchesLoading = !f.cleared && !f.priority && (!f.key || f.key === 'searching') && (!f.type || f.type === 'tv') && (!f.q || title.meta.title.toLowerCase().includes(f.q));
       if (!matchesLoading) continue;
-      groups.set(key, { entries: [], matching: 1, first: title.addedAt, progress: STAGE_RANK.get('searching')!, part: -1, download: -1, ready: false, searching: true, upcoming: isUpcoming(title) });
+      groups.set(key, { entries: [], matching: 1, first: title.addedAt, progress: STAGE_RANK.get('searching')!, part: -1, download: -1, ready: false, searching: true, upcoming: isUpcoming(title), notFound: false });
     }
-    // A title that waits for its release has no work in the queue yet, so its rows go after the rest.
-    const rows = [...groups.entries()].filter(([, g]) => g.matching > 0 && Number.isFinite(g.progress)).sort((a, b) => Number(a[1].upcoming) - Number(b[1].upcoming) || b[1].progress - a[1].progress || b[1].part - a[1].part || Number(b[1].ready) - Number(a[1].ready) || Number(b[1].searching) - Number(a[1].searching) || a[1].first - b[1].first || a[0].localeCompare(b[0]));
+    // A title that waits for its release has no work in the queue yet, so its rows go after the rest. A group with a
+    // target that found no release goes after every other row, because a new release is its only next step.
+    const rows = [...groups.entries()].filter(([, g]) => g.matching > 0 && Number.isFinite(g.progress)).sort((a, b) => Number(a[1].notFound) - Number(b[1].notFound) || Number(a[1].upcoming) - Number(b[1].upcoming) || b[1].progress - a[1].progress || b[1].part - a[1].part || Number(b[1].ready) - Number(a[1].ready) || Number(b[1].searching) - Number(a[1].searching) || a[1].first - b[1].first || a[0].localeCompare(b[0]));
     const items: QueueRow[] = rows.slice(offset, offset + limit).map(([key, group]) => {
       const first = group.entries[0];
       if (!first) {

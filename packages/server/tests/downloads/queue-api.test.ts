@@ -497,6 +497,35 @@ describe('order', () => {
     expect(await rows()).toEqual(['movie:12', 'group:tv:1:1', 'movie:11']);
   });
 
+  it('puts a target that found no release after every other row, also after one that has no match', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    for (const id of [11, 12, 13]) addFilm(id);
+    // The target without a release came first, so the order of creation alone would put it first.
+    const none = target('movie:11', 1_000);
+    const rejected = target('movie:12', 2_000);
+    pipe.queue.move(none, { stage: 'queued', branch: 'waiting', reason: { code: 'no_results' } }, 'test');
+    pipe.queue.move(rejected, { stage: 'queued', branch: 'waiting', reason: { code: 'all_rejected' } }, 'test');
+    pipe.queue.move(target('movie:13', 3_000), { stage: 'searching' }, 'test');
+
+    expect(await rows()).toEqual(['movie:13', 'movie:12', 'movie:11']);
+  });
+
+  it('puts a season with an episode that found no release after every other row', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const series = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
+    pipe.db.data.titles[series.key] = series;
+    for (const id of [11, 12]) addFilm(id);
+    // The season is downloading, but one of its episodes found no release. The season came first.
+    pipe.queue.move(target('tv:1', 1_000, 1, 1), { stage: 'downloading' }, 'test');
+    pipe.queue.move(target('tv:1', 1_001, 1, 2), { stage: 'queued', branch: 'waiting', reason: { code: 'no_results' } }, 'test');
+    pipe.queue.move(target('movie:11', 2_000), { stage: 'queued', branch: 'waiting', reason: { code: 'all_rejected' } }, 'test');
+    pipe.queue.move(target('movie:12', 3_000), { stage: 'searching' }, 'test');
+
+    expect(await rows()).toEqual(['movie:12', 'movie:11', 'group:tv:1:1']);
+  });
+
   it('does not let the number of episodes decide the order of two series that tie', async () => {
     pipe = await startPipeline();
     api = await pipe.api();

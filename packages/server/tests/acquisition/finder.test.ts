@@ -285,6 +285,33 @@ describe('the next search', () => {
   });
 });
 
+describe('the order of the sweep', () => {
+  // A target that waits for its next search, with the result of the search that left it waiting.
+  function waitingWith(tmdbId: number, result: 'no_results' | 'all_rejected') {
+    const m = movie({ key: `movie:${tmdbId}`, tmdbId, rootId: 'movie', manualRelease: true });
+    pipe!.db.data.titles[m.key] = m;
+    const entry = pipe!.queue.ensure(m.key, null, null);
+    pipe!.queue.request(entry, 'test');
+    pipe!.queue.move(entry, { stage: 'queued', branch: 'waiting', reason: { code: result } }, 'test');
+    entry.search = { at: 0, indexers: [], candidates: 0, accepted: 0, result, topRejections: [], nextAt: Date.now() - 1, rejected: [] };
+    return m;
+  }
+
+  it('searches a target that found no release after a target that has no match', async () => {
+    pipe = await startPipeline();
+    // The target without a release came first, so the order of creation alone would put it first.
+    const none = waitingWith(11, 'no_results');
+    const rejected = waitingWith(12, 'all_rejected');
+    // The queue is held, so the searches that the sweep starts stay in it.
+    pipe.db.data.queuePaused = true;
+    pipe.finder.sweep();
+
+    const searchJobs = Object.values(pipe.db.data.jobs).filter((job) => job.type === 'queue.search');
+    const seqOf = (titleKey: string) => searchJobs.find((job) => (job.payload as { titleKey: string }).titleKey === titleKey)!.seq;
+    expect(seqOf(none.key)).toBeGreaterThan(seqOf(rejected.key));
+  });
+});
+
 describe('interactive search', () => {
   it('lists each release with its reasons, and grabs one by choice but not an unsafe one', async () => {
     pipe = await startPipeline();
