@@ -93,7 +93,7 @@ export function Thumbnail({ image = '', title = '', year = '', loading = false, 
       aria-busy={loading || undefined}
       onClick={event => (event.ctrlKey || event.metaKey) && select(event)}
       onContextMenu={event => event.ctrlKey && event.button === 0 && select(event)}
-      className={`relative grid content-start ${noCaption ? '' : 'gap-3'} ${sizes[size]} max-w-full ${dimmed ? 'opacity-30' : ''} ${className}`}
+      className={`relative grid content-start ${noCaption ? '' : 'gap-3'} ${sizes[size]} max-w-full ${dimmed ? 'opacity-40' : ''} ${className}`}
     >
       <div className={`${block} group relative w-full aspect-2/3 rounded-md overflow-hidden`}>
         {/* Without a poster, the mark of the app shows faintly in its place, also while the poster loads, under the skeleton. */}
