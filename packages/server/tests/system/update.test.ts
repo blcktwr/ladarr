@@ -243,6 +243,40 @@ describe('update route', () => {
     expect(restart).toHaveBeenCalledTimes(1);
   });
 
+  it('restarts once when the client disconnects before the answer', async () => {
+    const restart = vi.fn();
+    let finish!: (value: { version: string }) => void;
+    const install = new Promise<{ version: string }>((resolve) => (finish = resolve));
+    let installing = false;
+    await start({
+      restart,
+      pauseQueue: async () => {},
+      installUpdate: () => {
+        installing = true;
+        return install;
+      },
+    });
+
+    const controller = new AbortController();
+    const request = fetch(`${app.base}/system/update`, {
+      method: 'POST',
+      headers: { cookie: app.cookie, 'x-csrf-token': app.csrfToken },
+      signal: controller.signal,
+    }).catch(() => undefined);
+
+    await until(() => installing);
+    controller.abort();
+    // The server reads the close of the socket on a later turn, and then the answer goes to nobody.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    finish({ version: VERSION });
+
+    await until(() => restart.mock.calls.length === 1, 2_000);
+    await request;
+    // A second call after the answer would restart the process twice.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(restart).toHaveBeenCalledTimes(1);
+  }, 10_000);
+
   it('answers 502 when the install fails, and does not restart', async () => {
     const restart = vi.fn();
     await start({

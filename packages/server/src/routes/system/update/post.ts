@@ -15,8 +15,17 @@ export function systemUpdatePost({ installUpdate, pauseQueue, resumeQueue, resta
     try {
       await pauseQueue?.();
       const { version } = await installUpdate();
-      res.on('finish', () => restart?.());
+      // The answer can go to a client that is gone, and the restart must still happen, once.
+      let done = false;
+      const restartOnce = () => {
+        if (done) return;
+        done = true;
+        restart?.();
+      };
+      res.on('finish', restartOnce);
+      res.on('close', restartOnce);
       res.status(202).json({ version });
+      if (res.destroyed) restartOnce();
     } catch (error) {
       updating = false;
       resumeQueue?.();

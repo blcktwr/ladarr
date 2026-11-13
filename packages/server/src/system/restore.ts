@@ -19,7 +19,7 @@ export class RestoreError extends Error {
 type Worker = { pause: () => Promise<boolean>; resume: () => void; enqueue: (input: EnqueueInput) => unknown };
 
 // Replaces the data of the running server with the data of a backup, without a restart.
-// shortcut: the restore runs in the process that serves the requests. A restart in a safe way needs a supervisor, and ladarr has none.
+// shortcut: the restore runs in the process that serves the requests. A restart in a safe way needs the supervisor to start the process again.
 export function createRestorer({ dir, worker, drainMs = 10_000 }: { dir: string; worker: Worker; drainMs?: number }) {
   let restoring = false;
   // The requests that change data and have no answer yet. One of them can wait for TMDB and write after the swap.

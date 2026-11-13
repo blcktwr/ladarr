@@ -32,6 +32,7 @@ export async function startTestApp(options: Parameters<typeof createApp>[0] = {}
     db,
     base,
     cookie,
+    csrfToken,
     get: (path: string) => call('GET', path),
     post: (path: string, body: unknown = {}) => call('POST', path, body),
     patch: (path: string, body: unknown) => call('PATCH', path, body),

@@ -12,7 +12,7 @@ COPY packages packages
 RUN npm run build
 
 FROM node:${NODE_VERSION}-alpine3.24
-RUN apk add --no-cache ffmpeg \
+RUN apk add --no-cache ffmpeg tini \
  && mkdir /config /data \
  && chown node:node /config /data
 WORKDIR /app
@@ -36,4 +36,5 @@ USER node
 EXPOSE 3000 8989 7878 5055
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD ["node", "packages/server/src/system/healthcheck.ts"]
-CMD ["node", "packages/server/src/index.ts"]
+# tini reaps orphans, and the supervisor starts the server again after an update.
+CMD ["/sbin/tini", "--", "node", "packages/server/src/system/supervisor.ts"]

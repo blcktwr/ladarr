@@ -20,6 +20,7 @@ import { closeLog, configureItemLogs, log, logToFile } from './core/log.ts';
 import { createRestorer } from './system/restore.ts';
 import { firstUnwritable } from './core/permissions.ts';
 import { installUpdate } from './system/update.ts';
+import { UPDATE_EXIT_CODE } from './system/exit.ts';
 import { createTmdb } from './metadata/tmdb.ts';
 import { createWebhooks } from './core/webhook.ts';
 import { createWorker } from './core/worker.ts';
@@ -87,7 +88,7 @@ function listen(app: ReturnType<typeof createApp>, port: number, name: string) {
   });
   server.on('error', (error) => {
     log.error('could not listen', { port, app: name, error });
-    void shutdown('listen');
+    void shutdown('listen', 1);
   });
   servers.push(server);
 }
@@ -112,8 +113,8 @@ listen(
     // The jobs stop before the files change. The ones that run finish first, so no import is cut in the middle.
     pauseQueue: () => worker.drain(),
     resumeQueue: () => worker.resume(),
-    // The files of the new version are in place. A clean stop saves the data, and Docker starts the process again.
-    restart: () => void shutdown('update'),
+    // The files of the new version are in place. A clean stop saves the data, and the supervisor starts the server again.
+    restart: () => void shutdown('update', UPDATE_EXIT_CODE),
   }),
   config.port,
   'ladarr',
@@ -127,7 +128,7 @@ if (config.proxy) {
 }
 
 let stopping = false;
-async function shutdown(signal: string) {
+async function shutdown(signal: string, code = 0) {
   // A second signal must not start a second shutdown.
   if (stopping) return;
   stopping = true;
@@ -143,7 +144,7 @@ async function shutdown(signal: string) {
     await worker.stop();
     log.info('server stopped');
     await closeLog();
-    process.exit(0);
+    process.exit(code);
   } catch (error) {
     log.error('could not stop cleanly', { error });
     await closeLog();
