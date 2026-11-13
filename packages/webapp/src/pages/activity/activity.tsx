@@ -128,9 +128,10 @@ function ReleaseDetails({ release }: { release: NonNullable<QueueEntryView['rele
   );
 }
 
-// The file of an episode: its name, with its size at the end.
+// The file of an episode: its name, with its size at the end. A long name breaks anywhere, so it wraps under the name of
+// the episode and does not widen the table.
 function FileDetails({ file }: { file: NonNullable<QueueEntryView['file']> }) {
-  return <Text variant="small">{file.name} ({formatBytes(file.sizeBytes)})</Text>;
+  return <Text variant="small"><span className="[overflow-wrap:anywhere]">{file.name}</span> ({formatBytes(file.sizeBytes)})</Text>;
 }
 
 // The checks belong to a target that validates or imports. A target outside those stages has none.
@@ -316,9 +317,9 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
   if (inline) {
     return (
       <div className="grid gap-2 w-full min-w-0">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {name}
-          <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">{name}</div>
+          <div className="flex shrink-0 items-center justify-end gap-2">
             <EntryStatus entry={entry} />
             {fix}
             {actions}
