@@ -166,7 +166,7 @@ export function posterState(title: { availability?: Availability | null; queueSt
   const state = title.queueStatus ? bookmarkStates[title.queueStatus] : undefined;
   if (state) return { state, label: statusName(title.queueStatus!) };
   if (title.availability === 'available') return { state: 'available', label: availabilityLabel.available };
-  if (title.availability === 'waiting') return { state: 'waiting', label: availabilityLabel.waiting };
+  if (title.availability === 'waiting') return { state: 'upcoming', label: availabilityLabel.waiting };
   return null;
 }
 

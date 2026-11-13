@@ -65,6 +65,12 @@ describe('Thumbnail', () => {
     expect(container.querySelector('figcaption svg')).toBeTruthy();
   });
 
+  it('shows the clock of the upcoming state in the bookmark', () => {
+    const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} type="Movies" state="upcoming" stateLabel="Waiting for release" />);
+
+    expect(container.querySelector('figcaption svg circle')).toBeTruthy();
+  });
+
   it('gives the state label for a screen reader', () => {
     const { container } = render(<Thumbnail image="/dune.jpg" title="Dune" year={2021} type="Movies" state="searching" stateLabel="Searching" />);
 

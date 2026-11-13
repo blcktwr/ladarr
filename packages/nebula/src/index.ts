@@ -17,6 +17,7 @@ export { DownloadIcon } from './components/indicators/DownloadIcon.tsx';
 export { ImportingIcon } from './components/indicators/ImportingIcon.tsx';
 export { PausedIcon } from './components/indicators/PausedIcon.tsx';
 export { SearchingIcon } from './components/indicators/SearchingIcon.tsx';
+export { UpcomingIcon } from './components/indicators/UpcomingIcon.tsx';
 export { ValidatingIcon } from './components/indicators/ValidatingIcon.tsx';
 export { WaitingIcon } from './components/indicators/WaitingIcon.tsx';
 export { EmptyState } from './components/EmptyState.tsx';

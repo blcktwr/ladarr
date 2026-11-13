@@ -125,6 +125,11 @@
     0%, 100% { opacity: 1; }
     50% { opacity: .6; }
   }
+  /* The hands of the upcoming icon turn slowly, so the time until the release reads as time that passes. */
+  --animate-tick: tick 8s linear infinite;
+  @keyframes tick {
+    to { transform: rotate(1turn); }
+  }
 
   --color-night: #161616;
   --color-night-deep: #040404;

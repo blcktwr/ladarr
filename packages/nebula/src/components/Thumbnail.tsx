@@ -9,6 +9,7 @@ import { BlockedIcon } from './indicators/BlockedIcon.tsx';
 import { DownloadIcon } from './indicators/DownloadIcon.tsx';
 import { ImportingIcon } from './indicators/ImportingIcon.tsx';
 import { SearchingIcon } from './indicators/SearchingIcon.tsx';
+import { UpcomingIcon } from './indicators/UpcomingIcon.tsx';
 import { ValidatingIcon } from './indicators/ValidatingIcon.tsx';
 import { WaitingIcon } from './indicators/WaitingIcon.tsx';
 
@@ -19,13 +20,14 @@ const sizes = { xs: 'w-20', sm: 'w-32', md: 'w-40', lg: 'w-56' };
 const notch = '[clip-path:polygon(0_0,100%_0,100%_100%,50%_calc(100%_-_0.5rem),0_100%)]';
 
 // The state of a title in the queue, or that it is downloaded. It shows as an icon at the bottom of the bookmark.
-export type ThumbnailState = 'waiting' | 'searching' | 'downloading' | 'validating' | 'importing' | 'available' | 'stuck';
+export type ThumbnailState = 'waiting' | 'upcoming' | 'searching' | 'downloading' | 'validating' | 'importing' | 'available' | 'stuck';
 
 const availableIcon = ({ className }: { className?: string }) => <Check className={className} strokeWidth={3} aria-hidden="true" />;
 
 // The icon of each state. It has the size of an indicator, and the colour of the text.
 const stateIcons: Record<ThumbnailState, ComponentType<{ className?: string }>> = {
   waiting: WaitingIcon,
+  upcoming: UpcomingIcon,
   searching: SearchingIcon,
   downloading: DownloadIcon,
   validating: ValidatingIcon,
