@@ -12,8 +12,8 @@ import { t } from '../../i18n/index.ts';
 
 const PAGE = 50;
 
-// The releases of one series that ladarr must not take again.
-export function SeriesBlocklist({ titleKey }: { titleKey: string }) {
+// The releases of one title that ladarr must not take again.
+export function Blocklist({ titleKey }: { titleKey: string }) {
   const [message, setMessage] = useState('');
   const scope = `titleKey=${encodeURIComponent(titleKey)}`;
   const { data, error, isFetching: loading, refetch, fetchNextPage, hasNextPage } = useInfiniteQuery({

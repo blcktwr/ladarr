@@ -9,7 +9,7 @@ import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal
 import { Alert } from '../../components/alert.tsx';
 import { Confirm } from '../../components/confirm.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
-import { SeriesBlocklist } from './activity-blocklist.tsx';
+import { Blocklist } from './activity-blocklist.tsx';
 import { MatchDialog } from './activity-match.tsx';
 import { AttachDialog } from './activity-client.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
@@ -1032,11 +1032,16 @@ function QueueView() {
                     <>
                       <GroupRejected group={chosen} filters={filters} refresh={refresh} />
                       <Pane className="w-full">
-                        <SeriesBlocklist titleKey={chosen.titleKey} />
+                        <Blocklist titleKey={chosen.titleKey} />
                       </Pane>
                     </>
                   ) : (
-                    <MovieRejected entry={chosen} refresh={refresh} />
+                    <>
+                      <MovieRejected entry={chosen} refresh={refresh} />
+                      <Pane className="w-full">
+                        <Blocklist titleKey={chosen.titleKey} />
+                      </Pane>
+                    </>
                   )}
                 </>
               ) : (
