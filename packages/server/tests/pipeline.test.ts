@@ -1,7 +1,7 @@
-import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { closeLog, logToFile, recentLogs } from '../src/core/log.ts';
 import { queueInitialHandler } from '../src/jobs/queue-initial.ts';
@@ -383,6 +383,53 @@ describe('import safety', () => {
     expect(pipe!.db.data.titles[film.key]!.fileId).toBeNull();
     expect(readdirSync(join(pipe!.folders.movies, 'Movie Name (2019)'))).toEqual(['Movie Name (2019).mkv']);
   });
+
+  it('takes the destination when it is the same file as the download', async () => {
+    const { name, entry, film } = await setup();
+    // An import published the destination and stopped before it wrote the record of the file.
+    const source = join(pipe!.folders.downloads, name, `${name}.mkv`);
+    mkdirSync(dirname(source), { recursive: true });
+    writeFileSync(source, 'video-data');
+    const folder = join(pipe!.folders.movies, 'Movie Name (2019)');
+    mkdirSync(folder, { recursive: true });
+    await link(source, join(folder, 'Movie Name (2019).mkv'));
+    pipe!.complete(name, { [`${name}.mkv`]: 'video-data' });
+
+    await until(() => entry.stage === 'available');
+    const file = Object.values(pipe!.db.data.files)[0]!;
+    expect(file.path).toBe('Movie Name (2019)/Movie Name (2019).mkv');
+    expect(pipe!.db.data.titles[film.key]!.fileId).toBe(file.id);
+    expect(statSync(join(pipe!.folders.movies, file.path)).ino).toBe(statSync(source).ino);
+    expect(pipe!.db.data.imports).toEqual({});
+  });
+
+  it('keeps the file and the journal when a write fails after the file is published', async () => {
+    // The write fails once, after the destination has its final name.
+    let armed = false;
+    const { name, entry, film } = await setup({
+      afterStep: (state) => {
+        if (state === 'staged') armed = true;
+      },
+      save: async () => {
+        if (!armed) return;
+        if (!existsSync(join(pipe!.folders.movies, 'Movie Name (2019)', 'Movie Name (2019).mkv'))) return;
+        armed = false;
+        throw new Error('the disk is full');
+      },
+    });
+    pipe!.poller.stop();
+    pipe!.complete(name, { [`${name}.mkv`]: 'video-data' });
+    pipe!.queue.move(entry, { stage: 'validating', reason: null }, 'download complete');
+    pipe!.worker.enqueue({ type: 'import.run', payload: { hash: hashOf(name) }, dedupeKey: `import:${hashOf(name)}` });
+
+    // The next run of the import finishes the record. The file is not left without one.
+    await until(() => entry.stage === 'available', 15_000);
+    const file = Object.values(pipe!.db.data.files)[0]!;
+    expect(file.path).toBe('Movie Name (2019)/Movie Name (2019).mkv');
+    expect(pipe!.db.data.titles[film.key]!.fileId).toBe(file.id);
+    expect(readFileSync(join(pipe!.folders.movies, file.path), 'utf8')).toBe('video-data');
+    expect(pipe!.db.data.imports).toEqual({});
+  }, 20_000);
 
   it('blocks a file that ffprobe can not read', async () => {
     const { name, entry } = await setup({ probe: async () => ({ ok: false, reason: 'unreadable' }) });

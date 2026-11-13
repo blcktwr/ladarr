@@ -420,6 +420,13 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       }
       // A file that the library does not know still blocks the destination, unless the user asked to replace it.
       if (target) {
+        // The destination is this download already: an earlier run published it and stopped before the record. It is
+        // the same file, so the import finishes instead of asking the user about a file that is its own.
+        const source = await stat(candidate.file.abs);
+        if (target.isFile() && target.ino === source.ino && target.dev === source.dev) {
+          candidate.replaces = null;
+          return;
+        }
         if (!replace || target.isDirectory()) throw new ImportProblem('destination_exists', dest);
         await unlink(join(rootReal!, dest));
       }
@@ -695,11 +702,12 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       }
     };
 
-    // A step that fails before the library record is in the journal goes out, and its targets are blocked. The other
-    // steps of the import go on. A failure after the record cannot be undone, so it goes up as it is.
+    // A step that fails before its file has its final name goes out, and its targets are blocked. The other steps of
+    // the import go on. A failure after the name is there can not be undone, so the journal keeps the step and the next
+    // run finishes it. The file is not left in the library without a record.
     const failed = async (step: JournalStep, error: unknown): Promise<ImportProblem> => {
       const problem = problemOf(error);
-      if (step.state !== 'planned' && step.state !== 'staged' && step.state !== 'published') throw error;
+      if (step.state !== 'planned' && step.state !== 'staged') throw error;
       // Nothing is in the library yet. Remove the staged file. The old library file was not changed.
       await rm(stagePathOf(journal, step, rootReal), { force: true }).catch(() => {});
       block(entriesOf(step.entryIds), problem.code, problem.message === problem.code ? undefined : problem.message);

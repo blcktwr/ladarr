@@ -96,6 +96,8 @@ type Options = {
   probe?: (path: string) => Promise<ProbeResult>;
   afterStep?: Parameters<typeof createImporter>[0]['afterStep'];
   fs?: Parameters<typeof createImporter>[0]['fs'];
+  // Replaces the write of the database, to test a disk that fails at a chosen step.
+  save?: () => Promise<void>;
   indexer?: Partial<Indexer>;
   // How often the size of a running copy is read.
   copyPollMs?: number;
@@ -130,7 +132,7 @@ export async function startPipeline(options: Options = {}) {
     published.push({ type, data });
     return originalPublish(type, data);
   };
-  const save = async () => {};
+  const save = options.save ?? (async () => {});
   const queue = createQueue(events, () => {});
   const limiter = createLimiter();
   const indexers = createIndexerService(limiter, { timeoutMs: 2_000 });
