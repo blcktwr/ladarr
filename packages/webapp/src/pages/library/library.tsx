@@ -19,6 +19,7 @@ import imdbLogo from '../../assets/imdb-logo.svg';
 import tmdbLogo from '../../assets/tmdb-logo.svg';
 import { BulkActions, PlanDialog, useSelection } from './library-bulk.tsx';
 import { AddManuallyDialog, ImportBackupDialog } from './catalog-import.tsx';
+import { FileInfoDialog } from './library-files.tsx';
 import { UntitledFolders } from './library-folders.tsx';
 
 type Target = { titleKey: string; season?: number; number?: number };
@@ -495,7 +496,7 @@ const factsOf = (header: Header, mediaType?: string) =>
 
 // The hero of a title has one shape for a movie and for a series. The parts below it are the ones that differ.
 // The children are the extra facts of a person. A photo of a person is not a poster, so it has its own size.
-function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutions, controls, children }: { header: Header; posterSize?: 'w342' | 'h632'; mediaType?: string; tmdbId?: number; resolutions?: number[]; controls?: ReactNode; children?: ReactNode }) {
+function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutions, onResolution, controls, children }: { header: Header; posterSize?: 'w342' | 'h632'; mediaType?: string; tmdbId?: number; resolutions?: number[]; onResolution?: (resolution: number) => void; controls?: ReactNode; children?: ReactNode }) {
   const facts = factsOf(header, mediaType);
   return (
     <div className={pageWidth}>
@@ -515,7 +516,9 @@ function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutio
           {resolutions && resolutions.length > 0 && (
             <div className="flex items-center gap-2">
               {resolutions.map((resolution) => (
-                <Badge key={resolution}>{`${resolution}p`}</Badge>
+                <Badge key={resolution} onClick={onResolution ? () => onResolution(resolution) : undefined} label={onResolution ? t('Show details of {resolution}p', { resolution }) : undefined}>
+                  {`${resolution}p`}
+                </Badge>
               ))}
             </div>
           )}
@@ -585,6 +588,8 @@ function TitleExtras({ mediaType, tmdbId }: { mediaType: string; tmdbId: string 
 function TitleView({ header, title, reload }: { header: TitleDetail | TitlePreview; title?: TitleDetail; reload: () => Promise<unknown> }) {
   const [message, setMessage] = useState('');
   const [plan, setPlan] = useState<{ request: PlanRequest; subject: string | null } | null>(null);
+  // The resolution badge whose downloaded file the user opened.
+  const [info, setInfo] = useState<number | null>(null);
   const [adding, setAdding] = useState<{ season: number | null } | null>(null);
   // The title that the user added stays on the page while the job brings its facts. Its own control shows the wait.
   const [pendingAdd, setPendingAdd] = useState<{ kind: 'series'; season: number | null } | { kind: 'movie' } | null>(null);
@@ -672,6 +677,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
         mediaType={header.mediaType}
         tmdbId={header.tmdbId}
         resolutions={title?.resolutions}
+        onResolution={title ? setInfo : undefined}
         controls={
           pendingAdd && addLoading && (pendingAdd.kind === 'movie' || pendingAdd.season === null || oneSeason !== null) ? (
             <Button pending>{t('Add')}</Button>
@@ -698,6 +704,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
       />
       {message && <Alert tone="danger">{message}</Alert>}
       <PlanDialog request={plan?.request ?? null} subject={plan?.subject} onClose={() => setPlan(null)} onDone={() => void reload()} />
+      {title && info !== null && <FileInfoDialog titleKey={title.key} resolution={info} onClose={() => setInfo(null)} />}
       {series && (
         <>
           <div className={`${pageWidth} grid gap-6`}>

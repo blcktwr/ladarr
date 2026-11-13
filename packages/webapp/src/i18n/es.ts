@@ -502,6 +502,17 @@ export const es: Record<string, string> = {
   'Not on the disk at the last scan': 'No estaba en el disco en el último análisis',
   'File of {episode}': 'Archivo de {episode}',
   'No file is recorded.': 'No hay ningún archivo registrado.',
+  'Downloaded file': 'Archivo descargado',
+  'Show details of {resolution}p': 'Mostrar detalles de {resolution}p',
+  'Format': 'Formato',
+  'Codec': 'Códec',
+  'Aspect ratio': 'Relación de aspecto',
+  'Frame rate': 'Velocidad de fotogramas',
+  'Dolby Vision': 'Dolby Vision',
+  'Yes': 'Sí',
+  'No': 'No',
+  'Audio {n}': 'Audio {n}',
+  'Subtitles {n}': 'Subtítulos {n}',
 
   // Folders without a title
   'A title uses this folder already.': 'Un título ya usa esta carpeta.',

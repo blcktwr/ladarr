@@ -1,7 +1,7 @@
 import type { EpisodeRef, FileDetails, FileRow, PlanRequest } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Badge, Button, EmptyState, List, Row, Section, Spinner } from 'nebula';
+import { Badge, Button, Details as Fields, Dropdown, EmptyState, List, Modal, Row, Section, Spinner } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/index.ts';
 import { formatBytes, formatDuration } from '../../lib/format.ts';
@@ -17,10 +17,14 @@ const stateText: Record<Exclude<FileDetails['state'], 'ok'>, string> = {
 };
 
 const bitrate = (bitsPerSecond: number) => `${(bitsPerSecond / 1_000_000).toFixed(1)} Mbit/s`;
+const fileName = (path: string) => path.split('/').at(-1) ?? path;
 
+type Field = { label: string; value: string };
+
+// The file as fields, in the groups of its data: the format, the video, the audio, and the subtitles.
 // ffprobe reads the file when this component shows, and not before.
-function Details({ titleKey, fileId }: { titleKey: string; fileId: string }) {
-  const { data, error, isFetching: loading, refetch: reload } = useQuery<{ details: FileDetails }>({ queryKey: [`/library/${titleKey}/files/${fileId}`] });
+function FileInfo({ titleKey, fileId }: { titleKey: string; fileId: string }) {
+  const { data, error, isFetching: loading, refetch: reload } = useQuery<{ file: FileRow; details: FileDetails }>({ queryKey: [`/library/${titleKey}/files/${fileId}`] });
   if (loading && !data) return <Spinner label={t('Reading the file')} />;
   if (!data) {
     return error?.message === 'busy' ? (
@@ -29,40 +33,86 @@ function Details({ titleKey, fileId }: { titleKey: string; fileId: string }) {
       <LoadFailed onRetry={reload} />
     );
   }
-  const { details } = data;
+  const { file, details } = data;
   if (details.state !== 'ok') return <p>{t(stateText[details.state])}</p>;
   const { video } = details;
+  const general: Field[] = [
+    { label: t('Format'), value: details.container },
+    ...(details.bitrate !== null ? [{ label: t('Bit rate'), value: bitrate(details.bitrate) }] : []),
+    { label: t('Size'), value: formatBytes(file.sizeBytes) },
+    ...(details.durationSeconds !== null ? [{ label: t('Duration'), value: formatDuration(details.durationSeconds) }] : []),
+  ];
+  const videoInfo: Field[] = video
+    ? [
+        { label: t('Codec'), value: video.codec },
+        ...(video.width && video.height ? [{ label: t('Resolution'), value: `${video.width} × ${video.height}` }] : []),
+        ...(video.aspectRatio ? [{ label: t('Aspect ratio'), value: video.aspectRatio }] : []),
+        ...(video.frameRate ? [{ label: t('Frame rate'), value: `${video.frameRate} fps` }] : []),
+        { label: t('Dolby Vision'), value: video.dolbyVision ? t('Yes') : t('No') },
+      ]
+    : [];
+  const audio: Field[] = details.audio.length
+    ? details.audio.map((track, index) => ({
+        label: t('Audio {n}', { n: index + 1 }),
+        value: `${track.language} · ${track.codec}${track.channels ? ` · ${track.channels} ch` : ''}`,
+      }))
+    : [{ label: t('Audio'), value: t('None') }];
+  const subtitles: Field[] = details.subtitles.length
+    ? details.subtitles.map((track, index) => ({ label: t('Subtitles {n}', { n: index + 1 }), value: `${track.language} · ${track.codec}` }))
+    : [{ label: t('Subtitles'), value: t('None') }];
   return (
-    <dl>
-      <dt>{t('Container')}</dt>
-      <dd>{details.container}</dd>
-      {details.durationSeconds !== null && (
+    <div className="grid gap-8 w-full">
+      <Section title={t('General')}>
+        <Fields items={general} />
+      </Section>
+      {videoInfo.length > 0 && (
+        <Section title={t('Video')}>
+          <Fields items={videoInfo} />
+        </Section>
+      )}
+      <Section title={t('Audio')}>
+        <Fields items={audio} />
+      </Section>
+      <Section title={t('Subtitles')}>
+        <Fields items={subtitles} />
+      </Section>
+    </div>
+  );
+}
+
+// The file of a resolution that the page shows as a badge. A title can have more than one, so the user picks one.
+export function FileInfoDialog({ titleKey, resolution, onClose }: { titleKey: string; resolution: number; onClose: () => void }) {
+  const { data, error, refetch } = useQuery<{ files: FileRow[] }>({ queryKey: [`/library/${titleKey}/files`] });
+  const [chosen, setChosen] = useState<string | null>(null);
+  const files = (data?.files ?? []).filter((file) => file.resolution === resolution);
+  const current = files.find((file) => file.id === chosen) ?? files[0];
+  return (
+    <Modal
+      open
+      onOpenChange={(open) => !open && onClose()}
+      title={t('Downloaded file')}
+      width="lg"
+      actions={
+        <Button variant="ghost" onClick={onClose}>
+          {t('Close')}
+        </Button>
+      }
+    >
+      {error && !data ? (
+        <LoadFailed onRetry={() => void refetch()} />
+      ) : !data ? (
+        <Spinner label={t('Loading')} />
+      ) : !current ? (
+        <EmptyState>{t('No file is recorded.')}</EmptyState>
+      ) : (
         <>
-          <dt>{t('Duration')}</dt>
-          <dd>{formatDuration(details.durationSeconds)}</dd>
+          {files.length > 1 && (
+            <Dropdown label={t('File')} value={current.id} options={files.map((file) => ({ value: file.id, label: file.episodes.length > 0 ? episodeLabel(file.episodes) : fileName(file.path) }))} onValueChange={(value) => setChosen(value)} />
+          )}
+          <FileInfo titleKey={titleKey} fileId={current.id} />
         </>
       )}
-      {details.bitrate !== null && (
-        <>
-          <dt>{t('Bit rate')}</dt>
-          <dd>{bitrate(details.bitrate)}</dd>
-        </>
-      )}
-      {video && (
-        <>
-          <dt>{t('Video')}</dt>
-          <dd>
-            {video.codec}
-            {video.width && video.height ? `, ${video.width}x${video.height}` : ''}
-            {video.frameRate ? `, ${video.frameRate} fps` : ''}
-          </dd>
-        </>
-      )}
-      <dt>{t('Audio')}</dt>
-      <dd>{details.audio.length ? details.audio.map((a) => `${a.language} ${a.codec}${a.channels ? ` ${a.channels} ch` : ''}`).join('; ') : t('None')}</dd>
-      <dt>{t('Subtitles')}</dt>
-      <dd>{details.subtitles.length ? details.subtitles.map((s) => `${s.language} ${s.codec}`).join('; ') : t('None')}</dd>
-    </dl>
+    </Modal>
   );
 }
 
@@ -87,7 +137,11 @@ function FileItem({ titleKey, file, onDelete }: { titleKey: string; file: FileRo
         {file.episodes.length > 0 ? `, ${episodeLabel(file.episodes)}` : ''}
       </span>
       {file.missing && <Badge tone="warning">{t('Not on the disk at the last scan')}</Badge>}
-      {shown && <Details titleKey={titleKey} fileId={file.id} />}
+      {shown && (
+        <div className="w-full">
+          <FileInfo titleKey={titleKey} fileId={file.id} />
+        </div>
+      )}
     </Row>
   );
 }

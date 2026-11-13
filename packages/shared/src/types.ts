@@ -165,6 +165,8 @@ export type FileRow = {
   mtimeMs: number;
   missing: boolean;
   episodes: EpisodeRef[];
+  // The resolution of the file, from its release or from its name. Null when neither says.
+  resolution: number | null;
 };
 
 export type FileDetails =
@@ -173,7 +175,7 @@ export type FileDetails =
       container: string;
       durationSeconds: number | null;
       bitrate: number | null;
-      video: { codec: string; width: number | null; height: number | null; frameRate: number | null } | null;
+      video: { codec: string; width: number | null; height: number | null; aspectRatio: string | null; frameRate: number | null; dolbyVision: boolean } | null;
       audio: { codec: string; channels: number | null; language: string }[];
       subtitles: { codec: string; language: string }[];
     }

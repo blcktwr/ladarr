@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import express from 'express';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { open, type Db } from '../../src/core/db.ts';
-import { describeProbe, libraryFilesRouter } from '../../src/library/tools/files.ts';
+import { describeProbe, fileRow, libraryFilesRouter } from '../../src/library/tools/files.ts';
 import type { ffprobeRaw } from '../../src/library/probe.ts';
 import { scanTitle } from '../../src/library/scan.ts';
 import { startTestApp } from '../helpers/test-app.ts';
@@ -63,12 +63,19 @@ describe('file list', () => {
     const all = await app.get('/library/tv:1/files');
     expect(all.body.files.map((file: { path: string }) => file.path)).toEqual(['Show/Season 01/Show.S01E01.mkv', 'Show/Season 01/Show.S01E02.mkv']);
     const one = await app.get('/library/tv:1/files?season=1&number=2');
-    expect(one.body.files).toMatchObject([{ path: 'Show/Season 01/Show.S01E02.mkv', episodes: [{ season: 1, number: 2 }], missing: false }]);
+    expect(one.body.files).toMatchObject([{ path: 'Show/Season 01/Show.S01E02.mkv', episodes: [{ season: 1, number: 2 }], missing: false, resolution: null }]);
     expect((await app.get('/library/tv:1/files?season=1&number=9')).body.files).toEqual([]);
   });
 
   it.each(['?season=1', '?number=1', '?season=x&number=1'])('rejects the query %s', async (query) => {
     expect((await app.get(`/library/tv:1/files${query}`)).body).toEqual({ error: 'invalid_episode' });
+  });
+
+  it('reports the resolution of a file from its record, or from its name', () => {
+    const file = { id: 'a', titleKey: 'movie:1', sizeBytes: 1, mtimeMs: 1, episodes: [], missing: false, addedAt: 0 };
+
+    expect(fileRow({ ...file, path: 'Movie/Movie.2019.2160p.WEB-DL.mkv' }).resolution).toBe(2160);
+    expect(fileRow({ ...file, path: 'Movie/Movie.2019.mkv', source: 'bluray', resolution: 1080 }).resolution).toBe(1080);
   });
 
   it('answers 404 for a title or a file that does not exist, or that belongs to another title', async () => {
@@ -95,7 +102,7 @@ describe('file details', () => {
       expect(calls).toEqual([]);
       const { body } = await server.get(`/tv:1/files/${fileOf(1)}`);
       expect(calls).toEqual([join(root, 'Show', 'Season 01', 'Show.S01E01.mkv')]);
-      expect(body.details).toEqual({ state: 'ok', container: 'matroska,webm', durationSeconds: 3600.5, bitrate: 8000000, video: { codec: 'hevc', width: 1920, height: 1080, frameRate: 23.976 }, audio: [{ codec: 'eac3', channels: 6, language: 'eng' }], subtitles: [] });
+      expect(body.details).toEqual({ state: 'ok', container: 'matroska,webm', durationSeconds: 3600.5, bitrate: 8000000, video: { codec: 'hevc', width: 1920, height: 1080, aspectRatio: '16:9', frameRate: 23.976, dolbyVision: false }, audio: [{ codec: 'eac3', channels: 6, language: 'eng' }], subtitles: [] });
       expect(body.file.path).toBe('Show/Season 01/Show.S01E01.mkv');
     } finally {
       server.close();
@@ -214,10 +221,28 @@ describe('describeProbe', () => {
       container: 'mov,mp4',
       durationSeconds: null,
       bitrate: null,
-      video: { codec: 'h264', width: null, height: null, frameRate: null },
+      video: { codec: 'h264', width: null, height: null, aspectRatio: null, frameRate: null, dolbyVision: false },
       audio: [{ codec: 'aac', channels: null, language: 'und' }, { codec: 'ac3', channels: 2, language: 'spa' }],
       subtitles: [{ codec: 'subrip', language: 'fra' }],
     });
+  });
+
+  it('takes the aspect ratio from ffprobe, or makes it from the size of the picture', () => {
+    const ratio = (stream: Record<string, unknown>) => describeProbe({ streams: [{ codec_type: 'video', codec_name: 'h264', ...stream }] });
+
+    expect(ratio({ display_aspect_ratio: '16:9', width: 720, height: 480 })).toMatchObject({ video: { aspectRatio: '16:9' } });
+    expect(ratio({ width: 3840, height: 1600 })).toMatchObject({ video: { aspectRatio: '12:5' } });
+    expect(ratio({ width: null, height: null })).toMatchObject({ video: { aspectRatio: null } });
+  });
+
+  it('tells a Dolby Vision file from its codec tag or its side data', () => {
+    const vision = (stream: Record<string, unknown>) => describeProbe({ streams: [{ codec_type: 'video', codec_name: 'hevc', ...stream }] });
+    const side = { side_data_list: [{ side_data_type: 'DOVI configuration record', dv_profile: 8, dv_level: 6 }] };
+
+    expect(vision({ codec_tag_string: 'dvh1' })).toMatchObject({ video: { dolbyVision: true } });
+    expect(vision(side)).toMatchObject({ video: { dolbyVision: true } });
+    expect(vision({ codec_tag_string: 'av01' })).toMatchObject({ video: { dolbyVision: false } });
+    expect(vision({})).toMatchObject({ video: { dolbyVision: false } });
   });
 
   it('reports a file without a video stream', () => {
@@ -234,7 +259,7 @@ describe.skipIf(!hasFfmpeg)('with the real ffprobe', () => {
     db.data.titles['tv:7'] = title({ key: 'tv:7', tmdbId: 7, rootId: 'tv', folder: 'Real', episodes: [episode(1, 1), episode(1, 2)] });
     await scanTitle('tv:7');
     const good = await app.get(`/library/tv:7/files/${db.data.titles['tv:7']!.episodes[0]!.fileId}`);
-    expect(good.body.details).toMatchObject({ state: 'ok', video: { codec: 'mpeg4', width: 64, height: 48, frameRate: 10 }, audio: [{ codec: 'aac', language: 'eng' }], subtitles: [] });
+    expect(good.body.details).toMatchObject({ state: 'ok', video: { codec: 'mpeg4', width: 64, height: 48, aspectRatio: '4:3', frameRate: 10, dolbyVision: false }, audio: [{ codec: 'aac', language: 'eng' }], subtitles: [] });
     expect(good.body.details.durationSeconds).toBeGreaterThan(0.9);
     const bad = await app.get(`/library/tv:7/files/${db.data.titles['tv:7']!.episodes[1]!.fileId}`);
     expect(bad.body.details).toEqual({ state: 'unreadable' });

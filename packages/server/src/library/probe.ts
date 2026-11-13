@@ -10,7 +10,20 @@ export type ProbeResult =
   // ffprobe is not installed. The check is skipped, and the caller says so.
   | { ok: 'skipped' };
 
-export type Stream = { codec_type?: string; codec_name?: string; width?: number; height?: number; avg_frame_rate?: string; channels?: number; disposition?: { attached_pic?: number }; tags?: { language?: string } };
+export type SideData = { side_data_type?: string };
+export type Stream = {
+  codec_type?: string;
+  codec_name?: string;
+  codec_tag_string?: string;
+  width?: number;
+  height?: number;
+  display_aspect_ratio?: string;
+  avg_frame_rate?: string;
+  channels?: number;
+  disposition?: { attached_pic?: number };
+  side_data_list?: SideData[];
+  tags?: { language?: string };
+};
 export type Raw = { format?: { duration?: string; format_name?: string; bit_rate?: string }; streams?: Stream[] };
 
 // Runs ffprobe and returns what it printed. `skipped`: ffprobe is not installed. `unreadable`: ffprobe cannot read the file.
