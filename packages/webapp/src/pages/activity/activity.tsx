@@ -15,7 +15,7 @@ import { AttachDialog } from './activity-client.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
 import { catalogPath, formatBytes, groupName, posterUrl, seasonName, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
-import { t, getLanguage } from '../../i18n/index.ts';
+import { t } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
 import { commentParts } from '../../lib/links.ts';
 import { useLive } from '../../lib/live.ts';
@@ -167,15 +167,11 @@ function TorrentInfo({ entryId }: { entryId: string }) {
       <Details
         columns={4}
         items={[
-          { label: t('Name'), value: data.name, wide: true },
           ...(data.pieceCount !== null
             ? [{ label: t('Pieces'), value: data.pieceLength === null ? data.pieceCount : `${data.pieceCount} (${formatBytes(data.pieceLength)})` }]
             : []),
           { label: t('Size'), value: formatBytes(data.totalBytes) },
-          ...(data.source ? [{ label: t('Source'), value: data.source }] : []),
           ...(data.createdBy ? [{ label: t('Created by'), value: data.createdBy }] : []),
-          ...(data.createdAt ? [{ label: t('Creation date'), value: new Date(data.createdAt).toLocaleDateString(getLanguage()) }] : []),
-          ...(data.private ? [{ label: t('Privacy'), value: t('Private torrent') }] : []),
           ...(data.comment ? [{ label: t('Comment'), value: <CommentText text={data.comment} />, wide: true }] : []),
         ]}
       />
