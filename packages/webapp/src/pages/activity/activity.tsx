@@ -697,6 +697,8 @@ function StageMenu({ summary, filters, setFilters }: { summary: QueueSummary | u
   counts.queued = (counts.queued ?? 0) + (summary?.counts.not_found ?? 0) + (summary?.counts.no_match ?? 0);
   counts.searching = (counts.searching ?? 0) + (summary?.counts.fetching ?? 0);
   counts.importing = (counts.importing ?? 0) + (summary?.counts.validating ?? 0);
+  // A download is one torrent of the client. A pack holds many targets of one series, and it counts once.
+  counts.downloading = summary?.activeTransfers ?? 0;
   return (
     <SubMenu
       fill
@@ -790,6 +792,9 @@ function QueueView() {
   // The button of the row opens the inspector in a narrow window, and the button of the inspector returns to the list.
   const rowButton = useRef<HTMLButtonElement | null>(null);
   const backButton = useRef<HTMLButtonElement | null>(null);
+  // The inspector opens at the row that the user clicked, so a row far down the list does not send the view to the top.
+  const listBox = useRef<HTMLDivElement | null>(null);
+  const [inspectorTop, setInspectorTop] = useState(0);
 
   const [preview, setPreview] = useState<{ body: Parameters<typeof send>[0]; data: QueueActionPreview } | null>(null);
   const [deletion, setDeletion] = useState<{ request: PlanRequest; subject: string } | null>(null);
@@ -894,7 +899,11 @@ function QueueView() {
 
   // A click on a row selects it. In a narrow window the list goes away, so the inspector shows at once.
   const inspect = (row: QueueRow) => {
-    setSelected(rowKey(row));
+    const key = rowKey(row);
+    const grid = listBox.current;
+    const target = grid ? [...grid.querySelectorAll<HTMLElement>('[data-row]')].find((element) => element.dataset.row === key) : undefined;
+    if (grid && target) setInspectorTop(Math.round(target.getBoundingClientRect().top - grid.getBoundingClientRect().top));
+    setSelected(key);
     if (window.matchMedia(`(max-width: ${NARROW - 1}px)`).matches) setOpen(true);
   };
 
@@ -913,6 +922,7 @@ function QueueView() {
   useEffect(() => {
     setSelected(null);
     setOpen(false);
+    setInspectorTop(0);
   }, [filters, page]);
 
   const rows = items.map((row) => ({
@@ -985,7 +995,7 @@ function QueueView() {
         </Pane>
       )}
       {!failed && !empty && (
-        <div className="grid gap-6 min-[800px]:grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)] min-[800px]:items-start">
+        <div ref={listBox} className="grid gap-6 min-[800px]:grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)] min-[800px]:items-start">
           {/* A narrow window shows the list alone while the inspector is closed. */}
           <div className={`grid gap-4 min-w-0 ${open ? 'max-[800px]:hidden' : ''}`}>
             <Pane className="w-full">
@@ -1003,31 +1013,34 @@ function QueueView() {
             {/* The page control lies under the pane, so the table keeps the whole pane and the control is not part of its container. */}
             {pages > 1 && <Pagination aria-label={t('Pages')} page={page + 1} count={pages} onPageChange={(next) => setPage(next - 1)} />}
           </div>
-          {/* The inspector takes the height of its content. A tall detail grows down the page, and the pane has no scroll. */}
-          <div className={`grid gap-6 min-w-0 ${open ? '' : 'max-[800px]:hidden'}`}>
-            {chosen ? (
-              <>
+          {/* The inspector is out of the flow, so it opens at the row that was clicked and grows with its content.
+              On a narrow window it is the only column and keeps its place. */}
+          <div className={`min-w-0 min-[800px]:relative ${open ? '' : 'max-[800px]:hidden'}`}>
+            <div className="grid gap-6 min-[800px]:absolute min-[800px]:inset-x-0" style={{ top: inspectorTop }}>
+              {chosen ? (
+                <>
+                  <Pane className="w-full">
+                    <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(row) => setDeletion({ request: { action: 'remove', keys: [row.titleKey] }, subject: row.title })} onBack={back} backRef={backButton} />
+                  </Pane>
+                  {chosen.kind === 'group' ? (
+                    <>
+                      <GroupRejected group={chosen} filters={filters} refresh={refresh} />
+                      <Pane className="w-full">
+                        <SeriesBlocklist titleKey={chosen.titleKey} />
+                      </Pane>
+                    </>
+                  ) : (
+                    <MovieRejected entry={chosen} refresh={refresh} />
+                  )}
+                </>
+              ) : (
                 <Pane className="w-full">
-                  <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(row) => setDeletion({ request: { action: 'remove', keys: [row.titleKey] }, subject: row.title })} onBack={back} backRef={backButton} />
+                  <div className="grid place-items-center">
+                    <Spinner label={t('Loading')} />
+                  </div>
                 </Pane>
-                {chosen.kind === 'group' ? (
-                  <>
-                    <GroupRejected group={chosen} filters={filters} refresh={refresh} />
-                    <Pane className="w-full">
-                      <SeriesBlocklist titleKey={chosen.titleKey} />
-                    </Pane>
-                  </>
-                ) : (
-                  <MovieRejected entry={chosen} refresh={refresh} />
-                )}
-              </>
-            ) : (
-              <Pane className="w-full">
-                <div className="grid place-items-center">
-                  <Spinner label={t('Loading')} />
-                </div>
-              </Pane>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
