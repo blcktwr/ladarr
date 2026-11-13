@@ -82,11 +82,12 @@ const PAGES: [string, Opener][] = [
     },
   ],
   [
-    'activity blocklist',
+    'activity without a blocklist',
     async (page) => {
       await activityPage(page);
-      // The first row of the queue is the series, so the page selects its detail by default.
-      await expect(page.getByRole('region', { name: 'Blocklist' })).toBeVisible();
+      // The first row of the queue is the series, so the page selects its detail by default. Nothing is on the
+      // blocklist, so its container does not show.
+      await expect(page.getByRole('region', { name: 'Blocklist' })).toHaveCount(0);
     },
   ],
   ['calendar', open('/calendar', (page) => expect(page.getByText('Nothing is scheduled.')).toBeVisible())],

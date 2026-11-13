@@ -313,7 +313,6 @@ export const es: Record<string, string> = {
   'No request entries.': 'No hay entradas de la petición.',
   'Details of {message}': 'Detalles de {message}',
   'No problems': 'Sin problemas',
-  'No release is blocked.': 'Ningún lanzamiento está bloqueado.',
   'Not used yet': 'Aún sin usar',
   'Now': 'Ahora',
   'Outbound': 'Salientes',

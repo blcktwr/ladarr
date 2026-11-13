@@ -1130,16 +1130,12 @@ function QueueView() {
                   {chosen.kind === 'group' ? (
                     <>
                       <GroupRejected group={chosen} filters={filters} refresh={refresh} />
-                      <Pane className="w-full">
-                        <Blocklist titleKey={chosen.titleKey} />
-                      </Pane>
+                      <Blocklist titleKey={chosen.titleKey} />
                     </>
                   ) : (
                     <>
                       <MovieRejected entry={chosen} refresh={refresh} />
-                      <Pane className="w-full">
-                        <Blocklist titleKey={chosen.titleKey} />
-                      </Pane>
+                      <Blocklist titleKey={chosen.titleKey} />
                     </>
                   )}
                 </>

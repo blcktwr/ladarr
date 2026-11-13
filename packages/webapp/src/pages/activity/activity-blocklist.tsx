@@ -3,7 +3,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../../lib/api.ts';
-import { Button, EmptyState, Section, Table, Text } from 'nebula';
+import { Button, Pane, Section, Table, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { Confirm } from '../../components/index.ts';
@@ -49,51 +49,48 @@ export function Blocklist({ titleKey }: { titleKey: string }) {
     }
   }
 
+  // The container shows only when a release is on the list. A failed read still shows, with its message.
+  if (!error && total === 0) return null;
+
   return (
-    <Section title={t('Blocklist')}
-      action={
-        total > 0 && (
-          <Confirm label={t('Clear the blocklist')} title={t('Clear the blocklist?')} confirm={t('Clear the blocklist')} onConfirm={() => void clear()}>
-            {t('Blocked releases can be taken again.')}
-          </Confirm>
-        )
-      }
-      actions={
-        hasNextPage && (
-          <Button variant="ghost" pending={loading} onClick={() => void fetchNextPage()}>
-            {t('Show more')}
-          </Button>
-        )
-      }
-    >
-      {message && <Alert tone="danger">{message}</Alert>}
-      {error && !data ? (
-        <LoadFailed onRetry={() => void refetch()} />
-      ) : (
-        <>
-          {rows?.length === 0 ? (
-            <EmptyState>{t('No release is blocked.')}</EmptyState>
-          ) : (
-            <Table
-              aria-label={t('Blocklist')}
-              loading={!rows}
-              columns={[{ label: t('Title') }, { label: t('Actions'), align: 'end', hideLabel: true }]}
-              rows={rows?.map((row) => ({
-                key: row.id,
-                cells: [
-                  <div className="grid gap-1">
-                    <span>{row.title}</span>
-                    <Text variant="small">{t(row.reason.message)}</Text>
-                  </div>,
-                  <Button variant="ghost" iconOnly aria-label={t('Delete {title} from the blocklist', { title: row.title })} onClick={() => void remove(row)}>
-                    <Trash2 />
-                  </Button>,
-                ],
-              }))}
-            />
-          )}
-        </>
-      )}
-    </Section>
+    <Pane className="w-full">
+      <Section title={t('Blocklist')}
+        action={
+          total > 0 && (
+            <Confirm label={t('Clear the blocklist')} title={t('Clear the blocklist?')} confirm={t('Clear the blocklist')} onConfirm={() => void clear()}>
+              {t('Blocked releases can be taken again.')}
+            </Confirm>
+          )
+        }
+        actions={
+          hasNextPage && (
+            <Button variant="ghost" pending={loading} onClick={() => void fetchNextPage()}>
+              {t('Show more')}
+            </Button>
+          )
+        }
+      >
+        {message && <Alert tone="danger">{message}</Alert>}
+        {error && !data ? <LoadFailed onRetry={() => void refetch()} /> : (
+          <Table
+            aria-label={t('Blocklist')}
+            loading={!rows}
+            columns={[{ label: t('Title') }, { label: t('Actions'), align: 'end', hideLabel: true }]}
+            rows={rows?.map((row) => ({
+              key: row.id,
+              cells: [
+                <div className="grid gap-1">
+                  <span>{row.title}</span>
+                  <Text variant="small">{t(row.reason.message)}</Text>
+                </div>,
+                <Button variant="ghost" iconOnly aria-label={t('Delete {title} from the blocklist', { title: row.title })} onClick={() => void remove(row)}>
+                  <Trash2 />
+                </Button>,
+              ],
+            }))}
+          />
+        )}
+      </Section>
+    </Pane>
   );
 }
