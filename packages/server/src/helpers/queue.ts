@@ -6,7 +6,7 @@ import { type Db, db } from '../core/db.ts';
 import type { Job } from '../core/jobs.ts';
 import { reasonInfo } from '../core/reasons.ts';
 import type { ImportStatus } from '../library/imports/status.ts';
-import type { Title } from '../library/library.ts';
+import { availability, type Title } from '../library/library.ts';
 import type { Poller, Transfer } from '../library/downloads/poller.ts';
 import { isActive, queueKey, STAGES, type QueueEntry } from '../library/downloads/queue.ts';
 
@@ -257,6 +257,9 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
     manualMatch: entry.manualMatch,
   };
 }
+
+// A title whose release has not come, or whose episodes have not aired, is upcoming. Its bookmark shows a clock.
+export const isUpcoming = (title: Title) => availability(title, { now: Date.now(), files: db.data.files }) === 'waiting';
 
 export type Filters = { key?: string; type?: string; q?: string; priority: boolean; cleared: boolean };
 export const filtersOf = (query: Record<string, unknown>): Filters => ({

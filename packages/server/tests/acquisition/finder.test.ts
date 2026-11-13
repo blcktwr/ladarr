@@ -50,6 +50,21 @@ describe('cache', () => {
   });
 });
 
+describe('release date', () => {
+  it('waits for the release date before the next search', async () => {
+    pipe = await startPipeline();
+    const date = '2999-01-01T00:00:00.000Z';
+    const m = movie({ rootId: 'movie', manualRelease: false, meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date }] } });
+    pipe.db.data.titles[m.key] = m;
+    pipe.tracker.state.items = [];
+
+    const [entry] = pipe.finder.requestSearch(m.key, { manual: true, fresh: true });
+    await until(() => entry!.branch === 'waiting');
+
+    expect(entry!.search!.nextAt).toBe(Date.parse(date));
+  });
+});
+
 describe('RSS', () => {
   it('takes a new release for a missing target without a search', async () => {
     pipe = await startPipeline();

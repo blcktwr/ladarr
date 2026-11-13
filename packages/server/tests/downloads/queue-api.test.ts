@@ -52,6 +52,25 @@ describe('requests and summary', () => {
     expect(started.body.started).toEqual([film.key]);
   });
 
+  it('puts the targets of a title that waits for its release at the end', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const waiting = movie({ key: 'movie:3', tmdbId: 3, meta: { ...movie().meta, tmdbId: 3 }, rootId: 'movie', manualRelease: false });
+    const released = movie({ rootId: 'movie', manualRelease: true });
+    pipe.db.data.titles[waiting.key] = waiting;
+    pipe.db.data.titles[released.key] = released;
+    pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
+
+    // The waiting title enters the queue first, so it would come first without the sort of the list.
+    expect((await api.post('/queue/search', { titleKey: waiting.key })).status).toBe(202);
+    await until(() => pipe!.queue.get('movie:3')!.attempt > 0);
+    expect((await api.post('/queue/search', { titleKey: released.key })).status).toBe(202);
+    await until(() => pipe!.queue.get('movie:2')!.attempt > 0);
+
+    const rows = (await api.get('/queue')).body.items.map((row: { titleKey: string }) => row.titleKey);
+    expect(rows).toEqual(['movie:2', 'movie:3']);
+  });
+
   it('names the quality of the release of an entry', async () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });

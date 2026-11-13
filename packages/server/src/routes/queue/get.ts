@@ -4,7 +4,7 @@ import type { RequestHandler } from 'express';
 import type { Poller } from '../../library/downloads/poller.ts';
 import { isActive, loadingTitleKeys, queueKey, type QueueEntry } from '../../library/downloads/queue.ts';
 import type { ImportStatus } from '../../library/imports/status.ts';
-import { filtersOf, lanePositions, matches, MAX_PAGE, progressOf, reachedOf, shown, STAGE_RANK, titleOf, view } from '../../helpers/queue.ts';
+import { filtersOf, isUpcoming, lanePositions, matches, MAX_PAGE, progressOf, reachedOf, shown, STAGE_RANK, titleOf, view } from '../../helpers/queue.ts';
 
 // One page of rows: one row for each season of a series, and one row for each movie. Rows with the most advanced
 // progress come first, and ties keep the order of creation. A row leaves the list when its targets are all available.
@@ -26,11 +26,11 @@ export function queueGet(poller: Poller, importStatus: ImportStatus | undefined)
     // The progress of a group is that of its least advanced target, so the number of episodes does not matter. The
     // part of its download is that of its least advanced downloading target, the one that ends the wait for
     // Validating.
-    const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number; download: number; ready: boolean; searching: boolean }>();
+    const groups = new Map<string, { entries: QueueEntry[]; matching: number; first: number; progress: number; download: number; ready: boolean; searching: boolean; upcoming: boolean }>();
     for (const entry of all) {
       if (!shown(entry) || (!f.cleared && entry.clearedAt)) continue;
       const key = entry.season === null ? entry.id : `${entry.titleKey}:${entry.season}`;
-      const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY, download: -1, ready: false, searching: false };
+      const group = groups.get(key) ?? { entries: [], matching: 0, first: entry.createdAt, progress: Number.POSITIVE_INFINITY, download: -1, ready: false, searching: false, upcoming: isUpcoming(titleOf(entry)!) };
       group.entries.push(entry);
       if (matches(entry, f)) group.matching++;
       group.first = Math.min(group.first, entry.createdAt);
@@ -56,9 +56,10 @@ export function queueGet(poller: Poller, importStatus: ImportStatus | undefined)
       if (!title) continue;
       const matchesLoading = !f.cleared && !f.priority && (!f.key || f.key === 'searching') && (!f.type || f.type === 'tv') && (!f.q || title.meta.title.toLowerCase().includes(f.q));
       if (!matchesLoading) continue;
-      groups.set(key, { entries: [], matching: 1, first: title.addedAt, progress: STAGE_RANK.get('searching')!, download: -1, ready: false, searching: true });
+      groups.set(key, { entries: [], matching: 1, first: title.addedAt, progress: STAGE_RANK.get('searching')!, download: -1, ready: false, searching: true, upcoming: isUpcoming(title) });
     }
-    const rows = [...groups.entries()].filter(([, g]) => g.matching > 0 && Number.isFinite(g.progress)).sort((a, b) => b[1].progress - a[1].progress || b[1].download - a[1].download || Number(b[1].ready) - Number(a[1].ready) || Number(b[1].searching) - Number(a[1].searching) || a[1].first - b[1].first || a[0].localeCompare(b[0]));
+    // A title that waits for its release has no work in the queue yet, so its rows go after the rest.
+    const rows = [...groups.entries()].filter(([, g]) => g.matching > 0 && Number.isFinite(g.progress)).sort((a, b) => Number(a[1].upcoming) - Number(b[1].upcoming) || b[1].progress - a[1].progress || b[1].download - a[1].download || Number(b[1].ready) - Number(a[1].ready) || Number(b[1].searching) - Number(a[1].searching) || a[1].first - b[1].first || a[0].localeCompare(b[0]));
     const items: QueueRow[] = rows.slice(offset, offset + limit).map(([key, group]) => {
       const first = group.entries[0];
       if (!first) {

@@ -16,6 +16,12 @@ import { requestIdFor } from '../../core/outbound.ts';
 
 // How long a waiting entry waits before the next search. The RSS sync finds new releases in between.
 export const RESEARCH_MS = 12 * 60 * 60_000;
+// A title that waits for its release is searched again when that date comes, not after a few hours.
+const nextSearchAt = (title: Title, at: number) => {
+  if (title.mediaType !== 'movie' || title.manualRelease) return at + RESEARCH_MS;
+  const release = movieEligibleAt(title);
+  return release !== null && release > at ? release : at + RESEARCH_MS;
+};
 const CACHE_MS = 5 * 60_000;
 const CACHE_MAX = 200;
 const DAY_MS = 24 * 60 * 60_000;
@@ -442,7 +448,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
             sizeRejection: sizeCode && sizeLimit != null && decision.mibPerMinute !== null ? { code: sizeCode, value: decision.mibPerMinute, limit: sizeLimit } : null,
           };
         });
-      Object.assign(entry.search!, { result: code === 'no_indexers' ? 'no_results' : code, accepted: 0, candidates: decisions.length, topRejections: rejections, nextAt: now() + RESEARCH_MS, rejected });
+      Object.assign(entry.search!, { result: code === 'no_indexers' ? 'no_results' : code, accepted: 0, candidates: decisions.length, topRejections: rejections, nextAt: nextSearchAt(title, now()), rejected });
       // The releases that came closest to acceptance first: the fewest reasons, then the most seeders. A person sees
       // what the indexers offered and which rule stopped each one.
       const explained = decisions.map((decision) =>
