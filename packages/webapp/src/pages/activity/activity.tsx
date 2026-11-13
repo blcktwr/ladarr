@@ -61,7 +61,8 @@ const idle = (entry: QueueEntryView) => entry.reason !== null || entry.branch ==
 
 // The status at the top of a detail view: the indicator, the message that explains it, and a divider before the
 // content below. A series and a movie use this same block, so the two details keep the same spacing. The bar of a
-// series shows the part of its episodes that is complete, above the message that counts them.
+// series shows the part of its download while the client downloads it, and the part of its episodes that is complete
+// otherwise, above the message that counts them.
 function DetailStatus({ status, icon, message, bar, divider = true, action, children }: { status: string; icon: string; message: string | null; bar?: ReactNode; divider?: boolean; action?: ReactNode; children?: ReactNode }) {
   return (
     <div className="grid gap-4">
@@ -685,10 +686,15 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
       : status === 'stuck' && stuckReason
         ? t(stuckReason)
         : t('{count} / {total} episodes', { count: completed, total });
-  // The bar of the whole series: the part of its episodes that is complete. A series that the search did not find
-  // has no work to fill.
+  // The bar of the whole series: the part of its episodes that is complete, or the part of its download that the
+  // client reports while it downloads. A series that the search did not find has no work to fill.
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-  const bar = status === 'not_found' ? undefined : <Progress value={percent} label={t('{count} / {total} episodes', { count: completed, total })} />;
+  const bar =
+    status === 'not_found' ? undefined : status === 'downloading' ? (
+      <Progress value={Math.round((group.download ?? 0) * 100)} label={`${groupName(group)} ${t('Download')}`} />
+    ) : (
+      <Progress value={percent} label={t('{count} / {total} episodes', { count: completed, total })} />
+    );
   return (
     <div className="grid min-w-0">
       <div className="grid gap-4">

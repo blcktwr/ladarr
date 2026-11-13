@@ -551,6 +551,9 @@ export type QueueGroupRow = {
   season: number | null;
   total: number;
   reached: QueueReached;
+  // The part of the download that the client reports for the least advanced download that runs, from 0 to 1. Null
+  // when no target of the group downloads.
+  download: number | null;
   matching: number;
   counts: Record<string, number>;
   priority: boolean;

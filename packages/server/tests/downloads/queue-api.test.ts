@@ -328,6 +328,47 @@ describe('requests and summary', () => {
     expect(children.map((child: { stage: string }) => child.stage)).toEqual(['available', 'available']);
   });
 
+  it('gives a group the part of the download that the client reports for its torrent', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const series = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
+    pipe.db.data.titles[series.key] = series;
+    const pack = 'Show.Name.S01.1080p.WEB-DL-GRP';
+    const files = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'];
+    pipe.tracker.state.items = [{ title: pack, size: 2 * 60 * 45 * MIB, files }];
+    pipe.finder.requestSearch(series.key);
+    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => pipe!.queue.get(id)!.stage === 'downloading'));
+
+    // The torrent has half of the pack, and each file has its own part. The group shows the part of the torrent, so the
+    // bar of the inspector matches the percentage of the client, and not the part of the least advanced file.
+    const hash = hashOf(pack, files);
+    pipe.qbit.progress(hash, 0.5);
+    pipe.qbit.setFiles(hash, [
+      { name: `${pack}/Show.Name.S01E01.mkv`, size: 60 * 45 * MIB, progress: 0.9 },
+      { name: `${pack}/Show.Name.S01E02.mkv`, size: 60 * 45 * MIB, progress: 0.7 },
+    ]);
+    await until(() => pipe!.poller.transfer(hash)?.entryProgress?.['tv:1:1x1'] === 0.9 && pipe!.poller.transfer(hash)?.entryProgress?.['tv:1:1x2'] === 0.7);
+
+    expect((await api.get('/queue')).body.items[0].download).toBe(0.5);
+  });
+
+  it('gives a group no part of a download when none of its targets downloads', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    // The worker stays away, so the targets keep the stage that the test gives them.
+    await pipe.worker.pause();
+    const series = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
+    pipe.db.data.titles[series.key] = series;
+    // Both episodes search. The client has no transfer for the season.
+    for (const number of [1, 2]) {
+      const entry = pipe.queue.ensure(series.key, 1, number);
+      pipe.queue.request(entry, 'test');
+      pipe.queue.move(entry, { stage: 'searching' }, 'test');
+    }
+
+    expect((await api.get('/queue')).body.items[0]).toMatchObject({ kind: 'group', key: 'tv:1:1', download: null });
+  });
+
   it('tells the work apart from the targets that stopped', async () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });
