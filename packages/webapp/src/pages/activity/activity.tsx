@@ -167,10 +167,10 @@ function TorrentInfo({ entryId }: { entryId: string }) {
         columns={4}
         items={[
           { label: t('Name'), value: data.name, wide: true },
-          ...(data.pieceCount !== null ? [{ label: t('Piece count'), value: data.pieceCount }] : []),
-          ...(data.pieceLength !== null ? [{ label: t('Piece size'), value: formatBytes(data.pieceLength) }] : []),
+          ...(data.pieceCount !== null
+            ? [{ label: t('Pieces'), value: data.pieceLength === null ? data.pieceCount : `${data.pieceCount} (${formatBytes(data.pieceLength)})` }]
+            : []),
           { label: t('Size'), value: formatBytes(data.totalBytes) },
-          { label: t('Files'), value: data.files.length },
           ...(data.source ? [{ label: t('Source'), value: data.source }] : []),
           ...(data.createdBy ? [{ label: t('Created by'), value: data.createdBy }] : []),
           ...(data.createdAt ? [{ label: t('Creation date'), value: new Date(data.createdAt).toLocaleDateString(getLanguage()) }] : []),
@@ -179,7 +179,7 @@ function TorrentInfo({ entryId }: { entryId: string }) {
         ]}
       />
       <Divider />
-      <Section title={t('Files')}>
+      <Section title={t('Files ({count})', { count: data.files.length })}>
         <Tree aria-label={t('Files in the torrent')} items={torrentTree(data)} />
       </Section>
     </>
