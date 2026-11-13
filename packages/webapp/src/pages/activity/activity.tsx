@@ -792,9 +792,10 @@ function QueueView() {
   // The button of the row opens the inspector in a narrow window, and the button of the inspector returns to the list.
   const rowButton = useRef<HTMLButtonElement | null>(null);
   const backButton = useRef<HTMLButtonElement | null>(null);
-  // The inspector opens at the row that the user clicked, so a row far down the list does not send the view to the top.
+  // The inspector opens at the row that the user clicked when the top of the list is out of view, so a row far down
+  // the list does not send the view to the top. Null keeps it at the top of the list, in the flow.
   const listBox = useRef<HTMLDivElement | null>(null);
-  const [inspectorTop, setInspectorTop] = useState(0);
+  const [inspectorTop, setInspectorTop] = useState<number | null>(null);
 
   const [preview, setPreview] = useState<{ body: Parameters<typeof send>[0]; data: QueueActionPreview } | null>(null);
   const [deletion, setDeletion] = useState<{ request: PlanRequest; subject: string } | null>(null);
@@ -901,8 +902,13 @@ function QueueView() {
   const inspect = (row: QueueRow) => {
     const key = rowKey(row);
     const grid = listBox.current;
-    const target = grid ? [...grid.querySelectorAll<HTMLElement>('[data-row]')].find((element) => element.dataset.row === key) : undefined;
-    if (grid && target) setInspectorTop(Math.round(target.getBoundingClientRect().top - grid.getBoundingClientRect().top));
+    const rowBox = grid ? [...grid.querySelectorAll<HTMLElement>('[data-row]')].find((element) => element.dataset.row === key) : undefined;
+    if (grid && rowBox) {
+      const top = grid.getBoundingClientRect().top;
+      // The top of the list is in view, so the inspector keeps its place there. It moves to the row only when the
+      // list scrolls its top away, and then it lands where the user reads.
+      setInspectorTop(top >= 0 ? null : Math.round(rowBox.getBoundingClientRect().top - top));
+    }
     setSelected(key);
     if (window.matchMedia(`(max-width: ${NARROW - 1}px)`).matches) setOpen(true);
   };
@@ -922,7 +928,7 @@ function QueueView() {
   useEffect(() => {
     setSelected(null);
     setOpen(false);
-    setInspectorTop(0);
+    setInspectorTop(null);
   }, [filters, page]);
 
   const rows = items.map((row) => ({
@@ -1013,10 +1019,10 @@ function QueueView() {
             {/* The page control lies under the pane, so the table keeps the whole pane and the control is not part of its container. */}
             {pages > 1 && <Pagination aria-label={t('Pages')} page={page + 1} count={pages} onPageChange={(next) => setPage(next - 1)} />}
           </div>
-          {/* The inspector is out of the flow, so it opens at the row that was clicked and grows with its content.
-              On a narrow window it is the only column and keeps its place. */}
+          {/* The inspector keeps the top of the list, in the flow. When the list scrolls its top away, it leaves the
+              flow and opens at the row that was clicked, so the detail lands where the user reads. */}
           <div className={`min-w-0 min-[800px]:relative ${open ? '' : 'max-[800px]:hidden'}`}>
-            <div className="grid gap-6 min-[800px]:absolute min-[800px]:inset-x-0" style={{ top: inspectorTop }}>
+            <div className={`grid gap-6 ${inspectorTop === null ? '' : 'min-[800px]:absolute min-[800px]:inset-x-0'}`} style={inspectorTop === null ? undefined : { top: inspectorTop }}>
               {chosen ? (
                 <>
                   <Pane className="w-full">
