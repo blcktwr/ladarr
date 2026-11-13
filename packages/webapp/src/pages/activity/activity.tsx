@@ -60,12 +60,14 @@ const nameOf = (row: QueueRow) => (row.kind === 'group' ? groupName(row) : row.l
 const idle = (entry: QueueEntryView) => entry.reason !== null || entry.branch === 'waiting' || entry.branch === 'cancelled';
 
 // The status at the top of a detail view: the indicator, the message that explains it, and a divider before the
-// content below. A series and a movie use this same block, so the two details keep the same spacing.
-function DetailStatus({ status, icon, message, divider = true, action, children }: { status: string; icon: string; message: string | null; divider?: boolean; action?: ReactNode; children?: ReactNode }) {
+// content below. A series and a movie use this same block, so the two details keep the same spacing. The bar of a
+// series shows the part of its episodes that is complete, above the message that counts them.
+function DetailStatus({ status, icon, message, bar, divider = true, action, children }: { status: string; icon: string; message: string | null; bar?: ReactNode; divider?: boolean; action?: ReactNode; children?: ReactNode }) {
   return (
     <div className="grid gap-4">
       <div className="grid gap-2">
         <StatusText small status={status} icon={icon} help={message ?? statusHelpText(icon)} />
+        {bar}
         {message && <Text variant="small">{message}</Text>}
         {action && <div className="flex justify-start mt-2">{action}</div>}
         {children}
@@ -596,10 +598,14 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
       : status === 'stuck' && stuckReason
         ? t(stuckReason)
         : t('{count} / {total} episodes', { count: completed, total });
+  // The bar of the whole series: the part of its episodes that is complete. A series that the search did not find
+  // has no work to fill.
+  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const bar = status === 'not_found' ? undefined : <Progress value={percent} label={t('{count} / {total} episodes', { count: completed, total })} />;
   return (
     <div className="grid min-w-0">
       <div className="grid gap-4">
-        {status ? <DetailStatus status={statusLabel(status)} icon={status} message={message} divider={!importing} /> : <Text>—</Text>}
+        {status ? <DetailStatus status={statusLabel(status)} icon={status} bar={bar} message={message} divider={!importing} /> : <Text>—</Text>}
         {importing && <ImportChecks entry={importing} />}
         {importing && unique.length > 0 && <Divider />}
         {unique.length > 0 && (
