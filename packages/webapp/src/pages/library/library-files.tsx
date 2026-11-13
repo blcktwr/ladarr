@@ -91,6 +91,7 @@ export function FileInfoDialog({ titleKey, resolution, onClose }: { titleKey: st
       open
       onOpenChange={(open) => !open && onClose()}
       title={t('Downloaded file')}
+      hideTitle
       width="lg"
       actions={
         <Button variant="ghost" onClick={onClose}>
