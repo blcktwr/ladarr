@@ -444,7 +444,11 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
             source: decision.parsed.source,
             kind: decision.kind,
             grabbable: want ? decide(decision.release, want, manualCtx).accepted : false,
-            reasons: decision.rejections.map((code) => REJECTION_TEXT[code] ?? code),
+            // The blocklist keeps a failed release out of the automatic searches. It is not a reason for the person,
+            // who can still take the release by hand.
+            reasons: decision.rejections
+              .filter((code) => code !== 'blocklisted')
+              .map((code) => REJECTION_TEXT[code] ?? code),
             sizeRejection: sizeCode && sizeLimit != null && decision.mibPerMinute !== null ? { code: sizeCode, value: decision.mibPerMinute, limit: sizeLimit } : null,
           };
         });

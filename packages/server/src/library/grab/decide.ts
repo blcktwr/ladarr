@@ -1,12 +1,11 @@
 import { type Data, type Settings, db, profilesFor } from '../../core/db.ts';
 import { WANT_KIND } from '@ladarr/shared/enums';
 import type { Indexer } from './indexers.ts';
-import { isMonitored, type Episode, type Title } from '../library.ts';
+import { type Episode, type Title } from '../library.ts';
 import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE, type Profile, type SizeLimits } from './quality.ts';
 import { normalizeTitle, parseRelease, type ParsedRelease } from './release.ts';
 import type { Covered } from '../downloads/queue.ts';
 import type { RawRelease } from './torznab.ts';
-import { episodeEligibleAt } from '../../core/dates.ts';
 
 // What a search looks for. A season want accepts a pack only.
 // `upgradeQuality` is the quality of a manual upgrade. The want then accepts a release of exactly that quality.
@@ -63,7 +62,6 @@ export const REJECTION_TEXT: Record<string, string> = {
   daily_ambiguous: 'The air date matches more than one episode, or none.',
   multi_season_pack: 'The release holds more than one season.',
   covers_available_episode: 'The release covers an episode that is available already.',
-  pack_has_unwanted_episodes: 'The season has episodes that cannot be taken now.',
   already_available: 'A file is available for this target.',
   not_an_upgrade: 'The quality of the release is not better than the quality of the current file.',
   upgrade_needs_single: 'The release is for several episodes. It cannot replace the file of one episode.',
@@ -86,10 +84,6 @@ export function titleMatches(parsedTitle: string, title: Title) {
   return wanted !== '' && alias(title).includes(wanted);
 }
 
-const episodeAired = (episode: Episode, now: number) => {
-  const at = episodeEligibleAt(episode.airDate);
-  return at !== null && at <= now;
-};
 
 export function decide(release: RawRelease, want: Want, ctx: Context): Decision {
   const { title } = want;
@@ -136,11 +130,6 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
     else {
       const inSeason = title.episodes.filter((episode) => episode.season === want.season);
       covers = inSeason.map((episode) => ({ season: episode.season, number: episode.number }));
-      // A pack must bring at least one episode that is wanted and has no file, and no episode that the user did not
-      // ask for. A file that the pack carries for an episode that the library has is skipped by the import.
-      const missing = inSeason.some((episode) => episodeAired(episode, ctx.now) && isMonitored(title, episode) && !ctx.hasFile(episode));
-      const unmonitored = inSeason.some((episode) => episodeAired(episode, ctx.now) && !isMonitored(title, episode));
-      if ((!missing || unmonitored) && !ctx.manual) reject('pack_has_unwanted_episodes');
       if (!inSeason.length) reject('wrong_season');
     }
   }
@@ -169,7 +158,8 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   if (!indexer || !push) reject('indexer_removed');
   if (!release.link && !release.magnet) reject('no_download_link');
   const hash = release.infoHash;
-  if (ctx.blocked(release, hash)) reject('blocklisted');
+  // The blocklist keeps a release that failed out of the automatic searches. A person can still take it by hand.
+  if (!ctx.manual && ctx.blocked(release, hash)) reject('blocklisted');
   if (hash && ctx.downloading(hash)) reject('already_downloading');
   // A want with `upgradeQuality` is for a target that has a file. The release must have exactly the chosen quality.
   if (want.kind !== 'season' && want.upgradeQuality !== undefined) {

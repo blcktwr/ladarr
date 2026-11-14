@@ -42,12 +42,22 @@ test('downloads a release that the automatic search rejected', async ({ page }) 
   // The list of the releases that the search rejected has a title above it.
   await expect(page.getByRole('heading', { name: 'Rejected releases' })).toBeVisible();
 
-  // The inspector lists every release that the search rejected. A release of another title breaks a safety check, so
-  // it has no download button, and the row says why.
+  // The inspector lists every release that the search rejected. Every row opens the files of its .torrent. A release
+  // of another title breaks a safety check, so it has no download button, and the row says why.
   const wrong = page.getByRole('row').filter({ hasText: WRONG });
   await expect(wrong).toBeVisible();
-  await expect(wrong.getByRole('button')).toHaveCount(0);
+  await expect(wrong.getByRole('button', { name: /^Download/ })).toHaveCount(0);
+  await expect(wrong.getByRole('button', { name: 'Files in the torrent' })).toHaveCount(1);
   await expect(wrong).toContainText('The title of the release is not this title.');
+
+  // The files of the .torrent of a rejected release open in a modal. The fake tracker sends a one-file torrent whose
+  // file is the name of the release. Esc closes the modal.
+  await wrong.getByRole('button', { name: 'Files in the torrent' }).click();
+  const torrent = page.getByRole('dialog', { name: 'Torrent' });
+  await expect(torrent).toBeVisible();
+  await expect(torrent.getByRole('tree', { name: 'Files in the torrent' })).toContainText(WRONG);
+  await page.keyboard.press('Escape');
+  await expect(torrent).toBeHidden();
 
   // A 720p BluRay that only the profile rejected keeps its button. A person can take it by hand. The quality and the
   // size lie above the name of the release, and the reason that stopped it lies below.

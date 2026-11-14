@@ -149,8 +149,8 @@ function torrentTree(data: QueueTorrent): TreeNode[] {
 
 // What the .torrent of the release holds: what the file says about itself, and its files. The modal is the pane, so the
 // blocks follow each other with a groove between them, and no other box goes inside.
-function TorrentInfo({ entryId }: { entryId: string }) {
-  const { data, error } = useQuery<QueueTorrent>({ queryKey: [`/queue/entries/${entryId}/torrent`] });
+function TorrentInfo({ path }: { path: string }) {
+  const { data, error } = useQuery<QueueTorrent>({ queryKey: [path] });
   // The alert of the app shows under the modal, so the error shows in the modal.
   if (error) return <p role="alert">{t('The file list of the torrent is not available.')}</p>;
   if (!data) {
@@ -194,7 +194,7 @@ function ReleaseDetails({ entryId, release }: { entryId: string; release: NonNul
             <div className="flex items-center justify-between gap-3">
               <span className="min-w-0">{release.title}</span>
               <Modal trigger={<Button iconOnly variant="ghost" aria-label={t('Files in the torrent')}><Info /></Button>} title={t('Torrent')} width="lg">
-                <TorrentInfo entryId={entryId} />
+                <TorrentInfo path={`/queue/entries/${entryId}/torrent`} />
               </Modal>
             </div>
           ),
@@ -304,11 +304,20 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
                     </Text>
                   ))}
                 </div>,
-                item.release.grabbable ? (
-                  <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
-                    <Check />
-                  </Button>
-                ) : null,
+                <div className="flex items-center justify-end gap-2">
+                  <Modal
+                    trigger={<Button iconOnly variant="ghost" aria-label={t('Files in the torrent')}><Info /></Button>}
+                    title={t('Torrent')}
+                    width="lg"
+                  >
+                    <TorrentInfo path={`/queue/entries/${item.entry.id}/releases/torrent?indexerId=${item.release.indexerId}&guid=${encodeURIComponent(item.release.guid)}`} />
+                  </Modal>
+                  {item.release.grabbable ? (
+                    <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
+                      <Check />
+                    </Button>
+                  ) : null}
+                </div>,
               ],
             };
           })}

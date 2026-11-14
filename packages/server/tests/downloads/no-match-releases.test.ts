@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { movie } from '../helpers/test-fixtures.ts';
-import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
+import { type FakeItem, hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
 let api: Awaited<ReturnType<Awaited<ReturnType<typeof startPipeline>>['api']>> | undefined;
@@ -18,9 +18,10 @@ const LOW_SIZE = 60 * 100 * MIB;
 const film = () => movie({ rootId: 'movie', manualRelease: true });
 
 // A film whose automatic search ends with every release rejected, and the detail view of its entry.
-async function rejectedFilm(items: { title: string; size: number }[]) {
+async function rejectedFilm(items: FakeItem[]) {
   pipe = await startPipeline();
-  api = await pipe.api();
+  // The inspector reads the .torrent of a rejected release through the indexer, so the app has the indexer service.
+  api = await pipe.api({ indexers: pipe.indexers });
   // A movie has no size limit by default, so the search would take the TINY release. The test sets a limit to reject it.
   pipe.db.data.qualitySizes.movie['webdl-1080'] = { min: 12.5, preferred: null, max: null };
   const m = film();
@@ -80,7 +81,7 @@ describe('the rejected releases of a search with no match', () => {
     expect(pipe!.qbit.torrents.has(hashOf(LOW))).toBe(true);
   });
 
-  it('lists a blocklisted release as not grabbable, and never takes it', async () => {
+  it('lists a blocklisted release as grabbable, without the blocklist as a reason', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
     const m = film();
@@ -94,17 +95,56 @@ describe('the rejected releases of a search with no match', () => {
     await until(() => entry!.branch === 'waiting' && entry!.reason?.code === 'all_rejected');
 
     const view = (await api.get(`/queue/entries/${entry!.id}`)).body.entry;
-    // A blocklisted release breaks a safety check, and a manual grab does not skip safety checks. The list shows it
-    // with its reason and says that it is not grabbable, next to the release that a person can still take.
+    // The blocklist keeps a failed release out of the automatic search. A person takes it by hand, so the list offers
+    // it and does not show the blocklist as the reason.
     expect(view.search.rejected.map((release: { title: string }) => release.title)).toEqual(expect.arrayContaining([LOW, BLOCKED]));
     const blocked = view.search.rejected.find((release: { title: string }) => release.title === BLOCKED);
-    expect(blocked).toMatchObject({ title: BLOCKED, grabbable: false });
-    expect(blocked.reasons).toContain('The release is on the blocklist.');
+    expect(blocked).toMatchObject({ title: BLOCKED, grabbable: true });
+    expect(blocked.reasons).not.toContain('The release is on the blocklist.');
 
     const grab = await api.post(`/queue/entries/${entry!.id}/releases/grab`, { indexerId: 1, guid: BLOCKED });
-    expect([404, 409]).toContain(grab.status);
-    if (grab.status === 409) expect(grab.body).toMatchObject({ error: 'release_rejected' });
-    expect(pipe.qbit.torrents.size).toBe(0);
-    expect(entry!.release).toBeNull();
+    expect(grab.status).toBe(202);
+    await until(() => entry!.stage === 'downloading');
+    expect(entry!.release).toMatchObject({ title: BLOCKED, manual: true });
+    expect(pipe.qbit.torrents.has(hashOf(BLOCKED))).toBe(true);
+  });
+
+  it('lists the files of the .torrent of a rejected release, by its indexer and guid', async () => {
+    const file = 'Movie.Name.2019.720p.BluRay.x264-LOW.mkv';
+    const { entry, detail } = await rejectedFilm([
+      { title: LOW, size: LOW_SIZE, files: [file] },
+      { title: WRONG, size: 100 * 120 * MIB },
+    ]);
+    const url = (query: string) => `/queue/entries/${entry.id}/releases/torrent?${query}`;
+
+    // The client names the release, and the server finds its link. The link carries the API key of the indexer, so the
+    // detail view never sends it to the client.
+    const view = await detail();
+    expect(view.search.rejected.find((release: { guid: string }) => release.guid === LOW)).not.toHaveProperty('link');
+
+    const files = await api!.get(url(`indexerId=1&guid=${encodeURIComponent(LOW)}`));
+    expect(files.status).toBe(200);
+    expect(files.body.name).toBe(LOW);
+    expect(files.body.files).toEqual([{ path: `${LOW}/${file}`, sizeBytes: 1000 }]);
+    expect(files.body.totalBytes).toBe(1000);
+
+    // A guid that the search did not reject has no link to serve.
+    const unknown = await api!.get(url(`indexerId=1&guid=${encodeURIComponent('Movie.Name.2019.720p.BluRay.x264-UNLISTED')}`));
+    expect(unknown.status).toBe(404);
+    expect(unknown.body).toEqual({ error: 'release_not_found' });
+
+    // The server keeps the link of each rejected release. A release without one has no .torrent to read.
+    const rejected = entry.search!.rejected.find((release) => release.guid === LOW)!;
+    const link = rejected.link;
+    rejected.link = null;
+    const unavailable = await api!.get(url(`indexerId=1&guid=${encodeURIComponent(LOW)}`));
+    expect(unavailable.status).toBe(409);
+    expect(unavailable.body).toEqual({ error: 'torrent_unavailable' });
+    rejected.link = link;
+
+    // The server names a release by its indexer and its guid, so a request without the indexer is invalid.
+    const invalid = await api!.get(url(`guid=${encodeURIComponent(LOW)}`));
+    expect(invalid.status).toBe(400);
+    expect(invalid.body).toEqual({ error: 'invalid_request' });
   });
 });

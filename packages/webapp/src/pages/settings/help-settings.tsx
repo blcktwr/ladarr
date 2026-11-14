@@ -23,7 +23,7 @@ const groups: { title: string; text: string; events: Entry[] }[] = [
       { name: 'finished', text: 'The search ended with no release. The line shows the number of releases and the primary reason.' },
       { name: 'search_deferred', text: 'The search reached its request budget. It continues in the next run.' },
       { name: 'release_chosen', text: 'ladarr selected one release from one indexer. The next step is the download.' },
-      { name: 'release_failed', text: 'The release had a problem, for example a broken torrent. It goes to the blocklist and the target starts a new try.' },
+      { name: 'release_failed', text: 'The release had a problem, for example a broken torrent. The target starts a new try.' },
     ],
   },
   {
