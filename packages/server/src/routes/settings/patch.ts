@@ -14,6 +14,7 @@ function parseChanges(body: unknown): Partial<Settings> | { invalid: string } {
     if (key === 'language' && (value === 'en' || value === 'es')) changes.language = value;
     else if (key === 'theme' && (value === 'dark' || value === 'light')) changes.theme = value;
     else if (key === 'keepQueueLogs' && typeof value === 'boolean') changes.keepQueueLogs = value;
+    else if (key === 'rejectZeroSeeders' && typeof value === 'boolean') changes.rejectZeroSeeders = value;
     else if (key === 'naming' && isObject(value) && !templateProblem('movie', value.movie) && !templateProblem('episode', value.episode)) {
       changes.naming = { movie: (value.movie as string).trim(), episode: (value.episode as string).trim() };
     } else if (key === 'audio' && value === null) changes.audio = null;

@@ -187,6 +187,32 @@ describe('policy', () => {
   });
 });
 
+describe('seeders', () => {
+  const name = 'Show.Name.S01E02.1080p.WEB-DL-GRP';
+  const on = { settings: { ...settings, rejectZeroSeeders: true } };
+  const off = { settings: { ...settings, rejectZeroSeeders: false } };
+
+  it('rejects a release with no seeders when the setting is on', () => {
+    expect(codes(name, ep2, on, { seeders: 0 })).toEqual(['no_seeders']);
+  });
+
+  it('accepts a release with no seeders when the setting is off', () => {
+    expect(codes(name, ep2, off, { seeders: 0 })).toEqual([]);
+  });
+
+  it('accepts a release when the indexer does not know its seeders', () => {
+    expect(codes(name, ep2, on, { seeders: null })).toEqual([]);
+  });
+
+  it('accepts a release with seeders when the setting is on', () => {
+    expect(codes(name, ep2, on, { seeders: 5 })).toEqual([]);
+  });
+
+  it('lets a manual choice take a release with no seeders', () => {
+    expect(codes(name, ep2, { ...on, manual: true }, { seeders: 0 })).toEqual([]);
+  });
+});
+
 describe('ranking', () => {
   const MIB = 1024 * 1024;
   const pick = (releases: ReturnType<typeof release>[], extra: Partial<Context> = {}) => {

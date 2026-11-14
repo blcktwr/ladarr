@@ -35,6 +35,8 @@ export type Settings = {
   audio: { language: string; strict: boolean } | null;
   // Keep the whole log of a target while it is in the queue. The log goes when the target is available.
   keepQueueLogs: boolean;
+  // Reject a release that the indexer reports with no seeders, so the target does not wait on a torrent that cannot download.
+  rejectZeroSeeders: boolean;
   // The name of a file in the library. See naming.ts.
   naming: NamingTemplates;
 };
@@ -165,6 +167,7 @@ export const emptyData = (): Data => ({
     defaultRoots: { movie: null, tv: null },
     audio: null,
     keepQueueLogs: true,
+    rejectZeroSeeders: false,
     naming: { ...DEFAULT_NAMING },
   },
   profiles: defaultProfiles(),

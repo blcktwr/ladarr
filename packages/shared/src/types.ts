@@ -291,6 +291,8 @@ export type SettingsData = {
   defaultRoots: { movie: string | null; tv: string | null };
   audio: { language: string; strict: boolean } | null;
   keepQueueLogs: boolean;
+  // A release with no seeders is rejected, so the target does not wait on a torrent that cannot download.
+  rejectZeroSeeders: boolean;
   naming: { movie: string; episode: string };
 };
 

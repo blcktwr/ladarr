@@ -74,6 +74,7 @@ export const REJECTION_TEXT: Record<string, string> = {
   no_download_link: 'The release has no download link.',
   indexer_removed: 'The indexer of the release was removed.',
   quality_rejected: 'The quality is not good enough (for example a camera copy).',
+  no_seeders: 'The release has no seeders.',
   quality_not_in_profile: 'The quality of the release is not in any quality profile of the title.',
   size_below_min: 'The file is smaller than the quality allows for this runtime.',
   size_above_max: 'The file is larger than the quality allows for this runtime.',
@@ -180,6 +181,8 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   const quality = evaluateChain(profiles, sizes, { source: parsed.source, resolution: parsed.resolution, sizeBytes: release.sizeBytes, audioLanguages: audio?.length ? audio : null }, { runtimeMinutes, audio: ctx.settings.audio });
   // A manual choice may skip the preferences of the profile. It does not skip a camera copy of unknown source: the user sees the warning.
   if (!ctx.manual) rejections.push(...quality.rejections);
+  // A release that the indexer reports with no seeders may never download. It stays a preference, so a person can take it by hand.
+  if (!ctx.manual && ctx.settings.rejectZeroSeeders && release.seeders === 0) reject('no_seeders');
 
   // Policy of the library and of the indexer.
   const indexer = ctx.indexers[release.indexerId];

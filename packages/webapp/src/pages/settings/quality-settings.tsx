@@ -1,9 +1,9 @@
-import type { ProfileData, QualityResponse, QualityRow, SizeLimits } from '@ladarr/shared/types';
+import type { ProfileData, QualityResponse, QualityRow, SettingsResponse, SizeLimits } from '@ladarr/shared/types';
 import type { MediaType } from '@ladarr/shared/enums';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { ActionMenu, Actions, Badge, Button, Checkbox, Confirm, Dropdown, Field, Hint, Modal, Section, Table, Text } from 'nebula';
+import { ActionMenu, Actions, Badge, Button, Checkbox, Confirm, Dropdown, Field, Hint, Modal, Section, Switch, Table, Text } from 'nebula';
 import { Alert, ModalActions } from '../../components/index.ts';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { api } from '../../lib/api.ts';
@@ -279,6 +279,35 @@ function ProfileModal({ profile, qualities, sizes, open, onOpenChange, onSaved }
   );
 }
 
+// The policy that rejects a release with no seeders. The change is saved at once.
+function ZeroSeeders() {
+  const { data } = useQuery<SettingsResponse>({ queryKey: ['/settings'] });
+  const client = useQueryClient();
+  const [failed, setFailed] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  async function save(reject: boolean) {
+    setFailed(false);
+    setPending(true);
+    try {
+      await api('/settings', { method: 'PATCH', body: { rejectZeroSeeders: reject } });
+      await client.invalidateQueries({ queryKey: ['/settings'] });
+    } catch {
+      setFailed(true);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  if (!data) return null;
+  return (
+    <>
+      <Switch label={t('Reject releases with no seeders')} checked={data.settings.rejectZeroSeeders} disabled={pending} onCheckedChange={(reject) => void save(reject)} />
+      {failed && <Alert tone="danger">{t('The request did not complete.')}</Alert>}
+    </>
+  );
+}
+
 export function Qualities() {
   const { data, error, refetch } = useQuery<QualityResponse>({ queryKey: ['/quality'] });
   const client = useQueryClient();
@@ -327,6 +356,7 @@ export function Qualities() {
         </Button>
       )}
     >
+      <ZeroSeeders />
       {message && <Alert tone="danger">{message}</Alert>}
       {error && !data ? (
         <LoadFailed onRetry={refetch} />
