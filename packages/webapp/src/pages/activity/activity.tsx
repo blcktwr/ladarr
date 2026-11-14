@@ -170,6 +170,8 @@ function TorrentInfo({ path }: { path: string }) {
             ? [{ label: t('Pieces'), value: data.pieceLength === null ? data.pieceCount : `${data.pieceCount} (${formatBytes(data.pieceLength)})` }]
             : []),
           { label: t('Size'), value: formatBytes(data.totalBytes) },
+          ...(data.resolution ? [{ label: t('Resolution'), value: `${data.resolution}p` }] : []),
+          ...(data.quality ? [{ label: t('Quality'), value: data.quality }] : []),
           ...(data.createdBy ? [{ label: t('Created by'), value: data.createdBy, wide: true }] : []),
           ...(data.comment ? [{ label: t('Comment'), value: <CommentText text={data.comment} />, wide: true }] : []),
         ]}
@@ -699,10 +701,11 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
         ? t(stuckReason)
         : t('{count} / {total} episodes', { count: completed, total });
   // The bar of the whole series: the part of its episodes that is complete, or the part of its download that the
-  // client reports while it downloads. A series that the search did not find, or that found no match, has no work to fill.
+  // client reports while it downloads. A series that the search did not find, that found no match, or that is stuck has
+  // no work to fill.
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
   const bar =
-    status === 'not_found' || status === 'no_match' ? undefined : status === 'downloading' ? (
+    status === 'not_found' || status === 'no_match' || status === 'stuck' ? undefined : status === 'downloading' ? (
       <Progress value={Math.round((group.download ?? 0) * 100)} label={`${groupName(group)} ${t('Download')}`} />
     ) : (
       <Progress value={percent} label={t('{count} / {total} episodes', { count: completed, total })} />
