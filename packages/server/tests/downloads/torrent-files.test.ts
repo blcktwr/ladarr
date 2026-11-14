@@ -32,6 +32,8 @@ describe('the files of the torrent of a target', () => {
         { path: `${NAME}/Movie.Name.es.srt`, sizeBytes: 1000 },
       ],
       totalBytes: 2000,
+      resolution: 1080,
+      quality: 'BluRay',
       comment: 'A comment from the writer',
       source: null,
       createdBy: null,

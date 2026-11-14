@@ -30,6 +30,14 @@ describe('parseRelease', () => {
     ['Madame.Web.2024.1080p.AMZN.WEB-DL.DDP5.1.Atmos.H.264-LatTeam.mkv SPANiSH', { title: 'Madame Web', year: 2024, resolution: 1080, source: 'webdl' }],
     ['Madame.Web.2024.1080p.BluRay.BDRip.DTSHD-MA.5.1.h264.mkv SPANiSH', { title: 'Madame Web', year: 2024, resolution: 1080, source: 'bluray' }],
     ['Cam.2024.1080p.WEB-DL-GRP', { title: 'Cam', year: 2024, resolution: 1080, source: 'webdl' }],
+    // A source marker before the year is a word of the title, even when the name gives no other marker.
+    ['Madame.Web.2024.1080p', { title: 'Madame Web', year: 2024, resolution: 1080, source: 'unknown' }],
+    ['Cam.2018.1080p', { title: 'Cam', year: 2018, resolution: 1080, source: 'unknown' }],
+    // A remux wins over the source marker before it, wherever the resolution is.
+    ['Movie.2020.BluRay.REMUX.1080p', { source: 'remux', resolution: 1080 }],
+    // An interlaced file counts as its size, and a number wins over the 4K of the branding.
+    ['Show.S01E01.1080i.HDTV.x264-GRP', { resolution: 1080, source: 'hdtv' }],
+    ['Movie.UHD.BluRay.1080p', { resolution: 1080, source: 'bluray' }],
   ])('%s', (name, expected) => {
     expect(parseRelease(name)).toMatchObject(expected);
   });

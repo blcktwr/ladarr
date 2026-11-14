@@ -662,6 +662,10 @@ export type QueueTorrent = {
   hash: string;
   files: { path: string; sizeBytes: number }[];
   totalBytes: number;
+  // The resolution that the name of the torrent says, for example 1080. Null when the name does not say.
+  resolution: number | null;
+  // The source that the name of the torrent says, for example "BluRay". Null when the name says none.
+  quality: string | null;
   // The fields that the writer of the torrent added. Absent in most torrents.
   comment: string | null;
   source: string | null;

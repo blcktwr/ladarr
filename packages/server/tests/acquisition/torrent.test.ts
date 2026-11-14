@@ -66,6 +66,8 @@ describe('torrentInfo', () => {
         { path: 'show/d/b.mkv', sizeBytes: 2000 },
       ],
       totalBytes: 3000,
+      resolution: null,
+      quality: null,
       comment: null,
       source: null,
       createdBy: null,
@@ -78,6 +80,41 @@ describe('torrentInfo', () => {
 
   it('gives the one file of a torrent that has no file list', () => {
     expect(torrentInfo(torrent(single)).files).toEqual([{ path: 'file', sizeBytes: 1000 }]);
+  });
+
+  it('gives the resolution and the quality that the name of the torrent says', () => {
+    const info = 'd6:lengthi1000e4:name27:Movie.2024.1080p.WEB-DL.mkv12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe';
+    expect(torrentInfo(torrent(info))).toMatchObject({ resolution: 1080, quality: 'WEB-DL' });
+  });
+
+  it('gives the quality of the largest file when the name of the torrent gives only the title', () => {
+    const info = 'd5:filesld6:lengthi105827e4:pathl35:Coco (2017) [YTS.AG]/WWW.YTS.AG.jpgeed6:lengthi803179210e4:pathl60:Coco (2017) [YTS.AG]/Coco.2017.720p.BluRay.x264-[YTS.AG].mp4eee4:name20:Coco (2017) [YTS.AG]12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe';
+    expect(torrentInfo(torrent(info))).toMatchObject({ resolution: 720, quality: 'BluRay' });
+  });
+
+  it('gives the resolution of the name and the source of the largest file', () => {
+    const info = 'd5:filesld6:lengthi105827e4:pathl43:Coco (2017) [1080p] [YTS.AG]/WWW.YTS.AG.jpgeed6:lengthi1709104125e4:pathl69:Coco (2017) [1080p] [YTS.AG]/Coco.2017.1080p.BluRay.x264-[YTS.AG].mp4eee4:name28:Coco (2017) [1080p] [YTS.AG]12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe';
+    expect(torrentInfo(torrent(info))).toMatchObject({ resolution: 1080, quality: 'BluRay' });
+  });
+
+  it('gives the quality of the largest video file, not the largest file of the torrent', () => {
+    const info = 'd5:filesld6:lengthi2000e4:pathl21:Movie.2020/backup.bineed6:lengthi1000e4:pathl38:Movie.2020/Movie.2020.1080p.WEBRip.mkveee4:name10:Movie.202012:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe';
+    expect(torrentInfo(torrent(info))).toMatchObject({ resolution: 1080, quality: 'WEBRip' });
+  });
+
+  it('gives the quality of the video file over the quality of the name', () => {
+    const info = 'd5:filesld6:lengthi1000e4:pathl50:Movie.2020.1080p.WEB-DL/Movie.2020.720p.BluRay.mkveee4:name23:Movie.2020.1080p.WEB-DL12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe';
+    expect(torrentInfo(torrent(info))).toMatchObject({ resolution: 720, quality: 'BluRay' });
+  });
+
+  it('gives the quality of the name when the name of the video file gives none', () => {
+    const info = 'd5:filesld6:lengthi1000e4:pathl42:Movie.2020.4K.UHD.BluRay.REMUX/feature.mkveee4:name30:Movie.2020.4K.UHD.BluRay.REMUX12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe';
+    expect(torrentInfo(torrent(info))).toMatchObject({ resolution: 2160, quality: 'BluRay Remux' });
+  });
+
+  it('gives no quality when neither the name nor the video file says it', () => {
+    const info = 'd5:filesld6:lengthi1000e4:pathl17:Movie/feature.mkveee4:name5:Movie12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe';
+    expect(torrentInfo(torrent(info))).toMatchObject({ resolution: null, quality: null });
   });
 
   it('gives the fields that the writer added, with the date in milliseconds', () => {

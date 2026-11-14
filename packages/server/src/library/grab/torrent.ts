@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { QueueTorrent } from '@ladarr/shared/types';
+import { parseRelease } from './release.ts';
+import { sourceLabel } from './quality.ts';
+import { isVideoFile } from '../parse.ts';
 
 const MAX_DEPTH = 16;
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -126,11 +129,22 @@ export function torrentInfo(torrent: Buffer): QueueTorrent {
   const files = torrentFiles(torrent).map((file) => ({ path: file.path, sizeBytes: file.length }));
   const totalBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
   const pieceLength = typeof info['piece length'] === 'number' && info['piece length'] > 0 ? info['piece length'] : null;
+  // The name of the torrent is a release name in most files. A name that gives only the title and the resolution, as
+  // most torrents of a tracker do, leaves the source to the name of its largest video file, which is the feature.
+  const named = parseRelease(info.name);
+  const largest = files
+    .filter((file) => isVideoFile(file.path))
+    .reduce<(typeof files)[number] | null>((best, file) => (!best || file.sizeBytes > best.sizeBytes ? file : best), null);
+  const feature = largest ? parseRelease(largest.path.split('/').at(-1) ?? '') : null;
+  const resolution = feature?.resolution ?? named.resolution ?? null;
+  const source = feature && feature.source !== 'unknown' ? feature.source : named.source;
   return {
     name: info.name,
     hash: infoHashOf(torrent),
     files,
     totalBytes,
+    resolution,
+    quality: source === 'unknown' ? null : sourceLabel(source),
     comment: text(top.comment),
     source: text(info.source),
     createdBy: text(top['created by']),

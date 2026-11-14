@@ -92,6 +92,10 @@ export const qualityLabel = (source: ReleaseSource, resolution: number | null) =
   return resolution === null ? words : `${words} ${resolution}p`;
 };
 
+// The source of a release as a person reads it, without its resolution.
+export const sourceLabel = (source: ReleaseSource) =>
+  source === 'cam' ? 'CAM' : source === 'telesync' ? 'TS' : source === 'unknown' ? 'unknown source' : SOURCE_LABEL[source];
+
 // The profile as a person reads it: its name and the qualities that it takes.
 export function explainProfile(profile: Profile) {
   const labelOf = (id: string) => QUALITIES.find((item) => item.id === id)?.label ?? id;

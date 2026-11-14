@@ -103,19 +103,25 @@ export function parseRelease(name: string): ParsedRelease {
   const airDate = daily && !episodeMatch ? `${daily[1]}-${daily[2]}-${daily[3]}` : null;
   if (airDate) markerAt = Math.min(markerAt, daily!.index + (/^[^0-9]/.test(daily![0]) ? 1 : 0));
 
-  // Quality markers.
-  const resolutionMatch = /(?:^|[^a-z0-9])(?:(\d{3,4})p|(4k|uhd))(?![a-z0-9])/i.exec(spaced);
-  const resolution = resolutionMatch ? (resolutionMatch[2] ? 2160 : Number(resolutionMatch[1])) : null;
+  // Quality markers. A size that the name gives as a number wins over the 4K of the branding, and an interlaced file
+  // counts as its size.
+  const dimensionMatch = /(?:^|[^a-z0-9])(\d{3,4})[pi](?![a-z0-9])/i.exec(spaced);
+  const brandingMatch = /(?:^|[^a-z0-9])(4k|uhd)(?![a-z0-9])/i.exec(spaced);
+  const resolutionMatch = dimensionMatch ?? brandingMatch;
+  const resolution = dimensionMatch ? Number(dimensionMatch[1]) : brandingMatch ? 2160 : null;
   const at = (match: RegExpMatchArray) => (match.index ?? 0) + (/^[^a-z0-9]/i.test(match[0]) ? 1 : 0);
   const resolutionAt = resolutionMatch ? at(resolutionMatch) : null;
-  // The source marker comes after the resolution in a release name. A word of the title that looks like one, such as
-  // "Web" in "Madame Web", stays in the title.
-  const sourceMatches = [...spaced.matchAll(/(?:^|[^a-z0-9])(web[ .-]?dl|web[ .-]?rip|webrip|web|blu[ .-]?ray|bdremux|remux|bdrip|brrip|raw[ .-]?hd|hdtv|sdtv|pdtv|dvdrip|dvd|hdcam|cam|hdts|telesync|ts|telecine|tc)(?![a-z0-9])/gi)];
+  // The source marker comes after the title and its year. A word of the title that looks like one, such as "Web" in
+  // "Madame Web", stays in the title.
+  const years = [...spaced.matchAll(/(?:^|[^0-9])(?:19|20)\d{2}(?![0-9])/g)].map(at);
+  const sourceMatches = [...spaced.matchAll(/(?:^|[^a-z0-9])(web[ .-]?dl|web[ .-]?rip|webrip|web|blu[ .-]?ray|bdremux|remux|bdrip|brrip|raw[ .-]?hd|hdtv|sdtv|pdtv|dvdrip|dvd|hdcam|cam|hdts|telesync|ts|telecine|tc)(?![a-z0-9])/gi)].filter(
+    (match) => !years.some((year) => year > at(match)),
+  );
   const keyOf = (match: RegExpMatchArray) => match[1]!.toLowerCase().replace(/[ .-]/g, '');
-  // The source marker comes after the resolution in a release name. A word of the title that looks like one, such as
-  // "Web" in "Madame Web", stays in the title. A remux or a raw capture wins over the BluRay or HDTV marker before it.
+  // A remux or a raw capture wins over the BluRay or HDTV marker before it, and a marker after the resolution wins over
+  // one before it.
   const after = resolutionAt === null ? sourceMatches : sourceMatches.filter((match) => at(match) >= resolutionAt);
-  const sourceMatch = after.find((match) => /^(bdremux|remux|rawhd)$/.test(keyOf(match))) ?? after[0] ?? sourceMatches[0];
+  const sourceMatch = sourceMatches.find((match) => /^(bdremux|remux|rawhd)$/.test(keyOf(match))) ?? after[0] ?? sourceMatches[0];
   const key = sourceMatch ? keyOf(sourceMatch) : undefined;
   const source: ReleaseSource =
     key === 'webdl' || key === 'web' ? 'webdl'
