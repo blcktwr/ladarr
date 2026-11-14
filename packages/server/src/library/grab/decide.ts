@@ -136,9 +136,11 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
     else {
       const inSeason = title.episodes.filter((episode) => episode.season === want.season);
       covers = inSeason.map((episode) => ({ season: episode.season, number: episode.number }));
-      // A pack must not bring back an episode that the user has, or one that the user did not ask for.
-      const unwanted = inSeason.some((episode) => episodeAired(episode, ctx.now) && (!isMonitored(title, episode) || ctx.hasFile(episode)));
-      if (unwanted && !ctx.manual) reject('pack_has_unwanted_episodes');
+      // A pack must bring at least one episode that is wanted and has no file, and no episode that the user did not
+      // ask for. A file that the pack carries for an episode that the library has is skipped by the import.
+      const missing = inSeason.some((episode) => episodeAired(episode, ctx.now) && isMonitored(title, episode) && !ctx.hasFile(episode));
+      const unmonitored = inSeason.some((episode) => episodeAired(episode, ctx.now) && !isMonitored(title, episode));
+      if ((!missing || unmonitored) && !ctx.manual) reject('pack_has_unwanted_episodes');
       if (!inSeason.length) reject('wrong_season');
     }
   }

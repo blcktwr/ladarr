@@ -76,10 +76,15 @@ describe('packs', () => {
     expect(d.covers).toHaveLength(3);
   });
 
-  it('rejects a pack that holds an episode that ladarr has, or one that is not monitored', () => {
+  it('accepts a pack that the library has in part, and rejects one that brings nothing', () => {
     const size = { sizeBytes: 3 * 60 * 45 * 1024 * 1024 };
+    // One episode has a file. The import takes the files of the other two and skips the one that the library has.
     const has = title({ episodes: [episode(1, 1, '2020-01-01', { fileId: 'f' }), episode(1, 2), episode(1, 3)] });
-    expect(codes('Show.Name.S01.1080p.WEB-DL-GRP', { ...season1, title: has }, {}, size)).toEqual(['pack_has_unwanted_episodes']);
+    expect(codes('Show.Name.S01.1080p.WEB-DL-GRP', { ...season1, title: has }, {}, size)).toEqual([]);
+    // Every aired episode has a file, so the pack brings nothing to the season.
+    const all = title({ episodes: [episode(1, 1, '2020-01-01', { fileId: 'f' }), episode(1, 2, '2020-01-02', { fileId: 'f' }), episode(1, 3, '2020-01-03', { fileId: 'f' })] });
+    expect(codes('Show.Name.S01.1080p.WEB-DL-GRP', { ...season1, title: all }, {}, size)).toEqual(['pack_has_unwanted_episodes']);
+    // An episode that the user did not ask for stops the pack.
     const off = title({ episodes: [episode(1, 1, '2020-01-01', { override: 'unmonitored' }), episode(1, 2)] });
     expect(codes('Show.Name.S01.1080p.WEB-DL-GRP', { ...season1, title: off }, {}, { sizeBytes: 2 * 60 * 45 * 1024 * 1024 })).toEqual(['pack_has_unwanted_episodes']);
   });

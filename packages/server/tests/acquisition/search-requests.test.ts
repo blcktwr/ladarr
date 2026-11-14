@@ -176,7 +176,7 @@ describe('search requests', () => {
     expect(entries.every((entry) => entry.release === null && entry.reason?.code === 'all_rejected')).toBe(true);
   });
 
-  it('searches a new episode even when a full pack is rejected for available episodes', async () => {
+  it('takes a full pack for the episodes that the library does not have', async () => {
     pipe = await startPipeline();
     const series = title({
       rootId: 'tv',
@@ -200,10 +200,10 @@ describe('search requests', () => {
     const third = pipe.queue.get('tv:1:1x3')!;
     const fourth = pipe.queue.get('tv:1:1x4')!;
     const fifth = pipe.queue.get('tv:1:1x5')!;
-    await until(() => grabbed(fourth) && third.branch === 'waiting' && fifth.branch === 'waiting');
-
+    await until(() => [third, fourth, fifth].every((entry) => grabbed(entry)));
+    // The pack covers every episode without a file, so the three take it and no episode query runs.
+    expect([third, fourth, fifth].map((entry) => entry.release!.title)).toEqual([pack, pack, pack]);
     const asked = episodeQueries().map((url) => url.searchParams.get('ep'));
-    expect(asked).toContain('4');
     expect(asked).not.toContain('3');
     expect(asked).not.toContain('5');
   });
