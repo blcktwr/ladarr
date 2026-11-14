@@ -2,7 +2,7 @@ import { type Db, db, profilesFor } from '../../core/db.ts';
 import { randomUUID } from 'node:crypto';
 import { languageOfRegion } from '../../core/languages.ts';
 import { episodeEligibleAt } from '../../core/dates.ts';
-import { bestOf, decide, explainDecision, REJECTION_TEXT, rejectionSummary, topRejections, type Context, type Decision, type Want } from './decide.ts';
+import { absoluteNumber, bestOf, decide, explainDecision, REJECTION_TEXT, rejectionSummary, topRejections, type Context, type Decision, type Want } from './decide.ts';
 import { indexerName, indexersFor, notUsedReason, seedLimits, type Indexer, type IndexerApp } from './indexers.ts';
 import { explainProfile } from './quality.ts';
 import { enqueue as enqueueJob, JobError, prioritize, type EnqueueInput, type Job } from '../../core/jobs.ts';
@@ -231,8 +231,9 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       { value: title.meta.originalTitle, alias: false, languages: [] },
     ].filter((name) => fresh(name.value, 0));
     // A very short alias, or one in a script that release names do not use, only gives noise.
+    const latin = (name: string) => /[a-z]{3}/i.test(name);
     const aliases: TitleName[] = title.meta.aliases
-      .filter((name) => fresh(name, 3))
+      .filter((name) => latin(name) && fresh(name, 3))
       .map((value) => ({ value, alias: true, languages: [...new Set((title.meta.aliasRegions?.[value] ?? []).map(languageOfRegion))] }));
     return [...names, ...aliases];
   };
@@ -813,7 +814,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
             defer({ phase: 'absolute', entryId: entry.id });
             return;
           }
-          const absolute = title.episodes.filter((e) => e.season > 0 && (e.season < entry.season! || (e.season === entry.season && e.number < entry.number!))).length + 1;
+          const absolute = absoluteNumber(title, entry.season!, entry.number!);
           const result = await ask({ kind: 'absolute', number: absolute }, names[0]!, [entry], (item) => [wantFor(title, item)]);
           if (!grabBest([entry], result.decisionsOf).length) open = open.filter((item) => item !== entry);
           if (result.incomplete) {

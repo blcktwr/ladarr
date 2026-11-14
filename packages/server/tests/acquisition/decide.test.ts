@@ -63,6 +63,26 @@ describe('identity', () => {
     expect(codes('Movie.Name.S01E01.2019.1080p.BluRay-GRP', film, {}, size)).toContain('not_a_movie');
   });
 
+  it('rejects the year of another title with the same name', () => {
+    expect(codes('Show.Name.1963.S01E02.1080p.WEB-DL-GRP', ep2)).toEqual(['year_mismatch']);
+    expect(codes('Show.Name.2020.S01E02.1080p.WEB-DL-GRP', ep2)).toEqual([]);
+    // A later year can be the year of a season, so it does not rule the release out.
+    expect(codes('Show.Name.2021.S01E02.1080p.WEB-DL-GRP', ep2)).toEqual([]);
+  });
+
+  it('does not guess the year of a title that the catalog does not give', () => {
+    const unknown = movie({ meta: { ...movie().meta, year: null } });
+    expect(codes('Movie.Name.2019.1080p.BluRay-GRP', { kind: 'movie', title: unknown }, {}, { sizeBytes: filmSize })).toEqual([]);
+    expect(codes('Movie.Name.1080p.BluRay-GRP', { kind: 'movie', title: unknown }, {}, { sizeBytes: filmSize })).toEqual([]);
+  });
+
+  it('matches a release of an anime by its absolute number', () => {
+    const anime = title({ episodes: show.episodes, seriesType: 'anime', meta: { ...show.meta, title: 'Anime Name', originalTitle: 'Anime Name' } });
+    const want: Want = { kind: 'episode', title: anime, season: 1, number: 3 };
+    expect(codes('[SubsPlease] Anime Name - 03 [1080p][WEB-DL]', want)).toEqual([]);
+    expect(codes('[SubsPlease] Anime Name - 05 [1080p][WEB-DL]', want)).toEqual(['wrong_episode']);
+  });
+
   it('matches an alias of the title', () => {
     const aliased = title({ episodes: [episode(1, 1)], meta: { ...show.meta, aliases: ['Le Show'] } });
     expect(codes('Le.Show.S01E01.1080p.WEB-DL-GRP', { kind: 'episode', title: aliased, season: 1, number: 1 })).toEqual([]);
@@ -98,6 +118,20 @@ describe('packs', () => {
   it('accepts only a pack for a season want', () => {
     expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', season1)).toContain('not_a_pack');
   });
+
+  it('rejects a pack that holds only a part of the season', () => {
+    expect(codes('Show.Name.S01.Part.1.1080p.WEB-DL-GRP', season1)).toEqual(['not_a_pack']);
+    expect(codes('Show.Name.S01.Part.1.1080p.WEB-DL-GRP', ep2)).toEqual(['not_an_episode']);
+  });
+
+  it('rejects a list of several seasons', () => {
+    expect(codes('Show.Name.S01.S02.1080p.WEB-DL-GRP', season1)).toEqual(['multi_season_pack']);
+  });
+
+  it('rejects a pack that a daily name gives for a single episode', () => {
+    const daily = title({ episodes: [episode(2024, 75, '2024-03-15')] });
+    expect(codes('Show.Name.S01.2024.03.15.1080p.WEB-DL-GRP', { kind: 'episode', title: daily, season: 2024, number: 75 })).toEqual(['not_an_episode']);
+  });
 });
 
 describe('policy', () => {
@@ -130,6 +164,21 @@ describe('policy', () => {
     const has = title({ episodes: [episode(1, 2, '2020-01-01', { fileId: 'f' })] });
     expect(codes(name, { ...ep2, title: has })).toEqual(['already_available']);
     expect(codes(name, { ...ep2, title: has }, { manual: true })).toEqual([]);
+  });
+
+  it('does not check the size of a release that the indexer gave no size for', () => {
+    expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, {}, { sizeBytes: 0 })).toEqual([]);
+  });
+
+  it('uses the hash of the magnet when the answer has no hash', () => {
+    const hash = 'b'.repeat(40);
+    const magnet = `magnet:?xt=urn:btih:${hash}&dn=Show.Name.S01E02.1080p.WEB-DL-GRP`;
+    expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, { downloading: (h) => h === hash }, { magnet, link: null })).toEqual(['already_downloading']);
+  });
+
+  it('does not take a missing episode of the catalog for a file that is available', () => {
+    const short = title({ episodes: [episode(1, 1), episode(1, 2)] });
+    expect(codes('Show.Name.S01E02E03.1080p.WEB-DL-GRP', { ...ep2, title: short }, {}, { sizeBytes: 120 * 45 * 1024 * 1024 })).toEqual([]);
   });
 
   it('rejects a release with no link', () => {
@@ -170,10 +219,46 @@ describe('ranking', () => {
     expect(pick([f, e])).toBe(e.guid);
   });
 
+  it('does not let a quality with no preferred size win the distance alone', () => {
+    const sameGroup: Profile = { id: 'p', name: 'p', items: [['webdl-1080', 'webrip-1080']] };
+    const quality = { profiles: { p: sameGroup }, profileOrder: ['p'], qualitySizes: { movie: unlimitedSizes(), tv: { ...defaultSizes(), 'webdl-1080': { min: null, preferred: 60, max: null } } } };
+    const near = release('Show.Name.S01E02.1080p.WEB-DL-A', { sizeBytes: 61 * 45 * MIB, seeders: 20 });
+    const unpreferred = release('Show.Name.S01E02.1080p.WEBRip-B', { sizeBytes: 55 * 45 * MIB, seeders: 5 });
+    expect(pick([unpreferred, near], { quality })).toBe(near.guid);
+  });
+
   it('counts the codes that stopped the most releases', () => {
     const list = ['A.CAM', 'B.CAM', 'Show.Name.S01E03.1080p.WEB-DL-X'].map((n) => decide(release(n), ep2, ctx()));
     expect(topRejections(list, 20)).toContain('wrong_title');
     expect(bestOf(list)).toBeUndefined();
+  });
+});
+
+describe('explanations', () => {
+  const detail = (name: string, want: Want, code: string) => {
+    const explained = explainDecision(decide(release(name), want, ctx()), { profiles: [defaultProfiles().p1080!], indexer: 'Tracker', year: want.title.meta.year, season: 1, number: 2 });
+    return explained.reasons.find((reason) => reason.code === code)?.detail ?? '';
+  };
+
+  it('names the quality that the upgrade asks for', () => {
+    expect(detail('Show.Name.S01E02.2160p.WEB-DL-GRP', { ...ep2, upgradeQuality: '1080p' }, 'not_an_upgrade')).toContain('1080p');
+  });
+
+  it('does not call a release with no season a single episode', () => {
+    expect(codes('Show.Name.1080p.WEB-DL-GRP', season1)).toEqual(['not_a_pack']);
+    expect(detail('Show.Name.1080p.WEB-DL-GRP', season1, 'not_a_pack')).not.toContain('single episode');
+  });
+
+  it('names the air date of a daily release', () => {
+    const daily = title({ episodes: [episode(2024, 75, '2024-03-15'), episode(2024, 76, '2024-03-20')] });
+    const explained = explainDecision(decide(release('Show.Name.2024.03.15.1080p.WEB-DL-GRP'), { kind: 'episode', title: daily, season: 2024, number: 76 }, ctx()), {
+      profiles: [defaultProfiles().p1080!],
+      indexer: 'Tracker',
+      year: 2024,
+      season: 2024,
+      number: 76,
+    });
+    expect(explained.reasons.find((reason) => reason.code === 'wrong_episode')?.detail ?? '').toContain('2024-03-15');
   });
 });
 

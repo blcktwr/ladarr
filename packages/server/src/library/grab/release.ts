@@ -8,8 +8,12 @@ export type ParsedRelease = {
   episodes: number[];
   // True when the release is a whole season: it has a season and no episode.
   pack: boolean;
+  // True when the season is split and the release holds one part of it.
+  part: boolean;
   // More than one season in one release. ladarr does not take these in the MVP.
   multiSeason: boolean;
+  // The absolute number of an anime release, which no season and episode give.
+  absolute: number | null;
   // YYYY-MM-DD for a daily show.
   airDate: string | null;
   resolution: number | null;
@@ -41,6 +45,24 @@ const LANGUAGES: Record<string, string> = {
 
 const MAX_EPISODES = 50;
 const SEPARATORS = /[._]+/g;
+
+// The words of a release name, from the point where its title ends.
+const wordsOf = (value: string) => value.split(/[^a-z0-9+]+/).filter(Boolean);
+
+// The words that a release name uses for its own fields, after a language tag.
+const FIELD_WORDS = /^(?:\d{3,4}[pi]|4k|uhd|web|webdl|webrip|rip|bluray|bdremux|remux|bdrip|brrip|rawhd|hdtv|sdtv|pdtv|dvdrip|dvd|hdcam|cam|hdts|ts|telecine|tc|x264|x265|h264|h265|hevc|avc|av1|10bit|8bit|dts|dtshd|truehd|atmos|aac|ac3|eac3|dd|ddp|ddp5|flac|proper|repack|extended|remastered|uncut|internal|complete|limited|hybrid|hdr|dv)$/i;
+const AUDIO_WORDS = new Set(['multi', 'dual', 'dl', 'sub', 'subs', 'subbed', 'dub', 'dubbed', 'vf', 'vo', 'vostfr', 'truefrench', 'vff']);
+
+// True when the word at that place is a field of the release and not a word of its episode name. The words of the
+// episode name come right after the episode marker, and no field word comes between a tag and the quality marker.
+function isTag(words: string[], index: number) {
+  for (let next = index + 1; next < words.length && next <= index + 3; next++) {
+    const word = words[next]!;
+    if (LANGUAGES[word] || AUDIO_WORDS.has(word)) continue;
+    return FIELD_WORDS.test(word) || next === words.length - 1;
+  }
+  return true;
+}
 
 // Reads a release name like "Show.Name.S01E02.1080p.WEB-DL.DDP5.1.H.264-GROUP".
 // It reads only what the name says. A value that the name does not give stays unknown.
@@ -83,19 +105,37 @@ export function parseRelease(name: string): ParsedRelease {
     markerAt = episodeMatch.index + (/^[^a-z0-9]/i.test(episodeMatch[0]) ? 1 : 0);
   }
 
-  // Season markers: S01, Season 1, S01-S03, Seasons 1-3. They count only when there is no episode.
+  // Season markers: S01, Season 1, S01-S03, Seasons 1-3. They count only when there is no episode. A name that lists
+  // several seasons holds more than one, also when it writes them one by one.
   let pack = false;
+  let part = false;
   let multiSeason = false;
+  let absolute: number | null = null;
   if (!episodeMatch) {
     const range = /(?:^|[^a-z0-9])s(?:eason)?s?[ ._]?(\d{1,2})[ ._]?(?:-|to|&|\+)[ ._]?s?(?:eason)?[ ._]?(\d{1,2})(?![0-9a-z])/i.exec(spaced);
-    const one = /(?:^|[^a-z0-9])(?:s|season[ ._]?)(\d{1,2})(?![0-9a-z])/i.exec(spaced);
+    const markers = [...spaced.matchAll(/(?:^|[^a-z0-9])(?:s|season[ ._]?)(\d{1,2})(?![0-9a-z])/gi)];
+    const one = markers[0];
     if (range && Number(range[2]) > Number(range[1])) {
       multiSeason = true;
       markerAt = range.index + 1;
+    } else if (one && new Set(markers.map((marker) => Number(marker[1]))).size > 1) {
+      multiSeason = true;
+      markerAt = one.index + (/^[^a-z0-9]/.test(one[0]) ? 1 : 0);
     } else if (one) {
       pack = true;
       season = Number(one[1]);
       markerAt = one.index + (/^[^a-z0-9]/i.test(one[0]) ? 1 : 0);
+      // A split season gives one part of its episodes, so the name does not cover the season.
+      if (/(?:^|[^a-z0-9])part[ ._-]?\d(?![0-9a-z])/i.test(spaced)) {
+        part = true;
+        pack = false;
+      }
+    }
+    // An anime release gives the absolute number of the episode, with no season and episode.
+    const numberAt = /(?:^|[^a-z0-9])-\s*(\d{1,3})(?:v\d{1,2})?\s*(?=$|[[(])/i.exec(spaced);
+    if (!pack && !multiSeason && numberAt) {
+      absolute = Number(numberAt[1]);
+      markerAt = numberAt.index + (/^[^a-z0-9]/.test(numberAt[0]) ? 1 : 0);
     }
   }
 
@@ -154,14 +194,19 @@ export function parseRelease(name: string): ParsedRelease {
   const end = Math.min(markerAt, yearAt, qualityAt, spaced.length);
   const title = spaced.slice(0, end).replace(/[\s(\[-]+$/, '').trim();
 
-  // Language words only count after the title, so a title like "The Italian Job" keeps its meaning.
-  const tail = spaced.slice(end).toLowerCase();
+  // Language words only count after the title, so a title like "The Italian Job" keeps its meaning. A language word
+  // that the words of the episode name follow is not a tag: "The.French.Connection" is not a French audio.
   const found = new Set<string>();
-  for (const word of tail.split(/[^a-z0-9]+/)) if (LANGUAGES[word]) found.add(LANGUAGES[word]!);
-  if (/\b(multi|dual)\b/.test(tail)) found.add('multi');
+  const tail = wordsOf(spaced.slice(end).toLowerCase());
+  for (const [index, word] of tail.entries()) {
+    if (!isTag(tail, index)) continue;
+    const language = LANGUAGES[word];
+    if (language) found.add(language);
+    else if (word === 'multi' || word === 'dual') found.add('multi');
+  }
   const audioLanguages = found.size ? [...found] : null;
 
-  return { title, year, season, episodes, pack, multiSeason, airDate, resolution, source, group, audioLanguages };
+  return { title, year, season, episodes, pack, part, multiSeason, absolute, airDate, resolution, source, group, audioLanguages };
 }
 
 // Compares titles without case, accents, punctuation, a leading article, or the year in brackets.
@@ -172,7 +217,7 @@ export function normalizeTitle(value: string) {
     .toLowerCase()
     .replace(/&/g, ' and ')
     .replace(/['’`]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .replace(/^(the|a|an) /, '')
     .trim();
 }

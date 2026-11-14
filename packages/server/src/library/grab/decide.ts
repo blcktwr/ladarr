@@ -6,6 +6,7 @@ import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE, ty
 import { normalizeTitle, parseRelease, type ParsedRelease } from './release.ts';
 import type { Covered } from '../downloads/queue.ts';
 import type { RawRelease } from './torznab.ts';
+import { magnetHash } from './torrent.ts';
 
 // What a search looks for. A season want accepts a pack only.
 // `upgradeQuality` is the quality of a manual upgrade. The want then accepts a release of exactly that quality.
@@ -41,8 +42,11 @@ export type Decision = {
   // The rank of the release in the profile of the title. A lower rank is better.
   rank: number;
   indexerPriority: number;
-  distance: number;
+  // The distance from the preferred size. Null when the quality has no preferred size.
+  distance: number | null;
   hash: string | null;
+  // The quality that a manual upgrade asks for, so its reason can name it.
+  upgradeQuality: string | null;
   // The quality that the release has, or null when its name does not say.
   quality: string | null;
   // The size limits of that quality in the profile. Null when the profile does not take the quality.
@@ -53,7 +57,7 @@ export type Decision = {
 export const REJECTION_TEXT: Record<string, string> = {
   wrong_title: 'The title of the release is not this title.',
   year_missing: 'The release has no year, so the movie cannot be identified.',
-  year_mismatch: 'The year of the release is not the year of the movie.',
+  year_mismatch: 'The year of the release is not the year of the title.',
   not_a_movie: 'The release is for a series.',
   not_an_episode: 'The release has no season and episode.',
   not_a_pack: 'The release is not a full season.',
@@ -79,6 +83,17 @@ export const REJECTION_TEXT: Record<string, string> = {
 
 const alias = (title: Title) => [title.meta.title, title.meta.originalTitle, ...title.meta.aliases].filter(Boolean).map(normalizeTitle);
 
+// The year when the title started. A release cannot be older than the title that it names, and a later year can be the
+// year of a season.
+const firstYear = (title: Title) => title.meta.year ?? title.episodes.reduce<number | null>((first, episode) => {
+  const year = episode.airDate ? Number(episode.airDate.slice(0, 4)) : null;
+  return year === null ? first : first === null ? year : Math.min(first, year);
+}, null);
+
+// The absolute number of an episode: its place in the whole series, across the seasons.
+export const absoluteNumber = (title: Title, season: number, number: number) =>
+  title.episodes.filter((episode) => episode.season > 0 && (episode.season < season || (episode.season === season && episode.number < number))).length + 1;
+
 export function titleMatches(parsedTitle: string, title: Title) {
   const wanted = normalizeTitle(parsedTitle);
   return wanted !== '' && alias(title).includes(wanted);
@@ -97,29 +112,41 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   if (!titleMatches(parsed.title, title)) reject('wrong_title');
   if (want.kind === 'movie') {
     if (parsed.season !== null || parsed.pack || parsed.multiSeason || parsed.airDate) reject('not_a_movie');
-    else if (parsed.year === null) reject('year_missing');
-    else if (parsed.year !== title.meta.year) reject('year_mismatch');
+    // A year that the catalog does not know is not a year that the release contradicts.
+    else if (title.meta.year !== null) {
+      if (parsed.year === null) reject('year_missing');
+      else if (parsed.year !== title.meta.year) reject('year_mismatch');
+    }
   } else if (want.kind === 'episode') {
     let numbers = parsed.episodes;
     let season = parsed.season;
-    if (parsed.airDate) {
+    // A pack is not an episode, also when its name carries the air date of one.
+    if (parsed.pack || parsed.multiSeason) reject(parsed.multiSeason ? 'multi_season_pack' : 'not_an_episode');
+    else if (parsed.absolute !== null) {
+      // An anime release names the absolute number of the episode. It matches the episode with that number.
+      if (absoluteNumber(title, want.season, want.number) !== parsed.absolute) reject('wrong_episode');
+      else {
+        season = want.season;
+        numbers = [want.number];
+      }
+    } else if (parsed.airDate) {
       // A daily release names a date. It matches only when one episode aired that day.
       const same = title.episodes.filter((episode) => episode.airDate === parsed.airDate);
       if (same.length === 1) {
         season = same[0]!.season;
         numbers = [same[0]!.number];
       } else reject('daily_ambiguous');
-    } else if (parsed.pack || parsed.multiSeason) reject(parsed.multiSeason ? 'multi_season_pack' : 'not_an_episode');
-    else if (season === null || !numbers.length) reject('not_an_episode');
+    } else if (season === null || !numbers.length) reject('not_an_episode');
     if (!rejections.includes('daily_ambiguous') && season !== null && numbers.length) {
       if (season !== want.season) reject('wrong_season');
       else if (!numbers.includes(want.number)) reject('wrong_episode');
       else {
         covers = numbers.map((number) => ({ season: season!, number }));
         if (numbers.length > 1) kind = 'multi';
-        // The other episodes of a multi-episode file must not have a file now.
+        // The other episodes of a multi-episode file must not have a file now. An episode that the catalog does not
+        // have is not an episode that a file covers.
         const others = numbers.filter((number) => number !== want.number).map((number) => title.episodes.find((e) => e.season === season && e.number === number));
-        if (others.some((episode) => !episode || ctx.hasFile(episode)) && !ctx.manual) reject('covers_available_episode');
+        if (others.some((episode) => episode !== undefined && ctx.hasFile(episode)) && !ctx.manual) reject('covers_available_episode');
       }
     }
   } else {
@@ -133,6 +160,9 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
       if (!inSeason.length) reject('wrong_season');
     }
   }
+
+  // A series shares its name with other titles too. A release older than the title is another title.
+  if (want.kind !== 'movie' && parsed.year !== null && parsed.year < (firstYear(title) ?? parsed.year)) reject('year_mismatch');
 
   // Quality and size.
   const profiles = profilesFor(ctx.quality, title);
@@ -157,7 +187,8 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   const push = indexer?.push[app];
   if (!indexer || !push) reject('indexer_removed');
   if (!release.link && !release.magnet) reject('no_download_link');
-  const hash = release.infoHash;
+  // An answer can carry the magnet only, and the hash of that magnet is the hash of the torrent.
+  const hash = release.infoHash ?? (release.magnet ? (magnetHash(release.magnet) ?? null) : null);
   // The blocklist keeps a release that failed out of the automatic searches. A person can still take it by hand.
   if (!ctx.manual && ctx.blocked(release, hash)) reject('blocklisted');
   if (hash && ctx.downloading(hash)) reject('already_downloading');
@@ -182,8 +213,10 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
     mibPerMinute: quality.mibPerMinute,
     rank: quality.rank ?? profiles.length * RANK_STRIDE,
     indexerPriority: push?.priority ?? 50,
-    distance: quality.limits?.preferred != null && quality.mibPerMinute !== null ? Math.abs(quality.mibPerMinute - quality.limits.preferred) : 0,
+    // A quality with no preferred size has no distance, so it does not win that step of the order.
+    distance: quality.limits?.preferred != null && quality.mibPerMinute !== null ? Math.abs(quality.mibPerMinute - quality.limits.preferred) : null,
     hash,
+    upgradeQuality: want.kind !== 'season' ? (want.upgradeQuality ?? null) : null,
     quality: qualityOf(parsed.source, parsed.resolution),
     limits: quality.limits,
   };
@@ -192,10 +225,12 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
 // The order of the spec: quality rank, indexer priority, distance from the preferred size, seeders, then a stable key.
 // A larger file does not win by size alone.
 export function compareDecisions(a: Decision, b: Decision) {
+  // The distance compares only two releases that both have one.
+  const distance = a.distance !== null && b.distance !== null ? a.distance - b.distance : 0;
   return (
     a.rank - b.rank ||
     a.indexerPriority - b.indexerPriority ||
-    a.distance - b.distance ||
+    distance ||
     (b.release.seeders ?? 0) - (a.release.seeders ?? 0) ||
     `${a.release.indexerId}:${a.release.guid}`.localeCompare(`${b.release.indexerId}:${b.release.guid}`)
   );
@@ -247,13 +282,16 @@ export function explainDecision(decision: Decision, options: { profiles: Profile
       case 'year_mismatch':
         return `the release is ${parsed.year}; the title is ${options.year}`;
       case 'wrong_season':
-        return `the release is S${pad(parsed.season)}; the target is S${pad(options.season)}`;
       case 'wrong_episode':
-        return `the release is E${parsed.episodes.map((number) => pad(number)).join(', ')}; the target is E${pad(options.number)}`;
+        // A daily release names a date, and its own fields say no season or episode.
+        if (parsed.airDate) return `the release is the air date ${parsed.airDate}; the target is S${pad(options.season)}E${pad(options.number)}`;
+        return code === 'wrong_season'
+          ? `the release is S${pad(parsed.season)}; the target is S${pad(options.season)}`
+          : `the release is E${parsed.episodes.map((number) => pad(number)).join(', ')}; the target is E${pad(options.number)}`;
       case 'not_an_episode':
         return parsed.pack || parsed.multiSeason ? 'the release is a season pack' : 'the release has no season and episode';
       case 'not_a_pack':
-        return 'the release is a single episode';
+        return parsed.episodes.length ? 'the release is a single episode' : 'the release has no season and episode';
       case 'not_a_movie':
         return 'the release is for a series';
       case 'multi_season_pack':
@@ -271,7 +309,9 @@ export function explainDecision(decision: Decision, options: { profiles: Profile
       case 'audio_language_missing':
         return `the release audio is ${parsed.audioLanguages?.join(', ') || 'unknown'}; the setting is ${options.audioLanguage}`;
       case 'not_an_upgrade':
-        return `the release is ${quality}, which is not better than the current file`;
+        return decision.upgradeQuality
+          ? `the release is ${quality}; the upgrade asks for ${decision.upgradeQuality}`
+          : `the release is ${quality}, which is not better than the current file`;
       case 'upgrade_needs_single':
         return 'the release is for several episodes, and the target has one file';
       default:

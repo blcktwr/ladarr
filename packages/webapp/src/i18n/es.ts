@@ -883,7 +883,7 @@ export const es: Record<string, string> = {
   // The reasons that ladarr rejects a release.
   'The title of the release is not this title.': 'El título de la versión no es este título.',
   'The release has no year, so the movie cannot be identified.': 'La versión no tiene año, así que no se puede identificar la película.',
-  'The year of the release is not the year of the movie.': 'El año de la versión no es el año de la película.',
+  'The year of the release is not the year of the title.': 'El año de la versión no es el año del título.',
   'The release is for a series.': 'La versión es de una serie.',
   'The release has no season and episode.': 'La versión no tiene temporada ni episodio.',
   'The release is not a full season.': 'La versión no es una temporada completa.',

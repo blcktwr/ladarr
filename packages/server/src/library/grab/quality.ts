@@ -183,7 +183,8 @@ export function evaluate(
   else if (!taken) rejections.push('quality_not_in_profile');
 
   let mibPerMinute: number | null = null;
-  if (runtimeMinutes && runtimeMinutes > 0) {
+  // A size of 0 is a size that the answer of the indexer did not give. It is unknown, not small.
+  if (runtimeMinutes && runtimeMinutes > 0 && release.sizeBytes > 0) {
     mibPerMinute = release.sizeBytes / MIB / runtimeMinutes;
     if (limits) {
       if (limits.min !== null && mibPerMinute < limits.min) rejections.push('size_below_min');

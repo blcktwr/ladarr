@@ -24,7 +24,8 @@ describe('parseRelease', () => {
     ['Show.Name.S01E02.480p.SDTV.XviD-GRP', { resolution: 480, source: 'sdtv' }],
     ['Show.Name.S01E02.480p.PDTV.XviD-GRP', { resolution: 480, source: 'sdtv' }],
     ['The.Remux.2020.1080p.WEB-DL-GRP', { title: 'The Remux', year: 2020, source: 'webdl' }],
-    ['[SubGroup] Anime Name - 05 [1080p]', { group: 'SubGroup', title: 'Anime Name - 05', resolution: 1080 }],
+    ['[SubGroup] Anime Name - 05 [1080p]', { group: 'SubGroup', title: 'Anime Name', absolute: 5, resolution: 1080 }],
+    ['[SubGroup] Anime Name - 12v2 [1080p]', { title: 'Anime Name', absolute: 12, resolution: 1080 }],
     ['Movie.Name.2018', { title: 'Movie Name', year: 2018, source: 'unknown', resolution: null }],
     // A word of the title that looks like a source marker stays in the title.
     ['Madame.Web.2024.1080p.AMZN.WEB-DL.DDP5.1.Atmos.H.264-LatTeam.mkv SPANiSH', { title: 'Madame Web', year: 2024, resolution: 1080, source: 'webdl' }],
@@ -49,6 +50,18 @@ describe('parseRelease', () => {
     expect(parseRelease('Show.S01E01.1080p.WEB-DL-GRP').audioLanguages).toBeNull();
   });
 
+  it('does not read a word of the episode name as an audio language', () => {
+    expect(parseRelease('Show.Name.S01E01.The.French.Connection.1080p.WEB-DL-GRP').audioLanguages).toBeNull();
+    expect(parseRelease('Show.Name.S01E02.GERMAN.1080p.WEB-DL-GRP').audioLanguages).toEqual(['de']);
+    expect(parseRelease('Show.Name.S01E02.GERMAN.DL.1080p.WEB-DL-GRP').audioLanguages).toEqual(['de']);
+    expect(parseRelease('Show.Name.S01E02.1080p.WEB-DL.French-GRP').audioLanguages).toEqual(['fr']);
+  });
+
+  it('reads a season that lists several seasons, and a pack that holds only a part', () => {
+    expect(parseRelease('Show.Name.S01.S02.1080p.WEB-DL-GRP')).toMatchObject({ multiSeason: true, pack: false });
+    expect(parseRelease('Show.Name.S01.Part.1.1080p.WEB-DL-GRP')).toMatchObject({ pack: false, part: true, season: 1 });
+  });
+
   it('does not take a resolution number for an episode or a year', () => {
     expect(parseRelease('Show.Name.S01E02.1080p.WEB-DL')).toMatchObject({ year: null, episodes: [2] });
     expect(parseRelease('Show.Name.2019.S01E02.1080p.WEB-DL')).toMatchObject({ title: 'Show Name', year: 2019, episodes: [2] });
@@ -61,5 +74,10 @@ describe('normalizeTitle', () => {
     expect(normalizeTitle('Amélie')).toBe('amelie');
     expect(normalizeTitle('Law & Order')).toBe(normalizeTitle('Law and Order'));
     expect(normalizeTitle("Grey's Anatomy")).toBe('greys anatomy');
+  });
+
+  it('keeps the letters of a title that is not in the Latin alphabet', () => {
+    expect(normalizeTitle('進撃の巨人')).toBe('進撃の巨人');
+    expect(normalizeTitle('東京 2')).not.toBe(normalizeTitle('京都 2'));
   });
 });
