@@ -248,14 +248,6 @@ const sourceLabel = (source: string) => sourceLabels[source] ?? (source === 'unk
 // The quality of a release as a person reads it: its resolution and its source.
 const releaseQuality = (release: QueueRejectedRelease) => [release.resolution ? `${release.resolution}p` : null, sourceLabel(release.source)].filter(Boolean).join(' ');
 
-// The size check that stopped a release, with the numbers that made it.
-const sizeReason = (release: QueueRejectedRelease) => {
-  const rejection = release.sizeRejection;
-  if (!rejection) return null;
-  const value = `${rejection.value.toFixed(1)} ${rejection.code === 'size_above_max' ? '>' : '<'} ${rejection.limit} MiB/min`;
-  return rejection.code === 'size_above_max' ? `File size (${value})` : `File size below the minimum: ${value}`;
-};
-
 // The releases that a search found and rejected, with the button that takes one by hand.
 function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; release: QueueRejectedRelease }[]; onDone: () => void }) {
   const [chosen, setChosen] = useState<{ entry: QueueEntryView; release: QueueRejectedRelease } | null>(null);
@@ -291,15 +283,14 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
           rows={items.map((item) => {
             const quality = releaseQuality(item.release);
             const size = formatBytes(item.release.sizeBytes);
-            const reason = sizeReason(item.release);
             return {
               key: `${item.release.indexerId}:${item.release.guid}`,
               cells: [
                 <div className="grid gap-1">
                   <Text variant="small">
-                    {quality} ({size}){reason ? ` / ${reason}` : ''}
+                    {quality} ({size})
                   </Text>
-                  <Text>{item.release.title}</Text>
+                  <Text><span className="[overflow-wrap:anywhere]">{item.release.title}</span></Text>
                   {item.release.reasons.map((text) => (
                     <Text key={text} variant="small">
                       {t(text)}

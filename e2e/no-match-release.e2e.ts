@@ -63,8 +63,9 @@ test('downloads a release that the automatic search rejected', async ({ page }) 
   // size lie above the name of the release, and the reason that stopped it lies below.
   const releaseLine = page.getByText('720p BluRay (5.9 GiB)').first();
   await expect(releaseLine).toBeVisible();
-  // A release that the file size rejected shows the numbers of the check after its quality and size.
-  await expect(page.getByText('1080p WEB-DL (10.0 MiB) / File size below the minimum: 0.1 < 12.5 MiB/min')).toBeVisible();
+  // A release that the file size rejected shows its quality and size, and the reason lies below with the other reasons.
+  await expect(page.getByText('1080p WEB-DL (10.0 MiB)')).toBeVisible();
+  await expect(page.getByText('The file is smaller than the quality allows for this runtime.')).toHaveCount(1);
   await expect(page.getByRole('row').filter({ hasText: RELEASE }).first()).toContainText(RELEASE);
   await expect(page.getByText('The quality of the release is not in any quality profile of the title.')).toHaveCount(1);
   const download = page.getByRole('button', { name: /^Download 720p BluRay/ });
