@@ -757,12 +757,19 @@ function MovieDetail({ entry, run, refresh }: { entry: QueueEntryView; run: Run;
 }
 
 // The inspector of the selected title: its name, its menu, and its progress. The body starts again when the selected
-// title changes, so a season of the title before does not stay open. The last item of the menu deletes the title from
-// the library, with the same modal as the page of the title.
-function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDelete, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onDelete: (row: QueueRow) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
+// title changes, so a season of the title before does not stay open. The last item of the menu deletes the row from the
+// library, with the same modal as the page of the title. A row of a series is one season, so it deletes that season. The
+// whole series goes only from the page of the series.
+function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDelete, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onDelete: (request: PlanRequest, subject: string) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
+  const deletion: { request: PlanRequest; subject: string } | null =
+    row.kind === 'group'
+      ? row.season === null
+        ? null
+        : { request: { action: 'remove', keys: [row.titleKey], season: row.season }, subject: seasonName(row.season) }
+      : { request: { action: 'remove', keys: [row.titleKey] }, subject: row.title };
   const items: { label: string; onClick: () => void; danger?: boolean }[] = [
     ...(row.kind === 'group' ? groupMenu(row, openGroupLogs, run) : entryMenu(row, run, openLogs, true)),
-    { label: t('Delete'), danger: true, onClick: () => onDelete(row) },
+    ...(deletion ? [{ label: t('Delete'), danger: true, onClick: () => onDelete(deletion.request, deletion.subject) }] : []),
   ];
   return (
     <div className="grid gap-6 w-full min-w-0">
@@ -1161,7 +1168,7 @@ function QueueView() {
                 <>
                   <div ref={detailsBox} className="w-full">
                     <Pane className="w-full">
-                      <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(row) => setDeletion({ request: { action: 'remove', keys: [row.titleKey] }, subject: row.title })} onBack={back} backRef={backButton} />
+                      <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(request, subject) => setDeletion({ request, subject })} onBack={back} backRef={backButton} />
                     </Pane>
                   </div>
                   {chosen.kind === 'group' ? (
