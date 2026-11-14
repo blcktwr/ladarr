@@ -49,13 +49,13 @@ test('downloads a release that the automatic search rejected', async ({ page }) 
   await expect(wrong.getByRole('button')).toHaveCount(1);
 
   // A 720p BluRay that only the profile rejected keeps its button. A person can take it by hand. The quality and the
-  // size lie above the name of the release, so the reason that the quality is not in a profile is not repeated.
+  // size lie above the name of the release, and the reason that stopped it lies below.
   const releaseLine = page.getByText('720p BluRay (5.9 GiB)').first();
   await expect(releaseLine).toBeVisible();
   // A release that the file size rejected shows the numbers of the check after its quality and size.
   await expect(page.getByText('1080p WEB-DL (10.0 MiB) / File size below the minimum: 0.1 < 12.5 MiB/min')).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: RELEASE }).first()).toContainText(RELEASE);
-  await expect(page.getByText('The quality of the release is not in any quality profile of the title.')).toHaveCount(0);
+  await expect(page.getByText('The quality of the release is not in any quality profile of the title.')).toHaveCount(1);
   const download = page.getByRole('button', { name: /^Download 720p BluRay/ });
   await expect(download).toBeVisible();
   await download.click();

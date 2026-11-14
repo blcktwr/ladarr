@@ -9,7 +9,6 @@ import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal
 import { Alert } from '../../components/alert.tsx';
 import { Confirm } from '../../components/confirm.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
-import { Blocklist } from './activity-blocklist.tsx';
 import { MatchDialog } from './activity-match.tsx';
 import { AttachDialog } from './activity-client.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
@@ -299,6 +298,11 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
                     {quality} ({size}){reason ? ` / ${reason}` : ''}
                   </Text>
                   <Text>{item.release.title}</Text>
+                  {item.release.reasons.map((text) => (
+                    <Text key={text} variant="small">
+                      {t(text)}
+                    </Text>
+                  ))}
                 </div>,
                 <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
                   <Check />
@@ -1124,15 +1128,9 @@ function QueueView() {
                     <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(row) => setDeletion({ request: { action: 'remove', keys: [row.titleKey] }, subject: row.title })} onBack={back} backRef={backButton} />
                   </Pane>
                   {chosen.kind === 'group' ? (
-                    <>
-                      <GroupRejected group={chosen} filters={filters} refresh={refresh} />
-                      <Blocklist titleKey={chosen.titleKey} />
-                    </>
+                    <GroupRejected group={chosen} filters={filters} refresh={refresh} />
                   ) : (
-                    <>
-                      <MovieRejected entry={chosen} refresh={refresh} />
-                      <Blocklist titleKey={chosen.titleKey} />
-                    </>
+                    <MovieRejected entry={chosen} refresh={refresh} />
                   )}
                 </>
               ) : (
