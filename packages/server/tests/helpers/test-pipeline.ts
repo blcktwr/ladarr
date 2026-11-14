@@ -162,13 +162,16 @@ export async function startPipeline(options: Options = {}) {
   real.start();
   poller.start();
 
-  // Simulates the end of a download: the files exist in the download folder, and the client reports 100%.
+  // Simulates the end of a download: the files exist in the download folder, the client lists them, and it reports 100%.
   function complete(name: string, files: Record<string, string>, hash = hashOf(name)) {
+    const list: { name: string; size: number; progress: number }[] = [];
     for (const [rel, content] of Object.entries(files)) {
       const abs = join(folders.downloads, name, rel);
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, content);
+      list.push({ name: `${name}/${rel}`, size: Buffer.byteLength(content), progress: 1 });
     }
+    qbit.setFiles(hash, list);
     qbit.progress(hash, 1);
   }
 

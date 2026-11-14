@@ -857,6 +857,37 @@ describe('repair', () => {
     expect(entry.manualMatch).toEqual({ file: 'Movie.mkv', covers: [] });
   });
 
+  it('does not offer a match for a file that ffprobe can not read', async () => {
+    pipe = await startPipeline({ probe: async () => ({ ok: false, reason: 'unreadable' }) });
+    api = await pipe.api();
+    const film = movie({ rootId: 'movie', manualRelease: true });
+    pipe.db.data.titles[film.key] = film;
+    pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
+    await api.post('/queue/search', { titleKey: film.key });
+    const entry = pipe.queue.get('movie:2')!;
+    await until(() => entry.stage === 'downloading');
+    pipe.complete(NAME, { [`${NAME}.mkv`]: 'broken' });
+    await until(() => entry.reason?.code === 'file_unreadable');
+    const body = (await api.get('/queue/entries/movie:2')).body;
+    expect(body.entry.reason).toMatchObject({ code: 'file_unreadable', action: 'none' });
+  });
+
+  it('lists only the files of the torrent when the content folder holds other downloads', async () => {
+    const film = await withMovie();
+    await api!.post('/queue/search', { titleKey: film.key });
+    const entry = pipe!.queue.get('movie:2')!;
+    await until(() => entry.stage === 'downloading');
+    // The client created no folder for this torrent, so it reports the folder of every download as the content.
+    const hash = hashOf(NAME);
+    pipe!.qbit.torrents.get(hash)!.content_path = pipe!.folders.downloads;
+    pipe!.qbit.setFiles(hash, [{ name: `${NAME}.mkv`, size: 8, progress: 1 }]);
+    writeFileSync(join(pipe!.folders.downloads, `${NAME}.mkv`), 'the-film');
+    mkdirSync(join(pipe!.folders.downloads, 'Other.Show.S01'));
+    writeFileSync(join(pipe!.folders.downloads, 'Other.Show.S01', 'Other.Show.S01E01.mkv'), 'other');
+    const files = (await api!.get('/queue/entries/movie:2/files')).body;
+    expect(files.files.map((f: { rel: string }) => f.rel)).toEqual([`${NAME}.mkv`]);
+  });
+
   it('lets a retry of a blocked import use a file chosen by hand', async () => {
     pipe = await startPipeline();
     api = await pipe.api();

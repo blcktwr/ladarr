@@ -14,7 +14,7 @@ import { isSample, isVideoFile, parseEpisodes, titleNumbers } from '../parse.ts'
 import { parseRelease } from '../grab/release.ts';
 import { probeFile, type ProbeResult } from '../probe.ts';
 import type { Clients } from '../downloads/client-api.ts';
-import type { ClientHandle } from '../downloads/qbittorrent.ts';
+import type { ClientHandle, Torrent } from '../downloads/qbittorrent.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
 import { entryId, isActive, type Queue, type QueueEntry } from '../downloads/queue.ts';
 import { checkRoot } from '../roots.ts';
@@ -121,6 +121,25 @@ export async function listVideos(base: string, { skipHidden = false }: { skipHid
     }
   }
   await walk(base, 0);
+  return found;
+}
+
+// The video files of a torrent, from the file list of the client. The folder of the content can be the folder of every
+// download, so the disk is not walked.
+export async function torrentVideos(handle: ClientHandle, torrent: Torrent): Promise<Found[] | undefined> {
+  const save = await realpath(torrent.savePath).catch(() => undefined);
+  const content = await realpath(torrent.contentPath).catch(() => undefined);
+  if (!save || !content || !inside(save, content)) return;
+  const found: Found[] = [];
+  for (const file of await handle.api.files(torrent.hash)) {
+    const abs = join(save, file.name);
+    if (!inside(save, abs) || !inside(content, abs)) continue;
+    const rel = abs === content ? basename(abs) : posix(relative(content, abs));
+    if (!isVideoFile(rel) || isSample(rel)) continue;
+    const info = await lstat(abs).catch(() => undefined);
+    if (!info?.isFile()) continue;
+    found.push({ abs, rel, sizeBytes: info.size });
+  }
   return found;
 }
 
@@ -304,8 +323,8 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     let picked: { picks: Pick[]; missing: QueueEntry[] };
     try {
       picked = await run('files_found', async () => {
-        const files = await listVideos(content);
-        const result = pick(title, group, files);
+        const files = await torrentVideos(handle, clientTorrent);
+        const result = pick(title, group, files ?? []);
         if (!result.picks.length) throw new ImportProblem('file_not_found');
         return result;
       });
@@ -885,8 +904,6 @@ export const unfinishedImports = () => {
 // The video files of a download, for the "Match file" choice. Returns nothing when the download is not reachable.
 export async function listDownloadFiles(handle: ClientHandle, hash: string): Promise<{ rel: string; sizeBytes: number }[] | undefined> {
   const torrent = await handle.api.find(hash);
-  const base = torrent && (await realpath(torrent.savePath).catch(() => undefined));
-  const content = torrent && (await realpath(torrent.contentPath).catch(() => undefined));
-  if (!base || !content || !inside(base, content)) return;
-  return (await listVideos(content)).map(({ rel, sizeBytes }) => ({ rel, sizeBytes }));
+  if (!torrent) return;
+  return (await torrentVideos(handle, torrent))?.map(({ rel, sizeBytes }) => ({ rel, sizeBytes }));
 }

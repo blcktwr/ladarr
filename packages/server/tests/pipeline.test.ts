@@ -439,6 +439,33 @@ describe('import safety', () => {
     expect(existsSync(join(pipe!.folders.movies, 'Movie Name (2019)'))).toBe(false);
   });
 
+  it('imports only the files of the torrent when the content folder holds another series', async () => {
+    pipe = await startPipeline();
+    const series = title({ rootId: 'tv', episodes: [episode(1, 1, '2020-01-01'), episode(1, 2, '2020-01-02')] });
+    pipe.db.data.titles[series.key] = series;
+    const name = 'Show.Name.S01.1080p.WEB-DL-GRP';
+    pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
+    pipe.finder.requestSearch(series.key);
+    await until(() => pipe!.queue.get('tv:1:1x2')?.stage === 'downloading');
+    // The client created no folder for this torrent, so it reports the folder of every download as the content.
+    const hash = hashOf(name);
+    pipe.qbit.torrents.get(hash)!.content_path = pipe.folders.downloads;
+    pipe.qbit.setFiles(hash, [
+      { name: 'Show.Name.S01E01.mkv', size: 3, progress: 1 },
+      { name: 'Show.Name.S01E02.mkv', size: 3, progress: 1 },
+    ]);
+    writeFileSync(join(pipe.folders.downloads, 'Show.Name.S01E01.mkv'), 'own one');
+    writeFileSync(join(pipe.folders.downloads, 'Show.Name.S01E02.mkv'), 'own two');
+    mkdirSync(join(pipe.folders.downloads, 'Other.Show'));
+    // The files of the other series are larger, so a walk of the whole folder would take them.
+    writeFileSync(join(pipe.folders.downloads, 'Other.Show', 'Show.Name.S01E01.mkv'), 'x'.repeat(50));
+    writeFileSync(join(pipe.folders.downloads, 'Other.Show', 'Show.Name.S01E02.mkv'), 'x'.repeat(50));
+    pipe.qbit.progress(hash, 1);
+    await until(() => ['1x1', '1x2'].every((n) => pipe!.queue.get(`tv:1:${n}`)?.stage === 'available'), 15_000);
+    const contents = Object.values(pipe!.db.data.files).map((file) => readFileSync(join(pipe!.folders.tv, file.path), 'utf8'));
+    expect(contents.sort()).toEqual(['own one', 'own two']);
+  }, 20_000);
+
   it('stays out of a download path that leads outside the download folder', async () => {
     const { name, entry } = await setup();
     pipe!.qbit.torrents.get(hashOf(name))!.content_path = '/etc';

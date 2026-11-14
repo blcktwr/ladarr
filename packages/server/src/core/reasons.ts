@@ -26,7 +26,7 @@ export const REASONS: Record<string, ReasonInfo> = {
 
   // The import.
   file_not_found: { message: 'The download has no file for this target.', action: 'match' },
-  file_unreadable: { message: 'The file is damaged or not a video.', action: 'match' },
+  file_unreadable: { message: 'The file is damaged or not a video.', action: 'none' },
   destination_exists: { message: 'A file with this name is in the library folder already. It is not replaced.', action: 'retry' },
   destination_outside_root: { message: 'The destination is outside the library folder.', action: 'settings', settings: 'library' },
   disk_full: { message: 'The disk has no room for the file.', action: 'retry' },
