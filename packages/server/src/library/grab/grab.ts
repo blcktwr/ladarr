@@ -37,7 +37,21 @@ export function reasonOf(error: unknown) {
 
 // Sends the chosen release to the client. Each step can be repeated: a restart or a retry reads the client first.
 export function createGrabber({ queue, finder, indexers, clients, save, reconcileMs = 1_000 }: GrabberDeps): (entries: QueueEntry[], signal: AbortSignal) => Promise<void> {
-  // The entries of a pack that the file list of the torrent does not cover. The check is the same as the check of the import.
+  // The entries of a pack that its files do not cover. The check is the same as the check of the import. The names come
+  // from the torrent file, before the client has the release, or from the client, when it has the release already.
+  function missingFrom(files: string[], entries: QueueEntry[]) {
+    // A torrent with one file has no list to compare.
+    if (files.length < 2) return [];
+    const title = db.data.titles[entries[0]!.titleKey];
+    const held = files
+      .filter((file) => isVideoFile(file) && !isSample(file))
+      .map((file) => {
+        const parsed = parseEpisodes(file.split('/').at(-1)!) ?? parseEpisodes(file);
+        return parsed && { season: parsed.season, numbers: titleNumbers(parsed, title?.episodes ?? []) };
+      });
+    return entries.filter((entry) => !held.some((found) => found?.season === entry.season && found.numbers.includes(entry.number!)));
+  }
+
   function missingFromPack(entries: QueueEntry[], torrent: Buffer) {
     let files: ReturnType<typeof torrentFiles>;
     try {
@@ -46,16 +60,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
       // ladarr cannot read the list. The import still blocks a missing episode.
       return [];
     }
-    // A torrent with one file has no list to compare.
-    if (files.length < 2) return [];
-    const title = db.data.titles[entries[0]!.titleKey];
-    const held = files
-      .filter((file) => isVideoFile(file.path) && !isSample(file.path))
-      .map((file) => {
-        const parsed = parseEpisodes(file.path.split('/').at(-1)!) ?? parseEpisodes(file.path);
-        return parsed && { season: parsed.season, numbers: titleNumbers(parsed, title?.episodes ?? []) };
-      });
-    return entries.filter((entry) => !held.some((found) => found?.season === entry.season && found.numbers.includes(entry.number!)));
+    return missingFrom(files.map((file) => file.path), entries);
   }
 
   async function grab(entries: QueueEntry[], signal: AbortSignal) {
@@ -119,6 +124,20 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
       const indexer = db.data.indexers[ref.indexerId] ?? downloaderOf(ref.link);
       if (!indexer) {
         for (const entry of entries) queue.move(entry, { reason: { code: 'no_indexers' } }, 'no indexer for the release');
+        return;
+      }
+      // An earlier try of this season took the release, so the client has the torrent. ladarr reads its files from the
+      // client and never downloads the release from the indexer again: that download costs the ratio of the indexer and
+      // brings nothing, because the data is in the client already.
+      const seen = Object.values(db.data.queue).find(
+        (entry) => entry.titleKey === leader.titleKey && entry.season === leader.season && entry.release?.indexerId === ref.indexerId && entry.release.guid === ref.guid && entry.transferHash,
+      )?.transferHash;
+      const held = seen ? await api.find(seen) : undefined;
+      if (held) {
+        const missing = ref.kind === 'pack' ? missingFrom((await api.files(held.hash)).map((file) => file.name), entries) : [];
+        if (missing.length) finder.fallback(missing, 'pack_missing_episodes');
+        entries = entries.filter((entry) => !missing.includes(entry));
+        if (entries.length) take(held);
         return;
       }
       const got = await indexers.download(indexer, ref.link, { signal });

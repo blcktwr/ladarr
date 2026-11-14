@@ -370,6 +370,29 @@ describe('the content of a pack', () => {
     expect(entries[0]!.attempts).toHaveLength(1);
   });
 
+  it('reads a pack that the client has from the client, and never downloads it from the indexer again', async () => {
+    pipe = await startPipeline();
+    // The season has two episodes when the pack arrives, and the pack holds both.
+    const series = title({ rootId: 'tv', episodes: [episode(1, 1, '2020-01-01'), episode(1, 2, '2020-01-02')] });
+    pipe.db.data.titles[series.key] = series;
+    const files = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'];
+    const hash = hashOf(PACK, files);
+    pipe.tracker.state.items = [{ title: PACK, size: 2 * 60 * 45 * MIB, files }];
+    pipe.finder.requestSearch(series.key);
+    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => pipe!.queue.get(id)!.stage === 'downloading'));
+    pipe.complete(PACK, { 'Show.Name.S01E01.mkv': 'the-first', 'Show.Name.S01E02.mkv': 'the-second' }, hash);
+
+    // New episodes air. The client still has the pack, so the search reads its files there. The release is not downloaded
+    // from the indexer a second time, and the episodes that the pack cannot give do not cost its ratio.
+    series.episodes.push(episode(1, 3, '2020-01-03'), episode(1, 4, '2020-01-04'));
+    pipe.finder.requestSearch(series.key);
+    await until(() => ['tv:1:1x3', 'tv:1:1x4'].every((id) => pipe!.queue.get(id)!.branch === 'waiting'));
+
+    expect(pipe.tracker.state.downloads.filter((file) => file === PACK)).toHaveLength(1);
+    expect(Object.values(pipe.db.data.blocklist)).toMatchObject([{ title: PACK, reason: 'pack_missing_episodes', season: 1 }]);
+    expect(pipe.qbit.torrents.size).toBe(1);
+  });
+
   it('blocks a pack that holds none of its episodes, before the client gets any data', async () => {
     pipe = await startPipeline();
     const series = season();
