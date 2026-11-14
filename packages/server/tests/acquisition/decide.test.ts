@@ -109,10 +109,10 @@ describe('packs', () => {
     expect(codes('Show.Name.S01.1080p.WEB-DL-GRP', { ...season1, title: off }, {}, { sizeBytes: 2 * 60 * 45 * 1024 * 1024 })).toEqual([]);
   });
 
-  it('lets a manual choice take such a pack, but not skip the identity', () => {
+  it('lets a manual choice take any release, also one of another title', () => {
     const has = title({ episodes: [episode(1, 1, '2020-01-01', { fileId: 'f' }), episode(1, 2)] });
     expect(codes('Show.Name.S01.1080p.WEB-DL-GRP', { ...season1, title: has }, { manual: true })).toEqual([]);
-    expect(codes('Other.S01.1080p.WEB-DL-GRP', { ...season1, title: has }, { manual: true })).toEqual(['wrong_title']);
+    expect(codes('Other.S01.1080p.WEB-DL-GRP', { ...season1, title: has }, { manual: true })).toEqual([]);
   });
 
   it('accepts only a pack for a season want', () => {

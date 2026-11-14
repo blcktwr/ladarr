@@ -52,8 +52,8 @@ export type Attempt = {
 
 export type StageEvent = { at: number; stage: Stage; branch: Branch | null; attempt: number; cause: string; detail?: string };
 
-// A release of the last search that was rejected. A grabbable release passes the safety checks, so a person can take
-// it by hand. The link stays on the server: it carries the API key.
+// A release of the last search that was rejected. A person can take it by hand. The link stays on the server: it
+// carries the API key.
 export type RejectedRelease = {
   indexerId: number;
   guid: string;
@@ -66,7 +66,6 @@ export type RejectedRelease = {
   resolution: number | null;
   source: string;
   kind: 'single' | 'multi' | 'pack';
-  grabbable: boolean;
   reasons: string[];
   // The size check that stopped the release, with the numbers. Null when the size did not stop it.
   sizeRejection: { code: 'size_below_min' | 'size_above_max'; value: number; limit: number } | null;

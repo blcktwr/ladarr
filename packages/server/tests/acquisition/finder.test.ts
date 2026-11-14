@@ -406,7 +406,7 @@ describe('categories', () => {
 });
 
 describe('interactive search', () => {
-  it('lists each release with its reasons, and grabs one by choice but not an unsafe one', async () => {
+  it('lists each release with its reasons, and grabs one by choice', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
     const m = film();
@@ -418,7 +418,7 @@ describe('interactive search', () => {
     const list = (await api.get(`/queue/releases?titleKey=${m.key}`)).body;
     expect(list).toMatchObject({ asked: 1, answered: 1 });
     const low = list.releases.find((r: { title: string }) => r.title === lowRes);
-    expect(low).toMatchObject({ accepted: false, overridable: true });
+    expect(low).toMatchObject({ accepted: false });
     expect(low.rejections).toEqual([{ code: 'quality_not_in_profile', message: expect.stringContaining('quality') }]);
     // A release of another title is not in the list.
     expect(list.releases.find((r: { title: string }) => r.title === wrong)).toBeUndefined();
@@ -426,16 +426,27 @@ describe('interactive search', () => {
     await api.get(`/queue/releases?titleKey=${m.key}`);
     expect(searches()).toBe(1);
 
-    const refused = await api.post('/queue/releases/grab', { titleKey: m.key, indexerId: 1, guid: wrong });
-    expect(refused.status).toBe(409);
-    expect(refused.body.rejections[0].code).toBe('wrong_title');
-    expect(pipe.qbit.torrents.size).toBe(0);
-
     const chosen = await api.post('/queue/releases/grab', { titleKey: m.key, indexerId: 1, guid: lowRes });
     expect(chosen.status).toBe(202);
     const entry = pipe.queue.get(m.key)!;
     await until(() => entry.stage === 'downloading');
     expect(entry.release).toMatchObject({ title: lowRes, manual: true });
     expect(pipe.qbit.torrents.has(hashOf(lowRes))).toBe(true);
+  });
+
+  it('takes a release of another title by hand', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const m = film();
+    pipe.db.data.titles[m.key] = m;
+    const wrong = 'Other.Movie.2019.1080p.BluRay-WRONG';
+    pipe.tracker.state.items = [{ title: wrong, size: 100 * 120 * MIB }];
+
+    const chosen = await api.post('/queue/releases/grab', { titleKey: m.key, indexerId: 1, guid: wrong });
+    expect(chosen.status).toBe(202);
+    const entry = pipe.queue.get(m.key)!;
+    await until(() => entry.stage === 'downloading');
+    expect(entry.release).toMatchObject({ title: wrong, manual: true });
+    expect(pipe.qbit.torrents.has(hashOf(wrong))).toBe(true);
   });
 });

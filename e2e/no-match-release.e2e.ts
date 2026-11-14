@@ -42,11 +42,11 @@ test('downloads a release that the automatic search rejected', async ({ page }) 
   // The list of the releases that the search rejected has a title above it.
   await expect(page.getByRole('heading', { name: 'Rejected releases' })).toBeVisible();
 
-  // The inspector lists every release that the search rejected. Every row opens the files of its .torrent. A release
-  // of another title breaks a safety check, so it has no download button, and the row says why.
+  // The inspector lists every release that the search rejected. Every row opens the files of its .torrent and offers
+  // the download, also a release of another title, which the search rejected for its name.
   const wrong = page.getByRole('row').filter({ hasText: WRONG });
   await expect(wrong).toBeVisible();
-  await expect(wrong.getByRole('button', { name: /^Download/ })).toHaveCount(0);
+  await expect(wrong.getByRole('button', { name: /^Download/ })).toHaveCount(1);
   await expect(wrong.getByRole('button', { name: 'Files in the torrent' })).toHaveCount(1);
   await expect(wrong).toContainText('The title of the release is not this title.');
 

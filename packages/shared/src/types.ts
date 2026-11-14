@@ -457,8 +457,8 @@ export type QueueTransfer = {
   peers: number;
 };
 
-// A release that the last search found and rejected. A grabbable release passes the safety checks, so a person can
-// take it by hand; the others stay in the list with the reasons that stopped them.
+// A release that the last search found and rejected. A person can take any of them by hand; the row says the reason
+// that stopped the automatic search.
 export type QueueRejectedRelease = {
   indexerId: number;
   guid: string;
@@ -468,7 +468,6 @@ export type QueueRejectedRelease = {
   resolution: number | null;
   source: string;
   kind: 'single' | 'multi' | 'pack';
-  grabbable: boolean;
   reasons: string[];
   // The size check that stopped the release, with the numbers. Null when the size did not stop it.
   sizeRejection: { code: 'size_below_min' | 'size_above_max'; value: number; limit: number } | null;
@@ -727,7 +726,6 @@ export type ReleaseRow = {
   seeders: number | null;
   kind: 'single' | 'multi' | 'pack';
   accepted: boolean;
-  overridable: boolean;
   rejections: { code: string; message: string }[];
 };
 

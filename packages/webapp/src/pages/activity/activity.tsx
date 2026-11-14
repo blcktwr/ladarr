@@ -305,11 +305,9 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
                   >
                     <TorrentInfo path={`/queue/entries/${item.entry.id}/releases/torrent?indexerId=${item.release.indexerId}&guid=${encodeURIComponent(item.release.guid)}`} />
                   </Modal>
-                  {item.release.grabbable ? (
-                    <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
-                      <Check />
-                    </Button>
-                  ) : null}
+                  <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
+                    <Check />
+                  </Button>
                 </div>,
               ],
             };

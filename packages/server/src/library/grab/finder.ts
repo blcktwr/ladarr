@@ -402,7 +402,6 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
 
   function noResult(entries: QueueEntry[], title: Title, decisionsOf: (entry: QueueEntry) => Decision[], asked: number, answered: number, found: number, profiles: ReturnType<typeof profilesFor>) {
     const shownProfiles = profiles.map(explainProfile);
-    const manualCtx = decideContext(true);
     for (const entry of entries) {
       // One release can come from more than one query, as a pack and as a single episode. The closest decision of the
       // release stays, so the reasons and the counts do not repeat it.
@@ -422,14 +421,13 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
         queue.move(entry, { stage: 'available', branch: null, reason: null }, 'no better release');
         continue;
       }
-      // Every release that the search found and rejected. A release that a manual choice accepts is grabbable, so a
-      // person can take it by hand. The others stay in the list with the reasons that stopped them.
+      // Every release that the search found and rejected. A person can take any of them by hand, so the list keeps the
+      // reason that stopped each one and offers the button that grabs it.
       const rejected = decisions
         .filter((decision) => !decision.accepted)
         .sort((a, b) => a.rejections.length - b.rejections.length || (b.release.seeders ?? 0) - (a.release.seeders ?? 0))
         .slice(0, MAX_CANDIDATES)
         .map((decision) => {
-          const want = wantForRelease(title, decision.release, entry.season ?? undefined, entry.number ?? undefined);
           const sizeCode = decision.rejections.find((code) => code === 'size_below_min' || code === 'size_above_max');
           const sizeLimit = sizeCode === 'size_above_max' ? decision.limits?.max : decision.limits?.min;
           return {
@@ -444,7 +442,6 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
             resolution: decision.parsed.resolution,
             source: decision.parsed.source,
             kind: decision.kind,
-            grabbable: want ? decide(decision.release, want, manualCtx).accepted : false,
             // The blocklist keeps a failed release out of the automatic searches. It is not a reason for the person,
             // who can still take the release by hand.
             reasons: decision.rejections
@@ -1118,19 +1115,18 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       if (releases.length) break;
     }
     const ctx = decideContext();
-    const manual = decideContext(true);
     const decisions = releases.flatMap((release) => {
       const want = wantForRelease(title, release, season, number);
       if (!want) return [];
-      return [{ decision: decide(release, want, ctx), overridable: decide(release, want, manual).accepted, want }];
+      return [{ decision: decide(release, want, ctx), want }];
     });
     return { decisions, asked, answered };
   }
 
-  // Grabs a release that the user chose. The preferences may be overridden. The identity and the duplicate checks may not.
+  // Grabs a release that the user chose. A person can take any release by hand, also one that the automatic search
+  // rejected.
   function grabManual(entries: QueueEntry[], release: RawRelease, want: Want) {
     const decision = decide(release, want, decideContext(true));
-    if (!decision.accepted) return { rejections: decision.rejections };
     for (const entry of entries) {
       if (entry.branch === 'waiting') queue.move(entry, { stage: 'queued', branch: null, reason: null }, 'release chosen by the user');
       else queue.request(entry, 'release chosen by the user');

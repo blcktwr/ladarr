@@ -18,7 +18,7 @@ export function queueReleasesGet(finder: Finder): RequestHandler {
       // A release of another title is noise: the indexer matched the words, and ladarr can never take it.
       releases: result.decisions
         .filter(({ decision }) => !decision.rejections.includes('wrong_title'))
-        .map(({ decision, overridable }) => ({
+        .map(({ decision }) => ({
           indexerId: decision.release.indexerId,
           guid: decision.release.guid,
           title: decision.release.title,
@@ -27,10 +27,9 @@ export function queueReleasesGet(finder: Finder): RequestHandler {
           seeders: decision.release.seeders,
           kind: decision.kind,
           accepted: decision.accepted,
-          overridable,
           rejections: decision.rejections.map((code) => ({ code, message: REJECTION_TEXT[code] ?? code })),
         }))
-        .sort((a, b) => Number(b.accepted) - Number(a.accepted) || Number(b.overridable) - Number(a.overridable) || b.sizeBytes - a.sizeBytes),
+        .sort((a, b) => Number(b.accepted) - Number(a.accepted) || b.sizeBytes - a.sizeBytes),
     });
   };
 }

@@ -548,7 +548,6 @@ export const es: Record<string, string> = {
   '{title} (full season)': '{title} (temporada completa)',
   '{title} (several episodes)': '{title} (varios episodios)',
   'Fits the preset.': 'Cumple con el perfil.',
-  'This release cannot be downloaded.': 'Esta versión no se puede descargar.',
 
   // Import a folder and rename
   'More actions': 'Más acciones',

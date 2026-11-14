@@ -66,11 +66,9 @@ export function ReleasesDialog({ target, label, onClose }: { target: Target | nu
             <Row
               key={`${release.indexerId}:${release.guid}`}
               actions={
-                release.overridable ? (
-                  <Button variant={release.accepted ? 'primary' : 'ghost'} onClick={() => void grab(release)}>
-                    {release.accepted ? t('Download') : t('Download anyway')}
-                  </Button>
-                ) : undefined
+                <Button variant={release.accepted ? 'primary' : 'ghost'} onClick={() => void grab(release)}>
+                  {release.accepted ? t('Download') : t('Download anyway')}
+                </Button>
               }
             >
               <p>
@@ -84,7 +82,6 @@ export function ReleasesDialog({ target, label, onClose }: { target: Target | nu
                 {release.indexer} {formatBytes(release.sizeBytes)} {release.seeders === null ? t('seeders unknown') : t('{n} seeders', { n: release.seeders })}
               </p>
               <p>{release.accepted ? t('Fits the preset.') : release.rejections.map((r) => t(r.message)).join(' ')}</p>
-              {!release.overridable && <p>{t('This release cannot be downloaded.')}</p>}
             </Row>
           ))}
         </List>

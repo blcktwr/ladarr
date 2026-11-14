@@ -206,11 +206,14 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
     if (episode && ctx.hasFile(episode) && !ctx.manual) reject('already_available');
   }
 
+  // A person can take any release by hand, so a manual choice has no rejection.
+  const finalRejections = ctx.manual ? [] : [...new Set(rejections)];
+
   return {
     release,
     parsed,
-    rejections: [...new Set(rejections)],
-    accepted: rejections.length === 0,
+    rejections: finalRejections,
+    accepted: finalRejections.length === 0,
     kind,
     covers,
     mibPerMinute: quality.mibPerMinute,

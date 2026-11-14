@@ -232,8 +232,6 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
             resolution: release.resolution,
             source: release.source,
             kind: release.kind,
-            // A search of an older version kept only the releases that a manual grab takes, and wrote no `grabbable`.
-            grabbable: release.grabbable ?? true,
             reasons: rejectedReasons(release),
             sizeRejection: release.sizeRejection,
           })),

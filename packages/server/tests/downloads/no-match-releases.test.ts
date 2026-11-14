@@ -34,7 +34,7 @@ async function rejectedFilm(items: FakeItem[]) {
 }
 
 describe('the rejected releases of a search with no match', () => {
-  it('lists every release that the search rejected, and grabs a grabbable one by hand', async () => {
+  it('lists every release that the search rejected, and grabs one by hand', async () => {
     const { entry, detail } = await rejectedFilm([
       { title: LOW, size: LOW_SIZE },
       { title: WRONG, size: 100 * 120 * MIB },
@@ -43,9 +43,8 @@ describe('the rejected releases of a search with no match', () => {
 
     const view = await detail();
     expect(Array.isArray(view.search.rejected)).toBe(true);
-    // A 720p BluRay that the default 1080p/2160p profiles reject for its quality is still a release that a person
-    // can pick, so it is grabbable. The API lists it without the link, the magnet, or the info hash: the link carries
-    // the API key.
+    // A 720p BluRay that the default 1080p/2160p profiles reject for its quality is a release that a person can pick.
+    // The API lists it without the link, the magnet, or the info hash: the link carries the API key.
     const item = view.search.rejected.find((release: { title: string }) => release.title === LOW);
     expect(item).toMatchObject({
       indexerId: 1,
@@ -56,7 +55,6 @@ describe('the rejected releases of a search with no match', () => {
       resolution: 720,
       source: 'bluray',
       kind: 'single',
-      grabbable: true,
     });
     expect(item).not.toHaveProperty('link');
     expect(item).not.toHaveProperty('magnet');
@@ -67,10 +65,10 @@ describe('the rejected releases of a search with no match', () => {
     // The list carries the numbers of the check, so the row can show why the file size did not fit.
     const tiny = view.search.rejected.find((release: { title: string }) => release.title === TINY);
     expect(tiny.sizeRejection).toEqual({ code: 'size_below_min', value: 0.1, limit: 12.5 });
-    // A release of another title breaks a safety check, so a manual grab cannot take it. The list still shows it,
-    // with the reason that stopped it, and says that it is not grabbable.
+    // A release of another title breaks the identity check, so the search rejected it. A person can take it by hand,
+    // and the list still shows the reason that stopped it.
     const wrong = view.search.rejected.find((release: { title: string }) => release.title === WRONG);
-    expect(wrong).toMatchObject({ title: WRONG, grabbable: false });
+    expect(wrong).toMatchObject({ title: WRONG });
     expect(wrong.reasons).toContain('The title of the release is not this title.');
 
     const grab = await api!.post(`/queue/entries/${entry.id}/releases/grab`, { indexerId: 1, guid: LOW });
@@ -81,7 +79,7 @@ describe('the rejected releases of a search with no match', () => {
     expect(pipe!.qbit.torrents.has(hashOf(LOW))).toBe(true);
   });
 
-  it('lists a blocklisted release as grabbable, without the blocklist as a reason', async () => {
+  it('lists a blocklisted release without the blocklist as a reason', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
     const m = film();
@@ -99,18 +97,17 @@ describe('the rejected releases of a search with no match', () => {
     // it and says why the blocklist holds the release, not that the release is on the blocklist.
     expect(view.search.rejected.map((release: { title: string }) => release.title)).toEqual(expect.arrayContaining([LOW, BLOCKED]));
     const blocked = view.search.rejected.find((release: { title: string }) => release.title === BLOCKED);
-    expect(blocked).toMatchObject({ title: BLOCKED, grabbable: true });
+    expect(blocked).toMatchObject({ title: BLOCKED });
     expect(blocked.reasons).toContain('The indexer gave a file that is not a torrent.');
     expect(blocked.reasons).not.toContain('The release is on the blocklist.');
 
-    // A search of an older version kept the blocklist as a reason and wrote no `grabbable`. The row still says why the
-    // blocklist holds the release, and it keeps the tick that takes the release by hand.
+    // A search of an older version kept the blocklist as a reason. The row still says why the blocklist holds the
+    // release.
     const old = entry!.search!.rejected.find((release) => release.guid === BLOCKED)!;
     old.reasons = ['The release is on the blocklist.'];
-    Reflect.deleteProperty(old, 'grabbable');
     const again = (await api.get(`/queue/entries/${entry!.id}`)).body.entry;
     const oldRow = again.search.rejected.find((release: { title: string }) => release.title === BLOCKED);
-    expect(oldRow).toMatchObject({ grabbable: true, reasons: ['The indexer gave a file that is not a torrent.'] });
+    expect(oldRow).toMatchObject({ reasons: ['The indexer gave a file that is not a torrent.'] });
 
     const grab = await api.post(`/queue/entries/${entry!.id}/releases/grab`, { indexerId: 1, guid: BLOCKED });
     expect(grab.status).toBe(202);
