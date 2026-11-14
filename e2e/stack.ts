@@ -169,13 +169,16 @@ export async function startStack() {
       }
     },
 
-    // The end of a download: the files are in the download folder, and the client reports 100%.
+    // The end of a download: the files are in the download folder, the client lists them, and it reports 100%.
     complete(name: string, files: Record<string, string>) {
+      const list: { name: string; size: number; progress: number }[] = [];
       for (const [rel, content] of Object.entries(files)) {
         const abs = join(folders.downloads, name, rel);
         mkdirSync(dirname(abs), { recursive: true });
         writeFileSync(abs, content);
+        list.push({ name: `${name}/${rel}`, size: Buffer.byteLength(content), progress: 1 });
       }
+      qbit.setFiles(hashOf(name), list);
       qbit.progress(hashOf(name), 1);
     },
 
