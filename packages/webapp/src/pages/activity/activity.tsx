@@ -426,12 +426,14 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
 
 type Run = (action: QueueActionName, ids: string[], group?: { titleKey: string; season: number | null }) => void;
 
-// The actions of a row, in its menu.
-function entryMenu(entry: QueueEntryView, run: Run, openLogs: (entry: QueueEntryView) => void): { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] {
+// The actions of a row, in its menu. The menu of a title in the inspector offers the retry of any reason, so a target
+// that stopped with an action of its own, such as the attach of a torrent that is in the client, starts again from
+// there. A row of an episode keeps the action of its reason in its own menu.
+function entryMenu(entry: QueueEntryView, run: Run, openLogs: (entry: QueueEntryView) => void, anyReason = false): { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] {
   const items: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] = [];
   const searching = entry.branch === 'waiting';
   // An episode has no search of its own.
-  if (entry.branch !== 'paused' && entry.reason?.action === 'retry' && !(searching && entry.number !== null)) items.push({ label: searching ? t('Retry') : t('Try again'), onClick: () => run('retry', [entry.id]) });
+  if (entry.branch !== 'paused' && (anyReason ? entry.reason !== null : entry.reason?.action === 'retry') && !(searching && entry.number !== null)) items.push({ label: searching ? t('Retry') : t('Try again'), onClick: () => run('retry', [entry.id]) });
   if (entry.lane !== null) items.push({ label: t('Delete priority'), onClick: () => run('unpriority', [entry.id]) });
   items.push({ label: t('Logs'), onClick: () => openLogs(entry) });
   return items;
@@ -752,7 +754,7 @@ function MovieDetail({ entry, run, refresh }: { entry: QueueEntryView; run: Run;
 // the library, with the same modal as the page of the title.
 function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDelete, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onDelete: (row: QueueRow) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
   const items: { label: string; onClick: () => void; danger?: boolean }[] = [
-    ...(row.kind === 'group' ? groupMenu(row, openGroupLogs, run) : entryMenu(row, run, openLogs)),
+    ...(row.kind === 'group' ? groupMenu(row, openGroupLogs, run) : entryMenu(row, run, openLogs, true)),
     { label: t('Delete'), danger: true, onClick: () => onDelete(row) },
   ];
   return (
