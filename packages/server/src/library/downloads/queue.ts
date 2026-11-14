@@ -160,13 +160,18 @@ export function loadingTitleKeys() {
   return keys;
 }
 
-// A torrent belongs to ladarr when a target that ladarr sent to the client has its hash. A torrent that the user
-// attached is the user's, and a target that still looks for a release has not sent a torrent yet.
+// A torrent belongs to ladarr when ladarr sent it to the client. The record of the sent torrents keeps it after a new
+// search clears the hash of a target, and after the target that sent it is gone. A file from before the record keeps
+// the step in the history of the target. A torrent that the user attached is the user's, and a target that still looks
+// for a release has not sent a torrent yet.
 const EARLY: readonly Stage[] = ['queued', 'searching', 'fetching'];
+const sentThisRelease = (entry: QueueEntry) =>
+  entry.release !== null && entry.history.some((event) => event.stage === 'sending' && event.detail === entry.release?.title);
 export function addedByApp(hash: string) {
+  if (db.data.sentTorrents[hash]) return true;
   const entries = Object.values(db.data.queue).filter((entry) => entry.transferHash === hash);
   if (entries.some((entry) => entry.release?.external)) return false;
-  return entries.some((entry) => !EARLY.includes(entry.stage));
+  return entries.some((entry) => !EARLY.includes(entry.stage) || sentThisRelease(entry));
 }
 
 // `onMove` runs after each change of the stage or the branch, with the values from before the change.

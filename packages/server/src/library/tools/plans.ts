@@ -77,8 +77,12 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
   // Removes the torrents of a dropped title or season. A client that fails does not stop the removal.
   async function removeTorrents(refs: { clientId: string; hash: string }[], deleteFiles: boolean) {
     for (const ref of refs) {
+      const client = clients?.get(ref.clientId);
+      if (!client) continue;
       try {
-        await clients?.get(ref.clientId)?.api.remove(ref.hash, deleteFiles);
+        await client.api.remove(ref.hash, deleteFiles);
+        // The torrent is gone, so the record of the torrents that ladarr sent no longer covers it.
+        delete db.data.sentTorrents[ref.hash];
       } catch (error) {
         log.warn('could not remove torrent', { clientId: ref.clientId, hash: ref.hash, error: String(error) });
       }

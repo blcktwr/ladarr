@@ -152,6 +152,8 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
     const existing = await api.find(hash!);
     if (existing) return owned(existing) ? adopt(existing) : unowned();
 
+    // The client did not have this torrent, so ladarr sends it now, and it belongs to the app from here on.
+    db.data.sentTorrents[hash!] = Date.now();
     // The request to the client is the sending step. The fetch of the release ended before this line.
     for (const entry of entries) queue.move(entry, { stage: 'sending', branch: null, reason: null }, 'sending to the client', ref.title);
     try {

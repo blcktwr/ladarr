@@ -135,6 +135,9 @@ export type Data = {
   imports: Record<string, ImportJournal>;
   // Releases that ladarr must not take again, keyed by info hash, or by indexer and GUID.
   blocklist: Record<string, { title: string; reason: string; at: number; titleKey?: string; season?: number }>;
+  // The torrents that ladarr sent to a client, keyed by info hash. A torrent in this record belongs to the app, also
+  // when its target searches again or the target that sent it is gone. A torrent that the user added is not here.
+  sentTorrents: Record<string, number>;
   // The secret in the URL of the iCal feed. Null means that the feed is off.
   calendarFeedToken: string | null;
   // The destinations for events, one for each event type. See webhook.ts.
@@ -182,6 +185,7 @@ export const emptyData = (): Data => ({
   queuePaused: false,
   imports: {},
   blocklist: {},
+  sentTorrents: {},
   calendarFeedToken: null,
   webhooks: [],
   compat: { commandSeq: 0, commands: {} },

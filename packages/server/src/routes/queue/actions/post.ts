@@ -120,6 +120,8 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
           // One request for each torrent, also when many targets point at it. The data stays on the disk.
           if (!removed.has(entry.transferHash!)) await api.remove(entry.transferHash!, false);
           removed.add(entry.transferHash!);
+          // The torrent is gone, so the record of the torrents that ladarr sent no longer covers it.
+          delete db.data.sentTorrents[entry.transferHash!];
           queue.move(entry, {}, 'torrent removed from the client', 'The data stays on the disk.');
           entry.transferHash = null;
           entry.clientId = null;

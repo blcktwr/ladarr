@@ -261,6 +261,40 @@ describe('attach a download', () => {
     await until(() => entry.stage === 'available');
   });
 
+  it('takes over a torrent that ladarr sent, after the target that sent it is gone', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const film = movie({ rootId: 'movie', manualRelease: true });
+    pipe.db.data.titles[film.key] = film;
+    pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
+    await api.post('/queue/search', { titleKey: film.key });
+    const hash = hashOf(NAME);
+    await until(() => pipe!.queue.get('movie:2')?.stage === 'downloading');
+    // The target leaves the queue. The torrent stays in the client, because ladarr added it.
+    delete pipe.db.data.queue['movie:2'];
+    pipe.finder.requestSearch(film.key);
+    const entry = pipe.queue.get('movie:2')!;
+    await until(() => entry.stage === 'downloading' && entry.reason === null);
+    expect(entry).toMatchObject({ branch: null, reason: null, transferHash: hash });
+  });
+
+  it('takes over a torrent that ladarr sent before the record of the sent torrents', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const film = movie({ rootId: 'movie', manualRelease: true });
+    pipe.db.data.titles[film.key] = film;
+    pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
+    await api.post('/queue/search', { titleKey: film.key });
+    const entry = pipe.queue.get('movie:2')!;
+    await until(() => entry.stage === 'downloading');
+    // A file from an older version has no record. The history of the target says what it sent.
+    delete pipe.db.data.sentTorrents[hashOf(NAME)];
+    pipe.queue.move(entry, { branch: 'cancelled' }, 'cancelled by the user');
+    pipe.finder.requestSearch(film.key);
+    await until(() => entry.stage === 'downloading' && entry.branch === null && entry.reason === null);
+    expect(entry.transferHash).toBe(hashOf(NAME));
+  });
+
   it('leaves a sibling that waits on the same torrent in Sending when only one episode is attached', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
