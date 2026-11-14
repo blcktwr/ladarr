@@ -259,6 +259,26 @@ describe('attach a download', () => {
     expect(pipe.db.data.sentTorrents[hash]).toBeUndefined();
   });
 
+  it('retries a target that stopped on the torrent that the client finished', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const film = movie({ rootId: 'movie', manualRelease: true });
+    pipe.db.data.titles[film.key] = film;
+    pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
+    // The user added the torrent by hand while it downloaded, so the grab stopped.
+    addExternal(NAME, { category: 'manual' });
+    await api.post('/queue/search', { titleKey: film.key });
+    const entry = pipe.queue.get('movie:2')!;
+    await until(() => entry.reason?.code === 'torrent_exists');
+    // The client finishes it, and the user retries the target.
+    pipe.complete(NAME, { 'Movie.mkv': 'the-film' });
+    expect((await api.post('/queue/actions', { action: 'retry', ids: ['movie:2'] })).status).toBe(200);
+    await until(() => entry.stage === 'available');
+    // The torrent of the client is the one that the import used. The client holds no other.
+    expect(pipe.qbit.torrents.size).toBe(1);
+    expect(entry.transferHash).toBe(hashOf(NAME));
+  });
+
   it('offers the torrent that was in the client already when a grab stopped', async () => {
     pipe = await startPipeline();
     api = await pipe.api();

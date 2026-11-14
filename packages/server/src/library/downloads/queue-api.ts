@@ -17,9 +17,12 @@ export function createRetry({ queue, finder, enqueue }: { queue: Queue; finder: 
 
   function retry(entry: QueueEntry) {
     reset(entry, 'retry');
-    const hash = entry.transferHash;
-    if (hash && (entry.stage === 'validating' || entry.stage === 'importing')) {
-      queue.move(entry, { branch: null, reason: null }, 'retry');
+    // A torrent that the client has is the work of the target: the import reads it, waits while it downloads, and
+    // blocks when it is gone. A finished torrent goes to the checks and never starts a new search.
+    const hash = entry.transferHash ?? entry.release?.infoHash ?? null;
+    if (hash && (entry.stage === 'validating' || entry.stage === 'importing' || entry.reason?.code === 'torrent_exists')) {
+      entry.transferHash = hash;
+      queue.move(entry, { stage: 'validating', branch: null, reason: null }, 'retry');
       enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
     } else if ((entry.stage === 'fetching' || entry.stage === 'sending') && entry.release) {
       queue.move(entry, { branch: null, reason: null }, 'retry');
