@@ -10,8 +10,8 @@ import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts'
 import { bySeasonNumber, label, lanePositions, shown } from '../../../helpers/queue.ts';
 
 export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
-  type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'clear' | 'remove_torrent' | 'replace';
-  const ACTIONS: Action[] = ['pause', 'resume', 'retry', 'priority', 'unpriority', 'clear', 'remove_torrent', 'replace'];
+  type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'remove_torrent' | 'replace';
+  const ACTIONS: Action[] = ['pause', 'resume', 'retry', 'priority', 'unpriority', 'remove_torrent', 'replace'];
 
   const jobsOf = (entry: QueueEntry) =>
     Object.values(db.data.jobs).filter((job) => {
@@ -36,8 +36,6 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
         return isActive(entry) && entry.priority === null && entry.branch !== 'paused' && early ? null : 'Only waiting work can have priority.';
       case 'unpriority':
         return entry.priority !== null ? null : 'This target has no priority.';
-      case 'clear':
-        return (entry.stage === 'available' || entry.branch === 'cancelled') && !entry.clearedAt ? null : 'Only finished targets can be cleared.';
       case 'remove_torrent': {
         if (!entry.transferHash) return 'This target has no torrent.';
         if (sharing(entry).length > 0) return 'A target still uses this torrent.';
@@ -111,10 +109,6 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
           for (const job of jobsOf(entry)) deprioritize(job.id);
           break;
         }
-        case 'clear':
-          entry.clearedAt = Date.now();
-          queue.touch(entry);
-          break;
         case 'remove_torrent': {
           if (!api) throw new ClientError('unreachable', 'No download client.');
           // One request for each torrent, also when many targets point at it. The data stays on the disk.

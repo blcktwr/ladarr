@@ -433,10 +433,6 @@ function entryMenu(entry: QueueEntryView, run: Run, openLogs: (entry: QueueEntry
   // An episode has no search of its own.
   if (entry.branch !== 'paused' && entry.reason?.action === 'retry' && !(searching && entry.number !== null)) items.push({ label: searching ? t('Retry') : t('Try again'), onClick: () => run('retry', [entry.id]) });
   if (entry.lane !== null) items.push({ label: t('Delete priority'), onClick: () => run('unpriority', [entry.id]) });
-  if (entry.key === 'available' || entry.key === 'cancelled') {
-    if (entry.hasTorrent && !entry.attached) items.push({ label: t('Delete torrent'), onClick: () => run('remove_torrent', [entry.id]) });
-    if (!entry.clearedAt) items.push({ label: t('Clear from the list'), onClick: () => run('clear', [entry.id]) });
-  }
   items.push({ label: t('Logs'), onClick: () => openLogs(entry) });
   return items;
 }
@@ -845,7 +841,6 @@ const actionLabel: Record<QueueActionName, string> = {
   retry: 'Try again',
   priority: 'Prioritize',
   unpriority: 'Delete priority from',
-  clear: 'Clear',
   remove_torrent: 'Delete the torrent of',
   replace: 'Replace',
 };
