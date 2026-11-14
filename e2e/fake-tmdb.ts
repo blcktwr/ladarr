@@ -37,7 +37,8 @@ export async function startFakeTmdb() {
         ],
       });
     }
-    // The discovery page. The movie list has a second page, the rating has another movie first, and each filter adds a movie.
+    // The discovery page. The movie list has a second page that repeats a title of the first one, the rating has
+    // another movie first, and each filter adds a movie.
     if (path === '/discover/movie') {
       const page = url.searchParams.get('page') ?? '1';
       const topRated = url.searchParams.get('sort_by') === 'vote_average.desc';
@@ -50,7 +51,7 @@ export async function startFakeTmdb() {
           : undefined;
       const results = filtered
         ? [MOVIE, filtered]
-        : page === '2' ? [benchMovie(BENCH_MOVIE_ID + 1)] : topRated ? [MOVIE, benchMovie(BENCH_MOVIE_ID + 2)] : [MOVIE];
+        : page === '2' ? [MOVIE, benchMovie(BENCH_MOVIE_ID + 1)] : topRated ? [MOVIE, benchMovie(BENCH_MOVIE_ID + 2)] : [MOVIE];
       return send({ page: Number(page), total_pages: filtered ? 1 : 2, results });
     }
     if (path === '/discover/tv') return send({ page: 1, total_pages: 1, results: [SERIES] });

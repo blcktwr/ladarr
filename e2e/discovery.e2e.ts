@@ -33,9 +33,13 @@ test('the Discovery item opens the page with a row for each list', async ({ page
   const main = page.getByRole('main');
   await expect(main.getByRole('heading', { name: 'Discovery', exact: true })).toBeVisible();
 
-  // The end of the page takes the next page of the movies.
+  // The end of the page takes the next page of the movies, with its titles at the end of the list, and a title that
+  // two pages share shows once.
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   await expect(main.getByRole('link', { name: /Bench Movie Alpha/ })).toBeVisible();
+  const order = await main.getByRole('link').allTextContents();
+  expect(order.findIndex((text) => text.includes('Bench Movie Alpha'))).toBeGreaterThan(order.findIndex((text) => text.includes('Show Name')));
+  await expect(main.getByRole('link', { name: /Movie Name/ })).toHaveCount(1);
 
   // The sort reads the lists again from the first page.
   await page.getByRole('combobox').click();

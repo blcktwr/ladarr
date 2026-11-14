@@ -152,11 +152,15 @@ export function Discovery() {
     getNextPageParam: (last) => (last.page < last.totalPages ? last.page + 1 : undefined),
   });
   const pages = data?.pages ?? [];
-  // Each row holds the results of every page that the page has. The lists share one gallery, so the rows of the page
-  // fill from the left also when a list does not end at the end of a row.
-  const shown = (pages[0]?.rows ?? []).flatMap(
-    (row) => pages.flatMap((page) => page.rows.find((other) => other.id === row.id)?.results ?? []),
-  );
+  // The gallery follows the order of the pages, so a new page adds its titles at the end of the list.
+  // TMDB repeats a title when the order of a list changes between two pages, so the list keeps the first one.
+  const seen = new Set<string>();
+  const shown = pages.flatMap((page) => page.rows.flatMap((row) => row.results)).filter((result) => {
+    const key = `${result.mediaType}:${result.tmdbId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   // The end of the page takes the next page before it reaches the screen.
   const more = useRef<HTMLDivElement>(null);
   useEffect(() => {
