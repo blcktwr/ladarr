@@ -34,7 +34,7 @@ export function Confirm({ open, onOpenChange, title, confirm, onConfirm, pending
         <AlertDialog.Backdrop forceRender className={veil} />
         <AlertDialog.Popup initialFocus={cancel} className={`${popup} ${widths.md}`}>
           <AlertDialog.Title className="text-ink-strong text-[17px]/6 font-semibold">{title}</AlertDialog.Title>
-          {children && <AlertDialog.Description render={<div />} className="grid grid-cols-[minmax(0,1fr)] justify-items-start min-h-0 w-full gap-5 overflow-y-auto text-ink text-[15px]/6">{children}</AlertDialog.Description>}
+          {children && <AlertDialog.Description render={<div />} className="-my-6 grid grid-cols-[minmax(0,1fr)] justify-items-start min-h-0 w-full gap-5 overflow-y-auto py-6 text-ink text-[15px]/6">{children}</AlertDialog.Description>}
           {/* The buttons are at the right edge. The confirm button is last, at the far right. */}
           <div className="self-end shrink-0">
             <Actions>
