@@ -304,9 +304,11 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
                     </Text>
                   ))}
                 </div>,
-                <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
-                  <Check />
-                </Button>,
+                item.release.grabbable ? (
+                  <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
+                    <Check />
+                  </Button>
+                ) : null,
               ],
             };
           })}
