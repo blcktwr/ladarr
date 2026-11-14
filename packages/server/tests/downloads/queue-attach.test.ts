@@ -242,6 +242,23 @@ describe('attach a download', () => {
     expect((await api!.get('/queue/entries/movie:2/external')).status).toBe(409);
   });
 
+  it('takes a finished torrent that was in the client already', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const film = movie({ rootId: 'movie', manualRelease: true });
+    pipe.db.data.titles[film.key] = film;
+    pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
+    // The user added this torrent by hand, and the client finished it before ladarr found the release.
+    const hash = addExternal(NAME, { category: 'manual' });
+    pipe.complete(NAME, { 'Movie.mkv': 'the-film' });
+    await api.post('/queue/search', { titleKey: film.key });
+    const entry = pipe.queue.get('movie:2')!;
+    // The grab uses the files of the torrent, which stays the user's: a removal never deletes it.
+    await until(() => entry.stage === 'available');
+    expect(entry.release?.external).toBe(true);
+    expect(pipe.db.data.sentTorrents[hash]).toBeUndefined();
+  });
+
   it('offers the torrent that was in the client already when a grab stopped', async () => {
     pipe = await startPipeline();
     api = await pipe.api();

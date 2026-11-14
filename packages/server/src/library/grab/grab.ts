@@ -75,7 +75,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
     // The client is known before the first request, so the limit of its downloads counts this target from now.
     for (const entry of entries) entry.clientId = connection.id;
 
-    const adopt = (found: Torrent) => {
+    const adopt = (found: Torrent, external: boolean) => {
       for (const entry of entries) {
         // The user cancelled while the add was running. The torrent stays in the client, and the entry stays cancelled.
         if (entry.branch === 'cancelled') {
@@ -84,25 +84,34 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
         }
         entry.transferHash = found.hash;
         entry.clientId = connection.id;
-        if (entry.release) entry.release.infoHash = found.hash;
-        catalog.info('download_added', `${connection.config.name} added "${found.name}"`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
-        queue.move(entry, { stage: 'downloading', branch: null, reason: null }, 'client accepted', found.name);
+        if (entry.release) {
+          entry.release.infoHash = found.hash;
+          // A torrent that ladarr did not send stays the user's, so a removal never deletes it.
+          if (external) entry.release.external = true;
+        }
+        if (external) catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
+        else catalog.info('download_added', `${connection.config.name} added "${found.name}"`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
+        queue.move(entry, { stage: 'downloading', branch: null, reason: null }, external ? 'torrent is in the client already' : 'client accepted', found.name);
       }
     };
-    // A torrent in the client that ladarr did not add is the user's. ladarr does not take it over.
-    const owned = (found: Torrent) => addedByApp(found.hash);
-    const unowned = () => {
+    // A torrent in the client with the hash of the release is the release. A finished torrent is used as it is, also
+    // when ladarr did not send it, because the user added it by hand or an older version did. The torrent stays the
+    // user's then, so a removal never deletes it. A torrent that still downloads is the user's, and ladarr does not
+    // take it over: the target stops with the reason that offers the attach.
+    const unowned = (found: Torrent) => {
       for (const entry of entries) {
-        catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: entry.transferHash ?? ref.infoHash });
+        catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
         queue.move(entry, { reason: { code: 'torrent_exists' } }, 'torrent is in the client already');
       }
     };
+    const take = (found: Torrent) =>
+      addedByApp(found.hash) || found.complete ? adopt(found, !addedByApp(found.hash)) : unowned(found);
 
     // A hash from an earlier try: if the client has the torrent, the work is done.
     let hash = ref.infoHash;
     if (hash) {
       const found = await api.find(hash);
-      if (found) return owned(found) ? adopt(found) : unowned();
+      if (found) return take(found);
     }
 
     let source: { torrent: Buffer } | { magnet: string };
@@ -150,7 +159,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
     await save();
 
     const existing = await api.find(hash!);
-    if (existing) return owned(existing) ? adopt(existing) : unowned();
+    if (existing) return take(existing);
 
     // The client did not have this torrent, so ladarr sends it now, and it belongs to the app from here on.
     db.data.sentTorrents[hash!] = Date.now();
@@ -173,7 +182,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
       for (let i = 0; i < 3; i++) {
         await sleep(reconcileMs);
         const found = await api.find(hash!).catch(() => undefined);
-        if (found) return owned(found) ? adopt(found) : unowned();
+        if (found) return take(found);
         if (found === null) break;
       }
       throw new JobError(error.code === 'unreachable' ? 'uncertain' : 'outage', error.message);
@@ -182,7 +191,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
     for (let i = 0; i < 3; i++) {
       if (i) await sleep(reconcileMs);
       const added = await api.find(hash!);
-      if (added) return adopt(added);
+      if (added) return take(added);
     }
     throw new JobError('uncertain', 'The client accepted the torrent but does not list it.');
   }
