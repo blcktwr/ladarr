@@ -684,10 +684,10 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
         ? t(stuckReason)
         : t('{count} / {total} episodes', { count: completed, total });
   // The bar of the whole series: the part of its episodes that is complete, or the part of its download that the
-  // client reports while it downloads. A series that the search did not find has no work to fill.
+  // client reports while it downloads. A series that the search did not find, or that found no match, has no work to fill.
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
   const bar =
-    status === 'not_found' ? undefined : status === 'downloading' ? (
+    status === 'not_found' || status === 'no_match' ? undefined : status === 'downloading' ? (
       <Progress value={Math.round((group.download ?? 0) * 100)} label={`${groupName(group)} ${t('Download')}`} />
     ) : (
       <Progress value={percent} label={t('{count} / {total} episodes', { count: completed, total })} />
