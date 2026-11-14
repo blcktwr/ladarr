@@ -905,10 +905,14 @@ function QueueView() {
   // The button of the row opens the inspector in a narrow window, and the button of the inspector returns to the list.
   const rowButton = useRef<HTMLButtonElement | null>(null);
   const backButton = useRef<HTMLButtonElement | null>(null);
-  // The inspector opens at the row that the user clicked when the top of the list is out of view, so a row far down
-  // the list does not send the view to the top. Null keeps it at the top of the list, in the flow.
+  // The inspector opens at the row that the user clicked, so the details land beside that row. Null keeps it at the
+  // top of the list, in the flow, until the first click.
   const listBox = useRef<HTMLDivElement | null>(null);
   const [inspectorTop, setInspectorTop] = useState<number | null>(null);
+  // The panel of the inspector, and a count of the clicks on a row. Each click brings the panel into view, also when
+  // its content arrives late and it grows after the click.
+  const detailsBox = useRef<HTMLDivElement | null>(null);
+  const [reveal, setReveal] = useState(0);
 
   const [preview, setPreview] = useState<{ body: Parameters<typeof send>[0]; data: QueueActionPreview } | null>(null);
   const [deletion, setDeletion] = useState<{ request: PlanRequest; subject: string } | null>(null);
@@ -1016,15 +1020,40 @@ function QueueView() {
     const key = rowKey(row);
     const grid = listBox.current;
     const rowBox = grid ? [...grid.querySelectorAll<HTMLElement>('[data-row]')].find((element) => element.dataset.row === key) : undefined;
-    if (grid && rowBox) {
-      const top = grid.getBoundingClientRect().top;
-      // The top of the list is in view, so the inspector keeps its place there. It moves to the row only when the
-      // list scrolls its top away, and then it lands where the user reads.
-      setInspectorTop(top >= 0 ? null : Math.round(rowBox.getBoundingClientRect().top - top));
-    }
+    // The inspector opens at the row, wherever the row is, so the details of a row land beside the row that the
+    // user clicked.
+    if (grid && rowBox) setInspectorTop(Math.round(rowBox.getBoundingClientRect().top - grid.getBoundingClientRect().top));
     setSelected(key);
+    setReveal((count) => count + 1);
     if (window.matchMedia(`(max-width: ${NARROW - 1}px)`).matches) setOpen(true);
   };
+
+  // A click on a row moves the page so the panel of the details shows whole, and a panel higher than the window shows
+  // from its top. The panel grows when its content arrives, so the resize keeps the page on it until the user scrolls.
+  useEffect(() => {
+    if (!reveal) return;
+    const box = detailsBox.current;
+    if (!box) return;
+    const show = () => {
+      const rect = box.getBoundingClientRect();
+      const view = document.documentElement.clientHeight;
+      const top = rect.height >= view ? 0 : Math.min(Math.max(rect.top, 0), view - rect.height);
+      if (Math.abs(rect.top - top) >= 1) window.scrollBy(0, rect.top - top);
+    };
+    const observer = new ResizeObserver(show);
+    observer.observe(box);
+    show();
+    const stop = () => {
+      observer.disconnect();
+      window.removeEventListener('wheel', stop);
+      window.removeEventListener('touchstart', stop);
+      window.removeEventListener('keydown', stop);
+    };
+    window.addEventListener('wheel', stop, { passive: true });
+    window.addEventListener('touchstart', stop, { passive: true });
+    window.addEventListener('keydown', stop);
+    return stop;
+  }, [reveal]);
 
   // The inspector of a narrow window covers the list. The focus moves with the view, so the keyboard stays in the part
   // that shows.
@@ -1132,15 +1161,17 @@ function QueueView() {
             {/* The page control lies under the pane, so the table keeps the whole pane and the control is not part of its container. */}
             {pages > 1 && <Pagination aria-label={t('Pages')} page={page + 1} count={pages} onPageChange={(next) => setPage(next - 1)} />}
           </div>
-          {/* The inspector keeps the top of the list, in the flow. When the list scrolls its top away, it leaves the
-              flow and opens at the row that was clicked, so the detail lands where the user reads. */}
+          {/* The inspector keeps the top of the list, in the flow, until a click. A click takes it out of the flow and
+              opens it at the row that was clicked, wherever the row is, so the detail lands beside that row. */}
           <div className={`min-w-0 min-[800px]:relative ${open ? '' : 'max-[800px]:hidden'}`}>
             <div className={`grid gap-6 ${inspectorTop === null ? '' : 'min-[800px]:absolute min-[800px]:inset-x-0'}`} style={inspectorTop === null ? undefined : { top: inspectorTop }}>
               {chosen ? (
                 <>
-                  <Pane className="w-full">
-                    <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(row) => setDeletion({ request: { action: 'remove', keys: [row.titleKey] }, subject: row.title })} onBack={back} backRef={backButton} />
-                  </Pane>
+                  <div ref={detailsBox} className="w-full">
+                    <Pane className="w-full">
+                      <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(row) => setDeletion({ request: { action: 'remove', keys: [row.titleKey] }, subject: row.title })} onBack={back} backRef={backButton} />
+                    </Pane>
+                  </div>
                   {chosen.kind === 'group' ? (
                     <GroupRejected group={chosen} filters={filters} refresh={refresh} />
                   ) : (
