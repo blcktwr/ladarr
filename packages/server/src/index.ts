@@ -73,7 +73,7 @@ for (const hash of unfinishedImports()) worker.enqueue({ type: 'import.run', pay
 
 const restorer = createRestorer({ dir: config.backupDir, worker });
 const services = { queue, finder, poller, clients, importStatus };
-const retries = createRetry({ queue, finder, enqueue: (input) => worker.enqueue(input) });
+const retries = createRetry({ queue, enqueue: (input) => worker.enqueue(input) });
 const indexersChanged = () => {
   retries.retryBlocked('no_indexers');
   events.publish('indexers.changed');

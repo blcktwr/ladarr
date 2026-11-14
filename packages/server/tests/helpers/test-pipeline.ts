@@ -11,6 +11,7 @@ import { createImporter } from '../../src/library/imports/importer.ts';
 import { importRunHandler } from '../../src/jobs/import-run.ts';
 import { importResumeHandler } from '../../src/jobs/import-resume.ts';
 import { queueGrabHandler } from '../../src/jobs/queue-grab.ts';
+import { queueRetryHandler } from '../../src/jobs/queue-retry.ts';
 import { queueSearchHandler } from '../../src/jobs/queue-search.ts';
 import type { Indexer } from '../../src/library/grab/indexers.ts';
 import { createIndexerService } from '../../src/library/grab/torznab.ts';
@@ -143,6 +144,7 @@ export async function startPipeline(options: Options = {}) {
   const handlers = {
     'queue.search': queueSearchHandler(finder),
     'queue.grab': queueGrabHandler({ queue, finder, indexers, clients, save, reconcileMs: 20 }),
+    'queue.retry': queueRetryHandler({ queue, finder, clients, enqueue: (input) => real.enqueue(input), events }),
     'import.run': importRunHandler({
       queue,
       events,

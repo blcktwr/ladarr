@@ -163,7 +163,7 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   const enqueue = enqueueInput ?? ((input: EnqueueInput) => enqueueJob(input));
   const api = express.Router();
   // A change of the indexers or of the clients can lift the block of a target. The target goes on, and the pages read the new state.
-  const retries = services ? createRetry({ queue: services.queue, finder: services.finder, enqueue }) : undefined;
+  const retries = services ? createRetry({ queue: services.queue, enqueue }) : undefined;
   const setupChanged = (kind: 'indexers' | 'clients') => {
     retries?.retryBlocked(kind === 'indexers' ? 'no_indexers' : 'client_missing');
     events.publish(`${kind}.changed`);

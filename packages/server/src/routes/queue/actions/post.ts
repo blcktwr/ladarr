@@ -60,7 +60,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     return [entry];
   }
 
-  const { retry } = createRetry({ queue, finder, enqueue });
+  const { retry } = createRetry({ queue, enqueue });
 
   async function apply(action: Action, entries: QueueEntry[]) {
     const removed = new Set<string>();

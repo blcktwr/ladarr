@@ -12,7 +12,7 @@ import { label, shown } from '../../../../../helpers/queue.ts';
 
 // Matches a file of the download to the target, or to several episodes. The match stays through every retry.
 export function queueEntryMatchPost(queue: Queue, finder: Finder, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler<{ id: string }> {
-  const { retry } = createRetry({ queue, finder, enqueue });
+  const { retry } = createRetry({ queue, enqueue });
   return async (req, res) => {
     const entry = db.data.queue[req.params.id];
     const handle = clients.get(entry?.clientId);

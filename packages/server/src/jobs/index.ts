@@ -20,6 +20,7 @@ import { metadataSweepHandler } from './metadata-sweep.ts';
 import { migrationImportHandler } from './migration-import.ts';
 import { queueGrabHandler } from './queue-grab.ts';
 import { queueInitialHandler } from './queue-initial.ts';
+import { queueRetryHandler } from './queue-retry.ts';
 import { queueRssHandler } from './queue-rss.ts';
 import { queueSearchHandler } from './queue-search.ts';
 import { queueSweepHandler } from './queue-sweep.ts';
@@ -51,6 +52,7 @@ export function jobHandlers({ backupDir, events, save, tmdb, enqueue, clients, q
     'queue.rss': queueRssHandler(finder),
     'queue.sweep': queueSweepHandler(finder),
     'queue.grab': queueGrabHandler({ queue, finder, indexers, clients, save }),
+    'queue.retry': queueRetryHandler({ queue, finder, clients, enqueue, events }),
     'import.run': importRunHandler({ queue, events, clients, save, status: importStatus }),
     'import.resume': importResumeHandler(),
     ...webhookDeliverHandler({}),
