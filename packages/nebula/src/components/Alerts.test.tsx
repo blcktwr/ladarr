@@ -330,21 +330,14 @@ describe('Alerts imperative API', () => {
     expect(screen.getByText('Hook message')).toBeTruthy();
   });
 
-  it('hides every alert while a modal is open, and shows them again when it closes', () => {
+  it('hides an alert that arrives under a modal, and shows it when the modal closes', () => {
     const { rerender } = render(
-      <Alerts>
-        <Modal open={false} onOpenChange={() => undefined} title="Test modal"><p>Body</p></Modal>
-      </Alerts>,
-    );
-    const id = addNow(() => alert.show('Hidden title', 'Message'));
-
-    expect(screen.getByText('Hidden title').closest('.invisible')).toBeNull();
-
-    rerender(
       <Alerts>
         <Modal open onOpenChange={() => undefined} title="Test modal"><p>Body</p></Modal>
       </Alerts>,
     );
+    const id = addNow(() => alert.show('Hidden title', 'Message'));
+
     expect(screen.getByText('Hidden title').closest('.invisible')).not.toBeNull();
     expect(screen.getByText('Hidden title').closest('[aria-hidden="true"]')).not.toBeNull();
 
@@ -358,21 +351,14 @@ describe('Alerts imperative API', () => {
     closeNow(id);
   });
 
-  it('hides every alert while a panel is open', () => {
+  it('hides an alert that arrives under a panel, and shows it when the panel closes', () => {
     const { rerender } = render(
-      <Alerts>
-        <Panel open={false} onOpenChange={() => undefined} label="Test panel"><p>Body</p></Panel>
-      </Alerts>,
-    );
-    const id = addNow(() => alert.show('Under the panel', 'Message'));
-
-    expect(screen.getByText('Under the panel').closest('.invisible')).toBeNull();
-
-    rerender(
       <Alerts>
         <Panel open onOpenChange={() => undefined} label="Test panel"><p>Body</p></Panel>
       </Alerts>,
     );
+    const id = addNow(() => alert.show('Under the panel', 'Message'));
+
     expect(screen.getByText('Under the panel').closest('.invisible')).not.toBeNull();
 
     rerender(
@@ -385,21 +371,67 @@ describe('Alerts imperative API', () => {
     closeNow(id);
   });
 
-  it('keeps the time of an alert while a modal is open', async () => {
+  it('ends an alert that already showed when a modal opens, so it does not come back', async () => {
     vi.useFakeTimers();
     const { rerender } = render(
       <Alerts>
         <Modal open={false} onOpenChange={() => undefined} title="Test modal"><p>Body</p></Modal>
       </Alerts>,
     );
-    const id = addNow(() => alert.show('Waiting title', 'Message', { timeout: 1000 }));
+    const id = addNow(() => alert.show('Shown title', 'Message'));
 
-    await advance(600);
+    expect(screen.getByText('Shown title').closest('.invisible')).toBeNull();
+
     rerender(
       <Alerts>
         <Modal open onOpenChange={() => undefined} title="Test modal"><p>Body</p></Modal>
       </Alerts>,
     );
+    rerender(
+      <Alerts>
+        <Modal open={false} onOpenChange={() => undefined} title="Test modal"><p>Body</p></Modal>
+      </Alerts>,
+    );
+
+    expect(screen.queryByText('Shown title')).toBeNull();
+
+    closeNow(id);
+  });
+
+  it('keeps a blocker under a modal, and shows it when the modal closes', () => {
+    const { rerender } = render(
+      <Alerts>
+        <Modal open={false} onOpenChange={() => undefined} title="Test modal"><p>Body</p></Modal>
+      </Alerts>,
+    );
+    const id = addNow(() => alert.blocker('Blocker title', 'Message'));
+
+    rerender(
+      <Alerts>
+        <Modal open onOpenChange={() => undefined} title="Test modal"><p>Body</p></Modal>
+      </Alerts>,
+    );
+    rerender(
+      <Alerts>
+        <Modal open={false} onOpenChange={() => undefined} title="Test modal"><p>Body</p></Modal>
+      </Alerts>,
+    );
+
+    expect(screen.getAllByText('Blocker title').some((node) => node.closest('.invisible') === null)).toBe(true);
+
+    closeNow(id);
+  });
+
+  it('waits the time of an alert that arrives while a modal is open, and starts it when the modal closes', async () => {
+    vi.useFakeTimers();
+    const { rerender } = render(
+      <Alerts>
+        <Modal open onOpenChange={() => undefined} title="Test modal"><p>Body</p></Modal>
+      </Alerts>,
+    );
+    const id = addNow(() => alert.show('Waiting title', 'Message', { timeout: 1000 }));
+
+    expect(screen.getByText('Waiting title').closest('.invisible')).not.toBeNull();
     await advance(5000);
     rerender(
       <Alerts>

@@ -24,7 +24,7 @@ const AlertTimeoutContext = createContext(5000);
 // The one manager of the app. alert uses it from any TypeScript file, and Alerts gives it to the provider.
 const manager = Toast.createToastManager();
 
-// The number of overlays that are open: a modal, a confirm or a panel. Every alert waits under them.
+// The number of overlays that are open: a modal, a confirm or a panel. No alert shows while one is open.
 let openModals = 0;
 const modalListeners = new Set<() => void>();
 const announceModal = () => modalListeners.forEach((listener) => listener());
@@ -99,7 +99,10 @@ const isBlocker = (toast: AlertToast) => toast.type === 'blocker';
 // It goes away after 5 seconds, or when you click its close button. A timeout of 0 keeps the front alert, and the queue waits.
 // While the pointer or the focus is on it, the time stops.
 // A blocker is in the queue too, and it never leaves on its own.
-// A modal, a confirm or a panel covers the window. Every alert waits under it, so the overlay keeps its buttons, and its live region stays quiet.
+// A modal, a confirm or a panel covers the window. No alert shows under it, so the overlay keeps its buttons, and its
+// live region stays quiet. An alert that already showed ends there, so it does not come back as if it were new. A
+// blocker, or an alert with a time of 0, waits instead, because the person must still act on it. The alerts that
+// arrive under the overlay wait too, and show when it closes.
 export function Alerts({ children, limit = 3, timeout = 5000 }: { children: ReactNode; limit?: number; timeout?: number }) {
   const underModal = useModalOpen();
   return (
@@ -108,7 +111,7 @@ export function Alerts({ children, limit = 3, timeout = 5000 }: { children: Reac
       <Toast.Provider toastManager={manager} timeout={timeout} limit={Number.MAX_SAFE_INTEGER}>
         {children}
         <Toast.Portal>
-          {/* The alerts stay in the store while an overlay is open, so they come back when it closes. The hidden live region reads nothing then. */}
+          {/* An alert that already showed ends under the overlay. The ones that wait stay in the store, so they come back when it closes. The hidden live region reads nothing meanwhile. */}
           <div aria-hidden={underModal || undefined} className={underModal ? 'invisible' : undefined}>
             <Toast.Viewport className="fixed z-50 bottom-6 left-1/2 -translate-x-1/2 w-[min(32rem,calc(100vw-3rem))] outline-none pointer-events-none">
               <Queue limit={limit} timeout={timeout} paused={underModal} />
@@ -131,7 +134,7 @@ function Queue({ limit, timeout, paused }: { limit: number; timeout: number; pau
   // Ending alerts that were never in front are invisible, but their roots must stay until the store removes them.
   const seen = useRef(new Set<string>());
   useEffect(() => {
-    if (front) {
+    if (front && !paused) {
       seen.current.add(front.id);
     }
     // Forget the alerts that the store has removed, so the set keeps only the alerts that are on the screen.
@@ -141,11 +144,26 @@ function Queue({ limit, timeout, paused }: { limit: number; timeout: number; pau
         seen.current.delete(id);
       }
     });
-  }, [front, manager.toasts]);
+  }, [front, manager.toasts, paused]);
+
+  // An overlay covers the alerts that are on the screen. The ones that leave on their own end there, so a person who
+  // closes the overlay does not see an old alert as a new one. A blocker, and an alert with a time of 0, wait instead:
+  // the person must still act on them. The alerts that arrive under the overlay wait too.
+  useEffect(() => {
+    if (!paused) {
+      return;
+    }
+    for (const toast of active) {
+      const data = toast.data as AlertData | undefined;
+      if (seen.current.has(toast.id) && (data?.alertTimeout ?? timeout) !== 0) {
+        manager.close(toast.id);
+      }
+    }
+  }, [paused, active, manager, timeout]);
 
   // Only the front alert has a time. The others wait with a time of 0, so an alert does not leave before its turn.
   // When an alert comes to the front, or is added again by its id, its own time replaces the time of 0.
-  // An overlay stops every time, so the alerts are still there when it closes.
+  // An overlay stops every time, so the alerts that wait are still there when it closes.
   useEffect(() => {
     if (!front) {
       return;
