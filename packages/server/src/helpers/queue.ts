@@ -1,6 +1,8 @@
 import { qualityLabel } from '../library/grab/quality.ts';
 import { parseRelease } from '../library/grab/release.ts';
 import type { Finder } from '../library/grab/finder.ts';
+import { BLOCK_REASONS } from '../library/grab/blocklist.ts';
+import { REJECTION_TEXT } from '../library/grab/decide.ts';
 import { IMPORT_STAGES } from '@ladarr/shared/enums';
 import { type Db, db } from '../core/db.ts';
 import type { Job } from '../core/jobs.ts';
@@ -173,6 +175,16 @@ export function fileOf(entry: QueueEntry, title: Title, transfer?: Transfer) {
   return file ? { name: file.path.split('/').at(-1)!, sizeBytes: file.sizeBytes } : null;
 }
 
+// The reasons of a release that the search rejected. A release that the blocklist stopped says why the blocklist holds
+// it, not that it is on the blocklist. A search of an older version kept the blocklist as a reason, so the row drops it.
+function rejectedReasons(release: { reasons?: string[]; indexerId: number; guid: string; infoHash?: string | null }) {
+  const reasons = (release.reasons ?? []).filter((text) => text !== REJECTION_TEXT.blocklisted);
+  // A blocklist entry is keyed by the hash of its torrent, or by its indexer and guid when it has no hash.
+  const block = (release.infoHash ? db.data.blocklist[release.infoHash] : undefined) ?? db.data.blocklist[`${release.indexerId}:${release.guid}`];
+  const text = block ? BLOCK_REASONS[block.reason] : undefined;
+  return text ? [...reasons, text] : reasons;
+}
+
 export function view(poller: Poller, importStatus: ImportStatus | undefined, entry: QueueEntry, lane: Map<string, number>, detail = false) {
   const title = titleOf(entry)!;
   const episode = entry.season === null ? undefined : title.episodes.find((e) => e.season === entry.season && e.number === entry.number);
@@ -220,8 +232,9 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
             resolution: release.resolution,
             source: release.source,
             kind: release.kind,
-            grabbable: release.grabbable,
-            reasons: release.reasons,
+            // A search of an older version kept only the releases that a manual grab takes, and wrote no `grabbable`.
+            grabbable: release.grabbable ?? true,
+            reasons: rejectedReasons(release),
             sizeRejection: release.sizeRejection,
           })),
         }

@@ -86,7 +86,7 @@ describe('the rejected releases of a search with no match', () => {
     api = await pipe.api();
     const m = film();
     pipe.db.data.titles[m.key] = m;
-    pipe.db.data.blocklist[`1:${BLOCKED}`] = { title: BLOCKED, reason: 'test', at: Date.now() };
+    pipe.db.data.blocklist[`1:${BLOCKED}`] = { title: BLOCKED, reason: 'invalid_torrent', at: Date.now() };
     pipe.tracker.state.items = [
       { title: BLOCKED, size: LOW_SIZE },
       { title: LOW, size: LOW_SIZE },
@@ -96,11 +96,21 @@ describe('the rejected releases of a search with no match', () => {
 
     const view = (await api.get(`/queue/entries/${entry!.id}`)).body.entry;
     // The blocklist keeps a failed release out of the automatic search. A person takes it by hand, so the list offers
-    // it and does not show the blocklist as the reason.
+    // it and says why the blocklist holds the release, not that the release is on the blocklist.
     expect(view.search.rejected.map((release: { title: string }) => release.title)).toEqual(expect.arrayContaining([LOW, BLOCKED]));
     const blocked = view.search.rejected.find((release: { title: string }) => release.title === BLOCKED);
     expect(blocked).toMatchObject({ title: BLOCKED, grabbable: true });
+    expect(blocked.reasons).toContain('The indexer gave a file that is not a torrent.');
     expect(blocked.reasons).not.toContain('The release is on the blocklist.');
+
+    // A search of an older version kept the blocklist as a reason and wrote no `grabbable`. The row still says why the
+    // blocklist holds the release, and it keeps the tick that takes the release by hand.
+    const old = entry!.search!.rejected.find((release) => release.guid === BLOCKED)!;
+    old.reasons = ['The release is on the blocklist.'];
+    Reflect.deleteProperty(old, 'grabbable');
+    const again = (await api.get(`/queue/entries/${entry!.id}`)).body.entry;
+    const oldRow = again.search.rejected.find((release: { title: string }) => release.title === BLOCKED);
+    expect(oldRow).toMatchObject({ grabbable: true, reasons: ['The indexer gave a file that is not a torrent.'] });
 
     const grab = await api.post(`/queue/entries/${entry!.id}/releases/grab`, { indexerId: 1, guid: BLOCKED });
     expect(grab.status).toBe(202);
