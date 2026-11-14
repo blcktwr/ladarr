@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { episode, movie, title } from '../helpers/test-fixtures.ts';
+import { episode, indexer, movie, title } from '../helpers/test-fixtures.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
@@ -309,6 +309,19 @@ describe('the order of the sweep', () => {
     const searchJobs = Object.values(pipe.db.data.jobs).filter((job) => job.type === 'queue.search');
     const seqOf = (titleKey: string) => searchJobs.find((job) => (job.payload as { titleKey: string }).titleKey === titleKey)!.seq;
     expect(seqOf(none.key)).toBeGreaterThan(seqOf(rejected.key));
+  });
+});
+
+describe('categories', () => {
+  it('searches every category when the indexer has none', async () => {
+    const push = { ...indexer().push.sonarr!, categories: [], animeCategories: [] };
+    pipe = await startPipeline({ indexer: { push: { sonarr: push, radarr: push } } });
+    const m = film();
+    pipe.db.data.titles[m.key] = m;
+    pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
+    pipe.finder.requestSearch(m.key);
+    await until(() => searches() === 1);
+    expect(pipe.tracker.state.searches.find((url) => url.searchParams.get('t') !== 'caps')!.searchParams.has('cat')).toBe(false);
   });
 });
 

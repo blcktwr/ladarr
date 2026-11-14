@@ -2,7 +2,7 @@ import type { IndexerRow, IndexerTestResult, SettingsResponse } from '@ladarr/sh
 import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { useEffect, useId, useMemo, useState, type ReactElement } from 'react';
-import { ActionMenu, Button, Checkbox, Confirm, Dropdown, EmptyState, Field, Form, Hint, Modal, Section, Table, TagInput, Text } from 'nebula';
+import { ActionMenu, Button, Checkbox, Confirm, Dropdown, EmptyState, Field, Form, Hint, Modal, MultiSelect, Section, Table, TagInput, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { api, ApiError } from '../../lib/api.ts';
@@ -18,13 +18,42 @@ const testText = (test: IndexerTestResult) =>
         ? t('The address is not a Torznab indexer.')
         : t('The indexer does not answer. Check the address.');
 
-type Draft = { name: string; type: 'torznab'; baseUrl: string; apiKey: string; delay: string; languages: string[]; enableRss: boolean; enableAutomaticSearch: boolean; enableInteractiveSearch: boolean };
+// The standard Torznab categories for series and movies. The indexer ignores a category that it does not have.
+const CATEGORY_OPTIONS = [
+  { value: '2000', label: '2000 Movies' },
+  { value: '2010', label: '2010 Movies/Foreign' },
+  { value: '2020', label: '2020 Movies/Other' },
+  { value: '2030', label: '2030 Movies/SD' },
+  { value: '2040', label: '2040 Movies/HD' },
+  { value: '2045', label: '2045 Movies/UHD' },
+  { value: '2050', label: '2050 Movies/BluRay' },
+  { value: '2060', label: '2060 Movies/3D' },
+  { value: '2070', label: '2070 Movies/DVD' },
+  { value: '2080', label: '2080 Movies/WEB-DL' },
+  { value: '2090', label: '2090 Movies/x264' },
+  { value: '2100', label: '2100 Movies/x265' },
+  { value: '5000', label: '5000 TV' },
+  { value: '5010', label: '5010 TV/Foreign' },
+  { value: '5020', label: '5020 TV/Other' },
+  { value: '5030', label: '5030 TV/SD' },
+  { value: '5040', label: '5040 TV/HD' },
+  { value: '5045', label: '5045 TV/UHD' },
+  { value: '5050', label: '5050 TV/BluRay' },
+  { value: '5060', label: '5060 TV/3D' },
+  { value: '5070', label: '5070 TV/Anime' },
+  { value: '5080', label: '5080 TV/DVD' },
+  { value: '5090', label: '5090 TV/WEB-DL' },
+  { value: '5100', label: '5100 TV/x264' },
+  { value: '5110', label: '5110 TV/x265' },
+];
 
-const empty: Draft = { name: '', type: 'torznab', baseUrl: '', apiKey: '', delay: '6', languages: [], enableRss: true, enableAutomaticSearch: true, enableInteractiveSearch: true };
+type Draft = { name: string; type: 'torznab'; baseUrl: string; apiKey: string; delay: string; languages: string[]; categories: string[]; enableRss: boolean; enableAutomaticSearch: boolean; enableInteractiveSearch: boolean };
+
+const empty: Draft = { name: '', type: 'torznab', baseUrl: '', apiKey: '', delay: '6', languages: [], categories: [], enableRss: true, enableAutomaticSearch: true, enableInteractiveSearch: true };
 
 const draftOf = (indexer?: IndexerRow): Draft =>
   indexer
-    ? { ...empty, name: indexer.name, baseUrl: indexer.baseUrl, delay: String(indexer.delaySeconds), languages: indexer.preferredLanguages, enableRss: indexer.enableRss, enableAutomaticSearch: indexer.enableAutomaticSearch, enableInteractiveSearch: indexer.enableInteractiveSearch }
+    ? { ...empty, name: indexer.name, baseUrl: indexer.baseUrl, delay: String(indexer.delaySeconds), languages: indexer.preferredLanguages, categories: indexer.categories.map(String), enableRss: indexer.enableRss, enableAutomaticSearch: indexer.enableAutomaticSearch, enableInteractiveSearch: indexer.enableInteractiveSearch }
     : empty;
 
 const delayOf = (value: string) => (value.trim() === '' ? NaN : Number(value));
@@ -40,6 +69,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
   const [draft, setDraft] = useState(draftOf(indexer));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [result, setResult] = useState<IndexerTestResult | null>(null);
+  const [categoriesUpdated, setCategoriesUpdated] = useState(false);
   const [failed, setFailed] = useState(false);
   const [pending, setPending] = useState<'test' | 'save' | null>(null);
   // The list does not hold the key, so the form asks for the key of the indexer that it edits.
@@ -63,6 +93,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
     setDraft({ ...draft, ...changes });
     setErrors({});
     setResult(null);
+    setCategoriesUpdated(false);
   };
 
   const messages: Record<string, string> = {
@@ -71,21 +102,32 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
     apiKey: t('Enter the API key.'),
     delaySeconds: t('Enter a number from 0 to 3600.'),
     preferredLanguages: t('Enter lowercase language codes, such as en or ja.'),
+    categories: t('Enter categories as numbers.'),
   };
 
   async function run(action: 'test' | 'save') {
-    // A new indexer is added only after a test that worked. A field that changes drops the result, so the test must run again.
-    if (action === 'save' && !editing && !result?.ok) return;
+    // The indexer is saved only after a test that worked, also when the form edits one. A field that changes drops the result, so the test must run again.
+    if (action === 'save' && !managed && !result?.ok) return;
     const seconds = delayOf(draft.delay);
     if (!delayValid(seconds)) return setErrors({ delaySeconds: messages.delaySeconds! });
     setPending(action);
     setFailed(false);
     setResult(null);
     // The server keeps the key of an indexer that exists. A key that the person leaves empty is not in the body, so it stays as it is.
-    const body = { name: draft.name, type: draft.type, baseUrl: draft.baseUrl, ...(editing && !draft.apiKey ? {} : { apiKey: draft.apiKey }), delaySeconds: seconds, preferredLanguages: draft.languages, enableRss: draft.enableRss, enableAutomaticSearch: draft.enableAutomaticSearch, enableInteractiveSearch: draft.enableInteractiveSearch };
+    const body = { name: draft.name, type: draft.type, baseUrl: draft.baseUrl, ...(editing && !draft.apiKey ? {} : { apiKey: draft.apiKey }), delaySeconds: seconds, preferredLanguages: draft.languages, categories: draft.categories.map(Number), enableRss: draft.enableRss, enableAutomaticSearch: draft.enableAutomaticSearch, enableInteractiveSearch: draft.enableInteractiveSearch };
     try {
-      if (action === 'test') setResult(await api<IndexerTestResult>(indexer ? `/indexers/${indexer.id}/test` : '/indexers/test', { method: 'POST', body }));
-      else {
+      if (action === 'test') {
+        const test = await api<IndexerTestResult>(indexer ? `/indexers/${indexer.id}/test` : '/indexers/test', { method: 'POST', body });
+        // The indexer lists the categories that it has. A selected category that is not in the list goes, so a search does not ask for a category that does not exist.
+        if (test.ok) {
+          const listed = new Set(test.categories.map(String));
+          const kept = draft.categories.filter((value) => listed.has(value));
+          const changed = kept.length !== draft.categories.length;
+          setCategoriesUpdated(changed);
+          if (changed) setDraft({ ...draft, categories: kept });
+        }
+        setResult(test);
+      } else {
         await (managed ? api(`/indexers/${indexer!.id}`, { method: 'PATCH', body: { delaySeconds: seconds, preferredLanguages: draft.languages } }) : api(indexer ? `/indexers/${indexer.id}` : '/indexers', { method: indexer ? 'PUT' : 'POST', body }));
         onDone();
       }
@@ -112,7 +154,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
             <>
               {result && (
                 <div className="mr-auto grid gap-1">
-                  <span className={`${result.ok ? 'text-success' : 'text-error'} text-[15px]/none font-[550] tracking-[.01em]`}>{result.ok ? t('Connected') : t('Error connecting')}</span>
+                  <span className={`${result.ok ? 'text-success' : 'text-error'} text-[15px]/none font-[550] tracking-[.01em]`}>{result.ok ? t(categoriesUpdated ? 'Connected, categories updated' : 'Connected') : t('Error connecting')}</span>
                   {!result.ok && <Text variant="small">{testText(result)}</Text>}
                 </div>
               )}
@@ -121,7 +163,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
               </Button>
             </>
           )}
-          <Button type="submit" form={formId} pending={pending === 'save'} disabled={pending === 'test' || (!editing && !result?.ok)}>
+          <Button type="submit" form={formId} pending={pending === 'save'} disabled={pending === 'test' || (!managed && !result?.ok)}>
             {editing ? t('Save') : t('Add')}
           </Button>
         </>
@@ -137,9 +179,18 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
         {failed && <Alert tone="danger">{t('The request did not complete. Try again.')}</Alert>}
         {!managed && (
           <>
-            <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_12rem] gap-x-4 w-full">
+            <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_12rem_minmax(0,1fr)] gap-x-4 w-full">
               <Field width="full" label={t('Name')} aria-required="true" error={errors.name} value={draft.name} onValueChange={(name) => set({ name })} />
               <Dropdown label={t('Type')} value={draft.type} options={[{ value: 'torznab', label: t('Torznab') }]} onValueChange={(type) => set({ type: type as Draft['type'] })} />
+              <MultiSelect
+                label={t('Categories')}
+                value={draft.categories}
+                onValueChange={(categories) => set({ categories })}
+                options={CATEGORY_OPTIONS}
+                valueText={(count) => t('{n} selected', { n: count })}
+                width="full"
+                error={errors.categories}
+              />
             </div>
             <Field width="full" label={t('Address')} aria-required="true" error={errors.baseUrl} value={draft.baseUrl} onValueChange={(baseUrl) => set({ baseUrl })} />
           </>
@@ -196,7 +247,7 @@ export function Indexers() {
   async function toggle(indexer: IndexerRow, enabled: boolean) {
     setFailed(false);
     try {
-      await api(`/indexers/${indexer.id}`, { method: 'PUT', body: { name: indexer.name, type: 'torznab', baseUrl: indexer.baseUrl, delaySeconds: indexer.delaySeconds, preferredLanguages: indexer.preferredLanguages, enableRss: enabled, enableAutomaticSearch: enabled, enableInteractiveSearch: enabled } });
+      await api(`/indexers/${indexer.id}`, { method: 'PUT', body: { name: indexer.name, type: 'torznab', baseUrl: indexer.baseUrl, delaySeconds: indexer.delaySeconds, preferredLanguages: indexer.preferredLanguages, categories: indexer.categories, enableRss: enabled, enableAutomaticSearch: enabled, enableInteractiveSearch: enabled } });
       void reload();
     } catch {
       setFailed(true);

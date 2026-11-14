@@ -217,7 +217,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
   function usableIndexers(title: Title, interactive = false) {
     return indexersFor(title.mediaType).filter((indexer) => {
       const push = indexer.push[app(title)]!;
-      return !notUsedReason(indexer, app(title)) && (interactive ? push.enableInteractiveSearch : push.enableAutomaticSearch) && categoriesOf(indexer, title).length > 0;
+      return !notUsedReason(indexer, app(title)) && (interactive ? push.enableInteractiveSearch : push.enableAutomaticSearch);
     });
   }
 
@@ -924,7 +924,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       if (!indexers.usable(indexer)) continue;
       for (const appName of ['sonarr', 'radarr'] as const) {
         const push = indexer.push[appName];
-        if (!push?.enableRss || !push.categories.length || notUsedReason(indexer, appName)) continue;
+        if (!push?.enableRss || notUsedReason(indexer, appName)) continue;
         let releases: RawRelease[];
         try {
           releases = await indexers.search(indexer, { kind: 'search', categories: [...push.categories, ...push.animeCategories], limit: 100 }, { signal });

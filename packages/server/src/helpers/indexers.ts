@@ -4,6 +4,7 @@ import {
   DEFAULT_DELAY_SECONDS,
   MAX_DELAY_SECONDS,
   identity,
+  isCategoryList,
   isLanguageList,
   isObject,
   newHealth,
@@ -19,12 +20,7 @@ export const invalidSetting = (res: Response, field: string) => void res.status(
 export const exists = (parsed: Parsed, id?: number) =>
   Object.values(db.data.indexers).some((item) => item.id !== id && identity(item.baseUrl, item.apiPath) === identity(parsed.baseUrl, parsed.apiPath));
 
-// The form of Settings. An indexer that the user adds serves both apps, with the standard Torznab categories for series, anime, and movies.
-const MANUAL_CATEGORIES: Record<IndexerApp, { categories: number[]; animeCategories: number[] }> = {
-  sonarr: { categories: [5000], animeCategories: [5070] },
-  radarr: { categories: [2000], animeCategories: [] },
-};
-
+// The form of Settings. An indexer that the user adds serves both apps. The categories are the ones that the user selects, and no categories means every category.
 // An indexer that exists keeps its key when the body leaves the key out, because the list does not hold the key.
 export function parseManual(body: unknown, existing?: Indexer): { parsed: Record<IndexerApp, Parsed>; delaySeconds: number; preferredLanguages: string[] } | { invalid: string } {
   if (!isObject(body)) return { invalid: 'body' };
@@ -34,6 +30,8 @@ export function parseManual(body: unknown, existing?: Indexer): { parsed: Record
   if (typeof delaySeconds !== 'number' || !Number.isFinite(delaySeconds) || delaySeconds < 0 || delaySeconds > MAX_DELAY_SECONDS) return { invalid: 'delaySeconds' };
   const languages = body.preferredLanguages === undefined ? (existing?.preferredLanguages ?? []) : body.preferredLanguages;
   if (!isLanguageList(languages)) return { invalid: 'preferredLanguages' };
+  const categories = body.categories ?? [];
+  if (!isCategoryList(categories)) return { invalid: 'categories' };
   for (const flag of ['enableRss', 'enableAutomaticSearch', 'enableInteractiveSearch']) if (body[flag] !== undefined && typeof body[flag] !== 'boolean') return { invalid: flag };
   const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
   if (!apiKey && !existing) return { invalid: 'apiKey' };
@@ -48,8 +46,8 @@ export function parseManual(body: unknown, existing?: Indexer): { parsed: Record
       fields: [
         { name: 'baseUrl', value: body.baseUrl },
         { name: 'apiKey', value: apiKey },
-        { name: 'categories', value: MANUAL_CATEGORIES[app].categories },
-        { name: 'animeCategories', value: MANUAL_CATEGORIES[app].animeCategories },
+        { name: 'categories', value: categories },
+        { name: 'animeCategories', value: [] },
       ],
     });
     if ('errors' in result) return { invalid: result.errors[0]!.propertyName };
@@ -67,8 +65,8 @@ export function setDelay(indexer: Indexer, delaySeconds: number) {
 // Asks the indexer for its capabilities. It saves nothing.
 export async function probe(service: IndexerService, indexer: Indexer): Promise<IndexerTestResult> {
   try {
-    await service.test(indexer);
-    return { ok: true as const };
+    const caps = await service.test(indexer);
+    return { ok: true as const, categories: caps.categories };
   } catch (error) {
     if (!(error instanceof IndexerError)) throw error;
     return { ok: false as const, code: error.code };

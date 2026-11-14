@@ -220,6 +220,11 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   await expect(editIndexer.getByLabel('API key')).toHaveValue('indexer-key');
   await editIndexer.getByLabel(/^Name/).fill('Renamed');
   await editIndexer.getByRole('checkbox', { name: 'Interactive search' }).click();
+  // An edit also waits for a test, because the indexer lists the categories that it has.
+  await expect(editIndexer.getByRole('button', { name: 'Save' })).toBeDisabled();
+  await editIndexer.getByRole('button', { name: 'Test connection' }).click();
+  await expect(editIndexer.getByText('Connected')).toBeVisible();
+  await expect(editIndexer.getByRole('button', { name: 'Save' })).toBeEnabled();
   await editIndexer.getByRole('button', { name: 'Save' }).click();
   await expect(editIndexer).toBeHidden();
   await expect(indexers.getByRole('cell', { name: 'Renamed', exact: true })).toBeVisible();

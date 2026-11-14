@@ -29,6 +29,8 @@ export { Hint } from './components/Hint.tsx';
 export { List } from './components/List.tsx';
 export { Loading } from './components/Loading.tsx';
 export { Modal } from './components/Modal.tsx';
+export { MultiSelect } from './components/MultiSelect.tsx';
+export type { MultiSelectOption } from './components/MultiSelect.tsx';
 export { Navbar } from './components/Navbar.tsx';
 export { Pagination } from './components/Pagination.tsx';
 export { Pane } from './components/Pane.tsx';

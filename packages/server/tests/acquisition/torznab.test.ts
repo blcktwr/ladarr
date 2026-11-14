@@ -250,6 +250,17 @@ describe('indexer service', () => {
     expect(Object.fromEntries(seen[0]!.searchParams)).toMatchObject({ t: 'tvsearch', q: 'Show', season: '1', ep: '2', tvdbid: '55', cat: '5030,5040', apikey: 'secret-key' });
   });
 
+  it('sends no category when the search has none, so the indexer answers with every category', async () => {
+    const seen: URL[] = [];
+    const { port } = await fakeTracker((url, res) => {
+      seen.push(url);
+      res.end(FEED);
+    });
+    const { indexer, service } = await setup(port, 0);
+    await service.search(indexer, { kind: 'search', q: 'Show', categories: [] });
+    expect(seen[0]!.searchParams.has('cat')).toBe(false);
+  });
+
   it('logs each outbound request with its query and the code of a network error, never the API key', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ladarr-torznab-'));
     logToFile(join(dir, 'ladarr.log'));

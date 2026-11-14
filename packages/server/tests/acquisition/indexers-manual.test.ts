@@ -29,15 +29,16 @@ afterAll(() => app.close());
 
 describe('indexers that the user adds', () => {
   it('adds an indexer for both apps and never sends the key back', async () => {
-    const res = await app.post('/indexers', body({ delaySeconds: 3, preferredLanguages: ['es', 'ja'] }));
+    const res = await app.post('/indexers', body({ delaySeconds: 3, preferredLanguages: ['es', 'ja'], categories: [5000, 5040] }));
     expect(res.status).toBe(201);
-    expect(res.body.indexer).toMatchObject({ name: 'Tracker', manual: true, apps: ['radarr', 'sonarr'], baseUrl: 'http://127.0.0.1:9/1/', delaySeconds: 3, preferredLanguages: ['es', 'ja'], enableRss: true, enableAutomaticSearch: true, enableInteractiveSearch: true });
+    expect(res.body.indexer).toMatchObject({ name: 'Tracker', manual: true, apps: ['radarr', 'sonarr'], baseUrl: 'http://127.0.0.1:9/1/', delaySeconds: 3, preferredLanguages: ['es', 'ja'], categories: [5000, 5040], enableRss: true, enableAutomaticSearch: true, enableInteractiveSearch: true });
     expect(JSON.stringify(res.body)).not.toContain('good');
     expect((await app.get(`/indexers/${res.body.indexer.id}/key`)).body).toEqual({ apiKey: 'good' });
     expect((await app.get('/indexers')).body.indexers.some((item: object) => 'apiKey' in item)).toBe(false);
     expect((await app.get('/indexers')).body.indexers[0].preferredLanguages).toEqual(['es', 'ja']);
+    expect((await app.get('/indexers')).body.indexers[0].categories).toEqual([5000, 5040]);
     const saved = app.db.data.indexers[res.body.indexer.id]!;
-    expect(saved).toMatchObject({ apiKey: 'good', manual: true, preferredLanguages: ['es', 'ja'], push: { sonarr: { categories: [5000], animeCategories: [5070] }, radarr: { categories: [2000] } } });
+    expect(saved).toMatchObject({ apiKey: 'good', manual: true, preferredLanguages: ['es', 'ja'], push: { sonarr: { categories: [5000, 5040], animeCategories: [] }, radarr: { categories: [5000, 5040], animeCategories: [] } } });
   });
 
   it('rejects an indexer that is not valid, or that is in the list', async () => {
@@ -53,17 +54,29 @@ describe('indexers that the user adds', () => {
     expect(await field({ preferredLanguages: ['ES'] })).toBe('preferredLanguages');
     expect(await field({ preferredLanguages: ['toolong'] })).toBe('preferredLanguages');
     expect(await field({ preferredLanguages: [1] })).toBe('preferredLanguages');
+    expect(await field({ categories: 'x' })).toBe('categories');
+    expect(await field({ categories: ['5000'] })).toBe('categories');
+    expect(await field({ categories: [1.5] })).toBe('categories');
     const same = await app.post('/indexers', body({ name: 'Copy' }));
     expect(same.status).toBe(409);
     expect(Object.keys(app.db.data.indexers)).toHaveLength(1);
   });
 
+  it('leaves the categories empty when the form sends none', async () => {
+    const added = await app.post('/indexers', body({ name: 'All', baseUrl: 'http://127.0.0.1:9/3/' }));
+    expect(added.status).toBe(201);
+    expect(added.body.indexer.categories).toEqual([]);
+    const saved = app.db.data.indexers[added.body.indexer.id]!;
+    expect(saved.push.sonarr!.categories).toEqual([]);
+    expect(saved.push.radarr!.categories).toEqual([]);
+  });
+
   it('changes an indexer and keeps its key when the body has none', async () => {
     const id = Object.values(app.db.data.indexers)[0]!.id;
-    const res = await app.fetchJson('PUT', `/indexers/${id}`, { name: 'Renamed', type: 'torznab', baseUrl: 'http://127.0.0.1:9/1/', apiKey: '', delaySeconds: 8, enableRss: false, enableAutomaticSearch: true, enableInteractiveSearch: false });
+    const res = await app.fetchJson('PUT', `/indexers/${id}`, { name: 'Renamed', type: 'torznab', baseUrl: 'http://127.0.0.1:9/1/', apiKey: '', delaySeconds: 8, categories: [5030], enableRss: false, enableAutomaticSearch: true, enableInteractiveSearch: false });
     expect(res.status).toBe(200);
-    expect(res.body.indexer).toMatchObject({ name: 'Renamed', delaySeconds: 8, preferredLanguages: ['es', 'ja'], enableRss: false, enableAutomaticSearch: true, enableInteractiveSearch: false });
-    expect(app.db.data.indexers[id]).toMatchObject({ apiKey: 'good', manual: true });
+    expect(res.body.indexer).toMatchObject({ name: 'Renamed', delaySeconds: 8, preferredLanguages: ['es', 'ja'], categories: [5030], enableRss: false, enableAutomaticSearch: true, enableInteractiveSearch: false });
+    expect(app.db.data.indexers[id]).toMatchObject({ apiKey: 'good', manual: true, push: { sonarr: { categories: [5030], animeCategories: [] }, radarr: { categories: [5030], animeCategories: [] } } });
     expect((await app.fetchJson('PUT', `/indexers/${id}`, { name: 'Renamed', type: 'torznab', baseUrl: 'ftp://nothing', apiKey: '' })).body.field).toBe('baseUrl');
     expect((await app.fetchJson('PUT', '/indexers/99', body())).status).toBe(404);
   });
@@ -114,7 +127,7 @@ describe('indexers that the user adds', () => {
 
   it('tests the settings of the form without saving them', async () => {
     const before = JSON.stringify(app.db.data.indexers);
-    expect((await app.post('/indexers/test', body())).body).toEqual({ ok: true });
+    expect((await app.post('/indexers/test', body())).body).toEqual({ ok: true, categories: [5000] });
     expect((await app.post('/indexers/test', body({ apiKey: 'bad' }))).body).toEqual({ ok: false, code: 'rejected' });
     expect((await app.post('/indexers/test', body({ baseUrl: 'http://127.0.0.1:9/9/not-torznab/' }))).body).toEqual({ ok: false, code: 'invalid_response' });
     offline = true;
@@ -127,10 +140,10 @@ describe('indexers that the user adds', () => {
   it('tests the saved indexer with the saved key', async () => {
     const id = Object.values(app.db.data.indexers)[0]!.id;
     requests.length = 0;
-    expect((await app.post(`/indexers/${id}/test`)).body).toEqual({ ok: true });
+    expect((await app.post(`/indexers/${id}/test`)).body).toEqual({ ok: true, categories: [5000] });
     // The second call must not wait for the delay of the first one.
     app.db.data.indexers[id]!.nextRequestAt = 0;
-    expect((await app.post(`/indexers/${id}/test`, body({ name: 'Renamed', apiKey: '' }))).body).toEqual({ ok: true });
+    expect((await app.post(`/indexers/${id}/test`, body({ name: 'Renamed', apiKey: '' }))).body).toEqual({ ok: true, categories: [5000] });
     expect(requests.map((url) => url.searchParams.get('apikey'))).toEqual(['good', 'good']);
     expect(app.db.data.indexers[id]!.health.okAt).not.toBeNull();
     expect((await app.post('/indexers/99/test')).status).toBe(404);
@@ -144,7 +157,7 @@ describe('indexers that the user adds', () => {
 
     requests.length = 0;
     const began = Date.now();
-    expect((await app.post(`/indexers/${id}/test`, body({ name: 'Renamed', apiKey: '' }))).body).toEqual({ ok: true });
+    expect((await app.post(`/indexers/${id}/test`, body({ name: 'Renamed', apiKey: '' }))).body).toEqual({ ok: true, categories: [5000] });
     expect(requests).toHaveLength(1);
     expect(Date.now() - began).toBeGreaterThanOrEqual(190);
     expect(indexer.nextRequestAt).toBeGreaterThanOrEqual(began + 190);

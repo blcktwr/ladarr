@@ -200,7 +200,9 @@ export function createIndexerService(limiter: Limiter, { fetch: fetchImpl = fetc
 
     // A search with no text is the RSS feed: the newest releases of the categories.
     async search(indexer: Indexer, query: SearchQuery, options: { signal?: AbortSignal; requestId?: string } = {}) {
-      const params: Record<string, string> = { t: FUNCTION[query.kind], cat: query.categories.join(','), limit: String(query.limit ?? 100), extended: '1' };
+      const params: Record<string, string> = { t: FUNCTION[query.kind], limit: String(query.limit ?? 100), extended: '1' };
+      // No categories asks for every category of the indexer.
+      if (query.categories.length) params.cat = query.categories.join(',');
       if (query.q) params.q = query.q;
       if (query.season !== undefined) params.season = String(query.season);
       if (query.ep !== undefined) params.ep = String(query.ep);

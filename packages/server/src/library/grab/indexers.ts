@@ -118,7 +118,7 @@ type Rejected = { propertyName: string; errorMessage: string; severity: 'error' 
 export const invalid = (propertyName: string, errorMessage: string): { errors: Rejected } => ({ errors: [{ propertyName, errorMessage, severity: 'error' }] });
 
 export const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-const isCategoryList = (value: unknown): value is number[] =>
+export const isCategoryList = (value: unknown): value is number[] =>
   Array.isArray(value) && value.length <= 500 && value.every((item) => Number.isInteger(item) && item >= 0 && item <= 999_999);
 export const isLanguageList = (value: unknown): value is string[] =>
   Array.isArray(value) && value.length <= 20 && value.every((code) => typeof code === 'string' && /^[a-z]{2,3}$/.test(code));
@@ -259,6 +259,7 @@ export function summarize(indexer: Indexer): IndexerRow {
     manual: Boolean(indexer.manual),
     baseUrl: indexer.baseUrl,
     apps: (Object.keys(indexer.push) as IndexerApp[]).sort(),
+    categories: [...new Set(pushes.flatMap((push) => push.categories))].sort((a, b) => a - b),
     priority: Math.min(...pushes.map((push) => push.priority)),
     delaySeconds: indexer.delaySeconds,
     preferredLanguages: indexer.preferredLanguages ?? [],

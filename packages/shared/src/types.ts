@@ -689,6 +689,8 @@ export type IndexerRow = {
   manual: boolean;
   baseUrl: string;
   apps: IndexerApp[];
+  // The Torznab categories that a search sends. No categories means every category.
+  categories: number[];
   priority: number;
   delaySeconds: number;
   nextRequestAt: number;
@@ -702,8 +704,8 @@ export type IndexerRow = {
   notUsed: { app: IndexerApp; reason: IndexerNotUsed }[];
 };
 
-// The answer of a connection test. It saves nothing.
-export type IndexerTestResult = { ok: true } | { ok: false; code: string };
+// The answer of a connection test. It saves nothing. The categories are the ones that the indexer lists.
+export type IndexerTestResult = { ok: true; categories: number[] } | { ok: false; code: string };
 export type ClientTestResult = { ok: true; version: string; apiVersion: string } | { ok: false; code: string };
 export type WebhookTestResult = { ok: true } | { ok: false; code: 'unreachable' | 'rejected'; status: number | null };
 
