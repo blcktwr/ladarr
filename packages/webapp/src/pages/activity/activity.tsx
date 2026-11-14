@@ -401,7 +401,7 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">{name}</div>
           <div className="flex shrink-0 items-center justify-end gap-2">
-            <EntryStatus entry={entry} />
+            {entry.key !== 'available' && <EntryStatus entry={entry} />}
             {fix}
             {actions}
           </div>
