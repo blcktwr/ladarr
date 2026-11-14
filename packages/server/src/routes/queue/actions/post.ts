@@ -134,7 +134,9 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     const { action, ids, group, preview } = (req.body ?? {}) as { action?: Action; ids?: unknown; group?: { titleKey?: string; season?: number | null }; preview?: boolean };
     if (!action || !ACTIONS.includes(action)) return void res.status(400).json({ error: 'invalid_action' });
     let picked: QueueEntry[];
-    if (group && typeof group.titleKey === 'string') picked = groupEntries(group.titleKey, group.season ?? null);
+    // The retry of a title starts again only the targets that a reason stops. A target that waits for its next search
+    // is not stopped, so the row of the title does not search it again.
+    if (group && typeof group.titleKey === 'string') picked = groupEntries(group.titleKey, group.season ?? null).filter((entry) => action !== 'retry' || queueKey(entry) === 'stuck');
     else if (Array.isArray(ids) && ids.length <= 1000 && ids.every((id) => typeof id === 'string')) picked = ids.flatMap((id) => (db.data.queue[id] && shown(db.data.queue[id]!) ? [db.data.queue[id]!] : []));
     else return void res.status(400).json({ error: 'invalid_request' });
 

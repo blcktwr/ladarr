@@ -797,6 +797,21 @@ describe('actions', () => {
     expect(preview.affected.map((a: { id: string }) => a.id)).toEqual(['tv:1:1x1', 'tv:1:2x1']);
   });
 
+  it('retries from a group only the targets that a reason stops', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const series = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
+    pipe.db.data.titles[series.key] = series;
+    pipe.tracker.state.items = [];
+    pipe.finder.requestSearch(series.key);
+    await until(() => ['1x1', '1x2'].every((n) => pipe!.queue.get(`tv:1:${n}`)!.branch === 'waiting'));
+
+    // One episode stops with a reason. The other one waits for its next search, so the retry of the row leaves it.
+    pipe.queue.move(pipe.queue.get('tv:1:1x1')!, { branch: null, reason: { code: 'destination_exists' } }, 'test');
+    const preview = (await api.post('/queue/actions', { action: 'retry', group: { titleKey: 'tv:1', season: 1 }, preview: true })).body;
+    expect(preview.affected.map((a: { id: string }) => a.id)).toEqual(['tv:1:1x1']);
+  });
+
   it('keeps the attempt history when a retry goes back to an earlier stage', async () => {
     const film = await withMovie();
     pipe!.tracker.state.items = [];
