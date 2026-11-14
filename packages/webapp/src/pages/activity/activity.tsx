@@ -531,9 +531,12 @@ function GroupLine({ group }: { group: QueueGroupRow }) {
 }
 
 // The menu of a series in the inspector. A series whose episodes are loading has no target to act on yet.
-function groupMenu(group: QueueGroupRow, openLogs: (group: QueueGroupRow) => void) {
+function groupMenu(group: QueueGroupRow, openLogs: (group: QueueGroupRow) => void, run: Run) {
   if (group.pending) return [];
-  return [{ label: t('Logs'), onClick: () => openLogs(group) }];
+  const items = [{ label: t('Logs'), onClick: () => openLogs(group) }];
+  // The episodes that a reason stopped start again together, from the row of the series.
+  if ((group.counts.stuck ?? 0) > 0) items.unshift({ label: t('Try again'), onClick: () => run('retry', [], { titleKey: group.titleKey, season: group.season }) });
+  return items;
 }
 
 // One title in the list: the poster, the name as a link to the page of the title, and its status. A click on the rest of
@@ -749,7 +752,7 @@ function MovieDetail({ entry, run, refresh }: { entry: QueueEntryView; run: Run;
 // the library, with the same modal as the page of the title.
 function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDelete, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onDelete: (row: QueueRow) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
   const items: { label: string; onClick: () => void; danger?: boolean }[] = [
-    ...(row.kind === 'group' ? groupMenu(row, openGroupLogs) : entryMenu(row, run, openLogs)),
+    ...(row.kind === 'group' ? groupMenu(row, openGroupLogs, run) : entryMenu(row, run, openLogs)),
     { label: t('Delete'), danger: true, onClick: () => onDelete(row) },
   ];
   return (
