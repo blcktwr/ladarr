@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { episode, indexer, movie, title } from '../helpers/test-fixtures.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 
@@ -309,6 +309,86 @@ describe('the order of the sweep', () => {
     const searchJobs = Object.values(pipe.db.data.jobs).filter((job) => job.type === 'queue.search');
     const seqOf = (titleKey: string) => searchJobs.find((job) => (job.payload as { titleKey: string }).titleKey === titleKey)!.seq;
     expect(seqOf(none.key)).toBeGreaterThan(seqOf(rejected.key));
+  });
+});
+
+describe('the repair of a blocked import', () => {
+  type Payload = { titleKey: string; season: number | null; entryIds: string[] };
+  const searchJobs = () => Object.values(pipe!.db.data.jobs).filter((job) => job.type === 'queue.search' && job.state === 'waiting');
+  const holds = (job: { payload: unknown }, id: string) => (job.payload as Payload).entryIds.includes(id);
+
+  // A target whose import stopped on a missing file of its pack, with its first attempt still open.
+  const blockedImport = () => {
+    const m = film();
+    pipe!.db.data.titles[m.key] = m;
+    const entry = pipe!.queue.ensure(m.key, null, null);
+    pipe!.queue.request(entry, 'attached download');
+    pipe!.queue.move(entry, { stage: 'validating', reason: { code: 'file_not_found' } }, 'import blocked');
+    return { m, entry };
+  };
+
+  it('keeps the search that the repair of a blocked import starts', async () => {
+    pipe = await startPipeline();
+    const { m, entry } = blockedImport();
+    // The repair waits thirty minutes after the import stopped.
+    entry.stageSince = Date.now() - 31 * 60_000;
+    // The queue is held, so the job that the repair starts stays waiting while the test reads it.
+    pipe.db.data.queuePaused = true;
+    // The sweep decides what to drop with the time of its start, and the repair makes its job a moment later. The clock
+    // moves forward on each read, so the test always sees that gap and never depends on the speed of the machine.
+    let at = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => (at += 1));
+    try {
+      pipe.finder.sweep();
+    } finally {
+      clock.mockRestore();
+    }
+
+    expect(entry).toMatchObject({ stage: 'queued', branch: null, reason: null });
+    expect(entry.attempt).toBe(2);
+    expect(entry.attempts.at(-1)).toMatchObject({ n: 2, reason: 'verification repair' });
+    const jobs = searchJobs();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.payload).toMatchObject({ titleKey: m.key, season: null });
+    expect(holds(jobs[0]!, entry.id)).toBe(true);
+  });
+
+  it('starts the search of a target that the queue left with an open attempt and no job', async () => {
+    pipe = await startPipeline();
+    const m = film();
+    pipe.db.data.titles[m.key] = m;
+    const entry = pipe.queue.ensure(m.key, null, null);
+    pipe.queue.request(entry, 'attached download');
+    // The second attempt of the repair stays open, and the job that would run it is gone.
+    pipe.queue.endAttempt(entry, 'failed', 'file_not_found');
+    pipe.queue.startAttempt(entry, 'verification repair');
+    pipe.db.data.queuePaused = true;
+    pipe.finder.sweep();
+
+    expect(entry).toMatchObject({ stage: 'queued', branch: null, reason: null });
+    expect(entry.attempts.at(-1)).toMatchObject({ n: 3, outcome: 'running', endedAt: null });
+    const jobs = searchJobs();
+    expect(jobs).toHaveLength(1);
+    expect(holds(jobs[0]!, entry.id)).toBe(true);
+  });
+
+  it('leaves a target that a waiting search job holds alone', async () => {
+    pipe = await startPipeline();
+    const m = film();
+    pipe.db.data.titles[m.key] = m;
+    const entry = pipe.queue.ensure(m.key, null, null);
+    pipe.queue.request(entry, 'attached download');
+    // The job that holds the open attempt waits, so the target has its search already.
+    pipe.db.data.queuePaused = true;
+    pipe.finder.enqueueSearch({ titleKey: m.key, season: null, entryIds: [entry.id], fresh: true });
+    expect(searchJobs()).toHaveLength(1);
+
+    pipe.finder.sweep();
+
+    expect(entry.attempt).toBe(1);
+    const jobs = searchJobs();
+    expect(jobs).toHaveLength(1);
+    expect(holds(jobs[0]!, entry.id)).toBe(true);
   });
 });
 

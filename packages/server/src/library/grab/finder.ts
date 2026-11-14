@@ -994,10 +994,35 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     for (const { titleKey, season, entryIds } of again.values()) enqueueSearch({ titleKey, season, entryIds, fresh: true });
   }
 
+  // A target whose attempt runs but that no search job holds is work that a lost job left behind: the app stopped in
+  // the middle of a search, or a job went before it opened its targets. The search starts again, so the target does not
+  // wait forever with no work.
+  function recoverLost() {
+    const held = new Set<string>();
+    for (const job of Object.values(db.data.jobs)) {
+      if (job.type !== 'queue.search' || (job.state !== 'waiting' && job.state !== 'running')) continue;
+      for (const id of (job.payload as SearchPayload).entryIds) held.add(id);
+    }
+    const again = new Map<string, { titleKey: string; season: number | null; entryIds: string[] }>();
+    for (const entry of Object.values(db.data.queue)) {
+      if (entry.stage !== 'queued' || entry.branch !== null || entry.reason !== null || entry.attempt === 0) continue;
+      if (held.has(entry.id) || entry.attempts.at(-1)?.outcome !== 'running') continue;
+      const title = db.data.titles[entry.titleKey];
+      if (!title || title.paused) continue;
+      catalog.warn('repair', 'The search of this target was lost. It starts again.', itemFields(entry), { code: 'lost_search' });
+      queue.endAttempt(entry, 'failed', 'lost search');
+      queue.startAttempt(entry, 'lost search');
+      const key = `${entry.titleKey}|${entry.season ?? ''}`;
+      const group = again.get(key) ?? { titleKey: entry.titleKey, season: entry.season, entryIds: [] };
+      group.entryIds.push(entry.id);
+      again.set(key, group);
+    }
+    for (const { titleKey, season, entryIds } of again.values()) enqueueSearch({ titleKey, season, entryIds, fresh: true });
+  }
+
   // Starts the search again for entries that waited long enough. Starts the search for every target that is due.
   function sweep() {
     const t = now();
-    repairBlocked();
     // A group where every target found no release goes last: a new release is its only next step, so another group
     // with work gets the indexers first. The sort is stable, so the other groups keep their order.
     const foundNothing = (group: { entryIds: string[] }) => group.entryIds.every((id) => {
@@ -1028,6 +1053,10 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       });
       if (!wanted) delete db.data.jobs[job.id];
     }
+    // The repair runs after the cleanup of the future work. Its jobs are work of now, and the cleanup of the old state
+    // must not see them and take them for future searches that no target waits for.
+    repairBlocked();
+    recoverLost();
     for (const { titleKey, season, entryIds, nextAt } of lastIfNotFound([...waiting.values()])) enqueueSearch({ titleKey, season, entryIds }, { runAt: nextAt, afterRun: true });
 
     // The targets that are due, a season at a time. One request covers the season and its pack, also when it arrives later.
