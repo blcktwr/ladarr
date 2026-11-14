@@ -170,7 +170,7 @@ function TorrentInfo({ path }: { path: string }) {
             ? [{ label: t('Pieces'), value: data.pieceLength === null ? data.pieceCount : `${data.pieceCount} (${formatBytes(data.pieceLength)})` }]
             : []),
           { label: t('Size'), value: formatBytes(data.totalBytes) },
-          ...(data.createdBy ? [{ label: t('Created by'), value: data.createdBy }] : []),
+          ...(data.createdBy ? [{ label: t('Created by'), value: data.createdBy, wide: true }] : []),
           ...(data.comment ? [{ label: t('Comment'), value: <CommentText text={data.comment} />, wide: true }] : []),
         ]}
       />
