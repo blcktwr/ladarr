@@ -20,7 +20,7 @@ export class BackupError extends Error {
 const NAME = /^ladarr-(auto|manual|safety)-(\d{8})T(\d{9})Z\.zip$/;
 export const isBackupName = (name: string) => NAME.test(name);
 
-const KEEP_AUTO = 7;
+const KEEP = 7;
 // A backup is a copy of the database. This limit stops an archive that expands without end.
 const MAX_UNPACKED_BYTES = 1024 ** 3;
 
@@ -119,9 +119,8 @@ export async function createBackup(dir: string, kind: BackupKind, now = new Date
   return { name, kind, createdAt: now.getTime(), bytes: archive.length };
 }
 
-// Keeps the newest automatic backups. A backup that the user made stays until the user deletes it.
-export async function pruneBackups(dir: string, keep = KEEP_AUTO) {
-  const auto = (await listBackups(dir)).filter((backup) => backup.kind === 'auto');
-  for (const old of auto.slice(keep)) await rm(join(dir, old.name), { force: true });
+// Keeps the newest backups. The oldest goes when a new one passes the limit, whatever its kind.
+export async function pruneBackups(dir: string, keep = KEEP) {
+  for (const old of (await listBackups(dir)).slice(keep)) await rm(join(dir, old.name), { force: true });
 }
 

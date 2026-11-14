@@ -116,7 +116,7 @@ describe('reading a bad backup', () => {
 });
 
 describe('retention and the daily job', () => {
-  it('keeps the newest automatic backups and every manual one', async () => {
+  it('keeps only the newest backups, whatever their kind', async () => {
     const target = fresh();
     const db = await dbWithTitle();
     const now = Date.now();
@@ -124,10 +124,10 @@ describe('retention and the daily job', () => {
     await createBackup(target, 'manual', new Date(now - 30 * DAY));
     await pruneBackups(target);
     const left = await listBackups(target);
-    expect(left.filter((b) => b.kind === 'auto')).toHaveLength(7);
-    expect(left.filter((b) => b.kind === 'manual')).toHaveLength(1);
+    expect(left).toHaveLength(7);
+    expect(left.filter((b) => b.kind === 'manual')).toHaveLength(0);
     // The seven that stay are the newest.
-    expect(Math.min(...left.filter((b) => b.kind === 'auto').map((b) => b.createdAt))).toBeGreaterThan(now - 7 * DAY);
+    expect(Math.min(...left.map((b) => b.createdAt))).toBeGreaterThan(now - 7 * DAY);
   });
 
   it('makes a backup when none exists, and not again within a day', async () => {
