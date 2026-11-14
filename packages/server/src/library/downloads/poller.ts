@@ -129,8 +129,8 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
           ? [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)[0]
           : files.find((item) => {
               if (manual) return item.name === manual || item.name.endsWith(`/${manual}`);
-              const name = item.name.split('/').pop() ?? item.name;
-              const parsed = parseEpisodes(name) ?? parseEpisodes(item.name);
+              // The whole name of the file, so a folder that names the season is read.
+              const parsed = parseEpisodes(item.name);
               return entry.number !== null && parsed?.season === entry.season && titleNumbers(parsed, title?.episodes ?? []).includes(entry.number);
             });
       if (file) {

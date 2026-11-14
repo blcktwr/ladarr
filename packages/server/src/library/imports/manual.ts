@@ -101,7 +101,8 @@ export async function planFiles(input: PlanInput): Promise<FolderPlan & { steps:
       movieChosen = true;
       continue;
     }
-    const parsed = parseEpisodes(basename(file.rel)) ?? parseEpisodes(file.rel);
+    // The folder of the file can name the season: "Season 02/Berserk E01.mkv".
+    const parsed = parseEpisodes(file.rel);
     if (!parsed) {
       rows.push(row(file, 'unmatched'));
       continue;

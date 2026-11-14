@@ -1145,10 +1145,10 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
 
   // A confirmed bad release ends the attempt. The entry goes back to Queued with a new attempt and a new search.
   // After a few attempts it asks for the user.
-  function fallback(entries: QueueEntry[], cause: string) {
+  function fallback(entries: QueueEntry[], cause: string, detail?: Record<string, unknown>) {
     const again: QueueEntry[] = [];
     for (const entry of entries) {
-      catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: ${cause}`, itemFields(entry), { code: cause, release: entry.release?.title ?? null });
+      catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: ${cause}`, itemFields(entry), { code: cause, release: entry.release?.title ?? null, ...detail });
       if (entry.release) block(entry.release, cause, entry.titleKey, entry.season);
       queue.endAttempt(entry, 'failed', cause);
       entry.release = null;

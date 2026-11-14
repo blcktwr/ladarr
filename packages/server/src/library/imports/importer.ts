@@ -210,7 +210,8 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     const done = () => new Set(picks.flatMap((p) => p.entries.map((e) => e.id)));
     for (const file of [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)) {
       if (taken.has(file.rel)) continue;
-      const parsed = parseEpisodes(basename(file.rel)) ?? parseEpisodes(file.rel);
+      // The folder of the file can name the season: "Season 02/Berserk E01.mkv".
+      const parsed = parseEpisodes(file.rel);
       if (!parsed) continue;
       const numbers = titleNumbers(parsed, title.episodes);
       const covered = group.filter((entry) => entry.season === parsed.season && numbers.includes(entry.number!) && !done().has(entry.id));

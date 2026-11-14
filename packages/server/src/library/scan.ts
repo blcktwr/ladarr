@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
-import { basename, join, relative, sep } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { type Db, type MediaFile, db } from '../core/db.ts';
 import { filesVersion } from './tools/remove.ts';
 import { isSample, isVideoFile, parseEpisodes } from './parse.ts';
@@ -130,7 +130,8 @@ export async function scanTitle(key: string): Promise<ScanResult> {
     result.extraFiles = sorted.filter((found) => found !== chosen && !byPath.has(found.path)).map((found) => found.path);
   } else {
     for (const found of videos) {
-      const parsed = parseEpisodes(basename(found.path));
+      // The folder of the file can name the season: "Season 02/Berserk E01.mkv".
+      const parsed = parseEpisodes(found.path);
       if (!parsed) {
         result.unmatched.push(found.path);
         continue;
