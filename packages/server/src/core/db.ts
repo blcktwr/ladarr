@@ -135,8 +135,6 @@ export type Data = {
   queuePaused: boolean;
   // The steps of the imports that are not done. See importer.ts.
   imports: Record<string, ImportJournal>;
-  // Releases that ladarr must not take again, keyed by info hash, or by indexer and GUID.
-  blocklist: Record<string, { title: string; reason: string; at: number; titleKey?: string; season?: number }>;
   // The episodes that the files of a release held, keyed by `<indexer ID>:<GUID>`. A pack can hold fewer episodes than
   // TMDB gives its season, so a later search reads this record instead of the count of the season.
   releaseCoverage: Record<string, { titleKey: string; season: number; numbers: number[] }>;
@@ -189,7 +187,6 @@ export const emptyData = (): Data => ({
   queueRev: 0,
   queuePaused: false,
   imports: {},
-  blocklist: {},
   releaseCoverage: {},
   sentTorrents: {},
   calendarFeedToken: null,
@@ -301,9 +298,8 @@ export function withDefaults(data: Data): Data {
   for (const client of next.downloadClients) client.type ??= 'qbittorrent';
   // A client that was saved before the limit existed has no limit.
   for (const client of next.downloadClients) client.maxDownloads ??= 0;
-  // A pack that held a part of its season used to go to the blocklist. The record of its files keeps the episodes that it
-  // holds now, so the entries of the old rule go.
-  for (const [key, entry] of Object.entries(next.blocklist)) if (entry.reason === 'pack_missing_episodes') delete next.blocklist[key];
+  // A release that failed is not kept out of the searches, so the list of the old rule goes.
+  delete (next as Data & { blocklist?: unknown }).blocklist;
   // The recovery folder is gone, so its job goes too.
   for (const job of Object.values(next.jobs)) if (job.type === 'import.clean') delete next.jobs[job.id];
   // An older file had a branch for a target that stopped. The state of the entry keeps the reason, and the migration

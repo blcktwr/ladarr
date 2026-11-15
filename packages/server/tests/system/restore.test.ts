@@ -60,18 +60,18 @@ describe('restore through the API', () => {
   it('replaces the data with the backup, makes a safety backup, and ends the sessions', async () => {
     const db = await start();
     db.data.settings.naming.movie = 'FR';
-    db.data.blocklist = { a: { title: 'Kept', reason: 'bad', at: 1 } };
+    db.data.releaseCoverage = { a: { titleKey: 'tv:1', season: 1, numbers: [1, 2] } };
     const apiKey = db.data.apiKey;
     const { backup } = (await app.post('/backups')).body;
 
     db.data.settings.naming.movie = 'DE';
-    db.data.blocklist = {};
+    db.data.releaseCoverage = {};
     db.data.apiKey = 'changed after the backup';
 
     const res = await app.post(`/backups/${backup.name}/restore`);
     expect(res.status).toBe(200);
     expect(db.data.settings.naming.movie).toBe('FR');
-    expect(db.data.blocklist).toEqual({ a: { title: 'Kept', reason: 'bad', at: 1 } });
+    expect(db.data.releaseCoverage).toEqual({ a: { titleKey: 'tv:1', season: 1, numbers: [1, 2] } });
     expect(db.data.apiKey).toBe(apiKey);
     expect(db.data.sessions).toEqual({});
     // The session of the request is gone with the others.
@@ -397,14 +397,14 @@ describe('the file on the disk', () => {
     const backupDir = fresh();
     const db = await open('unused.json');
     const old: Partial<Data> = { ...emptyData() };
-    delete old.blocklist;
+    delete old.releaseCoverage;
     const json = strToU8(JSON.stringify(old));
     const manifest = { format: 1, app: 'ladarr', appVersion: '0.0.0', schemaVersion: 1, createdAt: new Date().toISOString(), kind: 'manual', files: { 'db.json': { bytes: json.length, sha256: createHash('sha256').update(json).digest('hex') } }, excludes: [] };
     const name = 'ladarr-manual-20200101T000000000Z.zip';
     writeFileSync(join(backupDir, name), zipSync({ 'manifest.json': strToU8(JSON.stringify(manifest)), 'db.json': json }));
 
     await createRestorer({ dir: backupDir, worker: fakeWorker() }).restore(name);
-    expect(db.data.blocklist).toEqual({});
+    expect(db.data.releaseCoverage).toEqual({});
   });
 });
 

@@ -1,7 +1,6 @@
 import { qualityLabel } from '../library/grab/quality.ts';
 import { parseRelease } from '../library/grab/release.ts';
 import type { Finder } from '../library/grab/finder.ts';
-import { BLOCK_REASONS } from '../library/grab/blocklist.ts';
 import { REJECTION_TEXT } from '../library/grab/decide.ts';
 import { aggregate, describe, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
 import type { QueueGroupRow, QueuePage, QueueRow } from '@ladarr/shared/types';
@@ -231,14 +230,9 @@ const RENAMED_REASONS: Record<string, string> = {
 };
 const currentText = (text: string) => RENAMED_REASONS[text] ?? text;
 
-// The reasons of a release that the search rejected. A release that the blocklist stopped says why the blocklist holds
-// it, not that it is on the blocklist. A search of an older version kept the blocklist as a reason, so the row drops it.
-function rejectedReasons(release: { reasons?: string[]; indexerId: number; guid: string; infoHash?: string | null }) {
-  const reasons = (release.reasons ?? []).map(currentText).filter((text) => text !== REJECTION_TEXT.blocklisted);
-  // A blocklist entry is keyed by the hash of its torrent, or by its indexer and guid when it has no hash.
-  const block = (release.infoHash ? db.data.blocklist[release.infoHash] : undefined) ?? db.data.blocklist[`${release.indexerId}:${release.guid}`];
-  const text = block ? BLOCK_REASONS[block.reason] : undefined;
-  return text ? [...reasons, text] : reasons;
+// The reasons of a release that the search rejected.
+function rejectedReasons(release: { reasons?: string[] }) {
+  return (release.reasons ?? []).map(currentText);
 }
 
 export function view(poller: Poller, importStatus: ImportStatus | undefined, entry: QueueEntry, lane: Map<string, number>, detail = false) {

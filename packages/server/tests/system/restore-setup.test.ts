@@ -29,7 +29,7 @@ async function sourceBackup() {
   const db = await open('unused.json');
   db.data.owner = { passwordHash: 'hash', createdAt: 1 };
   db.data.settings.naming.movie = 'FR';
-  db.data.blocklist = { a: { title: 'Blocked', reason: 'bad', at: 1 } };
+  db.data.releaseCoverage = { a: { titleKey: 'tv:1', season: 1, numbers: [1, 2] } };
   const sourceDir = fresh();
   const { name } = await createBackup(sourceDir, 'manual');
   return readFileSync(join(sourceDir, name));
@@ -81,7 +81,7 @@ describe('restore during the setup', () => {
     expect(res.body).toMatchObject({ ok: true, safetyBackup: expect.any(String) });
     expect(db.data.owner).not.toBeNull();
     expect(db.data.settings.naming.movie).toBe('FR');
-    expect(db.data.blocklist).toEqual({ a: { title: 'Blocked', reason: 'bad', at: 1 } });
+    expect(db.data.releaseCoverage).toEqual({ a: { titleKey: 'tv:1', season: 1, numbers: [1, 2] } });
     // The backup holds no sessions, so the restore ends them all.
     expect(db.data.sessions).toEqual({});
 

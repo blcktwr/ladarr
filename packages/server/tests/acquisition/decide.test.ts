@@ -9,7 +9,6 @@ const ctx = (extra: Partial<Context> = {}): Context => ({
   settings,
   quality: emptyData(),
   indexers: { 1: indexer() },
-  blocked: () => false,
   downloading: () => false,
   hasFile: (e) => Boolean(e.fileId),
   hasMovieFile: (t) => Boolean(t.fileId),
@@ -204,12 +203,9 @@ describe('policy', () => {
     expect(codes('Show.Name.S01E02.1080p.WEB-DL-GRP', ep2, {}, size)).toEqual(['size_below_min']);
   });
 
-  it('rejects a blocked release, a release in the queue, and a target that has a file', () => {
+  it('rejects a release in the queue and a target that has a file', () => {
     const name = 'Show.Name.S01E02.1080p.WEB-DL-GRP';
     const hash = 'a'.repeat(40);
-    // The blocklist keeps a failed release out of the automatic search, and a manual choice can still take it.
-    expect(codes(name, ep2, { blocked: () => true })).toEqual(['blocklisted']);
-    expect(codes(name, ep2, { blocked: () => true, manual: true })).toEqual([]);
     expect(codes(name, ep2, { downloading: (h) => h === hash }, { infoHash: hash })).toEqual(['already_downloading']);
     const has = title({ episodes: [episode(1, 2, '2020-01-01', { fileId: 'f' })] });
     expect(codes(name, { ...ep2, title: has })).toEqual(['already_available']);

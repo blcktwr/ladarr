@@ -145,7 +145,6 @@ describe('series journey', () => {
     const entries = pipe.finder.requestSearch(series.key);
     await until(() => entries.every((e) => stageOf(e) === 'downloading'));
     expect(pipe.qbit.torrents.size).toBe(1);
-    expect(pipe.db.data.blocklist).toEqual({});
 
     pipe.complete(pack, { 'Show.Name.S02E01.mkv': 'one', 'Show.Name.S02E02.mkv': 'two', 'Show.Name.S02E03.mkv': 'three' }, hashOf(pack, files));
     await until(() => entries.every((e) => stageOf(e) === 'available'));
@@ -194,7 +193,6 @@ describe('series journey', () => {
     expect(entries.map((e) => stageOf(e))).toEqual(['available', 'queued', 'available']);
     // The missing episode waits for a release of its own, and it has no torrent.
     expect(entries[1]).toMatchObject({ state: { kind: 'waiting' }, transferHash: null });
-    expect(Object.values(pipe.db.data.blocklist)).toEqual([]);
     expect(Object.values(pipe.db.data.jobs).some((job) => job.type === 'queue.initial' && job.dedupeKey === `initial:${series.key}`)).toBe(true);
   });
 
@@ -219,10 +217,10 @@ describe('series journey', () => {
     expect(entries.slice(0, 13).every((entry) => entry.transferHash)).toBe(true);
     expect(entries[13]!.continuation).toMatchObject({ releaseSeason: 2, season: 1, from: 14 });
 
-    // The ten go back to the search, and the pack stays out of the blocklist: the record of its files keeps them.
+    // The ten go back to the search, and the record of the files of the pack keeps them.
     pipe.complete(first, content(firstFiles), hashOf(first, firstFiles));
     await until(() => entries.slice(13).every((entry) => entry.release?.title === second));
-    expect(Object.values(pipe.db.data.blocklist)).toEqual([]);
+    expect(pipe.db.data.releaseCoverage[`1:${first}`]).toMatchObject({ titleKey: series.key, season: 1, numbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] });
 
     pipe.complete(second, content(secondFiles), hashOf(second, secondFiles));
     await until(() => entries.every((entry) => stageOf(entry) === 'available'));
@@ -247,11 +245,10 @@ describe('series journey', () => {
     expect(entry!.release!.title).toBe(bad);
     expect(pipe.tracker.state.searches[0]!.searchParams.get('ep')).toBe('1');
 
-    // The client reports a fault: this is a problem of the client, not a bad release, so the release stays out of the blocklist.
+    // The client reports a fault: this is a problem of the client, not a bad release, so the entry keeps its attempt.
     pipe.qbit.progress(hashOf(bad), 0.4, 'missingFiles');
     await until(() => reasonOfEntry(entry!)?.code === 'client_error');
     expect(reasonOfEntry(entry!)).toMatchObject({ code: 'client_error' });
-    expect(pipe.db.data.blocklist).toEqual({});
   });
 });
 
@@ -311,15 +308,13 @@ describe('safety of the grab', () => {
     const good = 'Movie.Name.2019.1080p.BluRay-GRP';
     pipe.tracker.state.items = [{ title: bad, size: 100 * 60 * MIB, bad: true }, { title: good, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => stageOf(entry!) === 'downloading');
-    expect(entry!.release!.title).toBe(good);
-
-    // The bad release fails while ladarr reads it. That attempt stops in fetching, before any request to the client.
+    // The best release fails while ladarr reads it, and the next attempt chooses it again. Each attempt stops in
+    // fetching, before any request to the client, and the target asks for the user after the third.
+    await until(() => reasonOfEntry(entry!)?.code === 'too_many_attempts');
     const first = entry!.history.filter((event) => event.attempt === 1).map((event) => event.stage);
     expect(first).toContain('fetching');
     expect(first).not.toContain('sending');
-    // Only the good release goes to the client.
-    expect(pipe.qbit.calls.filter((call) => call.path === 'torrents/add')).toHaveLength(1);
+    expect(pipe.qbit.calls.filter((call) => call.path === 'torrents/add')).toEqual([]);
   });
 
   it('keeps the entry and its progress while the client is down, and does not blame the release', async () => {
@@ -338,7 +333,6 @@ describe('safety of the grab', () => {
     expect(pipe.poller.transfer(hashOf(name))).toMatchObject({ progress: 0.5, stale: true });
     expect(stageOf(entry!)).toBe('downloading');
     expect(branchOf(entry!)).toBeNull();
-    expect(pipe.db.data.blocklist).toEqual({});
 
     pipe.qbit.control.down = false;
     pipe.qbit.progress(hashOf(name), 0.7);

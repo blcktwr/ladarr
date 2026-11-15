@@ -201,7 +201,6 @@ describe('a release for a manual upgrade', () => {
     settings: quality.settings,
     quality,
     indexers: { 1: indexer() },
-    blocked: () => false,
     downloading: () => false,
     hasFile: () => true,
     hasMovieFile: () => true,
@@ -243,8 +242,7 @@ describe('a release for a manual upgrade', () => {
     expect(d.rejections).toEqual(['upgrade_needs_single']);
   });
 
-  it('keeps the other checks: identity and blocklist', () => {
+  it('keeps the other checks: identity', () => {
     expect(codes('Other.Show.S01E01.1080p.WEB-DL-GRP')).toEqual(['wrong_title']);
-    expect(decide(release('Show.Name.S01E01.1080p.WEB-DL-GRP', { sizeBytes: size }), wantAt('webdl-1080'), { ...ctx(), blocked: () => true }).rejections).toEqual(['blocklisted']);
   });
 });

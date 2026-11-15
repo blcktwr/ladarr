@@ -83,7 +83,6 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       settings: db.data.settings,
       quality: db.data,
       indexers: db.data.indexers,
-      blocked: (release, hash) => Boolean((hash && db.data.blocklist[hash]) || db.data.blocklist[`${release.indexerId}:${release.guid}`]),
       downloading: (hash) => hashes.has(hash),
       hasFile: (episode) => present(episode.fileId),
       hasMovieFile: (title) => present(title.fileId),
@@ -447,11 +446,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
             resolution: decision.parsed.resolution,
             source: decision.parsed.source,
             kind: decision.kind,
-            // The blocklist keeps a failed release out of the automatic searches. It is not a reason for the person,
-            // who can still take the release by hand.
-            reasons: decision.rejections
-              .filter((code) => code !== 'blocklisted')
-              .map((code) => REJECTION_TEXT[code] ?? code),
+            reasons: decision.rejections.map((code) => REJECTION_TEXT[code] ?? code),
             sizeRejection: sizeCode && sizeLimit != null && decision.mibPerMinute !== null ? { code: sizeCode, value: decision.mibPerMinute, limit: sizeLimit } : null,
           };
         });
@@ -1215,12 +1210,8 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
   // A pack that holds a part of its season: `missing` are the targets of the pack that its files do not cover. The record
   // of the files keeps the episodes that it holds, so a later search does not take the pack again for the others, and
   // those targets go back to the search with the numbering of the rest of the season. A pack whose files name no episode
-  // is not a pack of the season, and it goes to the blocklist. Returns the targets that the pack still covers.
-  function partial(entries: QueueEntry[], missing: QueueEntry[], { files, episodes }: { files: number; episodes: number }) {
-    if (!episodes) {
-      fallback(missing, 'pack_missing_episodes', packDetail(missing, files));
-      return [];
-    }
+  // holds nothing of the season, and the empty record keeps it out of the searches. Returns the targets that it covers.
+  function partial(entries: QueueEntry[], missing: QueueEntry[], { files }: { files: number }) {
     const leader = entries[0];
     const ref = leader?.release ?? null;
     const season = missing[0]!.season!;
@@ -1233,23 +1224,16 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     }
     const continuation = continuationOf(missing);
     for (const entry of missing) entry.continuation = continuation;
-    fallback(missing, 'pack_partial', packDetail(missing, files), { block: false });
+    fallback(missing, 'pack_partial', packDetail(missing, files));
     return entries.filter((entry) => !missing.includes(entry));
   }
 
-  // Stops the release from coming back. Only a confirmed bad release goes here, never an outage.
-  function block(release: Pick<ReleaseRef, 'infoHash' | 'indexerId' | 'guid' | 'title'>, reason: string, titleKey: string, season: number | null) {
-    db.data.blocklist[release.infoHash ?? `${release.indexerId}:${release.guid}`] = { title: release.title, reason, at: now(), titleKey, ...(season === null ? {} : { season }) };
-  }
-
-  // A confirmed bad release ends the attempt. The entry goes back to Queued with a new attempt and a new search.
-  // After a few attempts it asks for the user. `block` is false for a release that is good for its other targets: a
-  // pack that holds a part of a season stays off the blocklist.
-  function fallback(entries: QueueEntry[], cause: string, detail?: Record<string, unknown>, { block: blocked = true }: { block?: boolean } = {}) {
+  // A release that the download confirmed bad ends the attempt. The entry goes back to Queued with a new attempt and a
+  // new search. After a few attempts it asks for the user.
+  function fallback(entries: QueueEntry[], cause: string, detail?: Record<string, unknown>) {
     const again: QueueEntry[] = [];
     for (const entry of entries) {
       catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: ${cause}`, itemFields(entry), { code: cause, release: entry.release?.title ?? null, ...detail });
-      if (entry.release && blocked) block(entry.release, cause, entry.titleKey, entry.season);
       queue.endAttempt(entry, 'failed', cause);
       Object.assign(entry, { release: null, transferHash: null, clientId: null });
       if (entry.attempt >= MAX_ATTEMPTS) {
@@ -1266,7 +1250,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     for (const group of bySeason.values()) enqueueSearch({ titleKey: group[0]!.titleKey, season: group[0]!.season, entryIds: group.map((e) => e.id) }, { afterRun: true });
   }
 
-  return { requestSearch, reserve, fallback, partial, block, enqueueSearch, interactive, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
+  return { requestSearch, reserve, fallback, partial, enqueueSearch, interactive, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
 }
 
 export type Finder = ReturnType<typeof createFinder>;

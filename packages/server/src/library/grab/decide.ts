@@ -23,7 +23,6 @@ export type Context = {
   quality: Pick<Data, 'profiles' | 'profileOrder' | 'qualitySizes'>;
   // The indexers by ID. A release from an indexer that is gone is rejected.
   indexers: Record<string, Indexer>;
-  blocked: (release: RawRelease, hash: string | null) => boolean;
   // True when an active queue entry has this hash already.
   downloading: (hash: string) => boolean;
   hasFile: (episode: Episode) => boolean;
@@ -75,7 +74,6 @@ export const REJECTION_TEXT: Record<string, string> = {
   not_an_upgrade: 'The quality of the release is not better than the quality of the current file.',
   upgrade_needs_single: 'The release is for several episodes. It cannot replace the file of one episode.',
   already_downloading: 'This release is in the queue.',
-  blocklisted: 'The release is on the blocklist.',
   no_download_link: 'The release has no download link.',
   indexer_removed: 'The indexer of the release was removed.',
   quality_rejected: 'The quality is not good enough (for example a camera copy).',
@@ -219,8 +217,6 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   if (!release.link && !release.magnet) reject('no_download_link');
   // An answer can carry the magnet only, and the hash of that magnet is the hash of the torrent.
   const hash = release.infoHash ?? (release.magnet ? (magnetHash(release.magnet) ?? null) : null);
-  // The blocklist keeps a release that failed out of the automatic searches. A person can still take it by hand.
-  if (!ctx.manual && ctx.blocked(release, hash)) reject('blocklisted');
   if (hash && ctx.downloading(hash)) reject('already_downloading');
   // A want with `upgradeQuality` is for a target that has a file. The release must have exactly the chosen quality.
   if (want.kind !== 'season' && want.upgradeQuality !== undefined) {

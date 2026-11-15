@@ -23,16 +23,17 @@ describe('cache', () => {
     const m = film();
     pipe.db.data.titles[m.key] = m;
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
-    pipe.db.data.blocklist[`1:${NAME}`] = { title: NAME, reason: 'test', at: Date.now() };
+    // The policy of the moment rejects the release for its size.
+    pipe.db.data.qualitySizes.movie['bluray-1080'] = { min: 200, preferred: null, max: null };
 
     const [entry] = pipe.finder.requestSearch(m.key);
     await until(() => branchOf(entry!) === 'waiting');
-    expect(entry!.search!.topRejections).toContain('blocklisted');
+    expect(entry!.search!.topRejections).toContain('size_below_min');
     const before = searches();
     expect(before).toBe(1);
 
-    // The user takes the release off the blocklist. The search of the sweep uses the cache: no new request, but the new policy.
-    delete pipe.db.data.blocklist[`1:${NAME}`];
+    // The user lowers the limit. The search of the sweep uses the cache: no new request, but the new policy.
+    pipe.db.data.qualitySizes.movie['bluray-1080'] = { min: 0, preferred: null, max: null };
     pipe.finder.requestSearch(m.key);
     await until(() => stageOf(entry!) === 'downloading');
     expect(searches()).toBe(before);
@@ -118,18 +119,18 @@ describe('RSS with similar titles', () => {
 });
 
 describe('bad releases', () => {
-  it('blocks a file that is not a torrent and takes the next release', async () => {
+  it('asks for the user when the best release is not a torrent', async () => {
     pipe = await startPipeline();
     const m = film();
     pipe.db.data.titles[m.key] = m;
     const bad = 'Movie.Name.2019.1080p.WEB-DL-BAD';
     pipe.tracker.state.items = [{ title: bad, size: 100 * 60 * MIB, bad: true }, { title: NAME, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch(m.key);
-    await until(() => stageOf(entry!) === 'downloading');
-    expect(entry!.release!.title).toBe(NAME);
-    expect(Object.values(pipe.db.data.blocklist)).toMatchObject([{ title: bad, reason: 'invalid_torrent', titleKey: m.key }]);
-    expect(entry!.attempts.map((a) => [a.n, a.outcome, a.reason])).toEqual([[1, 'failed', 'search requested'], [2, 'running', 'fallback: invalid_torrent']]);
-    expect(pipe.qbit.torrents.size).toBe(1);
+    // Without a list of failed releases, the search takes the bad release again on each attempt, until the target asks
+    // for the user. No torrent reaches the client.
+    await until(() => reasonOfEntry(entry!)?.code === 'too_many_attempts');
+    expect(entry!.attempt).toBe(3);
+    expect(pipe.qbit.torrents.size).toBe(0);
   });
 
   it('asks for the user after three bad releases', async () => {
@@ -140,8 +141,6 @@ describe('bad releases', () => {
     const [entry] = pipe.finder.requestSearch(m.key);
     await until(() => reasonOfEntry(entry!)?.code === 'too_many_attempts');
     expect(entry!.attempt).toBe(3);
-    expect(entry!.attempt).toBe(3);
-    expect(Object.keys(pipe.db.data.blocklist)).toHaveLength(3);
     expect(pipe.qbit.torrents.size).toBe(0);
   });
 
@@ -152,7 +151,9 @@ describe('bad releases', () => {
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch(m.key);
     await until(() => stageOf(entry!) === 'fetching' || stageOf(entry!) === 'sending' || stageOf(entry!) === 'downloading');
-    expect(pipe.db.data.blocklist).toEqual({});
+    // The entry keeps the release: the fault is not a reason to blame it.
+    expect(entry!.release!.title).toBe(NAME);
+    expect(entry!.attempts.filter((attempt) => attempt.outcome === 'failed')).toEqual([]);
   });
 });
 

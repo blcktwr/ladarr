@@ -877,14 +877,8 @@ export const es: Record<string, string> = {
   'The files of the download are outside the save folder that the client reports.': 'Los archivos de la descarga están fuera de la carpeta de guardado que informa el cliente.',
   'Something stopped this target.': 'Algo detuvo este objetivo.',
 
-  // The reasons that ladarr blocks a release.
-  'The indexer gave a file that is not a torrent.': 'El indexador entregó un archivo que no es un torrent.',
-  'The magnet link of the release is not valid.': 'El enlace magnet de la versión no es válido.',
-  'The release has no download link.': 'La versión no tiene enlace de descarga.',
-  'The season pack does not hold all the episodes that it names.': 'El paquete de temporada no contiene todos los episodios que indica.',
-  'This release was blocked.': 'Esta versión fue bloqueada.',
-
   // The reasons that ladarr rejects a release.
+  'The release has no download link.': 'La versión no tiene enlace de descarga.',
   'The title of the release is not this title.': 'El título de la versión no es este título.',
   'The release has no year, so the movie cannot be identified.': 'La versión no tiene año, así que no se puede identificar la película.',
   'The year of the release is not the year of the title.': 'El año de la versión no es el año del título.',

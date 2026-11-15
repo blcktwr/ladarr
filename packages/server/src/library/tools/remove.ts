@@ -3,7 +3,6 @@ import { basename, dirname, join } from 'node:path';
 import { type Db, type MediaFile, db } from '../../core/db.ts';
 import type { Job } from '../../core/jobs.ts';
 import { deleteItemLog } from '../../core/log.ts';
-import { clearBlocklist } from '../grab/blocklist.ts';
 import { inside } from '../imports/folder-files.ts';
 import type { Title } from '../library.ts';
 import { isActive, type Queue, type QueueEntry } from '../downloads/queue.ts';
@@ -32,7 +31,6 @@ export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[
 // `cancelJob` stops a job that runs now. Without it, the record goes and a running handler ends at its next check.
 // The caller saves the database.
 export function dropTitle(key: string, queue?: Queue, cancelJob?: (id: string) => void) {
-  clearBlocklist(key);
   const entries = Object.values(db.data.queue).filter((entry) => entry.titleKey === key);
   const ids = new Set(entries.map((entry) => entry.id));
   // A search of a series holds the title key, and the jobs of one target hold its ID. The dedupe key also finds a
@@ -63,6 +61,8 @@ export function dropTitle(key: string, queue?: Queue, cancelJob?: (id: string) =
     deleteItemLog(entry.id);
     delete db.data.queue[entry.id];
   }
+  // The episodes that the files of a release held are facts of the title, so they go with it.
+  for (const [id, held] of Object.entries(db.data.releaseCoverage)) if (held.titleKey === key) delete db.data.releaseCoverage[id];
   // The file of the title holds the lines of its targets, so it goes with the title.
   deleteItemLog(key);
 }
@@ -71,7 +71,6 @@ export function dropTitle(key: string, queue?: Queue, cancelJob?: (id: string) =
 // the disk stay where they are. The caller clears the choices of the episodes and saves the database.
 // `cancelJob` stops a job that runs now. Without it, the record goes and a running handler ends at its next check.
 export function dropSeason(key: string, season: number, queue?: Queue, cancelJob?: (id: string) => void) {
-  clearBlocklist(key, season);
   const entries = Object.values(db.data.queue).filter((entry) => entry.titleKey === key && entry.season === season);
   const ids = new Set(entries.map((entry) => entry.id));
   // A search of a season holds the title key and the season. The jobs of one target hold its ID.
@@ -97,6 +96,8 @@ export function dropSeason(key: string, season: number, queue?: Queue, cancelJob
     deleteItemLog(entry.id);
     delete db.data.queue[entry.id];
   }
+  // The episodes that the files of a release of this season held go with the season.
+  for (const [id, held] of Object.entries(db.data.releaseCoverage)) if (held.titleKey === key && held.season === season) delete db.data.releaseCoverage[id];
 }
 
 // Counts the file records that a deletion removed, for each title. A scan that began before a deletion must not record what it read.

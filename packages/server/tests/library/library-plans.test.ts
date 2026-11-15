@@ -118,15 +118,14 @@ describe('apply of a removal with files', () => {
     expect(existsSync(movies)).toBe(true);
   });
 
-  it('removes the blocklist of a removed title and keeps the blocklist of other titles', async () => {
+  it('removes the coverage of a removed title and keeps the coverage of other titles', async () => {
     await seedShow();
-    app.db.data.blocklist = {
-      explicit: { title: 'Show.Name.S01E01.1080p.WEB-DL-GRP', reason: 'invalid_torrent', at: 1, titleKey: 'tv:1' },
-      legacy: { title: 'Show.Name.S01E02.1080p.WEB-DL-GRP', reason: 'invalid_torrent', at: 2 },
-      film: { title: 'Film.Name.2000.1080p.BluRay-GRP', reason: 'invalid_torrent', at: 3, titleKey: 'movie:2' },
+    app.db.data.releaseCoverage = {
+      show: { titleKey: 'tv:1', season: 1, numbers: [1, 2] },
+      other: { titleKey: 'tv:9', season: 1, numbers: [1] },
     };
     await app.del('/library/tv:1');
-    expect(Object.keys(app.db.data.blocklist)).toEqual(['film']);
+    expect(Object.keys(app.db.data.releaseCoverage)).toEqual(['other']);
   });
 
   it('keeps the files of a removal without the file option', async () => {
@@ -482,16 +481,15 @@ describe('removal of one season', () => {
     expect(Object.keys(app.db.data.files)).toHaveLength(1);
   });
 
-  it('removes only the blocklist of the season that is removed', async () => {
+  it('removes only the coverage of the season that is removed', async () => {
     await seedTwoSeasons();
-    app.db.data.blocklist = {
-      's1-explicit': { title: 'Show.S01.1080p.WEB-DL-GRP', reason: 'pack_missing_episodes', at: 1, titleKey: 'tv:1', season: 1 },
-      's1-legacy': { title: 'Show.Name.S01E02.1080p.WEB-DL-GRP', reason: 'invalid_torrent', at: 2 },
-      's2-legacy': { title: 'Show.Name.S02E01.1080p.WEB-DL-GRP', reason: 'invalid_torrent', at: 3 },
-      other: { title: 'Other.Show.S01E01.1080p.WEB-DL-GRP', reason: 'invalid_torrent', at: 4, titleKey: 'tv:9', season: 1 },
+    app.db.data.releaseCoverage = {
+      s1: { titleKey: 'tv:1', season: 1, numbers: [1, 2] },
+      s2: { titleKey: 'tv:1', season: 2, numbers: [1] },
+      other: { titleKey: 'tv:9', season: 1, numbers: [1] },
     };
     await apply((await preview({ action: 'remove', keys: ['tv:1'], season: 1 })).planId);
-    expect(Object.keys(app.db.data.blocklist).sort()).toEqual(['other', 's2-legacy']);
+    expect(Object.keys(app.db.data.releaseCoverage).sort()).toEqual(['other', 's2']);
   });
 
   it('unmonitors the season and keeps its files without the file option', async () => {

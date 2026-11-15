@@ -62,7 +62,7 @@ type Deps = {
   probe?: (path: string) => Promise<ProbeResult>;
   status?: ImportStatus;
   // The targets of a pack whose files it does not hold go back to the search. The pack stays good for its other targets.
-  partial?: (entries: QueueEntry[], missing: QueueEntry[], detail: { files: number; episodes: number }) => void;
+  partial?: (entries: QueueEntry[], missing: QueueEntry[], detail: { files: number }) => void;
   // How long a check stays in `running` before its work starts. Slow work keeps it there until it ends.
   checkDelayMs?: number;
   // For tests: replace a file operation, or stop after a step to test a restart.
@@ -325,7 +325,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     // A pack with some files leaves the other episodes to a new search, so the app does not wait on a file that the
     // release does not hold. A torrent with no usable file blocks, because another search would only find the same torrent.
     if (picked.missing.length) {
-      if (partial && picked.picks.length) partial(group, picked.missing, { files: picked.picks.length, episodes: picked.picks.length });
+      if (partial && picked.picks.length) partial(group, picked.missing, { files: picked.picks.length });
       else uncovered(picked.missing);
     }
 
