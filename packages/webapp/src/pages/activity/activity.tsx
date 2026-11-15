@@ -902,9 +902,12 @@ function QueueView() {
   const rowButton = useRef<HTMLButtonElement | null>(null);
   const backButton = useRef<HTMLButtonElement | null>(null);
   // The inspector opens at the row that the user clicked, so the details land beside that row. Null keeps it at the
-  // top of the list, in the flow, for the first row or until the first click.
+  // top of the list, in the flow.
   const listBox = useRef<HTMLDivElement | null>(null);
   const [inspectorTop, setInspectorTop] = useState<number | null>(null);
+  // The detail of the first row keeps the top of the list, in the flow, also when the selection falls to it because
+  // the selected row left. Any other row moves the details beside its row.
+  const detailsTop = chosen !== undefined && chosen === items[0] ? null : inspectorTop;
   // The panel of the inspector, and a count of the clicks on a row. Each click brings the panel into view, also when
   // its content arrives late and it grows after the click.
   const detailsBox = useRef<HTMLDivElement | null>(null);
@@ -1017,10 +1020,8 @@ function QueueView() {
     const grid = listBox.current;
     const rowBox = grid ? [...grid.querySelectorAll<HTMLElement>('[data-row]')].find((element) => element.dataset.row === key) : undefined;
     // The inspector opens at the row, wherever the row is, so the details of a row land beside the row that the
-    // user clicked. The first row keeps the top of the list, in the flow, because the padding of the pane above it
-    // would push the panel down.
-    const first = grid?.querySelector<HTMLElement>('[data-row]');
-    if (grid && rowBox) setInspectorTop(rowBox === first ? null : Math.round(rowBox.getBoundingClientRect().top - grid.getBoundingClientRect().top));
+    // user clicked.
+    if (grid && rowBox) setInspectorTop(Math.round(rowBox.getBoundingClientRect().top - grid.getBoundingClientRect().top));
     setSelected(key);
     setReveal((count) => count + 1);
     if (window.matchMedia(`(max-width: ${NARROW - 1}px)`).matches) setOpen(true);
@@ -1159,11 +1160,10 @@ function QueueView() {
             {/* The page control lies under the pane, so the table keeps the whole pane and the control is not part of its container. */}
             {pages > 1 && <Pagination aria-label={t('Pages')} page={page + 1} count={pages} onPageChange={(next) => setPage(next - 1)} />}
           </div>
-          {/* The inspector keeps the top of the list, in the flow, for the first row and until a click on another row.
-              A click on a row below the first takes it out of the flow and opens it at that row, so the detail lands
-              beside it. */}
+          {/* The inspector keeps the top of the list, in the flow, for the first row. A click on a row below the first
+              takes it out of the flow and opens it at that row, so the detail lands beside it. */}
           <div className={`min-w-0 min-[800px]:relative ${open ? '' : 'max-[800px]:hidden'}`}>
-            <div className={`grid gap-6 ${inspectorTop === null ? '' : 'min-[800px]:absolute min-[800px]:inset-x-0'}`} style={inspectorTop === null ? undefined : { top: inspectorTop }}>
+            <div className={`grid gap-6 ${detailsTop === null ? '' : 'min-[800px]:absolute min-[800px]:inset-x-0'}`} style={detailsTop === null ? undefined : { top: detailsTop }}>
               {chosen ? (
                 <>
                   <div ref={detailsBox} className="w-full">
