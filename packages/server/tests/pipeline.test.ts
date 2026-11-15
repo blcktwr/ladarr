@@ -179,7 +179,7 @@ describe('series journey', () => {
     }
   });
 
-  it('shows a partial pack: the others available, and the missing episode searched again', async () => {
+  it('shows a partial pack: the others available, and the missing episode stuck', async () => {
     pipe = await startPipeline();
     const series = show();
     pipe.db.data.titles[series.key] = series;
@@ -187,13 +187,14 @@ describe('series journey', () => {
     pipe.tracker.state.items = [{ title: pack, size: 3 * 60 * 45 * MIB }];
     const entries = pipe.finder.requestSearch(series.key);
     await until(() => entries.every((e) => stageOf(e) === 'downloading'));
-    // The new search of the missing episode finds nothing.
+    // A new search of the missing episode would find nothing.
     pipe.tracker.state.items = [];
     pipe.complete(pack, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E03.mkv': 'three' });
-    await until(() => entries.filter((e) => stageOf(e) === 'available').length === 2 && entries[1]!.transferHash === null && reasonOfEntry(entries[1]!) === null);
-    expect(entries.map((e) => stageOf(e))).toEqual(['available', 'queued', 'available']);
-    // The missing episode is not blocked: the import queues the search that covers it.
-    expect(entries[1]).toMatchObject({ state: { kind: 'queued' }, transferHash: null });
+    await until(() => entries.filter((e) => stageOf(e) === 'available').length === 2 && reasonOfEntry(entries[1]!)?.code === 'file_not_found');
+    expect(entries.map((e) => stageOf(e))).toEqual(['available', 'importing', 'available']);
+    expect(reasonOfEntry(entries[1]!)?.code).toBe('file_not_found');
+    // The missing episode waits for the user, and it keeps the torrent of the pack that does not cover it.
+    expect(entries[1]).toMatchObject({ state: { kind: 'blocked', at: 'importing' }, transferHash: hashOf(pack) });
     expect(Object.values(pipe.db.data.jobs).some((job) => job.type === 'queue.initial' && job.dedupeKey === `initial:${series.key}`)).toBe(true);
   });
 

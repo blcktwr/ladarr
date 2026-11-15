@@ -330,15 +330,51 @@ describe('the repair of a blocked import', () => {
     return { m, entry };
   };
 
-  it('keeps the search that the repair of a blocked import starts', async () => {
+  it('leaves a blocked import stuck, and starts no search', async () => {
     pipe = await startPipeline();
-    const { m, entry } = blockedImport();
+    const { entry } = blockedImport();
     // The repair waits thirty minutes after the import stopped.
     entry.stateSince = Date.now() - 31 * 60_000;
-    // The queue is held, so the job that the repair starts stays waiting while the test reads it.
+    // The queue is held, so a job that the repair starts would stay waiting while the test reads it.
     pipe.db.data.queuePaused = true;
-    // The sweep decides what to drop with the time of its start, and the repair makes its job a moment later. The clock
+    // The sweep decides what to drop with the time of its start, and a repair makes its job a moment later. The clock
     // moves forward on each read, so the test always sees that gap and never depends on the speed of the machine.
+    let at = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => (at += 1));
+    try {
+      pipe.finder.sweep();
+    } finally {
+      clock.mockRestore();
+    }
+
+    // The import stopped, so the target waits for the user and keeps its first attempt.
+    expect(entry.state).toMatchObject({ kind: 'blocked', at: 'validating' });
+    expect(entry.attempt).toBe(1);
+    expect(searchJobs()).toHaveLength(0);
+  });
+
+  it('leaves a target blocked at the import stuck, with no search', async () => {
+    pipe = await startPipeline();
+    const { entry } = blockedImport();
+    // The same problem, now at the import.
+    move(pipe.queue, entry, { stage: 'importing', reason: { code: 'torrent_missing' } }, 'torrent left the client');
+    entry.stateSince = Date.now() - 31 * 60_000;
+    pipe.db.data.queuePaused = true;
+    pipe.finder.sweep();
+
+    expect(entry.state).toMatchObject({ kind: 'blocked', at: 'importing' });
+    expect(entry.attempt).toBe(1);
+    expect(searchJobs()).toHaveLength(0);
+  });
+
+  it('repairs a target that stopped before the import', async () => {
+    pipe = await startPipeline();
+    const { m, entry } = blockedImport();
+    // A torrent that left the client before the import is a new search, not work for the user.
+    move(pipe.queue, entry, { stage: 'downloading', reason: { code: 'torrent_missing' } }, 'torrent left the client');
+    entry.stateSince = Date.now() - 31 * 60_000;
+    pipe.db.data.queuePaused = true;
+    // The clock moves forward, so the job that the repair makes is not taken for a search of the past.
     let at = Date.now();
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => (at += 1));
     try {

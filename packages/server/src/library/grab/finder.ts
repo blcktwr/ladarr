@@ -962,8 +962,9 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
 
   // --- Sweep ------------------------------------------------------------------------------
 
-  // An import that stopped on a missing file of its pack, or on a torrent that left the client, goes back to the
-  // search after a delay. A mount or a path that ladarr cannot see is not one of these: a new download blocks again.
+  // A target that stopped before its import, on a file of its pack or on a torrent that left the client, goes back to
+  // the search after a delay. A mount or a path that ladarr cannot see is not one of these: a new download blocks again.
+  // A target that stopped in Validating or Importing stays stuck, so the person resolves the problem there.
   const REPAIR = new Set(['file_not_found', 'torrent_missing']);
   const REPAIR_MS = 30 * 60_000;
 
@@ -973,8 +974,10 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     for (const entry of Object.values(db.data.queue)) {
       if (titleKey && entry.titleKey !== titleKey) continue;
       if (!isActive(entry) || entry.state.kind === 'paused' || entry.state.kind === 'cancelled') continue;
-      const problem = entry.state.kind === 'blocked' ? entry.state.problem : null;
-      if (!problem || !REPAIR.has(problem.code)) continue;
+      if (entry.state.kind !== 'blocked') continue;
+      const problem = entry.state.problem;
+      const at = entry.state.at;
+      if (!REPAIR.has(problem.code) || at === 'validating' || at === 'importing') continue;
       if (t - entry.stateSince < REPAIR_MS) continue;
       catalog.info('repair', `The import stopped on ${problem.code}. The search starts again.`, itemFields(entry), { code: problem.code });
       queue.endAttempt(entry, 'failed', 'verification repair');

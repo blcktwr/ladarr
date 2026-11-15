@@ -165,16 +165,9 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     }
   };
 
-  // A pack can leave episodes without a file. Those targets go back to the search at once, so a missing episode of
-  // the pack does not wait for a user action or a later verification.
-  const uncovered = (entries: QueueEntry[]) => {
-    for (const entry of entries) {
-      catalog.warn('import_uncovered', 'The download does not cover this episode. The search starts again.', itemFields(entry), { code: 'file_not_found' });
-      queue.endAttempt(entry, 'failed', 'file_not_found');
-      // The target starts a new try at once, so it keeps its place and its history.
-      queue.fallback(entry, 'the pack does not cover the episode', 'file_not_found');
-    }
-  };
+  // A pack can leave episodes without a file. Those targets stay stuck on the import, so a person resolves them there
+  // and the app does not download the episode again.
+  const uncovered = (entries: QueueEntry[]) => block(entries, 'file_not_found');
 
   // --- Plan -------------------------------------------------------------------------------
 

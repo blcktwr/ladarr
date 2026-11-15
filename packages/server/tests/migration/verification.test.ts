@@ -196,7 +196,7 @@ describe('library verification', () => {
     expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'queued' }, transferHash: null });
   });
 
-  it('returns a blocked import to the search after a delay', async () => {
+  it('keeps a blocked import stuck after a delay', async () => {
     const test = await setup();
     cleanups.push(test.cleanup);
     requestVerification((input) => enqueue(input), test.key, { downloads: [] });
@@ -205,7 +205,10 @@ describe('library verification', () => {
     move(test.queue, entry, { stage: 'validating', reason: { code: 'torrent_missing' } }, 'torrent gone');
     entry.stateSince = Date.now() - 31 * 60_000;
     await test.run();
-    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'queued' }, transferHash: null });
+    // The import stopped, so the target waits for the user, and the verification starts no search for it.
+    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'blocked', at: 'validating', problem: { code: 'torrent_missing' } } });
+    const jobs = Object.values(test.db.data.jobs).filter((job) => job.type === 'queue.search' && job.state === 'waiting');
+    expect(jobs.some((job) => (job.payload as { entryIds: string[] }).entryIds.includes(entry.id))).toBe(false);
   });
 
   it('merges a second import into the waiting work without losing a hash', async () => {
