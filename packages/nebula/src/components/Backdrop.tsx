@@ -23,7 +23,7 @@ export function Backdrop({ image = '', loading = false, children, className = ''
   const ready = done === image;
   return (
     <div aria-busy={loading || undefined} className={`relative grid items-end w-full min-h-96 ${className}`}>
-      <div aria-hidden="true" className={`${block} absolute inset-0 rounded-lg overflow-hidden mask-b-from-40%`}>
+      <div aria-hidden="true" className={`${block} absolute inset-0 overflow-hidden mask-b-from-40%`}>
         {(loading || (image && !ready)) && <Skeleton className="absolute inset-0" />}
         {/* The image is decoration, so it has no text. It fades in with its gradient. */}
         {!loading && image && (
