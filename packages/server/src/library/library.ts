@@ -81,6 +81,12 @@ export function seriesCounts(title: Title, clock: Clock, include: (episode: Epis
   return { total, eligible, available, upcoming };
 }
 
+// An episode without a date has not aired.
+const aired = (episode: Episode, clock: Clock) => {
+  const airs = episodeEligibleAt(episode.airDate);
+  return airs !== null && airs <= clock.now;
+};
+
 // The earliest known digital or physical release in any region. A theatrical release alone gives no date.
 export function movieEligibleAt(title: Title) {
   const times = title.meta.releaseDates.filter((date) => date.kind === 'digital' || date.kind === 'physical').map((date) => releaseInstant(date.date));
@@ -94,7 +100,8 @@ export function availability(title: Title, clock: Clock): Availability {
     return title.manualRelease || (at !== null && at <= clock.now) ? 'missing' : 'waiting';
   }
   const { eligible, available } = seriesCounts(title, clock);
-  if (eligible === 0) return 'waiting';
+  // A series is upcoming only while no episode has aired. Monitoring decides what is missing, not whether it is out.
+  if (!title.episodes.some((episode) => aired(episode, clock))) return 'waiting';
   return available >= eligible ? 'available' : 'missing';
 }
 

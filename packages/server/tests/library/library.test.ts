@@ -93,9 +93,10 @@ describe('series counts and availability', () => {
     expect(availability(show, clock)).toBe('missing');
   });
 
-  it('waits for release when nothing monitored has aired', () => {
+  it('waits for release only while nothing has aired', () => {
     expect(availability(title({ episodes: [episode(1, 1, '2999-01-01')] }), clock)).toBe('waiting');
     expect(availability(title({ episodes: [] }), clock)).toBe('waiting');
+    expect(availability(title({ episodes: [episode(1, 1, '1989-09-01', { override: 'unmonitored' })] }), clock)).not.toBe('waiting');
   });
 });
 
