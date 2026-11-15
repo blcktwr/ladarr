@@ -8,6 +8,7 @@ import { ClientError, type ClientHandle, type Torrent } from '../../../library/d
 import { addedByApp, isActive, phaseOfEntry, type Queue, type QueueEntry } from '../../../library/downloads/queue.ts';
 import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts';
 import { bySeasonNumber, label, lanePositions, shown, statusOf } from '../../../helpers/queue.ts';
+import { canRetry } from '@ladarr/shared/queue';
 
 export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
   type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'remove_torrent' | 'replace';
@@ -33,7 +34,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
       case 'resume':
         return entry.state.kind === 'paused' ? null : 'This target is not paused.';
       case 'retry':
-        return entry.state.kind === 'blocked' ? null : 'This target does not need a retry.';
+        return canRetry(entry.state) ? null : 'This target does not need a retry.';
       case 'priority':
         return isActive(entry) && entry.priority === null && entry.state.kind !== 'paused' && early ? null : 'Only waiting work can have priority.';
       case 'unpriority':
@@ -140,9 +141,9 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     const { action, ids, group, preview } = (req.body ?? {}) as { action?: Action; ids?: unknown; group?: { titleKey?: string; season?: number | null }; preview?: boolean };
     if (!action || !ACTIONS.includes(action)) return void res.status(400).json({ error: 'invalid_action' });
     let picked: QueueEntry[];
-    // The retry of a title starts again only the targets that a problem stops. A target that waits for its next search
-    // is not stopped, so the row of the title does not search it again.
-    if (group && typeof group.titleKey === 'string') picked = groupEntries(group.titleKey, group.season ?? null).filter((entry) => action !== 'retry' || entry.state.kind === 'blocked');
+    // The retry of a title starts again the targets that wait for its work: the ones that a problem stops, and the ones
+    // that wait for their next search with a result.
+    if (group && typeof group.titleKey === 'string') picked = groupEntries(group.titleKey, group.season ?? null).filter((entry) => action !== 'retry' || canRetry(entry.state));
     else if (Array.isArray(ids) && ids.length <= 1000 && ids.every((id) => typeof id === 'string')) picked = ids.flatMap((id) => (db.data.queue[id] && shown(db.data.queue[id]!) ? [db.data.queue[id]!] : []));
     else return void res.status(400).json({ error: 'invalid_request' });
 

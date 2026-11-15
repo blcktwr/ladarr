@@ -698,6 +698,46 @@ describe('actions', () => {
     expect((await api!.post('/queue/actions', { action: 'explode', ids: ['movie:2'] })).status).toBe(400);
   });
 
+  it('retries a target that waits for its next search', async () => {
+    const film = await withMovie();
+    pipe!.tracker.state.items = [];
+    await api!.post('/queue/search', { titleKey: film.key });
+    const entry = pipe!.queue.get('movie:2')!;
+    await until(() => branchOf(entry) === 'waiting');
+    expect((await api!.get('/queue/entries/movie:2')).body.entry.status).toBe('not_found');
+
+    // The release is there now, so the retry starts the search again and the target goes to the client.
+    pipe!.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
+    expect((await api!.post('/queue/actions', { action: 'retry', ids: ['movie:2'] })).status).toBe(200);
+    await until(() => stageOf(entry) === 'downloading');
+    expect(entry.attempts.map((attempt) => attempt.reason)).toEqual(['search requested', 'retry']);
+    expect(pipe!.tracker.state.downloads.length).toBe(1);
+  });
+
+  it('retries a target that stopped on a problem that has an action of its own', async () => {
+    const film = await withMovie();
+    await api!.post('/queue/search', { titleKey: film.key });
+    const entry = pipe!.queue.get('movie:2')!;
+    await until(() => stageOf(entry) === 'downloading');
+    move(pipe!.queue, entry, { stage: 'validating', reason: { code: 'file_not_found' } }, 'test');
+
+    // The reason offers a match, and the retry still runs the phases of the target again.
+    expect((await api!.get('/queue/entries/movie:2')).body.entry.reason).toMatchObject({ action: 'match' });
+    expect((await api!.post('/queue/actions', { action: 'retry', ids: ['movie:2'] })).status).toBe(200);
+    await until(() => reasonOfEntry(entry) === null);
+    expect(stageOf(entry)).toBe('downloading');
+  });
+
+  it('refuses a retry of a target that does not wait', async () => {
+    const film = await withMovie();
+    await api!.post('/queue/search', { titleKey: film.key });
+    await until(() => stageOf(pipe!.queue.get('movie:2')!) === 'downloading');
+
+    const refused = await api!.post('/queue/actions', { action: 'retry', ids: ['movie:2'] });
+    expect(refused.status).toBe(409);
+    expect(refused.body.unsupported[0].reason).toBe('This target does not need a retry.');
+  });
+
   it('replaces the file that blocks the destination name when the user asks', async () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });
@@ -800,7 +840,7 @@ describe('actions', () => {
     expect(preview.affected.map((a: { id: string }) => a.id)).toEqual(['tv:1:1x1', 'tv:1:2x1']);
   });
 
-  it('retries from a group only the targets that a reason stops', async () => {
+  it('retries from a group every target that waits or that a reason stops', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
     const series = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
@@ -809,10 +849,11 @@ describe('actions', () => {
     pipe.finder.requestSearch(series.key);
     await until(() => ['1x1', '1x2'].every((n) => branchOf(pipe!.queue.get(`tv:1:${n}`)) === 'waiting'));
 
-    // One episode stops with a reason. The other one waits for its next search, so the retry of the row leaves it.
-    move(pipe.queue, pipe.queue.get('tv:1:1x1')!, { branch: null, reason: { code: 'destination_exists' } }, 'test');
+    // One episode stopped with a reason and the other one waits for its next search. The retry of the row takes both,
+    // so the user starts the search of the season again.
+    move(pipe.queue, pipe.queue.get('tv:1:1x1')!, { branch: null, reason: { code: 'file_not_found' } }, 'test');
     const preview = (await api.post('/queue/actions', { action: 'retry', group: { titleKey: 'tv:1', season: 1 }, preview: true })).body;
-    expect(preview.affected.map((a: { id: string }) => a.id)).toEqual(['tv:1:1x1']);
+    expect(preview.affected.map((a: { id: string }) => a.id)).toEqual(['tv:1:1x1', 'tv:1:1x2']);
   });
 
   it('keeps the attempt history when a retry goes back to an earlier stage', async () => {

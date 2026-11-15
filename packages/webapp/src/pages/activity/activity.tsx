@@ -1,4 +1,5 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
+import { RETRY_STATUSES } from '@ladarr/shared/queue';
 import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary, QueueTorrent } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, FileText, FileVideo, Info, LoaderCircle, Pause, Play, X } from 'lucide-react';
@@ -426,15 +427,11 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
 
 type Run = (action: QueueActionName, ids: string[], group?: { titleKey: string; season: number | null }) => void;
 
-// The actions of a row, in its menu. The menu of a title in the inspector offers the retry of any reason, so a target
-// that stopped with an action of its own, such as the attach of a torrent that is in the client, starts again from
-// there. A row of an episode keeps the action of its reason in its own menu.
-function entryMenu(entry: QueueEntryView, run: Run, openLogs: (entry: QueueEntryView) => void, anyReason = false): { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] {
+// The actions of a row, in its menu. A target that a problem stops, and a target that waits for its next search with a
+// result, take a retry: the phases of the target run again, from the file in the library to a new search.
+function entryMenu(entry: QueueEntryView, run: Run, openLogs: (entry: QueueEntryView) => void): { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] {
   const items: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] = [];
-  // Only a blocked target needs a retry. The inspector of a title offers it for every problem, and the row of an
-  // episode keeps the action of its own problem.
-  const retryable = entry.status === 'stuck' && (anyReason || entry.reason?.action === 'retry');
-  if (retryable) items.push({ label: t('Try again'), onClick: () => run('retry', [entry.id]) });
+  if (RETRY_STATUSES.includes(entry.status)) items.push({ label: t('Try again'), onClick: () => run('retry', [entry.id]) });
   if (entry.lane !== null) items.push({ label: t('Delete priority'), onClick: () => run('unpriority', [entry.id]) });
   items.push({ label: t('Logs'), onClick: () => openLogs(entry) });
   return items;
@@ -520,8 +517,8 @@ function GroupLine({ group }: { group: QueueGroupRow }) {
 // The menu of a series in the inspector. A series whose episodes are loading has no target to act on yet.
 function groupMenu(group: QueueGroupRow, openLogs: (group: QueueGroupRow) => void, run: Run) {
   const items = [{ label: t('Logs'), onClick: () => openLogs(group) }];
-  // The episodes that a problem stopped start again together, from the row of the series.
-  if ((group.counts.stuck ?? 0) > 0) items.unshift({ label: t('Try again'), onClick: () => run('retry', [], { titleKey: group.titleKey, season: group.season }) });
+  // The episodes that wait for their next search, or that a problem stops, start again together from the row.
+  if (RETRY_STATUSES.some((status) => (group.counts[status] ?? 0) > 0)) items.unshift({ label: t('Try again'), onClick: () => run('retry', [], { titleKey: group.titleKey, season: group.season }) });
   return items;
 }
 
@@ -744,7 +741,7 @@ function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDele
     row.kind === 'pending'
       ? []
       : [
-          ...(row.kind === 'group' ? groupMenu(row, openGroupLogs, run) : entryMenu(row, run, openLogs, true)),
+          ...(row.kind === 'group' ? groupMenu(row, openGroupLogs, run) : entryMenu(row, run, openLogs)),
           ...(deletion ? [{ label: t('Delete'), danger: true, onClick: () => onDelete(deletion.request, deletion.subject) }] : []),
         ];
   return (

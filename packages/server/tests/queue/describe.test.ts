@@ -1,5 +1,5 @@
 import { describe as suite, expect, it } from 'vitest';
-import { aggregate, describe, isActiveState, phaseOf } from '@ladarr/shared/queue';
+import { aggregate, canRetry, describe, isActiveState, phaseOf } from '@ladarr/shared/queue';
 import type { Aggregate, Description, Problem, QueueState, Status } from '@ladarr/shared/queue';
 
 const connectionLost: Problem = { code: 'client_error', detail: 'connection reset by peer' };
@@ -143,6 +143,20 @@ suite('isActiveState', () => {
     it(`reports ${expected.active} for ${name}`, () => {
       expect(isActiveState(state)).toBe(expected.active);
     });
+  }
+});
+
+// A retry takes a target that a problem stops, and a target that waits for its next search with a result. Every other
+// target is in the journey, paused, or out of the queue, so a retry would take the work from it.
+suite('canRetry', () => {
+  const retryable: Status[] = ['stuck', 'not_found', 'no_match'];
+
+  for (const status of retryable) {
+    it(`takes ${status}`, () => expect(canRetry(stateForStatus[status])).toBe(true));
+  }
+
+  for (const status of (Object.keys(stateForStatus) as Status[]).filter((key) => !retryable.includes(key))) {
+    it(`leaves ${status}`, () => expect(canRetry(stateForStatus[status])).toBe(false));
   }
 });
 

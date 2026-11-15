@@ -76,6 +76,13 @@ export function isActiveState(state: QueueState) {
   return state.kind !== 'available' && state.kind !== 'cancelled';
 }
 
+// The statuses that a retry takes: a target that a problem stops, and a target that waits for its next search with a
+// result. Every other target is in the journey, paused, or out of the queue.
+export const RETRY_STATUSES: readonly Status[] = ['stuck', 'not_found', 'no_match'];
+
+// A retry runs the phases of the target again, so a target that waits for its next search starts it at once.
+export const canRetry = (state: QueueState) => RETRY_STATUSES.includes(describe(state).status);
+
 export function describe(state: QueueState): Description {
   const phase = phaseOf(state);
   const active = isActiveState(state);
