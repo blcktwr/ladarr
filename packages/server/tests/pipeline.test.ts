@@ -153,6 +153,23 @@ describe('series journey', () => {
     expect(series.episodes.every((e) => e.fileId)).toBe(true);
   });
 
+  it('imports a pack whose files name the episode but not the season', async () => {
+    pipe = await startPipeline();
+    const series = title({ rootId: 'tv', episodes: [episode(2, 1, '2020-01-01'), episode(2, 2, '2020-01-02')] });
+    pipe.db.data.titles[series.key] = series;
+    const pack = 'Show.Name.S02.1080p.BluRay-GRP';
+    pipe.tracker.state.items = [{ title: pack, size: 2 * 60 * 45 * MIB }];
+    const entries = pipe.finder.requestSearch(series.key);
+    await until(() => entries.every((e) => stageOf(e) === 'downloading'));
+
+    // The name of each file gives the episode only. The targets of the pack give the season.
+    pipe.complete(pack, { 'Show E01.mkv': 'one', 'Show E02.mkv': 'two' });
+    await until(() => entries.every((e) => stageOf(e) === 'available'));
+    const paths = Object.values(pipe.db.data.files).map((f) => f.path).sort();
+    expect(paths).toEqual(['Show Name (2020)/Season 02/Show Name - S02E01 - Episode 1.mkv', 'Show Name (2020)/Season 02/Show Name - S02E02 - Episode 2.mkv']);
+    expect(series.episodes.every((e) => e.fileId)).toBe(true);
+  }, 20_000);
+
   it('links every query of a series to one request per indexer', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ladarr-pipe-requests-'));
     logToFile(join(dir, 'ladarr.log'));

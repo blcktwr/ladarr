@@ -59,9 +59,10 @@ function lastNumber(name: string) {
 
 // Reads the season and the episodes from a name: S01E02, S01E02E03, S01E02-E04, S01E02-04, 1x02, or the episode alone as
 // E02, Ep.02, Episode 02 or Cap 02. The season of an episode with no season in its own name comes from the folder or the
-// prefix that the caller passes in the same string ("Season 02/Berserk E01.mkv"), and season 1 when the string has none.
-// A name that gives no season and episode returns nothing, so the file stays unmatched.
-export function parseEpisodes(name: string): ParsedEpisodes | undefined {
+// prefix that the caller passes in the same string ("Season 02/Berserk E01.mkv"), from the hint of the caller, and season 1
+// when the string has none and the caller gives no hint. A name that gives no season and episode returns nothing, so the
+// file stays unmatched.
+export function parseEpisodes(name: string, seasonHint?: number | null): ParsedEpisodes | undefined {
   const sxe = SXE.exec(name);
   if (sxe) return { season: Number(sxe[1]), numbers: numbersFrom(Number(sxe[2]), sxe[3]) };
   const nxn = NXN.exec(name);
@@ -71,7 +72,7 @@ export function parseEpisodes(name: string): ParsedEpisodes | undefined {
     const numbers = last !== null && last > first && last - first <= MAX_RANGE ? Array.from({ length: last - first + 1 }, (_, index) => first + index) : [first];
     return { season: Number(nxn[1]), numbers };
   }
-  const season = seasonOf(name);
+  const season = seasonOf(name) ?? seasonHint ?? null;
   const marked = MARK.exec(name);
   if (marked) return { season: season ?? 1, numbers: numbersFrom(Number(marked[1]), marked[2]) };
   if (season === null) return undefined;
@@ -99,8 +100,8 @@ export type Continuation = { releaseSeason: number; season: number; from: number
 
 // The season and the episodes of the title that a file of a release names. A release of the rest of a season numbers its
 // own season from 1, so its numbers are the places in that rest.
-export function releaseEpisodes(name: string, episodes: { season: number; number: number }[], continuation?: Continuation | null): ParsedEpisodes | undefined {
-  const parsed = parseEpisodes(name);
+export function releaseEpisodes(name: string, episodes: { season: number; number: number }[], continuation?: Continuation | null, seasonHint?: number | null): ParsedEpisodes | undefined {
+  const parsed = parseEpisodes(name, seasonHint);
   if (!parsed) return undefined;
   if (continuation && parsed.season === continuation.releaseSeason) {
     return { season: continuation.season, numbers: titleNumbers({ season: continuation.season, numbers: parsed.numbers.map((number) => continuation.from + number - 1) }, episodes) };

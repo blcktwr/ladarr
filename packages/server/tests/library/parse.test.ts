@@ -25,6 +25,13 @@ describe('episode names', () => {
   it('does not expand a huge range', () => {
     expect(parseEpisodes('Show S01E01-E999.mkv')).toEqual({ season: 1, numbers: [1, 999] });
   });
+
+  it('takes the season of the caller when the name has none', () => {
+    expect(parseEpisodes('Berserk E01.mkv', 2)).toEqual({ season: 2, numbers: [1] });
+    expect(parseEpisodes('Berserk 01.mkv', 2)).toEqual({ season: 2, numbers: [1] });
+    // A name with a season of its own keeps it.
+    expect(parseEpisodes('Season 3/Berserk E01.mkv', 2)).toEqual({ season: 3, numbers: [1] });
+  });
 });
 
 describe('episode markers without a season', () => {

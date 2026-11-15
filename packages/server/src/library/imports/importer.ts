@@ -175,10 +175,15 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
 
   type Pick = { file: Found; entries: QueueEntry[]; episodes: Episode[] };
 
-  function pick(title: Title, group: QueueEntry[], files: Found[]): { picks: Pick[]; missing: QueueEntry[] } {
+  function pick(title: Title, group: QueueEntry[], files: Found[], content: string): { picks: Pick[]; missing: QueueEntry[] } {
     const picks: Pick[] = [];
     const taken = new Set<string>();
     const episodeOf = (entry: QueueEntry) => title.episodes.find((e) => e.season === entry.season && e.number === entry.number);
+    // The name of the release, or the folder of the download, can give the season that the client leaves out of each
+    // file name. A group of several seasons has no one season for these files.
+    const seasons = new Set(group.map((entry) => entry.season));
+    const releaseName = group.find((entry) => entry.release)?.release?.title ?? '';
+    const seasonHint = seasons.size === 1 ? (parseRelease(releaseName).season ?? parseRelease(basename(content)).season ?? group[0]!.season) : null;
 
     if (title.mediaType === 'movie') {
       const entry = group[0]!;
@@ -201,7 +206,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     for (const file of [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)) {
       if (taken.has(file.rel)) continue;
       // The folder of the file can name the season: "Season 02/Berserk E01.mkv".
-      const found = releaseEpisodes(file.rel, title.episodes, continuation);
+      const found = releaseEpisodes(file.rel, title.episodes, continuation, seasonHint);
       if (!found) continue;
       const covered = group.filter((entry) => entry.season === found.season && found.numbers.includes(entry.number!) && !done().has(entry.id));
       // A file for an episode that was not asked for is part of the pack. It is not imported.
@@ -314,7 +319,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     try {
       picked = await run('files_found', async () => {
         const files = await torrentVideos(handle, clientTorrent);
-        const result = pick(title, group, files ?? []);
+        const result = pick(title, group, files ?? [], content);
         if (!result.picks.length) throw new ImportProblem('file_not_found');
         return result;
       });
