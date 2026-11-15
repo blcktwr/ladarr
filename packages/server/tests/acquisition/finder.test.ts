@@ -288,6 +288,27 @@ describe('the next search', () => {
   });
 });
 
+describe('the order of the searches of a series', () => {
+  it('starts the first season and its first episode, whatever the order of the episodes of the title', async () => {
+    pipe = await startPipeline();
+    const series = title({ rootId: 'tv', episodes: [episode(2, 2), episode(1, 2), episode(2, 1), episode(1, 1)] });
+    pipe.db.data.titles[series.key] = series;
+    // The queue is held, so the search jobs stay waiting while the test reads them.
+    pipe.db.data.queuePaused = true;
+    pipe.finder.requestSearch(series.key);
+
+    const payloads = Object.values(pipe.db.data.jobs)
+      .filter((job) => job.type === 'queue.search')
+      .sort((a, b) => a.seq - b.seq)
+      .map((job) => job.payload as { season: number; entryIds: string[] });
+    expect(payloads.map((payload) => payload.season)).toEqual([1, 2]);
+    expect(payloads.map((payload) => payload.entryIds)).toEqual([
+      ['tv:1:1x1', 'tv:1:1x2'],
+      ['tv:1:2x1', 'tv:1:2x2'],
+    ]);
+  });
+});
+
 describe('the order of the sweep', () => {
   // A target that waits for its next search, with the result of the search that left it waiting.
   function waitingWith(tmdbId: number, result: 'no_results' | 'all_rejected') {

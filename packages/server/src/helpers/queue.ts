@@ -6,7 +6,7 @@ import { REJECTION_TEXT } from '../library/grab/decide.ts';
 import { aggregate, describe, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
 import type { QueueGroupRow, QueuePage, QueueRow } from '@ladarr/shared/types';
 import { type Db, db } from '../core/db.ts';
-import type { Job } from '../core/jobs.ts';
+import { seasonOf, type Job } from '../core/jobs.ts';
 import { reasonInfo, type ReasonInfo } from '../core/reasons.ts';
 import type { ImportStatus } from '../library/imports/status.ts';
 import { availability, type Title } from '../library/library.ts';
@@ -147,7 +147,7 @@ export function jobLabel(job: Job): string | null {
 // job comes first, because it is the current work of the Activity page. Then the waiting jobs follow in the order
 // that the worker starts them.
 export function itemJobs() {
-  return Object.values(db.data.jobs)
+  const list = Object.values(db.data.jobs)
     .filter((job) => (job.state === 'waiting' || job.state === 'running') && isItemJob(job) && showsSearch(job))
     .sort((a, b) => {
       if (a.state !== b.state) return a.state === 'running' ? -1 : 1;
@@ -158,6 +158,21 @@ export function itemJobs() {
       }
       return a.runAt - b.runAt || a.seq - b.seq;
     });
+  // The searches of one series show from the first season up, as the worker starts them. A marked job keeps its place.
+  const slots = new Map<string, number[]>();
+  for (const [index, job] of list.entries()) {
+    const own = job.state === 'waiting' && job.priority === null ? seasonOf(job) : null;
+    if (!own) continue;
+    slots.set(own.titleKey, [...(slots.get(own.titleKey) ?? []), index]);
+  }
+  for (const group of slots.values()) {
+    if (group.length < 2) continue;
+    const ordered = group.map((index) => list[index]!).sort((a, b) => seasonOf(a)!.season - seasonOf(b)!.season);
+    group.forEach((slot, position) => {
+      list[slot] = ordered[position]!;
+    });
+  }
+  return list;
 }
 
 // The next request that the indexers of a job can take. A job that does not touch an indexer has no wait.

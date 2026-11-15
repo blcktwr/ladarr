@@ -186,7 +186,10 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
         if (entry) started.push(entry);
       }
     } else {
-      for (const episode of title.episodes) {
+      // The searches of a series start at the first season and its first episode, whatever the order of the
+      // episodes of the title. The queue reads this order in the jobs.
+      const episodes = [...title.episodes].sort((a, b) => a.season - b.season || a.number - b.number);
+      for (const episode of episodes) {
         if ((season !== undefined && episode.season !== season) || (number !== undefined && episode.number !== number)) continue;
         if (!wantedEpisode(title, episode)) continue;
         const entry = open(episode.season, episode.number);

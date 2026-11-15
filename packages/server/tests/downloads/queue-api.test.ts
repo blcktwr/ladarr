@@ -1014,6 +1014,22 @@ describe('jobs', () => {
     }
   });
 
+  it('lists the searches of a series from the first season up, as the worker starts them', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    pipe.db.data.queuePaused = true;
+    const series = title({ rootId: 'tv', episodes: [episode(1, 1), episode(9, 1)] });
+    pipe.db.data.titles[series.key] = series;
+    const first = pipe.queue.ensure(series.key, 1, 1);
+    const later = pipe.queue.ensure(series.key, 9, 1);
+    // The search of the later season entered the queue first.
+    enqueue({ type: 'queue.search', payload: { titleKey: series.key, season: 9, entryIds: [later.id] } });
+    enqueue({ type: 'queue.search', payload: { titleKey: series.key, season: 1, entryIds: [first.id] } });
+
+    const items = (await api.get('/queue/jobs')).body.items.filter((item: { type: string }) => item.type === 'queue.search');
+    expect(items.map((item: { payload: { season: number } }) => item.payload.season)).toEqual([1, 9]);
+  });
+
   it('lists the running job first, then the waiting jobs in the order that the worker starts them', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
