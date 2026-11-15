@@ -70,6 +70,11 @@ describe('identity', () => {
     expect(codes('Show.Name.2021.S01E02.1080p.WEB-DL-GRP', ep2)).toEqual([]);
   });
 
+  it.each([2019, null])('rejects an absolute-numbered episode for a movie with year %s', (year) => {
+    const target = movie({ meta: { ...movie().meta, year } });
+    expect(codes('[Group] Movie Name 2019 - 01 [1080p][WEB-DL]', { kind: 'movie', title: target })).toEqual(['not_a_movie']);
+  });
+
   it('does not guess the year of a title that the catalog does not give', () => {
     const unknown = movie({ meta: { ...movie().meta, year: null } });
     expect(codes('Movie.Name.2019.1080p.BluRay-GRP', { kind: 'movie', title: unknown }, {}, { sizeBytes: filmSize })).toEqual([]);
@@ -86,6 +91,16 @@ describe('identity', () => {
   it('matches an alias of the title', () => {
     const aliased = title({ episodes: [episode(1, 1)], meta: { ...show.meta, aliases: ['Le Show'] } });
     expect(codes('Le.Show.S01E01.1080p.WEB-DL-GRP', { kind: 'episode', title: aliased, season: 1, number: 1 })).toEqual([]);
+  });
+
+  it('does not match an absolute number to a special', () => {
+    const anime = title({ seriesType: 'anime', episodes: [episode(0, 1), episode(0, 2), episode(1, 1)] });
+    const name = '[Group] Show Name - 01 [1080p][WEB-DL]';
+    expect(codes(name, { kind: 'episode', title: anime, season: 0, number: 2 })).toEqual(['wrong_episode']);
+    expect(decide(release(name), { kind: 'episode', title: anime, season: 1, number: 1 }, ctx())).toMatchObject({
+      accepted: true,
+      covers: [{ season: 1, number: 1 }],
+    });
   });
 });
 
@@ -132,6 +147,19 @@ describe('packs', () => {
     const daily = title({ episodes: [episode(2024, 75, '2024-03-15')] });
     expect(codes('Show.Name.S01.2024.03.15.1080p.WEB-DL-GRP', { kind: 'episode', title: daily, season: 2024, number: 75 })).toEqual(['not_an_episode']);
   });
+
+  it('checks the size and preferred distance against the known coverage of a pack', () => {
+    const quality = emptyData();
+    quality.qualitySizes.tv['webdl-1080'] = { min: 12.5, preferred: 60, max: 100 };
+    const context = ctx({ quality, coverage: () => ({ titleKey: show.key, season: 1, numbers: [2] }) });
+    const name = 'Show.Name.S01.1080p.WEB-DL-GRP';
+    expect(decide(release(name), season1, context)).toMatchObject({ accepted: true, mibPerMinute: 60, distance: 0 });
+    expect(decide(release(name, { sizeBytes: 120 * 45 * 1024 * 1024 }), season1, context)).toMatchObject({
+      accepted: false,
+      rejections: ['size_above_max'],
+      mibPerMinute: 120,
+    });
+  });
 });
 
 describe('a season that the releases count as two', () => {
@@ -156,6 +184,13 @@ describe('a season that the releases count as two', () => {
     const decision = decide(restPack(), restSeason, ctx());
     expect(decision).toMatchObject({ accepted: true, kind: 'pack' });
     expect(decision.covers).toEqual(rest.map((number) => ({ season: 1, number })));
+  });
+
+  it('checks the size of a continuation pack against only the remaining episodes', () => {
+    const quality = emptyData();
+    quality.qualitySizes.tv['webdl-1080'] = { min: 12.5, preferred: 60, max: 100 };
+    const decision = decide(release('Show.Name.S02.1080p.WEB-DL-GRP', { sizeBytes: 10 * 120 * 45 * MIB }), restSeason, ctx({ quality }));
+    expect(decision).toMatchObject({ accepted: false, rejections: ['size_above_max'], mibPerMinute: 120, distance: 60 });
   });
 
   it('takes no pack of another season without the numbering of the release', () => {

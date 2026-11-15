@@ -1,4 +1,4 @@
-import { type Data, type Settings, db, profilesFor } from '../../core/db.ts';
+import { type Data, type Settings, profilesFor } from '../../core/db.ts';
 import { WANT_KIND } from '@ladarr/shared/enums';
 import type { Indexer } from './indexers.ts';
 import { type Episode, type Title } from '../library.ts';
@@ -30,7 +30,7 @@ export type Context = {
   // The episodes that the files of this release held, when ladarr read them before.
   coverage: (release: RawRelease) => Data['releaseCoverage'][string] | null;
   now: number;
-  // A manual choice skips the preferences. It never skips the safety checks.
+  // A manual choice accepts any release, including one that fails identity or policy checks.
   manual?: boolean;
 };
 
@@ -115,7 +115,7 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   // Identity: is this release the target?
   if (!titleMatches(parsed.title, title)) reject('wrong_title');
   if (want.kind === 'movie') {
-    if (parsed.season !== null || parsed.pack || parsed.multiSeason || parsed.airDate) reject('not_a_movie');
+    if (parsed.season !== null || parsed.pack || parsed.multiSeason || parsed.airDate || parsed.absolute !== null) reject('not_a_movie');
     // A year that the catalog does not know is not a year that the release contradicts.
     else if (title.meta.year !== null) {
       if (parsed.year === null) reject('year_missing');
@@ -134,7 +134,7 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
     if (parsed.pack || parsed.multiSeason) reject(parsed.multiSeason ? 'multi_season_pack' : 'not_an_episode');
     else if (parsed.absolute !== null && !continuation) {
       // An anime release names the absolute number of the episode. It matches the episode with that number.
-      if (absoluteNumber(title, want.season, want.number) !== parsed.absolute) reject('wrong_episode');
+      if (want.season === 0 || absoluteNumber(title, want.season, want.number) !== parsed.absolute) reject('wrong_episode');
       else {
         season = want.season;
         numbers = [want.number];
@@ -190,9 +190,7 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   const runtimes =
     want.kind === 'movie'
       ? [title.meta.runtime]
-      : want.kind === 'season'
-        ? title.episodes.filter((e) => e.season === want.season).map(runtimeOf)
-        : covers.map((c) => runtimeOf(title.episodes.find((e) => e.season === c.season && e.number === c.number)));
+      : covers.map((c) => runtimeOf(title.episodes.find((e) => e.season === c.season && e.number === c.number)));
   const runtimeMinutes = runtimes.length && runtimes.every((value): value is number => typeof value === 'number' && value > 0) ? runtimes.reduce((sum, value) => sum + value, 0) : null;
   const audio = parsed.audioLanguages?.filter((language) => language !== 'multi') ?? null;
   // A movie and an episode check their size against different tables.
@@ -203,7 +201,6 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   const oneEpisode = want.kind === 'season' && runtimeMinutes !== null ? Math.min(...(runtimes as number[])) : null;
   const packFloor = oneEpisode ? release.sizeBytes / (1024 * 1024) / oneEpisode : null;
   const qualityRejections = quality.rejections.filter((code) => !(code === 'size_below_min' && packFloor !== null && quality.limits?.min != null && packFloor >= quality.limits.min));
-  // A manual choice may skip the preferences of the profile. It does not skip a camera copy of unknown source: the user sees the warning.
   if (!ctx.manual) rejections.push(...qualityRejections);
 
   // Policy of the library and of the indexer.
