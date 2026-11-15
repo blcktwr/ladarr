@@ -8,7 +8,7 @@ import { api, ApiError } from '../../lib/api.ts';
 import { ResultItem } from '../search/result-item.tsx';
 import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, EmptyState, Gallery, Modal, Pane, Section, Spinner, SubMenu, Table, Text, Thumbnail } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
-import { Link, LoadFailed, LoadingGallery, pageWidth } from '../../components/index.ts';
+import { Link, LoadFailed, LoadingGallery, pageWidth, pageWidthContent } from '../../components/index.ts';
 import { ModalActions } from '../../components/modal-actions.tsx';
 import { availabilityLabel, catalogPath, contentType, posterUrl, describeError, posterState, statusLabel } from '../../lib/format.ts';
 import { t, getLanguage } from '../../i18n/index.ts';
@@ -498,48 +498,57 @@ const factsOf = (header: Header, mediaType?: string) =>
 function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutions, onResolution, controls, children }: { header: Header; posterSize?: 'w342' | 'h632'; mediaType?: string; tmdbId?: number; resolutions?: number[]; onResolution?: (resolution: number) => void; controls?: ReactNode; children?: ReactNode }) {
   const facts = factsOf(header, mediaType);
   return (
-    <div className={pageWidth}>
-      <Controls>{controls}</Controls>
-      <Backdrop image={posterUrl(header.backdropPath, 'w1280') ?? ''}>
-        {/* The header has the title and the year, so the poster has no title and no year. */}
-        {/* The empty caption leaves 16 px under the poster. The margin takes them back, so the poster is at the center of the backdrop. */}
-        <div className="-mb-4">
-          <Thumbnail size="lg" image={posterUrl(header.posterPath, posterSize) ?? ''} title="" year="" />
-        </div>
-        <div className="grid gap-3 grow basis-64 min-w-0 self-center">
-          <Text variant="title">{`${header.title}${header.year ? ` (${header.year})` : ''}`}</Text>
-          {facts.length > 0 && <Text>{facts.join(' | ')}</Text>}
-          {header.overview && <Text>{header.overview}</Text>}
-          {mediaType !== undefined && tmdbId !== undefined && <TitleLinks imdbId={header.imdbId} tmdbId={tmdbId} mediaType={mediaType} rating={header.rating} />}
-          {header.date && <Text variant="small">{formatDate(header.date)}</Text>}
-          {resolutions && resolutions.length > 0 && (
-            <div className="flex items-center gap-2">
-              {resolutions.map((resolution) => (
-                <Badge key={resolution} onClick={onResolution ? () => onResolution(resolution) : undefined} label={onResolution ? t('Show details of {resolution}p', { resolution }) : undefined}>
-                  {`${resolution}p`}
-                </Badge>
-              ))}
-            </div>
-          )}
-          {children && <Actions>{children}</Actions>}
+    <>
+      <div className={`${pageWidthContent} mt-6`}>
+        <Controls>{controls}</Controls>
+      </div>
+      {/* The backdrop spans the window. Its content keeps the width of the page. */}
+      <Backdrop image={posterUrl(header.backdropPath, 'w1280') ?? ''} className="mb-8">
+        <div className={`${pageWidthContent} flex flex-wrap items-end gap-6`}>
+          {/* The header has the title and the year, so the poster has no title and no year. */}
+          {/* The empty caption leaves 16 px under the poster. The margin takes them back, so the poster is at the center of the backdrop. */}
+          <div className="-mb-4">
+            <Thumbnail size="lg" image={posterUrl(header.posterPath, posterSize) ?? ''} title="" year="" />
+          </div>
+          <div className="grid gap-3 grow basis-64 min-w-0 self-center">
+            <Text variant="title">{`${header.title}${header.year ? ` (${header.year})` : ''}`}</Text>
+            {facts.length > 0 && <Text>{facts.join(' | ')}</Text>}
+            {header.overview && <Text>{header.overview}</Text>}
+            {mediaType !== undefined && tmdbId !== undefined && <TitleLinks imdbId={header.imdbId} tmdbId={tmdbId} mediaType={mediaType} rating={header.rating} />}
+            {header.date && <Text variant="small">{formatDate(header.date)}</Text>}
+            {resolutions && resolutions.length > 0 && (
+              <div className="flex items-center gap-2">
+                {resolutions.map((resolution) => (
+                  <Badge key={resolution} onClick={onResolution ? () => onResolution(resolution) : undefined} label={onResolution ? t('Show details of {resolution}p', { resolution }) : undefined}>
+                    {`${resolution}p`}
+                  </Badge>
+                ))}
+              </div>
+            )}
+            {children && <Actions>{children}</Actions>}
+          </div>
         </div>
       </Backdrop>
-    </div>
+    </>
   );
 }
 
 function TitleHeaderLoading() {
   return (
-    <div className={pageWidth}>
-      <Controls />
-      <Backdrop loading>
-        <Thumbnail size="lg" loading />
-        <div className="grid gap-3 grow basis-64 min-w-0 self-center">
-          <Text variant="title" loading />
-          <Text loading />
+    <>
+      <div className={`${pageWidthContent} mt-6`}>
+        <Controls />
+      </div>
+      <Backdrop loading className="mb-8">
+        <div className={`${pageWidthContent} flex flex-wrap items-end gap-6`}>
+          <Thumbnail size="lg" loading />
+          <div className="grid gap-3 grow basis-64 min-w-0 self-center">
+            <Text variant="title" loading />
+            <Text loading />
+          </div>
         </div>
       </Backdrop>
-    </div>
+    </>
   );
 }
 
