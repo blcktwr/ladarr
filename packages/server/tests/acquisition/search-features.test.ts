@@ -366,9 +366,9 @@ describe('the content of a pack', () => {
     expect(entries[1]!.transferHash).toBe(hashOf(PACK, files));
     expect(entries[2]!.release!.title).toBe(single);
     expect(pipe.qbit.torrents.size).toBe(2);
-    // The pack stays out of later searches, and the blocklist says why.
-    expect(Object.values(pipe.db.data.blocklist)).toMatchObject([{ title: PACK, reason: 'pack_missing_episodes', season: 1 }]);
-    expect(entries[2]!.attempts.map((a) => [a.n, a.outcome, a.reason])).toEqual([[1, 'failed', 'search requested'], [2, 'running', 'fallback: pack_missing_episodes']]);
+    // The pack keeps the episodes that it holds, and it is not blocked: a later search knows its files.
+    expect(pipe.db.data.blocklist).toEqual({});
+    expect(entries[2]!.attempts.map((a) => [a.n, a.outcome, a.reason])).toEqual([[1, 'failed', 'search requested'], [2, 'running', 'fallback: pack_partial']]);
     expect(entries[0]!.attempts).toHaveLength(1);
   });
 
@@ -391,7 +391,7 @@ describe('the content of a pack', () => {
     await until(() => ['tv:1:1x3', 'tv:1:1x4'].every((id) => branchOf(pipe!.queue.get(id)) === 'waiting'));
 
     expect(pipe.tracker.state.downloads.filter((file) => file === PACK)).toHaveLength(1);
-    expect(Object.values(pipe.db.data.blocklist)).toMatchObject([{ title: PACK, reason: 'pack_missing_episodes', season: 1 }]);
+    expect(pipe.db.data.blocklist).toEqual({});
     expect(pipe.qbit.torrents.size).toBe(1);
   });
 

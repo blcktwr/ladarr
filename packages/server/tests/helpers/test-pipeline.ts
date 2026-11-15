@@ -156,6 +156,7 @@ export async function startPipeline(options: Options = {}) {
       afterStep: options.afterStep,
       fs: options.fs,
       status: importStatus,
+      partial: finder.partial,
       checkDelayMs: options.checkDelayMs ?? 0,
     }),
     'import.resume': importResumeHandler(),

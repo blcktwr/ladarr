@@ -895,6 +895,7 @@ export const es: Record<string, string> = {
   'The release is for other episodes.': 'La versión es de otros episodios.',
   'The air date matches more than one episode, or none.': 'La fecha de emisión coincide con más de un episodio, o con ninguno.',
   'The release holds more than one season.': 'La versión contiene más de una temporada.',
+  'An earlier download of this pack held other episodes.': 'Una descarga anterior de este paquete contenía otros episodios.',
   'The release covers an episode that is available already.': 'La versión cubre un episodio que ya está disponible.',
   'A file is available for this target.': 'Ya hay un archivo disponible para este objetivo.',
   'The quality of the release is not better than the quality of the current file.': 'La calidad de la versión no es mejor que la del archivo actual.',

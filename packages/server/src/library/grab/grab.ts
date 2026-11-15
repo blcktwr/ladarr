@@ -5,7 +5,7 @@ import type { Finder } from './finder.ts';
 import type { Clients } from '../downloads/client-api.ts';
 import { ClientError, type Torrent } from '../downloads/qbittorrent.ts';
 import { addedByApp, type Queue, type QueueEntry } from '../downloads/queue.ts';
-import { isSample, isVideoFile, parseEpisodes, titleNumbers } from '../parse.ts';
+import { isSample, isVideoFile, releaseEpisodes } from '../parse.ts';
 import { infoHashOf, magnetHash, torrentComment, torrentFiles } from './torrent.ts';
 import { IndexerError, type IndexerService } from './torznab.ts';
 
@@ -37,19 +37,21 @@ export function reasonOf(error: unknown) {
 
 // Sends the chosen release to the client. Each step can be repeated: a restart or a retry reads the client first.
 export function createGrabber({ queue, finder, indexers, clients, save, reconcileMs = 1_000 }: GrabberDeps): (entries: QueueEntry[], signal: AbortSignal) => Promise<void> {
-  // The entries of a pack that its files do not cover. The check is the same as the check of the import. The names come
-  // from the torrent file, before the client has the release, or from the client, when it has the release already.
+  // The entries of a pack that its files do not cover, and the number of files that name an episode. The check is the
+  // same as the check of the import. The names come from the torrent file, before the client has the release, or from
+  // the client, when it has the release already.
   function missingFrom(files: string[], entries: QueueEntry[]) {
     // A torrent with one file has no list to compare.
-    if (files.length < 2) return [];
+    if (files.length < 2) return { missing: [] as QueueEntry[], episodes: 0 };
     const title = db.data.titles[entries[0]!.titleKey];
+    const continuation = entries.find((entry) => entry.continuation)?.continuation ?? null;
     const held = files
       .filter((file) => isVideoFile(file) && !isSample(file))
-      .map((file) => {
-        const parsed = parseEpisodes(file);
-        return parsed && { season: parsed.season, numbers: titleNumbers(parsed, title?.episodes ?? []) };
-      });
-    return entries.filter((entry) => !held.some((found) => found?.season === entry.season && found.numbers.includes(entry.number!)));
+      .map((file) => releaseEpisodes(file, title?.episodes ?? [], continuation));
+    return {
+      missing: entries.filter((entry) => !held.some((found) => found?.season === entry.season && found.numbers.includes(entry.number!))),
+      episodes: held.filter((found) => found && found.numbers.length).length,
+    };
   }
 
   // The episodes of the pack that the files of the pack do not cover, with the number of files that the pack holds.
@@ -59,13 +61,10 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
       files = torrentFiles(torrent);
     } catch {
       // ladarr cannot read the list. The import still blocks a missing episode.
-      return { files: 0, missing: [] as QueueEntry[] };
+      return { files: 0, missing: [] as QueueEntry[], episodes: 0 };
     }
-    return { files: files.length, missing: missingFrom(files.map((file) => file.path), entries) };
+    return { files: files.length, ...missingFrom(files.map((file) => file.path), entries) };
   }
-
-  // The episodes that the pack lacks, in the log line that blocks it. The reason alone does not say which one was missing.
-  const packDetail = (missing: QueueEntry[], files: number) => ({ files, missing: missing.map((entry) => `${entry.season}x${entry.number}`) });
 
   async function grab(entries: QueueEntry[], signal: AbortSignal) {
     const leader = entries[0]!;
@@ -139,9 +138,8 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
       const held = seen ? await api.find(seen) : undefined;
       if (held) {
         const packFiles = ref.kind === 'pack' ? (await api.files(held.hash)).map((file) => file.name) : [];
-        const missing = missingFrom(packFiles, entries);
-        if (missing.length) finder.fallback(missing, 'pack_missing_episodes', packDetail(missing, packFiles.length));
-        entries = entries.filter((entry) => !missing.includes(entry));
+        const pack = missingFrom(packFiles, entries);
+        if (pack.missing.length) entries = finder.partial(entries, pack.missing, { files: packFiles.length, episodes: pack.episodes });
         if (entries.length) take(held);
         return;
       }
@@ -158,8 +156,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
         // A pack must hold the episodes that it covers. The torrent file lists its files before the client has any data.
         if (ref.kind === 'pack') {
           const pack = missingFromPack(entries, got.torrent);
-          if (pack.missing.length) finder.fallback(pack.missing, 'pack_missing_episodes', packDetail(pack.missing, pack.files));
-          entries = entries.filter((entry) => !pack.missing.includes(entry));
+          if (pack.missing.length) entries = finder.partial(entries, pack.missing, { files: pack.files, episodes: pack.episodes });
           if (!entries.length) return;
         }
       }

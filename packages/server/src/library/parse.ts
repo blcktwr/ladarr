@@ -92,3 +92,18 @@ export function titleNumbers(parsed: ParsedEpisodes, episodes: { season: number;
     return at === undefined ? [] : [at];
   });
 }
+
+// The numbering of a release that counts as two seasons what the title counts as one. `releaseSeason` is the season of
+// the release, `season` the season of the title, and `from` the episode of the title that the release numbers as 1.
+export type Continuation = { releaseSeason: number; season: number; from: number };
+
+// The season and the episodes of the title that a file of a release names. A release of the rest of a season numbers its
+// own season from 1, so its numbers are the places in that rest.
+export function releaseEpisodes(name: string, episodes: { season: number; number: number }[], continuation?: Continuation | null): ParsedEpisodes | undefined {
+  const parsed = parseEpisodes(name);
+  if (!parsed) return undefined;
+  if (continuation && parsed.season === continuation.releaseSeason) {
+    return { season: continuation.season, numbers: titleNumbers({ season: continuation.season, numbers: parsed.numbers.map((number) => continuation.from + number - 1) }, episodes) };
+  }
+  return { season: parsed.season, numbers: titleNumbers(parsed, episodes) };
+}

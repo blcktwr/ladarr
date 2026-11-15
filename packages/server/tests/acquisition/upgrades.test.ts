@@ -205,6 +205,7 @@ describe('a release for a manual upgrade', () => {
     downloading: () => false,
     hasFile: () => true,
     hasMovieFile: () => true,
+    coverage: () => null,
     now: NOW,
   });
   const show = title({ episodes: [episode(1, 1, '2020-01-01', { fileId: 'f' })] });

@@ -1,5 +1,6 @@
 import { describe, isActiveState, phaseOf, type Phase, type Problem, type QueueState, type SearchOutcome, type WorkPhase } from '@ladarr/shared/queue';
 import type { EpisodeRef } from '@ladarr/shared/types';
+import type { Continuation } from '../parse.ts';
 import { type Db, db } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
 import { catalog, deleteItemLog, itemFields } from '../../core/log.ts';
@@ -112,6 +113,9 @@ export type QueueEntry = {
   // Set when the user chose to replace the file that holds the destination name. The importer clears it.
   replaceDestination?: boolean;
   importResult: ImportResult | null;
+  // Set when the releases count as two seasons what the title counts as one. The targets of the rest of the season then
+  // search the next season of the release. Null or absent for the numbering of the title.
+  continuation?: Continuation | null;
 };
 
 const MAX_HISTORY = 100;

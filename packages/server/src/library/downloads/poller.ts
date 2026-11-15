@@ -4,7 +4,7 @@ import type { Events } from '../../core/events.ts';
 import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { catalog, itemFields, log } from '../../core/log.ts';
 import { withOutboundRequests } from '../../core/outbound.ts';
-import { parseEpisodes, titleNumbers } from '../parse.ts';
+import { releaseEpisodes } from '../parse.ts';
 import type { Clients } from './client-api.ts';
 import { ClientError, type ClientHandle, type Torrent, type TorrentStatus } from './qbittorrent.ts';
 import { addedByApp, isActive, phaseOfEntry, type Queue, type QueueEntry } from './queue.ts';
@@ -132,8 +132,8 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
           : files.find((item) => {
               if (manual) return item.name === manual || item.name.endsWith(`/${manual}`);
               // The whole name of the file, so a folder that names the season is read.
-              const parsed = parseEpisodes(item.name);
-              return entry.number !== null && parsed?.season === entry.season && titleNumbers(parsed, title?.episodes ?? []).includes(entry.number);
+              const parsed = releaseEpisodes(item.name, title?.episodes ?? [], entry.continuation ?? null);
+              return entry.number !== null && parsed?.season === entry.season && parsed.numbers.includes(entry.number);
             });
       if (file) {
         progress[entry.id] = file.progress;

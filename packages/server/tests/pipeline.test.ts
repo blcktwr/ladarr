@@ -179,7 +179,7 @@ describe('series journey', () => {
     }
   });
 
-  it('shows a partial pack: the others available, and the missing episode stuck', async () => {
+  it('shows a partial pack: the others available, and the missing episode back in the search', async () => {
     pipe = await startPipeline();
     const series = show();
     pipe.db.data.titles[series.key] = series;
@@ -190,12 +190,48 @@ describe('series journey', () => {
     // A new search of the missing episode would find nothing.
     pipe.tracker.state.items = [];
     pipe.complete(pack, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E03.mkv': 'three' });
-    await until(() => entries.filter((e) => stageOf(e) === 'available').length === 2 && reasonOfEntry(entries[1]!)?.code === 'file_not_found');
-    expect(entries.map((e) => stageOf(e))).toEqual(['available', 'importing', 'available']);
-    expect(reasonOfEntry(entries[1]!)?.code).toBe('file_not_found');
-    // The missing episode waits for the user, and it keeps the torrent of the pack that does not cover it.
-    expect(entries[1]).toMatchObject({ state: { kind: 'blocked', at: 'importing' }, transferHash: hashOf(pack) });
+    await until(() => entries.filter((e) => stageOf(e) === 'available').length === 2 && stageOf(entries[1]!) === 'queued' && reasonOfEntry(entries[1]!)?.code === 'no_results');
+    expect(entries.map((e) => stageOf(e))).toEqual(['available', 'queued', 'available']);
+    // The missing episode waits for a release of its own, and it has no torrent.
+    expect(entries[1]).toMatchObject({ state: { kind: 'waiting' }, transferHash: null });
+    expect(Object.values(pipe.db.data.blocklist)).toEqual([]);
     expect(Object.values(pipe.db.data.jobs).some((job) => job.type === 'queue.initial' && job.dedupeKey === `initial:${series.key}`)).toBe(true);
+  });
+
+  it('takes a pack that holds a part of a season, and finds the rest as the next season', async () => {
+    pipe = await startPipeline();
+    // TMDB counts 23 episodes in season 1, and no season 2. The releases count the last ten as season 2.
+    const series = title({ rootId: 'tv', episodes: Array.from({ length: 23 }, (_, index) => episode(1, index + 1, '2020-01-01')) });
+    pipe.db.data.titles[series.key] = series;
+    const first = 'Show.Name.S01.1080p.WEB-DL-GRP';
+    const second = 'Show.Name.S02.1080p.WEB-DL-GRP';
+    const named = (season: number, count: number) => Array.from({ length: count }, (_, index) => `Show.Name.S0${season}E${String(index + 1).padStart(2, '0')}.mkv`);
+    const firstFiles = named(1, 13);
+    const secondFiles = named(2, 10);
+    const content = (files: string[]) => Object.fromEntries(files.map((file) => [file, `data-of-${file}`]));
+    pipe.tracker.state.items = [
+      { title: first, size: 13 * 600 * MIB, files: firstFiles },
+      { title: second, size: 10 * 600 * MIB, files: secondFiles },
+    ];
+    const entries = pipe.finder.requestSearch(series.key);
+    // The pack arrives with 13 of the 23 episodes, so the other ten take the numbering of the rest of the season.
+    await until(() => entries.filter((entry) => entry.continuation).length === 10 && pipe!.qbit.torrents.size === 2);
+    expect(entries.slice(0, 13).every((entry) => entry.transferHash)).toBe(true);
+    expect(entries[13]!.continuation).toMatchObject({ releaseSeason: 2, season: 1, from: 14 });
+
+    // The ten go back to the search, and the pack stays out of the blocklist: the record of its files keeps them.
+    pipe.complete(first, content(firstFiles), hashOf(first, firstFiles));
+    await until(() => entries.slice(13).every((entry) => entry.release?.title === second));
+    expect(Object.values(pipe.db.data.blocklist)).toEqual([]);
+
+    pipe.complete(second, content(secondFiles), hashOf(second, secondFiles));
+    await until(() => entries.every((entry) => stageOf(entry) === 'available'));
+    const paths = Object.values(pipe.db.data.files).map((file) => file.path);
+    expect(paths).toHaveLength(23);
+    // The files of the second pack take the numbers of the season of the title.
+    expect(paths).toContain('Show Name (2020)/Season 01/Show Name - S01E14 - Episode 14.mkv');
+    expect(paths).toContain('Show Name (2020)/Season 01/Show Name - S01E23 - Episode 23.mkv');
+    expect(series.episodes.every((episode) => episode.fileId)).toBe(true);
   });
 
   it('searches an episode on its own when no pack fits, and takes a fallback after a bad file', async () => {

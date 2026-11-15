@@ -5,15 +5,17 @@ import { type Episode, type Title } from '../library.ts';
 import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE, type Profile, type SizeLimits } from './quality.ts';
 import { normalizeTitle, parseRelease, type ParsedRelease } from './release.ts';
 import type { Covered } from '../downloads/queue.ts';
+import type { Continuation } from '../parse.ts';
 import type { RawRelease } from './torznab.ts';
 import { magnetHash } from './torrent.ts';
 
 // What a search looks for. A season want accepts a pack only.
 // `upgradeQuality` is the quality of a manual upgrade. The want then accepts a release of exactly that quality.
+// `continuation` is the numbering of a release that counts as two seasons what the title counts as one.
 export type Want =
   | { kind: typeof WANT_KIND.movie; title: Title; upgradeQuality?: string }
-  | { kind: typeof WANT_KIND.episode; title: Title; season: number; number: number; upgradeQuality?: string }
-  | { kind: typeof WANT_KIND.season; title: Title; season: number };
+  | { kind: typeof WANT_KIND.episode; title: Title; season: number; number: number; upgradeQuality?: string; continuation?: Continuation }
+  | { kind: typeof WANT_KIND.season; title: Title; season: number; continuation?: Continuation };
 
 export type Context = {
   settings: Settings;
@@ -26,6 +28,8 @@ export type Context = {
   downloading: (hash: string) => boolean;
   hasFile: (episode: Episode) => boolean;
   hasMovieFile: (title: Title) => boolean;
+  // The episodes that the files of this release held, when ladarr read them before.
+  coverage: (release: RawRelease) => Data['releaseCoverage'][string] | null;
   now: number;
   // A manual choice skips the preferences. It never skips the safety checks.
   manual?: boolean;
@@ -65,6 +69,7 @@ export const REJECTION_TEXT: Record<string, string> = {
   wrong_episode: 'The release is for other episodes.',
   daily_ambiguous: 'The air date matches more than one episode, or none.',
   multi_season_pack: 'The release holds more than one season.',
+  pack_covers_others: 'An earlier download of this pack held other episodes.',
   covers_available_episode: 'The release covers an episode that is available already.',
   already_available: 'A file is available for this target.',
   not_an_upgrade: 'The quality of the release is not better than the quality of the current file.',
@@ -121,9 +126,15 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   } else if (want.kind === 'episode') {
     let numbers = parsed.episodes;
     let season = parsed.season;
+    // A release of the rest of a season numbers its own season from 1, so its numbers give the places in that rest.
+    const continuation = want.continuation;
+    if (continuation && season === continuation.releaseSeason) {
+      numbers = numbers.map((number) => continuation.from + number - 1);
+      season = continuation.season;
+    }
     // A pack is not an episode, also when its name carries the air date of one.
     if (parsed.pack || parsed.multiSeason) reject(parsed.multiSeason ? 'multi_season_pack' : 'not_an_episode');
-    else if (parsed.absolute !== null) {
+    else if (parsed.absolute !== null && !continuation) {
       // An anime release names the absolute number of the episode. It matches the episode with that number.
       if (absoluteNumber(title, want.season, want.number) !== parsed.absolute) reject('wrong_episode');
       else {
@@ -152,13 +163,23 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
     }
   } else {
     kind = 'pack';
+    // A release of the rest of a season names the next season, and holds the episodes of the season from `from` up.
+    const continuation = want.continuation;
+    const releaseSeason = continuation?.releaseSeason ?? want.season;
     if (parsed.multiSeason) reject('multi_season_pack');
     else if (!parsed.pack) reject('not_a_pack');
-    else if (parsed.season !== want.season) reject('wrong_season');
+    else if (parsed.season !== releaseSeason) reject('wrong_season');
     else {
-      const inSeason = title.episodes.filter((episode) => episode.season === want.season);
-      covers = inSeason.map((episode) => ({ season: episode.season, number: episode.number }));
+      const from = continuation?.from ?? 0;
+      const inSeason = title.episodes.filter((episode) => episode.season === want.season && episode.number >= from);
+      // The files of an earlier download of this pack say which episodes it holds. A pack can hold fewer episodes than
+      // TMDB gives the season, so the record decides instead of the count of the season.
+      const held = ctx.coverage(release);
+      const known = held && held.titleKey === title.key && held.season === want.season ? new Set(held.numbers) : null;
+      covers = inSeason.filter((episode) => !known || known.has(episode.number)).map((episode) => ({ season: episode.season, number: episode.number }));
       if (!inSeason.length) reject('wrong_season');
+      // The pack held other episodes of the season, so it gives none of this target.
+      else if (known && !covers.length) reject('pack_covers_others');
     }
   }
 
@@ -179,8 +200,13 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   // A movie and an episode check their size against different tables.
   const sizes = want.kind === 'movie' ? ctx.quality.qualitySizes.movie : ctx.quality.qualitySizes.tv;
   const quality = evaluateChain(profiles, sizes, { source: parsed.source, resolution: parsed.resolution, sizeBytes: release.sizeBytes, audioLanguages: audio?.length ? audio : null }, { runtimeMinutes, audio: ctx.settings.audio });
+  // A pack can hold fewer episodes than TMDB gives the season, so its total needs only the size of one episode of the
+  // quality. The files of the download say how many episodes it really holds.
+  const oneEpisode = want.kind === 'season' && runtimeMinutes !== null ? Math.min(...(runtimes as number[])) : null;
+  const packFloor = oneEpisode ? release.sizeBytes / (1024 * 1024) / oneEpisode : null;
+  const qualityRejections = quality.rejections.filter((code) => !(code === 'size_below_min' && packFloor !== null && quality.limits?.min != null && packFloor >= quality.limits.min));
   // A manual choice may skip the preferences of the profile. It does not skip a camera copy of unknown source: the user sees the warning.
-  if (!ctx.manual) rejections.push(...quality.rejections);
+  if (!ctx.manual) rejections.push(...qualityRejections);
   // A release that the indexer reports with no seeders may never download. It stays a preference, so a person can take it by hand.
   if (!ctx.manual && ctx.settings.rejectZeroSeeders && release.seeders === 0) reject('no_seeders');
 
@@ -302,6 +328,8 @@ export function explainDecision(decision: Decision, options: { profiles: Profile
         return 'the release is for a series';
       case 'multi_season_pack':
         return 'the release holds more than one season';
+      case 'pack_covers_others':
+        return 'the files of this pack held other episodes';
       case 'quality_not_in_profile':
         return `the release is ${quality}; the profiles take ${profileQualities}`;
       case 'quality_rejected':

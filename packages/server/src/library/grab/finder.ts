@@ -9,6 +9,7 @@ import { enqueue as enqueueJob, JobError, prioritize, type EnqueueInput, type Jo
 import { isMonitored, movieEligibleAt, type Episode, type Title } from '../library.ts';
 import { catalog, itemFields, titleFields } from '../../core/log.ts';
 import { entryId, isActive, phaseOfEntry, type Queue, type QueueEntry, type ReleaseRef, type SearchState } from '../downloads/queue.ts';
+import type { Continuation } from '../parse.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import type { IndexerService, RawRelease, SearchQuery } from './torznab.ts';
 import { manualUpgradeTargets } from './upgrades.ts';
@@ -86,6 +87,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       downloading: (hash) => hashes.has(hash),
       hasFile: (episode) => present(episode.fileId),
       hasMovieFile: (title) => present(title.fileId),
+      coverage: (release) => db.data.releaseCoverage[`${release.indexerId}:${release.guid}`] ?? null,
       now: now(),
       manual,
     };
@@ -737,6 +739,8 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     } else {
       const season = payload.season;
       const counts: number[] = [];
+      // The numbering of the rest of a season, when the releases count as two seasons what the title counts as one.
+      const continuation = entries.find((entry) => entry.continuation)?.continuation ?? null;
       // The season queries come first. They give the packs, the singles, and the number of releases of each name,
       // which selects the name of the individual queries.
       if (!manual && season !== null && open.length > 1 && resume?.phase !== 'absolute') {
@@ -752,7 +756,8 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
           if (pack) {
             // The pack covers the episodes that it names. The other targets keep their own searches.
             const covered = open.filter((entry) => pack.covers.some((c) => c.season === entry.season && c.number === entry.number));
-            if (reserve(covered, pack)) open = open.filter((entry) => !covered.includes(entry));
+            // The files of an earlier download can hold none of these targets, and then the pack gives nothing here.
+            if (covered.length && reserve(covered, pack)) open = open.filter((entry) => !covered.includes(entry));
           }
           open = grabBest(open, (entry) => result.decisionsOf(entry).filter((decision) => decision.kind !== 'pack'));
           if (result.incomplete) {
@@ -798,6 +803,48 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
             if (!grabBest([entry], result.decisionsOf).length) open = open.filter((item) => item !== entry);
             if (result.incomplete) {
               defer({ phase: 'episode', entryId: entry.id });
+              return;
+            }
+          }
+        }
+      }
+
+      // The rest of a season that the releases count as another season, only when the schemes above gave nothing. TMDB
+      // can count as one season what the releases count as two, and the title has no season of that number.
+      if (open.length && continuation && !manual) {
+        const group = open.filter((entry) => entry.continuation);
+        if (group.length) {
+          if (budget && budget.left <= 0) {
+            defer();
+            return;
+          }
+          const seasonWant = (entry: QueueEntry): Want[] => [{ kind: 'season', title, season: continuation.season, continuation }, { kind: 'episode', title, season: entry.season!, number: entry.number!, continuation }];
+          const result = await ask({ kind: 'season', season: continuation.releaseSeason }, names[0]!, group, seasonWant);
+          const pack = bestOf(group.flatMap((entry) => result.decisionsOf(entry).filter((decision) => decision.kind === 'pack')));
+          if (pack) {
+            const covered = group.filter((entry) => pack.covers.some((candidate) => candidate.season === entry.season && candidate.number === entry.number));
+            if (covered.length && reserve(covered, pack)) open = open.filter((entry) => !covered.includes(entry));
+          }
+          open = grabBest(open, (entry) => result.decisionsOf(entry).filter((decision) => decision.kind !== 'pack'));
+          if (result.incomplete) {
+            defer();
+            return;
+          }
+          // The rest of the season can also arrive as one episode of each file of the release.
+          const singles = open.filter((entry) => entry.continuation && (open.length === 1 || recentEpisode(entry)));
+          for (const entry of singles) {
+            if (!open.includes(entry) || entry.state.kind !== 'searching') continue;
+            if (budget && budget.left <= 0) {
+              defer();
+              return;
+            }
+            const number = entry.number! - continuation.from + 1;
+            const single = await ask({ kind: 'episode', season: continuation.releaseSeason, number }, names[0]!, [entry], (item) => [
+              { kind: 'episode', title, season: item.season!, number: item.number!, continuation },
+            ]);
+            if (!grabBest([entry], single.decisionsOf).length) open = open.filter((item) => item !== entry);
+            if (single.incomplete) {
+              defer();
               return;
             }
           }
@@ -1139,18 +1186,70 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
 
   const MAX_ATTEMPTS = 3;
 
+  // The episodes that the pack lacks, in the log line that records it. The reason alone does not say which one was missing.
+  const packDetail = (missing: QueueEntry[], files: number) => ({ files, missing: missing.map((entry) => `${entry.season}x${entry.number}`) });
+
+  // The numbering of the rest of a season. TMDB can count as one season what the releases count as two, so when the title
+  // has no next season, the missing run of the season is the next season of the release.
+  function continuationOf(missing: QueueEntry[]): Continuation | null {
+    const first = missing[0]!;
+    const title = db.data.titles[first.titleKey];
+    const season = first.season;
+    if (!title || season === null) return null;
+    // A run that the rest of the season gave already keeps its numbering, also when it arrives in parts.
+    const known = missing.find((entry) => entry.continuation)?.continuation;
+    if (known) return known;
+    const numbers = missing.map((entry) => entry.number!).sort((a, b) => a - b);
+    const start = numbers[0];
+    const last = numbers.at(-1);
+    if (start === undefined || last === undefined || start <= 1) return null;
+    if (numbers.some((number, index) => number !== start + index)) return null;
+    const ofSeason = title.episodes.filter((episode) => episode.season === season).map((episode) => episode.number);
+    // The run must be the rest of the season.
+    if (last !== Math.max(...ofSeason)) return null;
+    // A season of the next number exists in the title, so a release of that number is that season.
+    if (title.episodes.some((episode) => episode.season === season + 1)) return null;
+    return { releaseSeason: season + 1, season, from: start };
+  }
+
+  // A pack that holds a part of its season: `missing` are the targets of the pack that its files do not cover. The record
+  // of the files keeps the episodes that it holds, so a later search does not take the pack again for the others, and
+  // those targets go back to the search with the numbering of the rest of the season. A pack whose files name no episode
+  // is not a pack of the season, and it goes to the blocklist. Returns the targets that the pack still covers.
+  function partial(entries: QueueEntry[], missing: QueueEntry[], { files, episodes }: { files: number; episodes: number }) {
+    if (!episodes) {
+      fallback(missing, 'pack_missing_episodes', packDetail(missing, files));
+      return [];
+    }
+    const leader = entries[0];
+    const ref = leader?.release ?? null;
+    const season = missing[0]!.season!;
+    if (leader && ref) {
+      db.data.releaseCoverage[`${ref.indexerId}:${ref.guid}`] = {
+        titleKey: leader.titleKey,
+        season,
+        numbers: entries.filter((entry) => !missing.includes(entry) && entry.season === season).map((entry) => entry.number!),
+      };
+    }
+    const continuation = continuationOf(missing);
+    for (const entry of missing) entry.continuation = continuation;
+    fallback(missing, 'pack_partial', packDetail(missing, files), { block: false });
+    return entries.filter((entry) => !missing.includes(entry));
+  }
+
   // Stops the release from coming back. Only a confirmed bad release goes here, never an outage.
   function block(release: Pick<ReleaseRef, 'infoHash' | 'indexerId' | 'guid' | 'title'>, reason: string, titleKey: string, season: number | null) {
     db.data.blocklist[release.infoHash ?? `${release.indexerId}:${release.guid}`] = { title: release.title, reason, at: now(), titleKey, ...(season === null ? {} : { season }) };
   }
 
   // A confirmed bad release ends the attempt. The entry goes back to Queued with a new attempt and a new search.
-  // After a few attempts it asks for the user.
-  function fallback(entries: QueueEntry[], cause: string, detail?: Record<string, unknown>) {
+  // After a few attempts it asks for the user. `block` is false for a release that is good for its other targets: a
+  // pack that holds a part of a season stays off the blocklist.
+  function fallback(entries: QueueEntry[], cause: string, detail?: Record<string, unknown>, { block: blocked = true }: { block?: boolean } = {}) {
     const again: QueueEntry[] = [];
     for (const entry of entries) {
       catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: ${cause}`, itemFields(entry), { code: cause, release: entry.release?.title ?? null, ...detail });
-      if (entry.release) block(entry.release, cause, entry.titleKey, entry.season);
+      if (entry.release && blocked) block(entry.release, cause, entry.titleKey, entry.season);
       queue.endAttempt(entry, 'failed', cause);
       Object.assign(entry, { release: null, transferHash: null, clientId: null });
       if (entry.attempt >= MAX_ATTEMPTS) {
@@ -1162,10 +1261,12 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     }
     const bySeason = new Map<string, QueueEntry[]>();
     for (const entry of again) bySeason.set(`${entry.titleKey}|${entry.season ?? ''}`, [...(bySeason.get(`${entry.titleKey}|${entry.season ?? ''}`) ?? []), entry]);
-    for (const group of bySeason.values()) enqueueSearch({ titleKey: group[0]!.titleKey, season: group[0]!.season, entryIds: group.map((e) => e.id) });
+    // The targets need a new search, also when the search that chose the release is still running: that run has its own
+    // list of targets, and it does not take these again.
+    for (const group of bySeason.values()) enqueueSearch({ titleKey: group[0]!.titleKey, season: group[0]!.season, entryIds: group.map((e) => e.id) }, { afterRun: true });
   }
 
-  return { requestSearch, reserve, fallback, block, enqueueSearch, interactive, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
+  return { requestSearch, reserve, fallback, partial, block, enqueueSearch, interactive, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
 }
 
 export type Finder = ReturnType<typeof createFinder>;

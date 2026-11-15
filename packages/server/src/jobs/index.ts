@@ -53,7 +53,7 @@ export function jobHandlers({ backupDir, events, save, tmdb, enqueue, clients, q
     'queue.sweep': queueSweepHandler(finder),
     'queue.grab': queueGrabHandler({ queue, finder, indexers, clients, save }),
     'queue.retry': queueRetryHandler({ queue, finder, clients, enqueue, events }),
-    'import.run': importRunHandler({ queue, events, clients, save, status: importStatus }),
+    'import.run': importRunHandler({ queue, events, clients, save, status: importStatus, partial: finder.partial }),
     'import.resume': importResumeHandler(),
     ...webhookDeliverHandler({}),
   };

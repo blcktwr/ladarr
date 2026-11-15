@@ -13,6 +13,7 @@ const ctx = (extra: Partial<Context> = {}): Context => ({
   downloading: () => false,
   hasFile: (e) => Boolean(e.fileId),
   hasMovieFile: (t) => Boolean(t.fileId),
+  coverage: () => null,
   now: NOW,
   ...extra,
 });
@@ -131,6 +132,55 @@ describe('packs', () => {
   it('rejects a pack that a daily name gives for a single episode', () => {
     const daily = title({ episodes: [episode(2024, 75, '2024-03-15')] });
     expect(codes('Show.Name.S01.2024.03.15.1080p.WEB-DL-GRP', { kind: 'episode', title: daily, season: 2024, number: 75 })).toEqual(['not_an_episode']);
+  });
+});
+
+describe('a season that the releases count as two', () => {
+  const MIB = 1024 * 1024;
+  // TMDB counts 23 episodes in season 1. The releases count the last ten as season 2, which TMDB does not have.
+  const split = title({ episodes: Array.from({ length: 23 }, (_, index) => episode(1, index + 1, '2020-01-01')) });
+  const rest = [14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
+  const continuation = { releaseSeason: 2, season: 1, from: 14 };
+  const restEpisode: Want = { kind: 'episode', title: split, season: 1, number: 14, continuation };
+  const restSeason: Want = { kind: 'season', title: split, season: 1, continuation };
+  const restPack = () => release('Show.Name.S02.1080p.WEB-DL-GRP', { sizeBytes: 10 * 600 * MIB });
+
+  it('reads the number of the release as a place in the rest of the season', () => {
+    expect(codes('Show.Name.S02E01.1080p.WEB-DL-GRP', restEpisode)).toEqual([]);
+    expect(codes('Show.Name.S02E02.1080p.WEB-DL-GRP', restEpisode)).toEqual(['wrong_episode']);
+    // The numbering of the title still matches its own target.
+    expect(codes('Show.Name.S01E14.1080p.WEB-DL-GRP', restEpisode)).toEqual([]);
+    expect(codes('Show.Name.S01E01.1080p.WEB-DL-GRP', restEpisode)).toEqual(['wrong_episode']);
+  });
+
+  it('takes the pack of the next season for the rest of the season', () => {
+    const decision = decide(restPack(), restSeason, ctx());
+    expect(decision).toMatchObject({ accepted: true, kind: 'pack' });
+    expect(decision.covers).toEqual(rest.map((number) => ({ season: 1, number })));
+  });
+
+  it('takes no pack of another season without the numbering of the release', () => {
+    expect(codes('Show.Name.S02.1080p.WEB-DL-GRP', { kind: 'season', title: split, season: 1 })).toEqual(['wrong_season']);
+  });
+
+  it('takes only the episodes that an earlier download of the pack held', () => {
+    const held = (numbers: number[]) => ctx({ coverage: () => ({ titleKey: 'tv:1', season: 1, numbers }) });
+    expect(decide(restPack(), restSeason, held(rest)).covers).toEqual(rest.map((number) => ({ season: 1, number })));
+    // The pack held the first part of the season, so it holds nothing of the rest: the search does not take it again.
+    const first = decide(restPack(), restSeason, held([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]));
+    expect(first.covers).toEqual([]);
+    expect(first.rejections).toContain('pack_covers_others');
+    // A pack of the season that held a part of it covers that part only.
+    const part = decide(release('Show.Name.S01.1080p.WEB-DL-GRP'), season1, held([1, 2]));
+    expect(part).toMatchObject({ accepted: true, kind: 'pack', covers: [{ season: 1, number: 1 }, { season: 1, number: 2 }] });
+  });
+
+  it('accepts a pack that is too small for the whole season and large enough for a part of it', () => {
+    // 13 of the 23 episodes at 600 MiB each: below the minimum of the quality for 23 episodes of 45 minutes.
+    const size = { sizeBytes: 13 * 600 * MIB };
+    expect(codes('Show.Name.S01.1080p.WEB-DL-GRP', { kind: 'season', title: split, season: 1 }, {}, size)).toEqual([]);
+    // An episode still checks its own size.
+    expect(codes('Show.Name.S01E01.1080p.WEB-DL-GRP', { kind: 'episode', title: split, season: 1, number: 1 }, {}, { sizeBytes: 10 * MIB })).toEqual(['size_below_min']);
   });
 });
 

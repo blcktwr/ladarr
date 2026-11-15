@@ -10,7 +10,7 @@ import type { Episode, Title } from '../library.ts';
 import { catalog, itemFields, log } from '../../core/log.ts';
 import type { ImportStatus } from './status.ts';
 import { episodePath, folderName, moviePath, versionedPath } from '../naming.ts';
-import { isSample, isVideoFile, parseEpisodes, titleNumbers } from '../parse.ts';
+import { isSample, isVideoFile, releaseEpisodes } from '../parse.ts';
 import { parseRelease } from '../grab/release.ts';
 import { probeFile, type ProbeResult } from '../probe.ts';
 import type { Clients } from '../downloads/client-api.ts';
@@ -61,6 +61,8 @@ type Deps = {
   save: () => Promise<void>;
   probe?: (path: string) => Promise<ProbeResult>;
   status?: ImportStatus;
+  // The targets of a pack whose files it does not hold go back to the search. The pack stays good for its other targets.
+  partial?: (entries: QueueEntry[], missing: QueueEntry[], detail: { files: number; episodes: number }) => void;
   // How long a check stays in `running` before its work starts. Slow work keeps it there until it ends.
   checkDelayMs?: number;
   // For tests: replace a file operation, or stop after a step to test a restart.
@@ -146,7 +148,7 @@ export async function torrentVideos(handle: ClientHandle, torrent: Torrent): Pro
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const checkKey = (hash: string, titleKey: string) => `${hash}:${titleKey}`;
 
-export function createImporter({ queue, events, clients, save, probe = probeFile, status, checkDelayMs = 100, fs = {}, afterStep, now = Date.now }: Deps) {
+export function createImporter({ queue, events, clients, save, probe = probeFile, status, partial, checkDelayMs = 100, fs = {}, afterStep, now = Date.now }: Deps) {
   const ops: Fs = { link: fs.link ?? fsLink, copyFile: fs.copyFile ?? fsCopyFile, rename: fs.rename ?? fsRename };
   const wait = async () => {
     if (checkDelayMs > 0) await sleep(checkDelayMs);
@@ -194,13 +196,14 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       taken.add(file.rel);
     }
     const done = () => new Set(picks.flatMap((p) => p.entries.map((e) => e.id)));
+    // The numbering of the release, when it counts as two seasons what the title counts as one.
+    const continuation = group.find((entry) => entry.continuation)?.continuation ?? null;
     for (const file of [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)) {
       if (taken.has(file.rel)) continue;
       // The folder of the file can name the season: "Season 02/Berserk E01.mkv".
-      const parsed = parseEpisodes(file.rel);
-      if (!parsed) continue;
-      const numbers = titleNumbers(parsed, title.episodes);
-      const covered = group.filter((entry) => entry.season === parsed.season && numbers.includes(entry.number!) && !done().has(entry.id));
+      const found = releaseEpisodes(file.rel, title.episodes, continuation);
+      if (!found) continue;
+      const covered = group.filter((entry) => entry.season === found.season && found.numbers.includes(entry.number!) && !done().has(entry.id));
       // A file for an episode that was not asked for is part of the pack. It is not imported.
       if (!covered.length) continue;
       picks.push({ file, entries: covered, episodes: covered.map(episodeOf).filter((e): e is Episode => Boolean(e)) });
@@ -319,9 +322,12 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       failGroup(problemOf(error));
       return;
     }
-    // A pack with some files leaves the other episodes to a new search. A torrent with no usable file blocks, because
-    // another search would only find the same torrent.
-    if (picked.missing.length) uncovered(picked.missing);
+    // A pack with some files leaves the other episodes to a new search, so the app does not wait on a file that the
+    // release does not hold. A torrent with no usable file blocks, because another search would only find the same torrent.
+    if (picked.missing.length) {
+      if (partial && picked.picks.length) partial(group, picked.missing, { files: picked.picks.length, episodes: picked.picks.length });
+      else uncovered(picked.missing);
+    }
 
     type Candidate = Pick & { dest: string | null; replaces: string | null; validation: 'ffprobe' | 'basic'; failed: boolean };
     const candidates: Candidate[] = picked.picks.map((item) => ({ ...item, dest: null, replaces: null, validation: 'basic', failed: false }));
