@@ -736,25 +736,29 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       const counts: number[] = [];
       // The numbering of the rest of a season, when the releases count as two seasons what the title counts as one.
       const continuation = entries.find((entry) => entry.continuation)?.continuation ?? null;
+      // The targets that the releases number as the rest of the season search another season, so the season queries of
+      // the title leave them out.
+      const regular = () => open.filter((entry) => !entry.continuation);
       // The season queries come first. They give the packs, the singles, and the number of releases of each name,
       // which selects the name of the individual queries.
-      if (!manual && season !== null && open.length > 1 && resume?.phase !== 'absolute') {
+      if (!manual && season !== null && regular().length > 0 && open.length > 1 && resume?.phase !== 'absolute') {
         for (const name of names) {
-          if (open.length <= 1) break;
+          const group = regular();
+          if (!group.length || open.length <= 1) break;
           if (budget && budget.left <= 0) {
             defer();
             return;
           }
-          const result = await ask({ kind: 'season', season }, name, open, (entry) => [{ kind: 'season', title, season }, wantFor(title, entry)]);
+          const result = await ask({ kind: 'season', season }, name, group, (entry) => [{ kind: 'season', title, season }, wantFor(title, entry)]);
           counts.push(result.releases.length);
-          const pack = bestOf(open.flatMap((entry) => result.decisionsOf(entry).filter((decision) => decision.kind === 'pack')));
+          const pack = bestOf(group.flatMap((entry) => result.decisionsOf(entry).filter((decision) => decision.kind === 'pack')));
           if (pack) {
             // The pack covers the episodes that it names. The other targets keep their own searches.
-            const covered = open.filter((entry) => pack.covers.some((c) => c.season === entry.season && c.number === entry.number));
+            const covered = group.filter((entry) => pack.covers.some((c) => c.season === entry.season && c.number === entry.number));
             // The files of an earlier download can hold none of these targets, and then the pack gives nothing here.
             if (covered.length && reserve(covered, pack)) open = open.filter((entry) => !covered.includes(entry));
           }
-          open = grabBest(open, (entry) => result.decisionsOf(entry).filter((decision) => decision.kind !== 'pack'));
+          open = grabBest(open, (entry) => (entry.continuation ? [] : result.decisionsOf(entry).filter((decision) => decision.kind !== 'pack')));
           if (result.incomplete) {
             defer();
             return;
@@ -765,8 +769,8 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       }
 
       // The recent window and a search with one target decide which episodes keep an individual query.
-      const targets = open.filter((entry) => manual || open.length === 1 || recentEpisode(entry));
-      const skipped = open.filter((entry) => !targets.includes(entry));
+      const targets = open.filter((entry) => !entry.continuation && (manual || open.length === 1 || recentEpisode(entry)));
+      const skipped = open.filter((entry) => !entry.continuation && !targets.includes(entry));
       if (!resume) for (const entry of skipped) noteSkipped(entry);
 
       if (resume?.phase !== 'absolute') {
@@ -804,17 +808,18 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
         }
       }
 
-      // The rest of a season that the releases count as another season, only when the schemes above gave nothing. TMDB
-      // can count as one season what the releases count as two, and the title has no season of that number.
-      if (open.length && continuation && !manual) {
-        const group = open.filter((entry) => entry.continuation);
-        if (group.length) {
+      // The rest of a season that the releases count as another season. TMDB can count as one season what the releases
+      // count as two, and the title has no season of that number.
+      if (open.length && continuation) {
+        const seasonWant = (entry: QueueEntry): Want[] => [{ kind: 'season', title, season: continuation.season, continuation }, { kind: 'episode', title, season: entry.season!, number: entry.number!, continuation }];
+        for (const name of names) {
+          const group = open.filter((entry) => entry.continuation);
+          if (!group.length) break;
           if (budget && budget.left <= 0) {
             defer();
             return;
           }
-          const seasonWant = (entry: QueueEntry): Want[] => [{ kind: 'season', title, season: continuation.season, continuation }, { kind: 'episode', title, season: entry.season!, number: entry.number!, continuation }];
-          const result = await ask({ kind: 'season', season: continuation.releaseSeason }, names[0]!, group, seasonWant);
+          const result = await ask({ kind: 'season', season: continuation.releaseSeason }, name, group, seasonWant);
           const pack = bestOf(group.flatMap((entry) => result.decisionsOf(entry).filter((decision) => decision.kind === 'pack')));
           if (pack) {
             const covered = group.filter((entry) => pack.covers.some((candidate) => candidate.season === entry.season && candidate.number === entry.number));
@@ -825,24 +830,31 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
             defer();
             return;
           }
-          // The rest of the season can also arrive as one episode of each file of the release.
-          const singles = open.filter((entry) => entry.continuation && (open.length === 1 || recentEpisode(entry)));
-          for (const entry of singles) {
-            if (!open.includes(entry) || entry.state.kind !== 'searching') continue;
+          // A name that returns releases is the name of the search. The aliases after it do not run.
+          if (result.releases.length) break;
+        }
+        // The rest of the season can also arrive as one episode of each file of the release.
+        const singles = open.filter((entry) => entry.continuation && (manual || open.length === 1 || recentEpisode(entry)));
+        for (const entry of singles) {
+          if (!open.includes(entry) || entry.state.kind !== 'searching') continue;
+          const number = entry.number! - continuation.from + 1;
+          for (const name of names) {
             if (budget && budget.left <= 0) {
               defer();
               return;
             }
-            const number = entry.number! - continuation.from + 1;
-            const single = await ask({ kind: 'episode', season: continuation.releaseSeason, number }, names[0]!, [entry], (item) => [
+            const single = await ask({ kind: 'episode', season: continuation.releaseSeason, number }, name, [entry], (item) => [
               { kind: 'episode', title, season: item.season!, number: item.number!, continuation },
             ]);
-            if (!grabBest([entry], single.decisionsOf).length) open = open.filter((item) => item !== entry);
+            grabBest([entry], single.decisionsOf);
             if (single.incomplete) {
               defer();
               return;
             }
+            // A name that returns releases is the name of the search. The aliases after it do not run.
+            if (single.releases.length) break;
           }
+          if (entry.state.kind === 'searching') open = open.filter((item) => item !== entry);
         }
       }
 
