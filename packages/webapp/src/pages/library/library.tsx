@@ -278,7 +278,7 @@ function EpisodeTable({ rows, loading = false, library = false }: { rows?: Episo
       rows={rows?.map((row, index) => ({
         key: `${row.season}x${row.number}`,
         cells: [
-          `${index + 1} (${row.number})`,
+          `${index + 1}${index + 1 === row.number ? '' : ` (${row.number})`}`,
           row.name,
           row.airDate ? airDate(row.airDate) : t('Unknown'),
           ...(library ? [<EpisodeStatus key="status" episode={row} />] : []),
