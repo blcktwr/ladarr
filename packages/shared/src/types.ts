@@ -290,8 +290,6 @@ export type SettingsData = {
   defaultRoots: { movie: string | null; tv: string | null };
   audio: { language: string; strict: boolean } | null;
   keepQueueLogs: boolean;
-  // A release with no seeders is rejected, so the target does not wait on a torrent that cannot download.
-  rejectZeroSeeders: boolean;
   naming: { movie: string; episode: string };
 };
 
@@ -720,6 +718,8 @@ export type IndexerRow = {
   nextRequestAt: number;
   // The languages of the names that the indexer should receive. No languages means every language.
   preferredLanguages: string[];
+  // A release with no seeders is rejected, so the target does not wait on a torrent that cannot download.
+  rejectZeroSeeders: boolean;
   enableRss: boolean;
   enableAutomaticSearch: boolean;
   enableInteractiveSearch: boolean;

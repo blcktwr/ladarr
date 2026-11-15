@@ -12,6 +12,7 @@ export function indexersCreate({ onChange = () => {} }: { onChange?: () => void 
     savePush('radarr', result.parsed.radarr);
     indexer.manual = true;
     indexer.preferredLanguages = result.preferredLanguages;
+    indexer.rejectZeroSeeders = result.rejectZeroSeeders;
     setDelay(indexer, result.delaySeconds);
     await db.write();
     onChange();

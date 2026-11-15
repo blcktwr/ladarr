@@ -37,6 +37,8 @@ export type Indexer = {
   delaySeconds: number;
   // The languages of the names that the indexer should receive. No languages means every language.
   preferredLanguages?: string[];
+  // Reject a release that the indexer reports with no seeders, so the target does not wait on a torrent that cannot download.
+  rejectZeroSeeders?: boolean;
   // The limiter keeps this time in the database, so a restart does not shorten the delay.
   nextRequestAt: number;
   push: Partial<Record<IndexerApp, IndexerPush>>;
@@ -263,6 +265,7 @@ export function summarize(indexer: Indexer): IndexerRow {
     priority: Math.min(...pushes.map((push) => push.priority)),
     delaySeconds: indexer.delaySeconds,
     preferredLanguages: indexer.preferredLanguages ?? [],
+    rejectZeroSeeders: Boolean(indexer.rejectZeroSeeders),
     nextRequestAt: indexer.nextRequestAt,
     enableRss: pushes.some((push) => push.enableRss),
     enableAutomaticSearch: pushes.some((push) => push.enableAutomaticSearch),

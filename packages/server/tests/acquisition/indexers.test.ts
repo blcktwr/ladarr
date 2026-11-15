@@ -125,6 +125,14 @@ describe('indexer manager adapter', () => {
     expect(app.db.data.indexers[id]!.preferredLanguages).toEqual(['ja']);
   });
 
+  it('keeps the policy of zero seeders that the user set when the indexer manager pushes again', async () => {
+    const id = Object.values(app.db.data.indexers)[0]!.id;
+    expect((await app.patch(`/indexers/${id}`, { delaySeconds: 9, rejectZeroSeeders: true })).body.indexer.rejectZeroSeeders).toBe(true);
+    expect((await app.patch(`/indexers/${id}`, { delaySeconds: 9, rejectZeroSeeders: 'yes' })).status).toBe(400);
+    await call(sonarr, 'POST', '/indexer', pushed([5030, 5040]));
+    expect(app.db.data.indexers[id]!.rejectZeroSeeders).toBe(true);
+  });
+
   it('rejects a push that is not valid', async () => {
     const bad = (fields: unknown[], extra: Record<string, unknown> = {}) => call(sonarr, 'POST', '/indexer', { ...pushed([5030]), fields, ...extra });
     expect((await call(sonarr, 'POST', '/indexer', pushed([5030], { implementation: 'Other' }))).status).toBe(400);

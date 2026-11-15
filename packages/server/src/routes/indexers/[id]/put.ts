@@ -14,6 +14,7 @@ export function indexersUpdate({ onChange = () => {} }: { onChange?: () => void 
     savePush('radarr', result.parsed.radarr, indexer.id);
     indexer.manual = true;
     indexer.preferredLanguages = result.preferredLanguages;
+    indexer.rejectZeroSeeders = result.rejectZeroSeeders;
     setDelay(indexer, result.delaySeconds);
     await db.write();
     onChange();

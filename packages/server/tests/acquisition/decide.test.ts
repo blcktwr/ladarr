@@ -239,22 +239,23 @@ describe('policy', () => {
 
 describe('seeders', () => {
   const name = 'Show.Name.S01E02.1080p.WEB-DL-GRP';
-  const on = { settings: { ...settings, rejectZeroSeeders: true } };
-  const off = { settings: { ...settings, rejectZeroSeeders: false } };
+  const on = { indexers: { 1: indexer({ rejectZeroSeeders: true }) } };
+  const off = { indexers: { 1: indexer({ rejectZeroSeeders: false }) } };
 
-  it('rejects a release with no seeders when the setting is on', () => {
+  it('rejects a release with no seeders when the indexer asks for it', () => {
     expect(codes(name, ep2, on, { seeders: 0 })).toEqual(['no_seeders']);
   });
 
-  it('accepts a release with no seeders when the setting is off', () => {
+  it('accepts a release with no seeders when the indexer does not ask for it', () => {
     expect(codes(name, ep2, off, { seeders: 0 })).toEqual([]);
+    expect(codes(name, ep2, {}, { seeders: 0 })).toEqual([]);
   });
 
   it('accepts a release when the indexer does not know its seeders', () => {
     expect(codes(name, ep2, on, { seeders: null })).toEqual([]);
   });
 
-  it('accepts a release with seeders when the setting is on', () => {
+  it('accepts a release with seeders when the indexer asks for it', () => {
     expect(codes(name, ep2, on, { seeders: 5 })).toEqual([]);
   });
 

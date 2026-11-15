@@ -28,7 +28,7 @@ afterAll(() => {
 describe('settings', () => {
   it('starts with defaults and offers the two profiles of version 1', async () => {
     const { body } = await app.get('/settings');
-    expect(body.settings).toMatchObject({ setupCompleted: false, audio: null, keepQueueLogs: true, rejectZeroSeeders: false });
+    expect(body.settings).toMatchObject({ setupCompleted: false, audio: null, keepQueueLogs: true });
     expect(body.settings).not.toHaveProperty('upgrades');
     expect(body.settings).not.toHaveProperty('defaultPreset');
     expect(body.settings).not.toHaveProperty('region');
@@ -71,12 +71,6 @@ describe('settings', () => {
     expect((await app.patch('/settings', { keepQueueLogs: true })).body.settings.keepQueueLogs).toBe(true);
   });
 
-  it('saves the policy of zero seeders', async () => {
-    expect((await app.patch('/settings', { rejectZeroSeeders: true })).status).toBe(200);
-    expect((await app.get('/settings')).body.settings.rejectZeroSeeders).toBe(true);
-    expect((await app.patch('/settings', { rejectZeroSeeders: false })).status).toBe(200);
-  });
-
   it.each([
     [{ region: 'AR' }, 'region'],
     [{ timeZone: 'UTC' }, 'timeZone'],
@@ -88,8 +82,6 @@ describe('settings', () => {
     [{ defaultRoots: { movie: 'missing' } }, 'defaultRoots.movie'],
     [{ keepQueueLogs: 'true' }, 'keepQueueLogs'],
     [{ keepQueueLogs: 1 }, 'keepQueueLogs'],
-    [{ rejectZeroSeeders: 'true' }, 'rejectZeroSeeders'],
-    [{ rejectZeroSeeders: 1 }, 'rejectZeroSeeders'],
     [{ maxAliases: 5 }, 'maxAliases'],
     [{ maxAliases: -1 }, 'maxAliases'],
     [{ maxAliases: 21 }, 'maxAliases'],

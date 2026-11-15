@@ -7,9 +7,13 @@ export function indexersPatch(): RequestHandler<{ id: string }> {
   return async (req, res) => {
     const indexer = db.data.indexers[Number(req.params.id)];
     if (!indexer) return void res.status(404).json({ error: 'not_found' });
-    const body = (req.body ?? {}) as { delaySeconds?: unknown; preferredLanguages?: unknown };
+    const body = (req.body ?? {}) as { delaySeconds?: unknown; preferredLanguages?: unknown; rejectZeroSeeders?: unknown };
     if (typeof body.delaySeconds !== 'number' || !Number.isFinite(body.delaySeconds) || body.delaySeconds < 0 || body.delaySeconds > MAX_DELAY_SECONDS)
       return invalidSetting(res, 'delaySeconds');
+    if (body.rejectZeroSeeders !== undefined) {
+      if (typeof body.rejectZeroSeeders !== 'boolean') return invalidSetting(res, 'rejectZeroSeeders');
+      indexer.rejectZeroSeeders = body.rejectZeroSeeders;
+    }
     if (body.preferredLanguages !== undefined) {
       if (!isLanguageList(body.preferredLanguages)) return invalidSetting(res, 'preferredLanguages');
       indexer.preferredLanguages = [...new Set(body.preferredLanguages)];

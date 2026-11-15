@@ -47,13 +47,13 @@ const CATEGORY_OPTIONS = [
   { value: '5110', label: '5110 TV/x265' },
 ];
 
-type Draft = { name: string; type: 'torznab'; baseUrl: string; apiKey: string; delay: string; languages: string[]; categories: string[]; enableRss: boolean; enableAutomaticSearch: boolean; enableInteractiveSearch: boolean };
+type Draft = { name: string; type: 'torznab'; baseUrl: string; apiKey: string; delay: string; languages: string[]; categories: string[]; enableRss: boolean; enableAutomaticSearch: boolean; enableInteractiveSearch: boolean; rejectZeroSeeders: boolean };
 
-const empty: Draft = { name: '', type: 'torznab', baseUrl: '', apiKey: '', delay: '6', languages: [], categories: [], enableRss: true, enableAutomaticSearch: true, enableInteractiveSearch: true };
+const empty: Draft = { name: '', type: 'torznab', baseUrl: '', apiKey: '', delay: '6', languages: [], categories: [], enableRss: true, enableAutomaticSearch: true, enableInteractiveSearch: true, rejectZeroSeeders: false };
 
 const draftOf = (indexer?: IndexerRow): Draft =>
   indexer
-    ? { ...empty, name: indexer.name, baseUrl: indexer.baseUrl, delay: String(indexer.delaySeconds), languages: indexer.preferredLanguages, categories: indexer.categories.map(String), enableRss: indexer.enableRss, enableAutomaticSearch: indexer.enableAutomaticSearch, enableInteractiveSearch: indexer.enableInteractiveSearch }
+    ? { ...empty, name: indexer.name, baseUrl: indexer.baseUrl, delay: String(indexer.delaySeconds), languages: indexer.preferredLanguages, categories: indexer.categories.map(String), enableRss: indexer.enableRss, enableAutomaticSearch: indexer.enableAutomaticSearch, enableInteractiveSearch: indexer.enableInteractiveSearch, rejectZeroSeeders: indexer.rejectZeroSeeders }
     : empty;
 
 const delayOf = (value: string) => (value.trim() === '' ? NaN : Number(value));
@@ -114,7 +114,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
     setFailed(false);
     setResult(null);
     // The server keeps the key of an indexer that exists. A key that the person leaves empty is not in the body, so it stays as it is.
-    const body = { name: draft.name, type: draft.type, baseUrl: draft.baseUrl, ...(editing && !draft.apiKey ? {} : { apiKey: draft.apiKey }), delaySeconds: seconds, preferredLanguages: draft.languages, categories: draft.categories.map(Number), enableRss: draft.enableRss, enableAutomaticSearch: draft.enableAutomaticSearch, enableInteractiveSearch: draft.enableInteractiveSearch };
+    const body = { name: draft.name, type: draft.type, baseUrl: draft.baseUrl, ...(editing && !draft.apiKey ? {} : { apiKey: draft.apiKey }), delaySeconds: seconds, preferredLanguages: draft.languages, categories: draft.categories.map(Number), enableRss: draft.enableRss, enableAutomaticSearch: draft.enableAutomaticSearch, enableInteractiveSearch: draft.enableInteractiveSearch, rejectZeroSeeders: draft.rejectZeroSeeders };
     try {
       if (action === 'test') {
         const test = await api<IndexerTestResult>(indexer ? `/indexers/${indexer.id}/test` : '/indexers/test', { method: 'POST', body });
@@ -128,7 +128,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
         }
         setResult(test);
       } else {
-        await (managed ? api(`/indexers/${indexer!.id}`, { method: 'PATCH', body: { delaySeconds: seconds, preferredLanguages: draft.languages } }) : api(indexer ? `/indexers/${indexer.id}` : '/indexers', { method: indexer ? 'PUT' : 'POST', body }));
+        await (managed ? api(`/indexers/${indexer!.id}`, { method: 'PATCH', body: { delaySeconds: seconds, preferredLanguages: draft.languages, rejectZeroSeeders: draft.rejectZeroSeeders } }) : api(indexer ? `/indexers/${indexer.id}` : '/indexers', { method: indexer ? 'PUT' : 'POST', body }));
         onDone();
       }
     } catch (err) {
@@ -216,6 +216,9 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
             <Checkbox label={t('Interactive search')} checked={draft.enableInteractiveSearch} onCheckedChange={(enableInteractiveSearch) => set({ enableInteractiveSearch })} />
           </div>
         )}
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-3 justify-items-start w-full">
+          <Checkbox label={t('Reject releases with no seeders')} checked={draft.rejectZeroSeeders} onCheckedChange={(rejectZeroSeeders) => set({ rejectZeroSeeders })} />
+        </div>
       </Form>
     </Modal>
   );

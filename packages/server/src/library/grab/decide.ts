@@ -207,14 +207,15 @@ export function decide(release: RawRelease, want: Want, ctx: Context): Decision 
   const qualityRejections = quality.rejections.filter((code) => !(code === 'size_below_min' && packFloor !== null && quality.limits?.min != null && packFloor >= quality.limits.min));
   // A manual choice may skip the preferences of the profile. It does not skip a camera copy of unknown source: the user sees the warning.
   if (!ctx.manual) rejections.push(...qualityRejections);
-  // A release that the indexer reports with no seeders may never download. It stays a preference, so a person can take it by hand.
-  if (!ctx.manual && ctx.settings.rejectZeroSeeders && release.seeders === 0) reject('no_seeders');
 
   // Policy of the library and of the indexer.
   const indexer = ctx.indexers[release.indexerId];
   const app = want.title.mediaType === 'movie' ? 'radarr' : 'sonarr';
   const push = indexer?.push[app];
   if (!indexer || !push) reject('indexer_removed');
+  // A release that the indexer reports with no seeders may never download. It stays a preference of the indexer, so a
+  // person can take it by hand.
+  if (!ctx.manual && indexer?.rejectZeroSeeders && release.seeders === 0) reject('no_seeders');
   if (!release.link && !release.magnet) reject('no_download_link');
   // An answer can carry the magnet only, and the hash of that magnet is the hash of the torrent.
   const hash = release.infoHash ?? (release.magnet ? (magnetHash(release.magnet) ?? null) : null);
