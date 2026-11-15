@@ -1,5 +1,8 @@
 export type ParsedEpisodes = { season: number; numbers: number[] };
 
+// The facts of an episode that a file name can give. An `Episode` of the library has all of them, and more.
+type EpisodeFacts = { season: number; number: number; name?: string; airDate?: string | null };
+
 const MAX_RANGE = 50;
 const VIDEO = /\.(mkv|mp4|m4v|avi|mov|wmv|ts|webm)$/i;
 const SAMPLE = /(^|[^a-z0-9])sample([^a-z0-9]|$)/i;
@@ -19,6 +22,8 @@ const MARK = /(?:^|[^a-z0-9])(?:cap[ií]tulo|episode|cap|epi|ep|e)[ ._-]?(\d{1,3
 // A folder or a prefix that names the season: "Season 01", "AoT - Season 3", "Temporada 2", "S03".
 const SEASON_WORD = /(?:^|[^a-z0-9])(?:season|temporada|temporad|saison|staffel|stagione)[ ._-]?(\d{1,2})(?![0-9a-z])/i;
 const SEASON_SHORT = /(?:^|[^a-z0-9])s(\d{1,2})(?![0-9a-z])/i;
+// YYYY-MM-DD, YYYY.MM.DD or YYYY MM DD, as a daily release or a folder names it.
+const AIR_DATE = /(?:^|[^0-9])((?:19|20)\d{2})[ ._-](0[1-9]|1[0-2])[ ._-](0[1-9]|[12]\d|3[01])(?![0-9])/;
 
 // The first episode and the episodes that follow it. A dash between two numbers is a range.
 function numbersFrom(first: number, tail: string | undefined) {
@@ -34,16 +39,22 @@ function numbersFrom(first: number, tail: string | undefined) {
   return numbers;
 }
 
-// The season that a folder or a prefix of the name gives. A name with S01E02 has its own season, so the callers read it first.
+// The season that a folder or a prefix of the name gives. A name with S01E02 has its own season, so the callers read it
+// first. The folder closest to the file name wins, because a release of one season can sit in a folder that names
+// another: "Season 01/Show.S02/Show - 04.mkv" is an episode of season 2.
 function seasonOf(name: string): number | null {
-  const word = SEASON_WORD.exec(name);
-  if (word) return Number(word[1]);
-  const short = SEASON_SHORT.exec(name);
-  return short ? Number(short[1]) : null;
+  for (const segment of name.split('/').reverse()) {
+    const word = SEASON_WORD.exec(segment);
+    if (word) return Number(word[1]);
+    const short = SEASON_SHORT.exec(segment);
+    if (short) return Number(short[1]);
+  }
+  return null;
 }
 
-// The number at the end of the file name, when the path names the season: "Season 3/AoT - 04.mkv". A number that is part of
-// another token, as the 1080 of 1080p or the 0 of 2.0, is not the episode. A path with no season does not give a number.
+// The number at the end of the file name: the episode of a file in a season folder ("Season 3/AoT - 04.mkv"), or the
+// absolute position of an anime release. A number that is part of another token, as the 1080 of 1080p or the 0 of 2.0,
+// is not the episode.
 function lastNumber(name: string) {
   const stem = name
     .replace(/\.[a-z0-9]{2,4}$/i, '')
@@ -100,11 +111,55 @@ export type Continuation = { releaseSeason: number; season: number; from: number
 
 // The season and the episodes of the title that a file of a release names. A release of the rest of a season numbers its
 // own season from 1, so its numbers are the places in that rest.
-export function releaseEpisodes(name: string, episodes: { season: number; number: number }[], continuation?: Continuation | null, seasonHint?: number | null): ParsedEpisodes | undefined {
+// The file and its path give more than a marker: an air date, the absolute position of an anime release, and the name of
+// the episode. They count in that order, because a marker in the name is the most precise signal.
+export function releaseEpisodes(name: string, episodes: EpisodeFacts[], continuation?: Continuation | null, seasonHint?: number | null, titleName?: string | null): ParsedEpisodes | undefined {
   const parsed = parseEpisodes(name, seasonHint);
-  if (!parsed) return undefined;
-  if (continuation && parsed.season === continuation.releaseSeason) {
-    return { season: continuation.season, numbers: titleNumbers({ season: continuation.season, numbers: parsed.numbers.map((number) => continuation.from + number - 1) }, episodes) };
+  if (parsed) {
+    if (continuation && parsed.season === continuation.releaseSeason) {
+      return { season: continuation.season, numbers: titleNumbers({ season: continuation.season, numbers: parsed.numbers.map((number) => continuation.from + number - 1) }, episodes) };
+    }
+    return { season: parsed.season, numbers: titleNumbers(parsed, episodes) };
   }
-  return { season: parsed.season, numbers: titleNumbers(parsed, episodes) };
+  // A hint of the caller leaves the episodes of one season, so a date or a name that two seasons share is not a doubt.
+  const season = seasonHint ?? null;
+  const candidates = season === null ? episodes : episodes.filter((episode) => episode.season === season);
+  // Two episodes with the same date or the same name are not a match.
+  const one = (found: EpisodeFacts[]) => (found.length === 1 ? { season: found[0]!.season, numbers: [found[0]!.number] } : undefined);
+
+  // A daily release names its air date, and no episode number.
+  const date = AIR_DATE.exec(name);
+  if (date) return one(candidates.filter((episode) => episode.airDate === `${date[1]}-${date[2]}-${date[3]}`));
+
+  // An anime release counts its episodes across the whole series, and its file names hold the number alone. A season in
+  // the path or a hint of the caller makes the number an episode of that season, so it is not a position.
+  if (season === null && seasonOf(name) === null) {
+    const loose = lastNumber(name.split('/').at(-1)!);
+    if (loose !== undefined) {
+      const ordered = episodes.filter((episode) => episode.season > 0).sort((a, b) => a.season - b.season || a.number - b.number);
+      const at = ordered[loose - 1];
+      return at ? { season: at.season, numbers: [at.number] } : undefined;
+    }
+  }
+
+  // The file names the episode and no number: "Show Name - The Battle.mkv". The name of the title at its front is not
+  // part of the name of the episode.
+  const stem = normalizeName(name.split('/').at(-1)!.replace(/\.[a-z0-9]{2,4}$/i, ''));
+  const title = titleName ? normalizeName(titleName) : '';
+  const rest = title && stem.startsWith(title) ? stem.slice(title.length).trim() : stem;
+  if (!rest || rest === title) return undefined;
+  return one(candidates.filter((episode) => episode.name !== undefined && normalizeName(episode.name) === rest));
+}
+
+// The words of a name, for a comparison: no case, no accents, `&` as `and`, no apostrophes, one space between words.
+// A leading article stays, because it is part of the name of an episode: "The Battle" is not "Battle".
+function normalizeName(text: string) {
+  return text
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/['’]/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 }

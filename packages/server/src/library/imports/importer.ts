@@ -206,7 +206,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     for (const file of [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)) {
       if (taken.has(file.rel)) continue;
       // The folder of the file can name the season: "Season 02/Berserk E01.mkv".
-      const found = releaseEpisodes(file.rel, title.episodes, continuation, seasonHint);
+      const found = releaseEpisodes(file.rel, title.episodes, continuation, seasonHint, title.meta.title);
       if (!found) continue;
       const covered = group.filter((entry) => entry.season === found.season && found.numbers.includes(entry.number!) && !done().has(entry.id));
       // A file for an episode that was not asked for is part of the pack. It is not imported.

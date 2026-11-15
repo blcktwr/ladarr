@@ -47,7 +47,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
     const continuation = entries.find((entry) => entry.continuation)?.continuation ?? null;
     const held = files
       .filter((file) => isVideoFile(file) && !isSample(file))
-      .map((file) => releaseEpisodes(file, title?.episodes ?? [], continuation));
+      .map((file) => releaseEpisodes(file, title?.episodes ?? [], continuation, null, title?.meta.title ?? null));
     return { missing: entries.filter((entry) => !held.some((found) => found?.season === entry.season && found.numbers.includes(entry.number!))) };
   }
 
