@@ -179,7 +179,7 @@ suite('aggregate', () => {
     expect(result.counts).toEqual({ queued: 2, not_found: 1, stuck: 1, available: 1 });
   });
 
-  it('lists the distinct tabs in their fixed order', () => {
+  it('uses only the tab of the aggregate status', () => {
     const states: QueueState[] = [
       { kind: 'blocked', at: 'downloading', problem: timeout },
       { kind: 'validating' },
@@ -191,7 +191,7 @@ suite('aggregate', () => {
       { kind: 'fetching' },
       { kind: 'paused', resume: 'importing', problem: null },
     ];
-    expect(aggregate(states).tabs).toEqual(['queued', 'searching', 'downloading', 'importing', 'stuck']);
+    expect(aggregate(states).tabs).toEqual(['stuck']);
   });
 
   it('lists no tabs when every member has none', () => {
@@ -207,6 +207,8 @@ suite('aggregate', () => {
     const start = precedence.indexOf(status);
     const states = precedence.slice(start).map((member) => stateForStatus[member]);
     expect(aggregate(states).status).toBe(status);
+    const tab = describe(stateForStatus[status]).tab;
+    expect(aggregate(states).tabs).toEqual(tab ? [tab] : []);
   });
 
   it('reports available when every member is available', () => {
@@ -262,7 +264,7 @@ suite('aggregate', () => {
 
     expect(forward.status).toBe('stuck');
     expect(forward.total).toBe(6);
-    expect(forward.tabs).toEqual(['queued', 'downloading', 'stuck']);
+    expect(forward.tabs).toEqual(['stuck']);
     expect(backward.status).toBe(forward.status);
     expect(backward.total).toBe(forward.total);
     expect(backward.counts).toEqual(forward.counts);

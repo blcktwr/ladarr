@@ -135,8 +135,8 @@ export const statusLabel = (key: string) => (Object.hasOwn(statusTexts, key) ? t
 // The queue state that the bookmark of a poster shows. A state that has no icon in the design does not show one.
 const bookmarkStates: Record<string, ThumbnailState> = {
   searching: 'searching',
-  // The search found no release. The target still waits in the queue for the next search, so it searches.
-  not_found: 'searching',
+  not_found: 'waiting',
+  no_match: 'waiting',
   downloading: 'downloading',
   validating: 'validating',
   importing: 'importing',
@@ -160,6 +160,7 @@ const statusName = (status: string) => {
 export function posterState(title: { availability?: Availability | null; queueStatus?: string | null }): { state: ThumbnailState; label: string } | null {
   const state = title.queueStatus ? bookmarkStates[title.queueStatus] : undefined;
   if (state) return { state, label: statusName(title.queueStatus!) };
+  if (title.queueStatus) return null;
   if (title.availability === 'available') return { state: 'available', label: availabilityLabel.available };
   if (title.availability === 'waiting') return { state: 'upcoming', label: availabilityLabel.waiting };
   return null;

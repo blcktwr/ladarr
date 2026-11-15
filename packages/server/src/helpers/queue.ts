@@ -437,7 +437,7 @@ function groupsOf(f: Filters, poller?: Poller): RowGroup[] {
   // A group with a target that found no release goes after every other row, because a new release is its only next
   // step. A title that waits for its release has no work yet, so its row goes after the rest.
   return [...groups.values()]
-    .filter((group) => group.matching > 0 && Number.isFinite(group.progress))
+    .filter((group) => group.matching > 0 && Number.isFinite(group.progress) && (!f.key || group.pending || groupAggregate(group.entries).tabs.some((tab) => tab === f.key)))
     .sort(
       (a, b) =>
         Number(a.notFound) - Number(b.notFound) ||
@@ -494,8 +494,7 @@ export function queuePage(poller: Poller, importStatus: ImportStatus | undefined
   return { cursor: db.data.queueRev, total: rows.length, items: rows.slice(offset, offset + limit).map((group) => groupRowOf(group, poller, importStatus, lane)) };
 }
 
-// The number of rows in each tab. A row counts once in each tab that holds one of its targets, so a mixed season can
-// count in more than one tab, as it can appear in more than one tab.
+// The number of rows in each tab. A row counts only in the tab of its aggregate status.
 export function queueTabCounts(): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const group of groupsOf(filtersOf({}))) {

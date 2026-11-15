@@ -42,7 +42,7 @@ export type Aggregate = {
   // Null when there is no member. A group whose members are all available is available.
   status: Status | null;
   counts: Record<string, number>;
-  // The distinct tabs of the members, in the order of the page.
+  // The tab of the aggregate status, or none when that status has no tab.
   tabs: Tab[];
   total: number;
   // The most frequent problem of the blocked members. A tie goes to the lower code.
@@ -110,7 +110,7 @@ function tabOfPhase(phase: WorkPhase): Tab {
 
 export function aggregate(states: Iterable<QueueState>): Aggregate {
   const counts: Record<string, number> = {};
-  const tabs = new Set<Tab>();
+  const tabs = new Map<Status, Tab | null>();
   const problems = new Map<string, { problem: Problem; count: number }>();
   let total = 0;
   let available = 0;
@@ -119,7 +119,7 @@ export function aggregate(states: Iterable<QueueState>): Aggregate {
     total++;
     const description = describe(state);
     counts[description.status] = (counts[description.status] ?? 0) + 1;
-    if (description.tab) tabs.add(description.tab);
+    tabs.set(description.status, description.tab);
     if (state.kind === 'available') available++;
     else statuses.add(description.status);
     if (state.kind === 'blocked') {
@@ -134,5 +134,6 @@ export function aggregate(states: Iterable<QueueState>): Aggregate {
     problem = item.problem;
     break;
   }
-  return { status, counts, tabs: TAB_ORDER.filter((tab) => tabs.has(tab)), total, problem };
+  const tab = status === null ? null : tabs.get(status);
+  return { status, counts, tabs: tab ? [tab] : [], total, problem };
 }
