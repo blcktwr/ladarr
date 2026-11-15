@@ -14,7 +14,7 @@ export const matchesType = (title: Title, type: LibraryType | undefined) => !typ
 function attentionKeys() {
   const keys = new Set<string>();
   for (const entry of Object.values(db.data.queue)) {
-    if (entry.branch === null && entry.reason !== null && entry.attempt > 0 && !entry.clearedAt) keys.add(entry.titleKey);
+    if (entry.state.kind === 'blocked' && entry.attempt > 0 && !entry.clearedAt) keys.add(entry.titleKey);
   }
   return keys;
 }

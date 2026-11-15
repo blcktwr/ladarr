@@ -5,7 +5,8 @@ import { db } from './db.ts';
 import type { EnqueueInput } from './jobs.ts';
 import { outboundFetch } from './http.ts';
 import { log } from './log.ts';
-import type { MoveHook } from '../library/downloads/queue.ts';
+import type { QueueState } from '@ladarr/shared/queue';
+import type { StateHook } from '../library/downloads/queue.ts';
 import { reasonInfo } from './reasons.ts';
 
 // Raise this number when a receiver must change to read the body of an event.
@@ -90,10 +91,12 @@ export function createWebhooks({ enqueue, now = Date.now }: Deps) {
   }
 
   // The hook of the queue. An error here must never reach the import.
-  const onMove: MoveHook = (entry, before) => {
+  const onState: StateHook = (entry, before) => {
     try {
-      const imported = entry.stage === 'available' && before.stage !== 'available';
-      const blocked = entry.branch === null && entry.reason !== null && before.reason === null;
+      const imported = entry.state.kind === 'available' && before.kind !== 'available';
+      // A pause and a resume around the same problem is one blocking episode. A change of the problem text is not a
+      // second one either.
+      const blocked = entry.state.kind === 'blocked' && before.kind !== 'blocked' && before.kind !== 'paused';
       if (!imported && !blocked) return;
       const title = db.data.titles[entry.titleKey];
       const [mediaType, tmdbId] = entry.titleKey.split(':') as [MediaType, string];
@@ -103,7 +106,7 @@ export function createWebhooks({ enqueue, now = Date.now }: Deps) {
       };
       if (imported) emit('available', fields);
       else {
-        const code = entry.reason?.code ?? 'unknown';
+        const code = (entry.state as Extract<QueueState, { kind: 'blocked' }>).problem.code;
         emit('stuck', { ...fields, reason: { code, message: reasonInfo(code).message } });
       }
     } catch (error) {
@@ -111,6 +114,6 @@ export function createWebhooks({ enqueue, now = Date.now }: Deps) {
     }
   };
 
-  return { onMove };
+  return { onState };
 }
 

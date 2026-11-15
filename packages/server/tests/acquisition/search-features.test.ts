@@ -1,3 +1,5 @@
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,7 +64,7 @@ describe('upgrades', () => {
     const job = Object.values(pipe!.db.data.jobs).find((item) => item.type === BULK_SEARCH_JOB)!;
     expect(job.payload).toMatchObject({ kind: 'upgrades', quality: 'webdl-1080' });
     expect(job.payload).not.toHaveProperty('manual');
-    await until(() => pipe!.queue.get(film.key)?.stage === 'downloading');
+    await until(() => { const entry = pipe!.queue.get(film.key); return entry ? stageOf(entry) === 'downloading' : false; });
     expect(pipe!.queue.get(film.key)!.attempts[0]!.reason).toBe('upgrade search');
     expect(pipe!.tracker.state.downloads).toEqual([WEBDL]);
   });
@@ -155,7 +157,7 @@ describe('queries for aliases', () => {
     pipe.db.data.titles[film.key] = film;
     pipe.tracker.state.answer = (url) => (url.searchParams.get('q') === 'Third Alias Name' ? [{ title: NAME, size: 100 * 120 * MIB }] : []);
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     // The title and the original title are the same name. Then two aliases give nothing, and the third gives the release.
     expect(asked()).toEqual(['Movie Name', 'Le Nom du Film', 'Film Alias Two', 'Third Alias Name']);
     expect(entry!.release!.title).toBe(NAME);
@@ -167,7 +169,7 @@ describe('queries for aliases', () => {
     pipe.db.data.titles[film.key] = film;
     pipe.tracker.state.answer = (url) => (url.searchParams.get('q') === 'Alias Five' ? [{ title: 'Alias.Five.2019.1080p.BluRay-GRP', size: 100 * 120 * MIB }] : []);
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading' || entry!.branch === 'waiting');
+    await until(() => stageOf(entry!) === 'downloading' || branchOf(entry!) === 'waiting');
     expect(asked()).toEqual(['Movie Name', 'Alias One', 'Alias Two', 'Alias Three', 'Alias Four', 'Alias Five']);
     expect(entry!.release?.title).toBe('Alias.Five.2019.1080p.BluRay-GRP');
   });
@@ -183,11 +185,11 @@ describe('queries for aliases', () => {
       return [];
     };
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.branch === 'waiting' || entry!.stage === 'downloading');
-    expect(entry!.branch).toBe('waiting');
+    await until(() => branchOf(entry!) === 'waiting' || stageOf(entry!) === 'downloading');
+    expect(branchOf(entry!)).toBe('waiting');
     expect(asked()).toEqual(['Movie Name']);
     expect(entry!.release).toBeNull();
-    expect(entry!.reason).toMatchObject({ code: 'all_rejected' });
+    expect(reasonOfEntry(entry!)).toMatchObject({ code: 'all_rejected' });
   });
 
   it('does not ask for an alias when the title gave a release', async () => {
@@ -196,7 +198,7 @@ describe('queries for aliases', () => {
     pipe.db.data.titles[film.key] = film;
     pipe.tracker.state.items = [{ title: 'Movie.Name.2019.1080p.BluRay-GRP', size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(asked()).toEqual(['Movie Name']);
   });
 
@@ -265,7 +267,7 @@ describe('the languages of the indexers', () => {
     pipe.db.data.titles[movieTitle.key] = movieTitle;
     pipe.tracker.state.items = [];
     const [entry] = pipe.finder.requestSearch(movieTitle.key);
-    await until(() => entry!.branch === 'waiting');
+    await until(() => branchOf(entry!) === 'waiting');
     return entry!;
   };
 
@@ -291,7 +293,7 @@ describe('the languages of the indexers', () => {
     pipe.db.data.titles[movieTitle.key] = movieTitle;
     pipe.tracker.state.items = [];
     const [entry] = pipe.finder.requestSearch(movieTitle.key);
-    await until(() => entry!.branch === 'waiting');
+    await until(() => branchOf(entry!) === 'waiting');
     expect(names('key')).toEqual(['English Name', 'Unknown Original']);
     expect(names('ja-key')).toEqual(['English Name', 'Unknown Original']);
   });
@@ -304,7 +306,7 @@ describe('the languages of the indexers', () => {
     pipe.db.data.titles[movieTitle.key] = movieTitle;
     pipe.tracker.state.items = [];
     const [entry] = pipe.finder.requestSearch(movieTitle.key);
-    await until(() => entry!.branch === 'waiting');
+    await until(() => branchOf(entry!) === 'waiting');
     expect(names('key')).toEqual(['English Name', 'Japanese Original']);
     expect(entry!.search!.indexers.find((indexer) => indexer.id === 1)).toMatchObject({ state: 'done' });
   });
@@ -320,7 +322,7 @@ describe('the log of a series', () => {
       pipe.db.data.titles[series.key] = series;
       pipe.tracker.state.items = [];
       const entries = pipe.finder.requestSearch(series.key);
-      await until(() => entries.every((entry) => entry.branch === 'waiting'));
+      await until(() => entries.every((entry) => branchOf(entry) === 'waiting'));
       await closeLog();
 
       const last = (await recentLogs(100, { itemId: series.key, itemType: 'tv' })).at(-1);
@@ -345,7 +347,7 @@ describe('the content of a pack', () => {
     const files = [`${PACK}/Show.Name.S01E01.mkv`, `${PACK}/Show.Name.S01E02.mkv`, `${PACK}/Show.Name.S01E03.mkv`, `${PACK}/Sample/sample.mkv`, `${PACK}/info.nfo`];
     pipe.tracker.state.items = [{ title: PACK, size: packSize, files: files.map((file) => file.slice(PACK.length + 1)) }];
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((e) => e.stage === 'downloading'));
+    await until(() => entries.every((e) => stageOf(e) === 'downloading'));
     expect(pipe.qbit.torrents.size).toBe(1);
     expect(pipe.db.data.blocklist).toEqual({});
   });
@@ -358,7 +360,7 @@ describe('the content of a pack', () => {
     const single = 'Show.Name.S01E03.1080p.WEB-DL-SGL';
     pipe.tracker.state.items = [{ title: PACK, size: packSize, files }, { title: single, size: 60 * 45 * MIB }];
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((e) => e.stage === 'downloading'));
+    await until(() => entries.every((e) => stageOf(e) === 'downloading'));
 
     expect(entries[0]!.transferHash).toBe(hashOf(PACK, files));
     expect(entries[1]!.transferHash).toBe(hashOf(PACK, files));
@@ -379,14 +381,14 @@ describe('the content of a pack', () => {
     const hash = hashOf(PACK, files);
     pipe.tracker.state.items = [{ title: PACK, size: 2 * 60 * 45 * MIB, files }];
     pipe.finder.requestSearch(series.key);
-    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => pipe!.queue.get(id)!.stage === 'downloading'));
+    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => stageOf(pipe!.queue.get(id)!) === 'downloading'));
     pipe.complete(PACK, { 'Show.Name.S01E01.mkv': 'the-first', 'Show.Name.S01E02.mkv': 'the-second' }, hash);
 
     // New episodes air. The client still has the pack, so the search reads its files there. The release is not downloaded
     // from the indexer a second time, and the episodes that the pack cannot give do not cost its ratio.
     series.episodes.push(episode(1, 3, '2020-01-03'), episode(1, 4, '2020-01-04'));
     pipe.finder.requestSearch(series.key);
-    await until(() => ['tv:1:1x3', 'tv:1:1x4'].every((id) => pipe!.queue.get(id)!.branch === 'waiting'));
+    await until(() => ['tv:1:1x3', 'tv:1:1x4'].every((id) => branchOf(pipe!.queue.get(id)) === 'waiting'));
 
     expect(pipe.tracker.state.downloads.filter((file) => file === PACK)).toHaveLength(1);
     expect(Object.values(pipe.db.data.blocklist)).toMatchObject([{ title: PACK, reason: 'pack_missing_episodes', season: 1 }]);
@@ -399,7 +401,7 @@ describe('the content of a pack', () => {
     pipe.db.data.titles[series.key] = series;
     pipe.tracker.state.items = [{ title: PACK, size: packSize, files: ['Show.Name.S01.part1.rar', 'Show.Name.S01.part2.rar'] }];
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((e) => e.branch === 'waiting'));
+    await until(() => entries.every((e) => branchOf(e) === 'waiting'));
     expect(pipe.qbit.torrents.size).toBe(0);
     expect(pipe.qbit.calls.filter((c) => c.path === 'torrents/add')).toEqual([]);
     expect(Object.values(pipe.db.data.blocklist)).toMatchObject([{ title: PACK, reason: 'pack_missing_episodes', season: 1 }]);
@@ -411,7 +413,7 @@ describe('the content of a pack', () => {
     pipe.db.data.titles[series.key] = series;
     pipe.tracker.state.items = [{ title: PACK, size: packSize }];
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((e) => e.stage === 'downloading'));
+    await until(() => entries.every((e) => stageOf(e) === 'downloading'));
     expect(pipe.db.data.blocklist).toEqual({});
   });
 });
@@ -431,7 +433,7 @@ describe('the pace of the indexer', () => {
     };
 
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((entry) => entry.branch === 'waiting'), 20_000);
+    await until(() => entries.every((entry) => branchOf(entry) === 'waiting'), 20_000);
 
     // Two seasons: one query for the season, and one for each episode that the season query did not settle.
     expect(starts).toHaveLength(8);
@@ -453,7 +455,7 @@ describe('what the indexer manager pushes with an indexer', () => {
     pipe.db.data.titles[film().key] = film();
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch('movie:2');
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(entry!.release!.seed).toEqual({ ratio: 1.5, minutes: 1440 });
     expect(addBody()).toMatchObject({ ratioLimit: '1.5', seedingTimeLimit: '1440' });
   });
@@ -465,7 +467,7 @@ describe('what the indexer manager pushes with an indexer', () => {
     pipe.db.data.titles[series.key] = series;
     pipe.tracker.state.items = [{ title: 'Show.Name.S01.1080p.WEB-DL-GRP', size: 2 * 60 * 45 * MIB }];
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((e) => e.stage === 'downloading'));
+    await until(() => entries.every((e) => stageOf(e) === 'downloading'));
     expect(addBody()).toMatchObject({ seedingTimeLimit: '4320' });
     expect(addBody().ratioLimit).toBeUndefined();
   });
@@ -475,7 +477,7 @@ describe('what the indexer manager pushes with an indexer', () => {
     pipe.db.data.titles[film().key] = film();
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch('movie:2');
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(entry!.release!.seed).toBeNull();
     expect(addBody().ratioLimit).toBeUndefined();
     expect(addBody().seedingTimeLimit).toBeUndefined();
@@ -492,8 +494,8 @@ describe('what the indexer manager pushes with an indexer', () => {
     await pipe.finder.rss(signal());
     expect(pipe.queue.get('movie:2')).toBeUndefined();
     const [entry] = pipe.finder.requestSearch('movie:2');
-    await until(() => entry!.reason?.code === 'no_indexers' && entry!.stage === 'queued');
-    expect(entry!.reason!.code).toBe('no_indexers');
+    await until(() => reasonOfEntry(entry!)?.code === 'no_indexers' && stageOf(entry!) === 'searching');
+    expect(reasonOfEntry(entry!)!.code).toBe('no_indexers');
     expect(pipe.tracker.state.searches).toHaveLength(0);
   });
 
@@ -503,13 +505,13 @@ describe('what the indexer manager pushes with an indexer', () => {
     pipe.db.data.titles[film().key] = film();
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch('movie:2');
-    await until(() => entry!.reason?.code === 'no_indexers');
+    await until(() => reasonOfEntry(entry!)?.code === 'no_indexers');
     const api = await pipe.api();
     try {
       const added = await api.post('/indexers', { name: 'Tracker', type: 'torznab', baseUrl: `http://127.0.0.1:${pipe.tracker.port}/1/`, apiKey: 'indexer-key', delaySeconds: 0 });
       expect(added.status).toBe(201);
-      await until(() => entry!.stage === 'downloading');
-      expect(entry!.reason).toBeNull();
+      await until(() => stageOf(entry!) === 'downloading');
+      expect(reasonOfEntry(entry!)).toBeNull();
       expect(pipe.published.some((event) => event.type === 'indexers.changed')).toBe(true);
     } finally {
       api.close();
@@ -523,7 +525,7 @@ describe('what the indexer manager pushes with an indexer', () => {
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     await pipe.finder.rss(signal());
     const [entry] = pipe.finder.requestSearch('movie:2');
-    await until(() => entry!.reason !== null);
+    await until(() => reasonOfEntry(entry!) !== null);
     expect(pipe.tracker.state.searches).toHaveLength(0);
     expect(pipe.qbit.torrents.size).toBe(0);
   });
@@ -540,7 +542,7 @@ describe('a chain of quality profiles', () => {
     pipe.tracker.state.items = [{ title: releaseName, size: 30 * 45 * MIB }];
 
     const [entry] = pipe.finder.requestSearch(series.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(entry!.release!.title).toBe(releaseName);
   });
 });

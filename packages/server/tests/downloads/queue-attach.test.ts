@@ -1,3 +1,6 @@
+import { move } from '../helpers/test-queue.ts';
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
@@ -46,7 +49,7 @@ async function waitingMovie() {
   pipe.tracker.state.items = [];
   await api.post('/queue/search', { titleKey: film.key });
   const entry = pipe.queue.get('movie:2')!;
-  await until(() => entry.branch === 'waiting');
+  await until(() => branchOf(entry) === 'waiting');
   return entry;
 }
 
@@ -59,9 +62,9 @@ async function importedMovie() {
   pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
   await api.post('/queue/search', { titleKey: film.key });
   const entry = pipe.queue.get('movie:2')!;
-  await until(() => entry.stage === 'downloading');
+  await until(() => stageOf(entry) === 'downloading');
   pipe.complete(NAME, { 'Movie.mkv': 'the-film' });
-  await until(() => entry.stage === 'available');
+  await until(() => stageOf(entry) === 'available');
   return entry;
 }
 
@@ -81,7 +84,7 @@ describe('remove the torrent', () => {
     expect(entry.transferHash).toBeNull();
     expect(entry.history.at(-1)).toMatchObject({ cause: 'torrent removed from the client' });
     // The target stays available. The view says that no torrent is left.
-    expect((await api!.get('/queue/entries/movie:2')).body.entry).toMatchObject({ key: 'available', hasTorrent: false });
+    expect((await api!.get('/queue/entries/movie:2')).body.entry).toMatchObject({ status: 'available', hasTorrent: false });
   });
 
   it('refuses a torrent that a target still uses', async () => {
@@ -91,7 +94,7 @@ describe('remove the torrent', () => {
     pipe.db.data.titles[film.key] = film;
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     await api.post('/queue/search', { titleKey: film.key });
-    await until(() => pipe!.queue.get('movie:2')!.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('movie:2')!) === 'downloading');
     const refused = await api.post('/queue/actions', { action: 'remove_torrent', ids: ['movie:2'] });
     expect(refused.status).toBe(409);
     expect(refused.body.unsupported[0].reason).toContain('still uses');
@@ -105,9 +108,9 @@ describe('remove the torrent', () => {
     pipe.db.data.titles[series.key] = series;
     pipe.tracker.state.items = [{ title: PACK, size: 3 * 60 * 45 * MIB }];
     pipe.finder.requestSearch(series.key);
-    await until(() => pipe!.queue.get('tv:1:1x3')!.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('tv:1:1x3')!) === 'downloading');
     pipe.complete(PACK, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two', 'Show.Name.S01E03.mkv': 'three' });
-    await until(() => ['1x1', '1x2', '1x3'].every((n) => pipe!.queue.get(`tv:1:${n}`)!.stage === 'available'));
+    await until(() => ['1x1', '1x2', '1x3'].every((n) => stageOf(pipe!.queue.get(`tv:1:${n}`)!) === 'available'));
 
     const preview = (await api.post('/queue/actions', { action: 'remove_torrent', ids: ['tv:1:1x2'], preview: true })).body;
     expect(preview.affected.map((a: { id: string }) => a.id).sort()).toEqual(['tv:1:1x1', 'tv:1:1x2', 'tv:1:1x3']);
@@ -140,7 +143,7 @@ describe('attach a download', () => {
     const series = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
     pipe.db.data.titles[series.key] = series;
     pipe.finder.requestSearch(series.key);
-    await until(() => pipe!.queue.get('tv:1:1x1')!.branch === 'waiting' && pipe!.queue.get('tv:1:1x2')!.branch === 'waiting');
+    await until(() => branchOf(pipe!.queue.get('tv:1:1x1')) === 'waiting' && branchOf(pipe!.queue.get('tv:1:1x2')) === 'waiting');
     addExternal(PACK);
     addExternal('Other.Show.S02.1080p', { category: '' });
     addExternal('Third.Torrent');
@@ -158,7 +161,7 @@ describe('attach a download', () => {
     const series = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
     pipe.db.data.titles[series.key] = series;
     pipe.finder.requestSearch(series.key);
-    await until(() => pipe!.queue.get('tv:1:1x1')!.branch === 'waiting' && pipe!.queue.get('tv:1:1x2')!.branch === 'waiting');
+    await until(() => branchOf(pipe!.queue.get('tv:1:1x1')) === 'waiting' && branchOf(pipe!.queue.get('tv:1:1x2')) === 'waiting');
     const hash = addExternal(PACK);
     const first = pipe.queue.get('tv:1:1x1')!;
 
@@ -175,14 +178,14 @@ describe('attach a download', () => {
     expect((await api.post('/queue/entries/tv:1:1x1/attach', { ...body, confirmOwner: true, confirmTitle: true })).status).toBe(200);
     for (const id of ['tv:1:1x1', 'tv:1:1x2']) {
       const entry = pipe.queue.get(id)!;
-      expect(entry).toMatchObject({ stage: 'downloading', branch: null, transferHash: hash, release: { external: true, manual: true, kind: 'pack', title: PACK } });
+      expect(entry).toMatchObject({ state: { kind: 'downloading' }, transferHash: hash, release: { external: true, manual: true, kind: 'pack', title: PACK } });
       expect(entry.attempts.map((a) => [a.reason, a.outcome])).toEqual([['search requested', 'cancelled'], ['attached download', 'running']]);
     }
     const view = (await api.get('/queue/entries/tv:1:1x1')).body.entry;
-    expect(view).toMatchObject({ hasTorrent: true, attached: true, key: 'downloading' });
+    expect(view).toMatchObject({ hasTorrent: true, attached: true, status: 'downloading' });
     // The poller follows the torrent in the other category, and does not flag it as missing.
     await until(() => pipe!.poller.transfer(hash)?.entryIds.length === 2);
-    expect(first.branch).toBeNull();
+    expect(branchOf(first)).toBeNull();
   });
 
   it('imports the files of an attached download, and never removes that torrent', async () => {
@@ -193,9 +196,9 @@ describe('attach a download', () => {
     // The attach only reads the client. It adds no tag and no category.
     expect(pipe!.qbit.calls.slice(before).filter((call) => /add|delete|stop|start|pause|resume|Tags|Category/.test(call.path))).toEqual([]);
     expect(pipe!.qbit.torrents.get(hash)).toMatchObject({ tags: '', category: 'manual' });
-    await until(() => entry.stage === 'downloading' && pipe!.poller.transfer(hash) !== undefined);
+    await until(() => stageOf(entry) === 'downloading' && pipe!.poller.transfer(hash) !== undefined);
     pipe!.complete(NAME, { 'Movie.mkv': 'the-film' });
-    await until(() => entry.stage === 'available');
+    await until(() => stageOf(entry) === 'available');
     expect(Object.values(pipe!.db.data.files)).toHaveLength(1);
 
     // An attached torrent stays in the client.
@@ -211,7 +214,7 @@ describe('attach a download', () => {
     pipe!.complete(NAME, { 'Movie.mkv': 'the-film' });
     expect((await api!.post('/queue/entries/movie:2/attach', { hash, confirmOwner: true, confirmTitle: true })).status).toBe(200);
     expect(entry.history.at(-1)).toMatchObject({ stage: 'validating', cause: 'download attached by the user' });
-    await until(() => entry.stage === 'available');
+    await until(() => stageOf(entry) === 'available');
   });
 
   it('refuses a torrent in the wrong state, one that the client does not have, or one in use by another title', async () => {
@@ -235,7 +238,7 @@ describe('attach a download', () => {
 
     // A target that downloads now takes no attach.
     entry.release = null;
-    pipe!.queue.move(entry, { stage: 'downloading', branch: null, reason: null }, 'test');
+    move(pipe!.queue, entry, { stage: 'downloading', branch: null, reason: null }, 'test');
     const wrongState = await post(addExternal('Free.Torrent'));
     expect(wrongState.status).toBe(409);
     expect(wrongState.body.unsupported[0].reason).toContain('not waiting');
@@ -254,7 +257,7 @@ describe('attach a download', () => {
     await api.post('/queue/search', { titleKey: film.key });
     const entry = pipe.queue.get('movie:2')!;
     // The grab uses the files of the torrent, which stays the user's: a removal never deletes it.
-    await until(() => entry.stage === 'available');
+    await until(() => stageOf(entry) === 'available');
     expect(entry.release?.external).toBe(true);
     expect(pipe.db.data.sentTorrents[hash]).toBeUndefined();
   });
@@ -269,11 +272,11 @@ describe('attach a download', () => {
     addExternal(NAME, { category: 'manual' });
     await api.post('/queue/search', { titleKey: film.key });
     const entry = pipe.queue.get('movie:2')!;
-    await until(() => entry.reason?.code === 'torrent_exists');
+    await until(() => reasonOfEntry(entry)?.code === 'torrent_exists');
     // The client finishes it, and the user retries the target.
     pipe.complete(NAME, { 'Movie.mkv': 'the-film' });
     expect((await api.post('/queue/actions', { action: 'retry', ids: ['movie:2'] })).status).toBe(200);
-    await until(() => entry.stage === 'available');
+    await until(() => stageOf(entry) === 'available');
     // The torrent of the client is the one that the import used. The client holds no other.
     expect(pipe.qbit.torrents.size).toBe(1);
     expect(entry.transferHash).toBe(hashOf(NAME));
@@ -289,13 +292,13 @@ describe('attach a download', () => {
     addExternal(NAME, { category: 'manual' });
     await api.post('/queue/search', { titleKey: film.key });
     const entry = pipe.queue.get('movie:2')!;
-    await until(() => entry.reason?.code === 'torrent_exists');
-    expect(entry.reason?.code).toBe('torrent_exists');
+    await until(() => reasonOfEntry(entry)?.code === 'torrent_exists');
+    expect(reasonOfEntry(entry)?.code).toBe('torrent_exists');
     expect((await api.get('/queue/entries/movie:2')).body.entry.reason).toMatchObject({ action: 'attach' });
     expect((await api.post('/queue/entries/movie:2/attach', { hash: hashOf(NAME), confirmOwner: true, confirmTitle: true })).status).toBe(200);
-    expect(entry).toMatchObject({ stage: 'downloading', branch: null, reason: null });
+    expect(entry.state).toEqual({ kind: 'downloading' });
     pipe.complete(NAME, { 'Movie.mkv': 'the-film' });
-    await until(() => entry.stage === 'available');
+    await until(() => stageOf(entry) === 'available');
   });
 
   it('takes over a torrent that ladarr sent, after the target that sent it is gone', async () => {
@@ -306,13 +309,13 @@ describe('attach a download', () => {
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     await api.post('/queue/search', { titleKey: film.key });
     const hash = hashOf(NAME);
-    await until(() => pipe!.queue.get('movie:2')?.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('movie:2')) === 'downloading');
     // The target leaves the queue. The torrent stays in the client, because ladarr added it.
     delete pipe.db.data.queue['movie:2'];
     pipe.finder.requestSearch(film.key);
     const entry = pipe.queue.get('movie:2')!;
-    await until(() => entry.stage === 'downloading' && entry.reason === null);
-    expect(entry).toMatchObject({ branch: null, reason: null, transferHash: hash });
+    await until(() => stageOf(entry) === 'downloading' && reasonOfEntry(entry) === null);
+    expect(entry).toMatchObject({ state: { kind: 'downloading' }, transferHash: hash });
   });
 
   it('takes over a torrent that ladarr sent before the record of the sent torrents', async () => {
@@ -323,12 +326,12 @@ describe('attach a download', () => {
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     await api.post('/queue/search', { titleKey: film.key });
     const entry = pipe.queue.get('movie:2')!;
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     // A file from an older version has no record. The history of the target says what it sent.
     delete pipe.db.data.sentTorrents[hashOf(NAME)];
-    pipe.queue.move(entry, { branch: 'cancelled' }, 'cancelled by the user');
+    move(pipe.queue, entry, { branch: 'cancelled' }, 'cancelled by the user');
     pipe.finder.requestSearch(film.key);
-    await until(() => entry.stage === 'downloading' && entry.branch === null && entry.reason === null);
+    await until(() => stageOf(entry) === 'downloading' && branchOf(entry) === null && reasonOfEntry(entry) === null);
     expect(entry.transferHash).toBe(hashOf(NAME));
   });
 
@@ -341,12 +344,12 @@ describe('attach a download', () => {
     // The user added the pack by hand in another category, so the grab stops for both episodes.
     const hash = addExternal(PACK);
     pipe.finder.requestSearch(series.key);
-    await until(() => ['1x1', '1x2'].every((n) => pipe!.queue.get(`tv:1:${n}`)!.reason?.code === 'torrent_exists'));
+    await until(() => ['1x1', '1x2'].every((n) => reasonOfEntry(pipe!.queue.get(`tv:1:${n}`)!)?.code === 'torrent_exists'));
     expect((await api.post('/queue/entries/tv:1:1x1/attach', { hash, confirmOwner: true, confirmTitle: true })).status).toBe(200);
     await until(() => pipe!.poller.transfer(hash)?.entryIds.length === 1);
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(pipe.queue.get('tv:1:1x1')).toMatchObject({ stage: 'downloading', branch: null });
-    expect(pipe.queue.get('tv:1:1x2')).toMatchObject({ stage: 'fetching', branch: null, reason: { code: 'torrent_exists' } });
+    expect(pipe.queue.get('tv:1:1x1')!.state).toEqual({ kind: 'downloading' });
+    expect(pipe.queue.get('tv:1:1x2')!.state).toEqual({ kind: 'blocked', at: 'fetching', problem: { code: 'torrent_exists' } });
     expect(pipe.poller.transfer(hash)!.entryIds).toEqual(['tv:1:1x1']);
   });
 
@@ -357,11 +360,11 @@ describe('attach a download', () => {
     pipe!.qbit.control.delayInfoMs = 300;
     const attaching = api!.post('/queue/entries/movie:2/attach', { hash, confirmOwner: true, confirmTitle: true });
     await new Promise((resolve) => setTimeout(resolve, 100));
-    pipe!.queue.move(entry, { branch: 'cancelled', reason: null }, 'cancelled by the user');
+    move(pipe!.queue, entry, { branch: 'cancelled', reason: null }, 'cancelled by the user');
     const result = await attaching;
     expect(result.status).toBe(409);
     expect(result.body.error).toBe('attach_not_supported');
-    expect(entry).toMatchObject({ branch: 'cancelled', transferHash: null });
+    expect(entry).toMatchObject({ state: { kind: 'cancelled' }, transferHash: null });
   });
 
   it('follows a torrent that the user moved to another category', async () => {
@@ -372,11 +375,11 @@ describe('attach a download', () => {
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     await api.post('/queue/search', { titleKey: film.key });
     const entry = pipe.queue.get('movie:2')!;
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     pipe.qbit.torrents.get(hashOf(NAME))!.category = 'moved';
     pipe.qbit.progress(hashOf(NAME), 0.5);
     await until(() => pipe!.poller.transfer(hashOf(NAME))?.progress === 0.5);
-    expect(entry.branch).toBeNull();
+    expect(branchOf(entry)).toBeNull();
   });
 });
 
@@ -388,7 +391,7 @@ describe('client details', () => {
     pipe.db.data.titles[film.key] = film;
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     await api.post('/queue/search', { titleKey: film.key });
-    await until(() => pipe!.queue.get('movie:2')!.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('movie:2')!) === 'downloading');
     return hashOf(NAME);
   }
 
@@ -445,10 +448,10 @@ describe('match a file that covers several episodes', () => {
     pipe.db.data.titles[series.key] = series;
     pipe.tracker.state.items = [{ title: PACK, size: 3 * 60 * 45 * MIB }];
     pipe.finder.requestSearch(series.key);
-    await until(() => pipe!.queue.get('tv:1:1x3')!.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('tv:1:1x3')!) === 'downloading');
     // The names of the files give no episode numbers, so ladarr can not pick.
     pipe.complete(PACK, { 'part-a.mkv': 'first-and-second', 'part-b.mkv': 'third-file' });
-    await until(() => ['1x1', '1x2', '1x3'].every((n) => pipe!.queue.get(`tv:1:${n}`)!.reason?.code === 'file_not_found'));
+    await until(() => ['1x1', '1x2', '1x3'].every((n) => reasonOfEntry(pipe!.queue.get(`tv:1:${n}`)!)?.code === 'file_not_found'));
   }
 
   it('previews each association before it changes, and imports one file for two episodes', async () => {
@@ -473,16 +476,16 @@ describe('match a file that covers several episodes', () => {
     expect(pipe!.queue.get('tv:1:1x1')!.manualMatch).toBeNull();
 
     expect((await api!.post('/queue/entries/tv:1:1x1/match', body)).status).toBe(200);
-    await until(() => ['1x1', '1x2'].every((n) => pipe!.queue.get(`tv:1:${n}`)!.stage === 'available'));
+    await until(() => ['1x1', '1x2'].every((n) => stageOf(pipe!.queue.get(`tv:1:${n}`)!) === 'available'));
     // One file holds both episodes, and the third episode still waits for its own file.
     const files2 = Object.values(pipe!.db.data.files);
     expect(files2).toHaveLength(1);
     expect(files2[0]!.path).toBe('Show Name (2020)/Season 01/Show Name - S01E01E02.mkv');
     expect(files2[0]!.episodes.map((e) => e.number)).toEqual([1, 2]);
-    expect(pipe!.queue.get('tv:1:1x3')!.reason?.code).toBe('file_not_found');
+    expect(reasonOfEntry(pipe!.queue.get('tv:1:1x3')!)?.code).toBe('file_not_found');
 
     expect((await api!.post('/queue/entries/tv:1:1x3/match', { file: 'part-b.mkv' })).status).toBe(200);
-    await until(() => pipe!.queue.get('tv:1:1x3')!.stage === 'available');
+    await until(() => stageOf(pipe!.queue.get('tv:1:1x3')!) === 'available');
     expect(Object.values(pipe!.db.data.files)).toHaveLength(2);
   });
 

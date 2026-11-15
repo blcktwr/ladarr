@@ -18,13 +18,12 @@ import type {
   PlanSkip,
   Policy,
   QueueActionName,
-  QueueBranch,
-  QueueStage,
   RootProblem,
   TorrentStatus,
   TrackerStatus,
   WebhookEventType,
 } from './enums.ts';
+import type { Phase, QueueState, Status, Tab } from './queue.ts';
 
 // The shapes of the domain and of the HTTP API. The server and the web app both import them.
 
@@ -505,12 +504,13 @@ export type QueueEntryView = {
   number: number | null;
   episodeName: string | null;
   label: string;
-  stage: QueueStage;
-  branch: QueueBranch | null;
-  // The key that the pages show: a branch, or a result of the search that keeps the target waiting.
-  key: string;
+  // The derived status, tab, and phase of the state of the target.
+  status: Status;
+  tab: Tab | null;
+  phase: Phase;
+  // The problem of a stuck target, or the result of a search that keeps it waiting. Null otherwise.
   reason: QueueReason | null;
-  stageSince: number;
+  stateSince: number;
   revision: number;
   lane: number | null;
   attempt: number;
@@ -534,7 +534,7 @@ export type QueueEntryView = {
 };
 
 export type QueueEntryDetail = QueueEntryView & {
-  history: { at: number; stage: QueueStage; branch: QueueBranch | null; attempt: number; cause: string; detail?: string }[];
+  history: { at: number; state: QueueState; stage: Phase; attempt: number; cause: string; detail?: string }[];
   attempts: { n: number; startedAt: number; endedAt: number | null; reason: string; release: string | null; outcome: string; detail?: string }[];
 };
 
@@ -548,27 +548,50 @@ export type QueueGroupRow = {
   title: string;
   year: number | null;
   posterPath: string | null;
-  // A group is one season of a series, and a series that waits for its episodes has no season.
+  // A group is one season of a series.
   season: number | null;
+  // The status of the whole group, from all of its targets, independent of the selected tab.
+  status: Status | null;
   total: number;
   reached: QueueReached;
   // The part of the download that the client reports for the least advanced download that runs, from 0 to 1. Null
   // when no target of the group downloads.
   download: number | null;
   matching: number;
+  // The targets of the group by status, and the tabs that hold one of them.
   counts: Record<string, number>;
+  tabs: Tab[];
+  // The most frequent problem of the blocked targets of the group.
+  problem: QueueReason | null;
   priority: boolean;
-  // The series is in the queue already, but its episodes are still loading, so it has no target yet.
-  pending?: boolean;
 };
 
-export type QueueRow = QueueGroupRow | ({ kind: 'entry' } & QueueEntryView);
+// A series that waits for its episodes. Its initial job has no target yet, so the row is not a group of entries.
+export type QueuePendingRow = {
+  kind: 'pending';
+  key: string;
+  titleKey: string;
+  title: string;
+  year: number | null;
+  posterPath: string | null;
+  season: null;
+  priority: boolean;
+};
+
+export type QueueRow = QueueGroupRow | QueuePendingRow | ({ kind: 'entry' } & QueueEntryView);
 
 // A page of the queue. The table is not virtual, so it shows one page at a time.
 export type QueuePage = { cursor: number; total: number; items: QueueRow[] };
 
+// The aggregate of a whole group, before the tab filter and the page. The inspector header reads it beside the
+// filtered items, so the row and the header show the same status.
+export type QueueGroupSummary = Pick<QueueGroupRow, 'status' | 'counts' | 'tabs' | 'total' | 'reached' | 'download' | 'problem'>;
+
+export type QueueGroupPage = { cursor: number; group: QueueGroupSummary; items: QueueEntryView[] };
+
 export type QueueSummary = {
   cursor: number;
+  // The number of rows in each tab. A row counts once in each tab that holds one of its targets.
   counts: Record<string, number>;
   // The targets that can still move, by stage. A stopped target is not in it.
   working: Record<string, number>;
@@ -607,7 +630,7 @@ export type QueueJob = {
 
 export type QueueActionPreview = {
   action: QueueActionName;
-  affected: { id: string; label: string; stage: string; key: string; lane: number | null }[];
+  affected: { id: string; label: string; status: Status; phase: Phase; lane: number | null }[];
   unsupported: { id: string; reason: string }[];
   sharedTransfers: { name: string; entries: number }[];
 };

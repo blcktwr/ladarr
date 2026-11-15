@@ -1,9 +1,9 @@
-import { IMPORT_STAGES, type ImportCheckId, type ImportCheckState } from '@ladarr/shared/enums';
+import type { ImportCheckId, ImportCheckState } from '@ladarr/shared/enums';
 import type { ImportCheck, RunStatus } from '@ladarr/shared/types';
 import { stat } from 'node:fs/promises';
 import { db } from '../../core/db.ts';
 import type { Events } from '../../core/events.ts';
-import { queueKey } from '../downloads/queue.ts';
+import { describe } from '@ladarr/shared/queue';
 
 // What the importer is doing now, in memory. The journal and the library hold the facts. This holds the numbers
 // that the client reads again after a restart: the bytes of a running copy, the result of a manual import or a rename,
@@ -42,9 +42,10 @@ export function createImportStatus(events: Events, { pollMs = 500, now = Date.no
   function publishChecks(_key?: string) {
     const at = now();
     const entries = Object.values(db.data.queue).flatMap((entry) => {
-      if (!IMPORT_STAGES.includes(entry.stage)) return [];
+      const description = describe(entry.state);
+      if (description.phase !== 'validating' && description.phase !== 'importing') return [];
       const checks = listOf(entry.id);
-      return checks ? [{ id: entry.id, stage: entry.stage, key: queueKey(entry), checks }] : [];
+      return checks ? [{ id: entry.id, status: description.status, phase: description.phase, checks }] : [];
     });
     events.publish('import.checks', { at, entries });
   }

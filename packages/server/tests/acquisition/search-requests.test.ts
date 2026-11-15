@@ -1,3 +1,6 @@
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
+import type { QueueEntry } from '../../src/library/downloads/queue.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +21,7 @@ const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60_000)
 const queries = () => pipe!.tracker.state.searches.filter((url) => url.searchParams.get('t') !== 'caps');
 const seasonQueries = () => queries().filter((url) => url.searchParams.get('ep') === null);
 const episodeQueries = () => queries().filter((url) => url.searchParams.get('ep') !== null);
-const grabbed = (entry: { stage: string }) => entry.stage === 'fetching' || entry.stage === 'sending' || entry.stage === 'downloading';
+const grabbed = (entry: QueueEntry) => stageOf(entry) === 'fetching' || stageOf(entry) === 'sending' || stageOf(entry) === 'downloading';
 const named = (extra: Parameters<typeof title>[0] = {}) =>
   title({ rootId: 'tv', meta: { ...title().meta, title: 'Show Name', originalTitle: 'Original Show Name', aliases: ['Alias One', 'Alias Two', 'Alias Three'] }, ...extra });
 
@@ -38,13 +41,13 @@ describe('search requests', () => {
     const first = pipe.queue.get('tv:1:1x1')!;
     const second = pipe.queue.get('tv:1:1x2')!;
     const third = pipe.queue.get('tv:1:1x3')!;
-    await until(() => grabbed(second) && first.branch === 'waiting' && third.branch === 'waiting');
+    await until(() => grabbed(second) && branchOf(first) === 'waiting' && branchOf(third) === 'waiting');
 
     expect(seasonQueries()).toHaveLength(1);
     expect(episodeQueries()).toHaveLength(0);
     expect(second.release!.title).toBe(single);
-    expect(first.branch).toBe('waiting');
-    expect(third.branch).toBe('waiting');
+    expect(branchOf(first)).toBe('waiting');
+    expect(branchOf(third)).toBe('waiting');
   });
 
   it('shows the season result in the title log and in each episode log, and sends no individual query for an old season', async () => {
@@ -60,7 +63,7 @@ describe('search requests', () => {
       ];
 
       const entries = pipe.finder.requestSearch(series.key);
-      await until(() => entries.every((entry) => entry.branch === 'waiting'));
+      await until(() => entries.every((entry) => branchOf(entry) === 'waiting'));
       expect(seasonQueries()).toHaveLength(1);
       expect(episodeQueries()).toHaveLength(0);
 
@@ -95,7 +98,7 @@ describe('search requests', () => {
       pipe.db.data.titles[series.key] = series;
 
       const entries = pipe.finder.requestSearch(series.key);
-      await until(() => entries.every((entry) => entry.branch === 'waiting'));
+      await until(() => entries.every((entry) => branchOf(entry) === 'waiting'));
 
       await closeLog();
       const titleLines = (await recentLogs(200, { itemId: series.key })).filter((line) => line.event === 'search');
@@ -137,7 +140,7 @@ describe('search requests', () => {
 
     const entries = pipe.finder.requestSearch(series.key);
     await until(
-      () => entries.every((entry) => entry.branch === 'waiting' && entry.search !== null && entry.search.result !== null && entry.search.result !== 'deferred'),
+      () => entries.every((entry) => branchOf(entry) === 'waiting' && entry.search !== null && entry.search.result !== null && entry.search.result !== 'deferred'),
       20_000,
     );
 
@@ -155,7 +158,7 @@ describe('search requests', () => {
     pipe.tracker.state.items = [];
 
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((entry) => entry.branch === 'waiting'));
+    await until(() => entries.every((entry) => branchOf(entry) === 'waiting'));
 
     expect(seasonQueries().map((url) => url.searchParams.get('q')).sort()).toEqual(['Alias One', 'Alias Three', 'Alias Two', 'Original Show Name', 'Show Name']);
     expect(episodeQueries()).toHaveLength(0);
@@ -168,12 +171,12 @@ describe('search requests', () => {
     pipe.tracker.state.items = [{ title: 'Show.Name.S01.480p.WEB-DL-GRP', size: 2 * 30 * 45 * MIB }];
 
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((entry) => entry.branch === 'waiting'));
+    await until(() => entries.every((entry) => branchOf(entry) === 'waiting'));
 
     expect(seasonQueries()).toHaveLength(1);
     expect(seasonQueries()[0]!.searchParams.get('q')).toBe('Show Name');
     expect(episodeQueries()).toHaveLength(0);
-    expect(entries.every((entry) => entry.release === null && entry.reason?.code === 'all_rejected')).toBe(true);
+    expect(entries.every((entry) => entry.release === null && reasonOfEntry(entry)?.code === 'all_rejected')).toBe(true);
   });
 
   it('takes a full pack for the episodes that the library does not have', async () => {
@@ -263,12 +266,12 @@ describe('search requests', () => {
 
     expect((await api.post('/queue/search', { titleKey: series.key, season: 1, number: 1 })).status).toBe(202);
     const entry = pipe.queue.get('tv:1:1x1')!;
-    await until(() => entry.branch === 'waiting' || grabbed(entry));
+    await until(() => branchOf(entry) === 'waiting' || grabbed(entry));
 
-    expect(entry.branch).toBe('waiting');
+    expect(branchOf(entry)).toBe('waiting');
     expect(episodeQueries().map((url) => url.searchParams.get('q'))).toEqual(['Show Name']);
     expect(entry.release).toBeNull();
-    expect(entry.reason?.code).toBe('all_rejected');
+    expect(reasonOfEntry(entry)?.code).toBe('all_rejected');
   });
 
   it('uses the recent window for the individual queries of a multi-episode search', async () => {
@@ -278,7 +281,7 @@ describe('search requests', () => {
     pipe.tracker.state.items = [];
 
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((entry) => entry.branch === 'waiting'));
+    await until(() => entries.every((entry) => branchOf(entry) === 'waiting'));
 
     expect(seasonQueries()).toHaveLength(1);
     expect(episodeQueries().filter((url) => url.searchParams.get('ep') === '1')).toHaveLength(1);

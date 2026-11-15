@@ -79,7 +79,7 @@ function titleOf(mediaType: MediaType, tmdbId: number) {
 }
 
 function activeQueue(key: string) {
-  return Object.values(db.data.queue).some((entry) => entry.titleKey === key && ACTIVE_STAGES.has(entry.stage) && entry.branch !== 'cancelled');
+  return Object.values(db.data.queue).some((entry) => entry.titleKey === key && ACTIVE_STAGES.has(entry.state.kind) && entry.state.kind !== 'cancelled');
 }
 
 function requestsFor(mediaType: MediaType, tmdbId: number) {

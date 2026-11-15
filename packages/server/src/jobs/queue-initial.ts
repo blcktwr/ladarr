@@ -18,11 +18,14 @@ export function queueInitialHandler({ queue, finder }: { queue: Queue; finder: F
       // A title that entered the queue first waits for the facts that the search needs.
       if (title.mediaType === 'movie' && title.metaLoadedAt === null) {
         if (job.attempts <= 1) catalog.info('waiting', 'The search waits for the metadata to load', titleFields(title));
+        // The page reads the pending row again, so a failure that ends the job removes it.
+        queue.notify();
         throw new JobError('outage', 'The metadata is not loaded yet.');
       }
       if (title.mediaType === 'tv' && !title.episodesLoadedAt) {
         // The first run says why the search waits. The next runs wait without a new line.
         if (job.attempts <= 1) catalog.info('waiting', 'The search waits for the episodes to load', titleFields(title));
+        queue.notify();
         throw new JobError('outage', 'The episodes are not loaded yet.');
       }
       // A title with nothing to search leaves the queue. The page learns it from this message.

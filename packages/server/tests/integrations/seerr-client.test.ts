@@ -1,3 +1,4 @@
+import { stageOf } from '../../src/library/downloads/queue.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -269,7 +270,7 @@ describe('the Seerr API for Wholphin', () => {
     expect(created.status).toBe(201);
     expect(created.body).toMatchObject({ status: 2 });
     expect(pipe.db.data.titles['movie:603']).toMatchObject({ rootId: 'movie', preset: 'p1080', paused: false });
-    await until(() => pipe.db.data.queue['movie:603']?.stage === 'downloading');
+    await until(() => stageOf(pipe.db.data.queue['movie:603']) === 'downloading');
 
     const listed = await wholphin.requests();
     expect(listed.results).toMatchObject([{ id: created.body.id, status: 2, media: { tmdbId: MOVIE_ID } }]);
@@ -278,7 +279,7 @@ describe('the Seerr API for Wholphin', () => {
     expect(processing.mediaInfo).toMatchObject({ status: 3, requests: [expect.objectContaining({ id: created.body.id, status: 2 })] });
 
     pipe.complete(RELEASE, { [`${RELEASE}.mkv`]: 'video-data' });
-    await until(() => pipe.db.data.queue['movie:603']?.stage === 'available');
+    await until(() => stageOf(pipe.db.data.queue['movie:603']) === 'available');
 
     const done = await wholphin.movie(MOVIE_ID);
     expect(done.mediaInfo).toMatchObject({ status: 5, requests: [expect.objectContaining({ id: created.body.id, status: 5 })] });
@@ -300,14 +301,14 @@ describe('the Seerr API for Wholphin', () => {
     expect(listed.results).toMatchObject([{ media: { tmdbId: SERIES_ID } }]);
     expect(listed.results[0].media.seasons).toEqual(expect.any(Array));
 
-    await until(() => ['tv:1396:1x1', 'tv:1396:1x2'].every((id) => pipe.db.data.queue[id]?.stage === 'downloading'), 12_000);
+    await until(() => ['tv:1396:1x1', 'tv:1396:1x2'].every((id) => stageOf(pipe.db.data.queue[id]) === 'downloading'), 12_000);
     const processing = await wholphin.tv(SERIES_ID);
     expect(processing.mediaInfo.seasons.find((season: any) => season.seasonNumber === 1)).toMatchObject({ status: 3 });
     expect(processing.mediaInfo.seasons.find((season: any) => season.seasonNumber === 2)).toMatchObject({ status: 1 });
     expect(processing.mediaInfo.requests[0].seasons).toMatchObject([{ seasonNumber: 1, status: 2 }]);
 
     pipe.complete(PACK, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two' });
-    await until(() => ['tv:1396:1x1', 'tv:1396:1x2'].every((id) => pipe.db.data.queue[id]?.stage === 'available'));
+    await until(() => ['tv:1396:1x1', 'tv:1396:1x2'].every((id) => stageOf(pipe.db.data.queue[id]) === 'available'));
 
     const done = await wholphin.tv(SERIES_ID);
     expect(done.mediaInfo).toMatchObject({ status: 5 });

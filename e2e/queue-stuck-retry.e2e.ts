@@ -43,5 +43,5 @@ test('starts the episodes of a series that stopped again from the menu of the se
   // The import runs again, so the file that held the destination name goes before the retry.
   rmSync(dest);
   await dialog.getByRole('button', { name: 'Try again', exact: true }).click();
-  await expect.poll(async () => (await entry())?.stage, { timeout: 60_000 }).toBe('available');
+  await expect.poll(async () => (await entry())?.status, { timeout: 60_000 }).toBe('available');
 });

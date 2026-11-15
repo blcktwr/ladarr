@@ -5,6 +5,7 @@
   "exports": {
     "./config": "./src/config.ts",
     "./enums": "./src/enums.ts",
+    "./queue": "./src/queue.ts",
     "./types": "./src/types.ts"
   }
 }

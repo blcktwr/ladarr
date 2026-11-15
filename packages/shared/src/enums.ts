@@ -15,20 +15,11 @@ export type Override = 'monitored' | 'unmonitored';
 // The episodes of a series that ladarr monitors: all of them, or the ones that air from now.
 export type Policy = 'all' | 'future';
 
-// The journey of a queue target: Queued, Searching, Fetching the release, Sending to client, Downloading, Validating, Importing, Available.
-// A stage can be skipped when its work is not needed. A stage never shows progress that did not happen.
-export type QueueStage = 'queued' | 'searching' | 'fetching' | 'sending' | 'downloading' | 'validating' | 'importing' | 'available';
-
-// The stages whose target has the checks of an import.
-export const IMPORT_STAGES: readonly QueueStage[] = ['validating', 'importing'];
+// The journey of a queue target lives in @ladarr/shared/queue, as one state for each target.
 
 // What a search wants: a movie, one episode, or a whole season.
 export const WANT_KIND = { movie: 'movie', episode: 'episode', season: 'season' } as const;
 export type WantKind = (typeof WANT_KIND)[keyof typeof WANT_KIND];
-
-// A branch is a state beside the journey. It does not move the entry forward.
-// "waiting" means that no release is eligible yet.
-export type QueueBranch = 'paused' | 'cancelled' | 'waiting';
 
 // The checks of an import, in the order that the importer runs them.
 export const IMPORT_CHECK_IDS = [

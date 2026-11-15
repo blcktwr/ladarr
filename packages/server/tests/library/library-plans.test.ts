@@ -1,3 +1,6 @@
+import { move } from '../helpers/test-queue.ts';
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -323,14 +326,14 @@ describe('safety', () => {
     queue.request(active, 'test');
     const finished = queue.ensure('tv:1', 1, 2);
     queue.request(finished, 'test');
-    queue.move(finished, { stage: 'available' }, 'imported');
+    move(queue, finished, { stage: 'available' }, 'imported');
     const other = queue.ensure('movie:2', null, null);
     queue.request(other, 'test');
 
     dropTitle('tv:1', queue);
-    expect(active.branch).toBe('cancelled');
-    expect(finished).toMatchObject({ branch: null, stage: 'available' });
-    expect(other.branch).toBeNull();
+    expect(branchOf(active)).toBe('cancelled');
+    expect(finished.state).toEqual({ kind: 'available' });
+    expect(branchOf(other)).toBeNull();
   });
 
   it('removes the file records of the title and no other record in a plain removal', async () => {

@@ -56,7 +56,7 @@ const clients = createClients();
 const webhooks = createWebhooks({
   enqueue: (input) => worker.enqueue(input),
 });
-const queue = createQueue(events, persist, webhooks.onMove);
+const queue = createQueue(events, persist, webhooks.onState);
 const limiter = createLimiter(persist);
 const indexers = createIndexerService(limiter, {}, persist);
 const finder = createFinder({ queue, indexers, enqueue: (input) => worker.enqueue(input) });

@@ -1,5 +1,5 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
-import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary, QueueTorrent } from '@ladarr/shared/types';
+import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary, QueueTorrent } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, FileText, FileVideo, Info, LoaderCircle, Pause, Play, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
@@ -13,7 +13,7 @@ import { MatchDialog } from './activity-match.tsx';
 import { AttachDialog } from './activity-client.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
-import { catalogPath, formatBytes, groupName, posterUrl, seasonName, shownCounts, shownKey, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
+import { catalogPath, formatBytes, groupName, posterUrl, seasonName, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
 import { commentParts } from '../../lib/links.ts';
@@ -26,8 +26,6 @@ const PAGE = 50;
 const EPISODES = 12;
 // The summary text for a screen reader changes at most once in this time.
 const ANNOUNCE_MS = 5_000;
-// A series that waits for its episodes has no target yet, so the queue has no event for the end of that wait.
-const PENDING_RECHECK_MS = 3_000;
 // Below this width the page shows the list or the inspector, not both.
 const NARROW = 800;
 
@@ -44,19 +42,17 @@ const groupKey = (f: Filters, group: QueueGroupRow) => {
   return `/queue/groups/${group.titleKey}?${params}`;
 };
 
-// The key of a row on the page: one group of episodes, or one movie.
-const rowKey = (row: QueueRow) => (row.kind === 'group' ? `group:${row.key}` : `entry:${row.id}`);
+// The key of a row on the page: one group of episodes, one movie, or a series that loads its episodes.
+const rowKey = (row: QueueRow) => (row.kind === 'group' ? `group:${row.key}` : row.kind === 'pending' ? `pending:${row.key}` : `entry:${row.id}`);
 
-// The episodes of a group, for the details and for the sections that read the same entries.
+// The episodes of a group, for the details and for the sections that read the same entries. The response carries the
+// aggregate of the whole group beside the filtered items.
 function useGroupEntries(group: QueueGroupRow, filters: Filters) {
-  return useQuery<{ items: QueueEntryView[] }>({ queryKey: [groupKey(filters, group)], gcTime: 0, enabled: !group.pending });
+  return useQuery<QueueGroupPage>({ queryKey: [groupKey(filters, group)], gcTime: 0 });
 }
 
 // The name that the page shows for a row.
-const nameOf = (row: QueueRow) => (row.kind === 'group' ? groupName(row) : row.label);
-
-// A target that waits, stopped, or is cancelled has no work to show.
-const idle = (entry: QueueEntryView) => entry.reason !== null || entry.branch === 'waiting' || entry.branch === 'cancelled';
+const nameOf = (row: QueueRow) => (row.kind === 'entry' ? row.label : groupName(row));
 
 // The status at the top of a detail view: the indicator, the message that explains it, and a divider before the
 // content below. A series and a movie use this same block, so the two details keep the same spacing. The bar of a
@@ -77,11 +73,9 @@ function DetailStatus({ status, icon, message, bar, divider = true, action, chil
   );
 }
 
-// The status of a target: what it does now. A target that stopped on a reason keeps the indicator of its stage, and
-// the hint says why it stopped.
+// The status of a target: what it does now. A target that stopped shows Stuck, and the hint says why it stopped.
 function EntryStatus({ entry }: { entry: QueueEntryView }) {
-  const key = shownKey(entry.key);
-  return <StatusText small status={statusLabel(key)} icon={key} help={entry.reason ? t(entry.reason.message) : statusHelpText(entry.key)} />;
+  return <StatusText small status={statusLabel(entry.status)} icon={entry.status} help={entry.reason ? t(entry.reason.message) : statusHelpText(entry.status)} />;
 }
 
 // A target that stopped because the destination name is taken. The user decides to replace the file, and the import
@@ -348,7 +342,7 @@ function RejectedPane({ items, onDone }: { items: { entry: QueueEntryView; relea
 
 // The rejected releases of a movie. Only a target that found no match keeps them.
 function MovieRejected({ entry, refresh }: { entry: QueueEntryView; refresh: () => void }) {
-  const releases = entry.key === 'no_match' ? (entry.search?.rejected ?? []) : [];
+  const releases = entry.status === 'no_match' ? (entry.search?.rejected ?? []) : [];
   return <RejectedPane items={releases.map((release) => ({ entry, release }))} onDone={refresh} />;
 }
 
@@ -367,7 +361,7 @@ function GroupRejected({ group, filters, refresh }: { group: QueueGroupRow; filt
 
 // The progress of a download: the part that is done.
 function TransferProgress({ entry }: { entry: QueueEntryView }) {
-  if (entry.stage !== 'downloading' || idle(entry)) return null;
+  if (entry.status !== 'downloading') return null;
   // The first poll can arrive after the target enters Downloading. The bar shows from 0% until then.
   const percent = downloadPercent(entry) ?? 0;
   return (
@@ -380,7 +374,7 @@ function TransferProgress({ entry }: { entry: QueueEntryView }) {
 
 // The percent of a download that runs. The list of the episodes of a series shows it in the name, with no bar and no rate.
 function downloadPercent(entry: QueueEntryView) {
-  if (!entry.transfer || entry.stage !== 'downloading' || idle(entry)) return null;
+  if (!entry.transfer || entry.status !== 'downloading') return null;
   return Math.round(entry.transfer.progress * 100);
 }
 
@@ -393,7 +387,7 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
   const percent = inline ? downloadPercent(entry) : null;
   const data = !inline && entry.release ? <ReleaseDetails entryId={entry.id} release={entry.release} /> : inline && entry.file ? <FileDetails file={entry.file} /> : null;
   const name = label && <Text>{percent === null ? entry.label : <>{entry.label} <strong>({percent}%)</strong></>}</Text>;
-  const status = shownKey(entry.key);
+  const status = entry.status;
   // The reason shows under the status of a movie, and under the status of an episode that a problem stops, above its
   // file. The list keeps the status and the hint.
   const reason = entry.reason ? t(entry.reason.message) : null;
@@ -407,12 +401,12 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">{name}</div>
           <div className="flex shrink-0 items-center justify-end gap-2">
-            {entry.key !== 'available' && <EntryStatus entry={entry} />}
+            {entry.status !== 'available' && <EntryStatus entry={entry} />}
             {fix}
             {actions}
           </div>
         </div>
-        {entry.key === 'stuck' && reason && <Text variant="small">{reason}</Text>}
+        {entry.status === 'stuck' && reason && <Text variant="small">{reason}</Text>}
         {data}
       </div>
     );
@@ -437,9 +431,10 @@ type Run = (action: QueueActionName, ids: string[], group?: { titleKey: string; 
 // there. A row of an episode keeps the action of its reason in its own menu.
 function entryMenu(entry: QueueEntryView, run: Run, openLogs: (entry: QueueEntryView) => void, anyReason = false): { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] {
   const items: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] = [];
-  const searching = entry.branch === 'waiting';
-  // An episode has no search of its own.
-  if (entry.branch !== 'paused' && (anyReason ? entry.reason !== null : entry.reason?.action === 'retry') && !(searching && entry.number !== null)) items.push({ label: searching ? t('Retry') : t('Try again'), onClick: () => run('retry', [entry.id]) });
+  // Only a blocked target needs a retry. The inspector of a title offers it for every problem, and the row of an
+  // episode keeps the action of its own problem.
+  const retryable = entry.status === 'stuck' && (anyReason || entry.reason?.action === 'retry');
+  if (retryable) items.push({ label: t('Try again'), onClick: () => run('retry', [entry.id]) });
   if (entry.lane !== null) items.push({ label: t('Delete priority'), onClick: () => run('unpriority', [entry.id]) });
   items.push({ label: t('Logs'), onClick: () => openLogs(entry) });
   return items;
@@ -510,39 +505,22 @@ function GroupLogs({ titleKey }: { titleKey: string }) {
   return <EntryLogs entryId={titleKey} itemType="tv" />;
 }
 
-// The stages of the queue in the order that a group shows them: the work that goes on first, then the waits.
-const stageOrder = ['searching', 'fetching', 'sending', 'downloading', 'validating', 'importing', 'stuck', 'not_found', 'no_match', 'queued', 'paused', 'cancelled'];
-
-// The stage of a series or a season: the first one where it has targets.
-function groupStage(counts: Record<string, number>) {
-  const shown = shownCounts(counts);
-  return stageOrder.find((key) => (shown[key] ?? 0) > 0) ?? null;
-}
-
-// The stage of a title in the list and in the inspector: the first one where it has targets. A title that is all
-// imported has no stage of its own, so it is Available.
-function overallKey(counts: Record<string, number>) {
-  return groupStage(counts) ?? ((counts.available ?? 0) > 0 ? 'available' : null);
-}
-
-// The status of a series or a season, in the same style as the status of a target.
-function GroupStatus({ counts }: { counts: Record<string, number> }) {
-  const key = overallKey(counts);
-  return key ? <StatusText small status={statusLabel(key)} icon={key} /> : <Text variant="small">—</Text>;
+// The status of a group, in the same style as the status of a target. The server sends the aggregate of the whole
+// group, so the row and the inspector show the same status.
+function GroupStatus({ status }: { status: QueueGroupRow['status'] }) {
+  return status ? <StatusText small status={statusLabel(status)} icon={status} /> : <Text variant="small">—</Text>;
 }
 
 // The line under the name of a series in the list: its status. The part of its targets that is in the library shows in
 // the inspector.
 function GroupLine({ group }: { group: QueueGroupRow }) {
-  const key = overallKey(group.counts);
-  return key ? <StatusText small status={statusLabel(key)} icon={key} /> : <Text variant="small">—</Text>;
+  return <GroupStatus status={group.status} />;
 }
 
 // The menu of a series in the inspector. A series whose episodes are loading has no target to act on yet.
 function groupMenu(group: QueueGroupRow, openLogs: (group: QueueGroupRow) => void, run: Run) {
-  if (group.pending) return [];
   const items = [{ label: t('Logs'), onClick: () => openLogs(group) }];
-  // The episodes that a reason stopped start again together, from the row of the series.
+  // The episodes that a problem stopped start again together, from the row of the series.
   if ((group.counts.stuck ?? 0) > 0) items.unshift({ label: t('Try again'), onClick: () => run('retry', [], { titleKey: group.titleKey, season: group.season }) });
   return items;
 }
@@ -561,7 +539,7 @@ function MasterRow({ row }: { row: QueueRow }) {
         <Text variant="body" className="min-w-0">
           <strong>{nameOf(row)}</strong>
         </Text>
-        {row.kind === 'group' ? <GroupLine group={row} /> : <EntryStatus entry={row} />}
+        {row.kind === 'group' ? <GroupLine group={row} /> : row.kind === 'pending' ? <StatusText small status={statusLabel('searching')} icon="searching" /> : <EntryStatus entry={row} />}
       </div>
     </div>
   );
@@ -646,32 +624,18 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   const [season, setSeason] = useState<number | null>(null);
   const { data, error, refetch } = useGroupEntries(group, filters);
   const entries = data?.items;
-  if (group.pending) {
-    return (
-      <div className="grid gap-3">
-        <GroupStatus counts={group.counts} />
-        <div className="grid place-items-center">
-          <Spinner label={t('Loading episodes')} />
-        </div>
-      </div>
-    );
-  }
   if (error && !entries) return <LoadFailed onRetry={() => void refetch()} />;
   // The skeleton of the table keeps the motion off for a person who asks for less, and it needs no label of its own.
   if (!entries) {
     return <Table aria-label={t('Seasons')} loading columns={seasonColumns.map((column) => ({ ...column, label: t(column.label) }))} />;
   }
-  const counts: Record<string, number> = {};
-  for (const entry of entries) counts[entry.key] = (counts[entry.key] ?? 0) + 1;
-  // The count covers the whole series, not only the episodes that the filter shows. An episode that finished its
-  // download counts in validating, importing, and available.
-  const completed = group.reached.completed;
-  const total = group.total;
-  const status = overallKey(counts);
-  // The reason that most of the stuck targets share, for the line under the status.
-  const stuck = new Map<string, number>();
-  for (const entry of entries) if (entry.key === 'stuck' && entry.reason) stuck.set(entry.reason.message, (stuck.get(entry.reason.message) ?? 0) + 1);
-  const stuckReason = [...stuck].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  // The counts, the status, and the problem cover the whole series, not only the episodes that the filter shows.
+  const summary = data?.group;
+  const status = summary?.status ?? group.status;
+  const completed = summary?.reached.completed ?? group.reached.completed;
+  const total = summary?.total ?? group.total;
+  const download = summary?.download ?? group.download;
+  const stuckReason = summary?.problem?.message ?? group.problem?.message ?? null;
   const toggle = (number: number) => setSeason((current) => (current === number ? null : number));
   // The releases of the series. A pack is one release. Several episodes can have their own.
   const releases = new Map<string, NonNullable<QueueEntryView['release']>>();
@@ -680,9 +644,9 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   // The target that carries the release of the series. The .torrent of the release is the same for every episode of a pack.
   const releaseEntry = entries.find((entry) => entry.release);
   const qualities = [...new Set(unique.flatMap((release) => (release.quality ? [release.quality] : [])))];
-  // The target of the checklist: an episode with checks that moves, or one that a reason stopped. Every target of a
+  // The target of the checklist: an episode with checks that moves, or one that a problem stopped. Every target of a
   // pack carries the same list.
-  const importing = entries.find((entry) => hasChecks(entry) && entry.reason === null) ?? entries.find(hasChecks);
+  const importing = entries.find((entry) => hasChecks(entry) && entry.status !== 'stuck') ?? entries.find(hasChecks);
   const message =
     status === 'no_match'
       ? t('The indexers have releases, but none fits your selected qualities.')
@@ -695,7 +659,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
   const bar =
     status === 'searching' || status === 'not_found' || status === 'no_match' || status === 'stuck' ? undefined : status === 'downloading' ? (
-      <Progress value={Math.round((group.download ?? 0) * 100)} label={`${groupName(group)} ${t('Download')}`} />
+      <Progress value={Math.round((download ?? 0) * 100)} label={`${groupName(group)} ${t('Download')}`} />
     ) : (
       <Progress value={percent} label={t('{count} / {total} episodes', { count: completed, total })} />
     );
@@ -756,21 +720,33 @@ function MovieDetail({ entry, run, refresh }: { entry: QueueEntryView; run: Run;
   );
 }
 
+// The inspector of a series whose episodes load. Its initial job has no target yet, so there is nothing to show.
+function PendingDetail() {
+  return (
+    <div className="grid place-items-center">
+      <Spinner label={t('Loading episodes')} />
+    </div>
+  );
+}
+
 // The inspector of the selected title: its name, its menu, and its progress. The body starts again when the selected
 // title changes, so a season of the title before does not stay open. The last item of the menu deletes the row from the
 // library, with the same modal as the page of the title. A row of a series is one season, so it deletes that season. The
 // whole series goes only from the page of the series.
 function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDelete, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onDelete: (request: PlanRequest, subject: string) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
   const deletion: { request: PlanRequest; subject: string } | null =
-    row.kind === 'group'
-      ? row.season === null
-        ? null
-        : { request: { action: 'remove', keys: [row.titleKey], season: row.season }, subject: seasonName(row.season) }
-      : { request: { action: 'remove', keys: [row.titleKey] }, subject: row.title };
-  const items: { label: string; onClick: () => void; danger?: boolean }[] = [
-    ...(row.kind === 'group' ? groupMenu(row, openGroupLogs, run) : entryMenu(row, run, openLogs, true)),
-    ...(deletion ? [{ label: t('Delete'), danger: true, onClick: () => onDelete(deletion.request, deletion.subject) }] : []),
-  ];
+    row.kind === 'entry'
+      ? { request: { action: 'remove', keys: [row.titleKey] }, subject: row.title }
+      : row.kind === 'group' && row.season !== null
+        ? { request: { action: 'remove', keys: [row.titleKey], season: row.season }, subject: seasonName(row.season) }
+        : null;
+  const items: { label: string; onClick: () => void; danger?: boolean }[] =
+    row.kind === 'pending'
+      ? []
+      : [
+          ...(row.kind === 'group' ? groupMenu(row, openGroupLogs, run) : entryMenu(row, run, openLogs, true)),
+          ...(deletion ? [{ label: t('Delete'), danger: true, onClick: () => onDelete(deletion.request, deletion.subject) }] : []),
+        ];
   return (
     <div className="grid gap-6 w-full min-w-0">
       {/* The list is under the inspector in a narrow window, so the panel has its own way back. */}
@@ -785,10 +761,12 @@ function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDele
           <Text variant="heading" className="min-w-0">{nameOf(row)}</Text>
           <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
         </RouterLink>
-        <ActionMenu label={t('Actions for {name}', { name: nameOf(row) })} items={items} />
+        {items.length > 0 && <ActionMenu label={t('Actions for {name}', { name: nameOf(row) })} items={items} />}
       </div>
       {row.kind === 'group' ? (
         <GroupDetail key={`${row.key}|${filters.stage}`} group={row} filters={filters} run={run} refresh={refresh} openLogs={openLogs} />
+      ) : row.kind === 'pending' ? (
+        <PendingDetail />
       ) : (
         <MovieDetail key={`${row.id}|${filters.stage}`} entry={row} run={run} refresh={refresh} />
       )}
@@ -800,15 +778,8 @@ const keys = ['queued', 'searching', 'downloading', 'importing', 'stuck'];
 
 // The stages of the whole page. The row is wide, so it lies above the container of the queue.
 function StageMenu({ summary, filters, setFilters }: { summary: QueueSummary | undefined; filters: Filters; setFilters: (f: Filters) => void }) {
-  const counts = shownCounts(summary?.counts ?? {});
-  // A target that found no release, or no release that fits the preset, waits for its next search, so it counts in
-  // Waiting. Fetching the release belongs to the search, so it counts in Searching. Validating belongs to the import,
-  // so it counts in Importing.
-  counts.queued = (counts.queued ?? 0) + (summary?.counts.not_found ?? 0) + (summary?.counts.no_match ?? 0);
-  counts.searching = (counts.searching ?? 0) + (summary?.counts.fetching ?? 0);
-  counts.importing = (counts.importing ?? 0) + (summary?.counts.validating ?? 0);
-  // A download is one torrent of the client. A pack holds many targets of one series, and it counts once.
-  counts.downloading = summary?.activeTransfers ?? 0;
+  // The server counts rows for each tab, so a badge equals the rows of its tab.
+  const counts = summary?.counts ?? {};
   return (
     <SubMenu
       fill
@@ -838,7 +809,7 @@ function ConfirmAction({ preview, onCancel, onConfirm }: { preview: QueueActionP
       <ul>
         {preview.affected.slice(0, 20).map((item) => (
           <li key={item.id}>
-            {item.label} {stageLabel(shownKey(item.key))}
+            {item.label} {statusLabel(item.status)}
           </li>
         ))}
       </ul>
@@ -959,30 +930,23 @@ function QueueView() {
   // The checks of an import change one by one. The rows read the new state here, without the debounce of `refresh`,
   // so the sequence stays visible.
   useLive('import.checks', (data) => {
-    const event = data as { entries?: { id: string; stage: QueueEntryView['stage']; key: string; checks: NonNullable<QueueEntryView['checks']> }[] } | undefined;
+    const event = data as { entries?: { id: string; status: QueueEntryView['status']; phase: QueueEntryView['phase']; checks: NonNullable<QueueEntryView['checks']> }[] } | undefined;
     if (!event?.entries?.length) return;
     const updated = new Map(event.entries.map((entry) => [entry.id, entry]));
     const patch = (item: QueueEntryView): QueueEntryView => {
       const change = updated.get(item.id);
-      return change ? { ...item, stage: change.stage, key: change.key, checks: change.checks } : item;
+      return change ? { ...item, status: change.status, phase: change.phase, checks: change.checks } : item;
     };
     void queryClient.setQueriesData<QueuePage>({ predicate: (query) => String(query.queryKey[0]).startsWith('/queue?') }, (page) =>
       page ? { ...page, items: page.items.map((row) => (row.kind === 'entry' ? { ...row, ...patch(row) } : row)) } : page,
     );
-    void queryClient.setQueriesData<{ items: QueueEntryView[] }>({ predicate: (query) => String(query.queryKey[0]).startsWith('/queue/groups/') }, (data) =>
+    void queryClient.setQueriesData<QueueGroupPage>({ predicate: (query) => String(query.queryKey[0]).startsWith('/queue/groups/') }, (data) =>
       data ? { ...data, items: data.items.map(patch) } : data,
     );
   });
-  // A title that loads its episodes, or leaves the library, changes the pending row of the queue.
+  // A title that loads its episodes, or leaves the library, changes the pending row of the queue. The job of the
+  // title sends its own queue event, so the page needs no timer.
   useLive('library.changed', refresh);
-  // The row of a series that waits for its episodes depends on a job, and the end of that wait can arrive with no
-  // event of its own. The page reads the queue again until the pending row becomes a real one.
-  const pending = items.some((row) => row.kind === 'group' && row.pending);
-  useEffect(() => {
-    if (!pending) return;
-    const id = setInterval(refresh, PENDING_RECHECK_MS);
-    return () => clearInterval(id);
-  }, [pending, refresh]);
 
   // The count of the view changes with the filters and with the work. The screen reader hears it, and the focus stays.
   useEffect(() => {
@@ -1173,9 +1137,9 @@ function QueueView() {
                   </div>
                   {chosen.kind === 'group' ? (
                     <GroupRejected group={chosen} filters={filters} refresh={refresh} />
-                  ) : (
+                  ) : chosen.kind === 'entry' ? (
                     <MovieRejected entry={chosen} refresh={refresh} />
-                  )}
+                  ) : null}
                 </>
               ) : (
                 <Pane className="w-full">

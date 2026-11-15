@@ -27,7 +27,7 @@ test.beforeAll(async () => {
   ];
   const movie = await stack.call('POST', '/library', { mediaType: 'movie', tmdbId: 2, add: 'all' });
   if (movie.status >= 300) throw new Error(`POST /library answered ${movie.status}: ${JSON.stringify(movie.body)}`);
-  await expect.poll(async () => (await stack.call('GET', '/queue/entries/movie:2')).body.entry?.key, { timeout: 60_000 }).toBe('no_match');
+  await expect.poll(async () => (await stack.call('GET', '/queue/entries/movie:2')).body.entry?.status, { timeout: 60_000 }).toBe('no_match');
 });
 test.afterAll(() => stack.stop());
 test.beforeEach(async ({ context }) => {
@@ -67,7 +67,7 @@ test('downloads a release that the automatic search rejected', async ({ page }) 
   await expect(page.getByText('1080p WEB-DL (10.0 MiB)')).toBeVisible();
   await expect(page.getByText('The file is smaller than the quality allows for this runtime.')).toHaveCount(1);
   await expect(page.getByRole('row').filter({ hasText: RELEASE }).first()).toContainText(RELEASE);
-  await expect(page.getByText('The quality of the release is not in any quality profile of the title.')).toHaveCount(1);
+  await expect(page.getByText('The quality of the release is not in the allowed qualities.')).toHaveCount(1);
   const download = page.getByRole('button', { name: /^Download 720p BluRay/ });
   await expect(download).toBeVisible();
   await download.click();
@@ -76,6 +76,6 @@ test('downloads a release that the automatic search rejected', async ({ page }) 
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Download', exact: true }).click();
 
-  await expect.poll(async () => (await stack.call('GET', '/queue/entries/movie:2')).body.entry?.stage, { timeout: 60_000 }).toBe('downloading');
+  await expect.poll(async () => (await stack.call('GET', '/queue/entries/movie:2')).body.entry?.status, { timeout: 60_000 }).toBe('downloading');
   await expect.poll(() => [...stack.qbit.torrents.values()].some((torrent) => torrent.name === RELEASE), { timeout: 60_000 }).toBe(true);
 });

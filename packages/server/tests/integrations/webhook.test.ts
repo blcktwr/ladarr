@@ -1,3 +1,6 @@
+import { move } from '../helpers/test-queue.ts';
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -65,7 +68,7 @@ async function collect(destination: string | null = 'http://receiver.test/hook')
     ];
   }
   const webhooks = createWebhooks({ enqueue: (input) => enqueueJob(input), now: () => NOW });
-  const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
+  const queue = createQueue(createEvents(), () => {}, webhooks.onState);
   return { db, webhooks, queue };
 }
 
@@ -74,8 +77,8 @@ describe('events', () => {
     const { db, queue } = await collect();
     db.data.titles['movie:2'] = movie();
     db.data.titles['tv:1'] = title({ episodes: [episode(1, 2)] });
-    queue.move(queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
-    queue.move(queue.ensure('tv:1', 1, 2), { stage: 'available' }, 'imported');
+    move(queue, queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
+    move(queue, queue.ensure('tv:1', 1, 2), { stage: 'available' }, 'imported');
 
     const base = { schemaVersion: 1, id: expect.any(String), type: 'available', timestamp: '2024-06-01T00:00:00.000Z', reason: null, problem: null };
     expect(eventsOf(db)).toEqual([
@@ -90,14 +93,14 @@ describe('events', () => {
     const { db, queue } = await collect();
     db.data.titles['movie:2'] = movie();
     const entry = queue.ensure('movie:2', null, null);
-    queue.move(entry, { reason: { code: 'file_not_found' } }, 'import blocked');
-    queue.move(entry, { reason: { code: 'file_unreadable' } }, 'import blocked');
+    move(queue, entry, { reason: { code: 'file_not_found' } }, 'import blocked');
+    move(queue, entry, { reason: { code: 'file_unreadable' } }, 'import blocked');
     expect(eventsOf(db)).toHaveLength(1);
     expect(eventsOf(db)[0]).toMatchObject({ type: 'stuck', title: { key: 'movie:2' }, reason: { code: 'file_not_found', message: 'The download has no file for this target.' } });
     expect(deliveriesOf(db)[0]!.webhookId).toBe('stuck-webhook');
 
-    queue.move(entry, { branch: null, reason: null }, 'retry');
-    queue.move(entry, { reason: { code: 'disk_full' } }, 'import blocked');
+    move(queue, entry, { branch: null, reason: null }, 'retry');
+    move(queue, entry, { reason: { code: 'disk_full' } }, 'import blocked');
     expect(eventsOf(db).map((event) => event.type)).toEqual(['stuck', 'stuck']);
     expect(eventsOf(db)[1]!.reason?.code).toBe('disk_full');
     expect(eventsOf(db)[1]!.id).not.toBe(eventsOf(db)[0]!.id);
@@ -107,17 +110,18 @@ describe('events', () => {
     const { db, queue } = await collect();
     db.data.titles['movie:2'] = movie();
     const entry = queue.ensure('movie:2', null, null);
-    queue.move(entry, { stage: 'searching' }, 'search');
-    queue.move(entry, { stage: 'available' }, 'imported');
-    queue.move(entry, { stage: 'available' }, 'imported');
+    move(queue, entry, { stage: 'searching' }, 'search');
+    move(queue, entry, { stage: 'available' }, 'imported');
+    move(queue, entry, { stage: 'available' }, 'imported');
     expect(eventsOf(db).map((event) => event.type)).toEqual(['available']);
   });
 
   it('sends each event only to the webhooks of its type', async () => {
     const { db, queue } = await collect();
     db.data.titles['movie:2'] = movie();
-    queue.move(queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
-    queue.move(queue.ensure('movie:2', null, null), { reason: { code: 'file_not_found' } }, 'blocked');
+    db.data.titles['movie:3'] = movie({ key: 'movie:3', tmdbId: 3 });
+    move(queue, queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
+    move(queue, queue.ensure('movie:3', null, null), { reason: { code: 'file_not_found' } }, 'blocked');
     expect(deliveriesOf(db).map(({ webhookId, event }) => [webhookId, event.type])).toEqual([
       ['available-webhook', 'available'],
       ['stuck-webhook', 'stuck'],
@@ -128,15 +132,15 @@ describe('events', () => {
     const { db, queue } = await collect();
     db.data.webhooks.push({ id: 'available-webhook-2', type: 'available', url: 'http://other.test/hook' });
     db.data.titles['movie:2'] = movie();
-    queue.move(queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
+    move(queue, queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
     expect(deliveriesOf(db).map((payload) => payload.webhookId)).toEqual(['available-webhook', 'available-webhook-2']);
     expect(eventsOf(db)[0]).toBe(eventsOf(db)[1]);
   });
 
   it('makes no job when no webhook of the type is set', async () => {
     const { db, queue } = await collect(null);
-    queue.move(queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
-    queue.move(queue.ensure('movie:2', null, null), { reason: { code: 'file_not_found' } }, 'blocked');
+    move(queue, queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
+    move(queue, queue.ensure('movie:3', null, null), { reason: { code: 'file_not_found' } }, 'blocked');
     expect(Object.keys(db.data.jobs)).toEqual([]);
   });
 
@@ -149,16 +153,16 @@ describe('events', () => {
         throw new Error('broken');
       },
     });
-    const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
+    const queue = createQueue(createEvents(), () => {}, webhooks.onState);
     const entry = queue.ensure('movie:2', null, null);
-    expect(() => queue.move(entry, { stage: 'available' }, 'imported')).not.toThrow();
-    expect(entry.stage).toBe('available');
+    expect(() => move(queue, entry, { stage: 'available' }, 'imported')).not.toThrow();
+    expect(stageOf(entry)).toBe('available');
   });
 
   it('drops an event when the backlog is full', async () => {
     const { db, queue } = await collect();
     for (let i = 0; i < 1_000; i++) enqueueJob({ type: 'webhook.deliver', payload: {} });
-    queue.move(queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
+    move(queue, queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
     expect(jobsOf(db)).toHaveLength(1_000);
   });
 });
@@ -175,8 +179,8 @@ describe('delivery', () => {
     worker.start();
     closers.push(() => worker.stop());
     const webhooks = createWebhooks({ enqueue: (input) => worker.enqueue(input), now: () => NOW });
-    const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
-    const finish = () => queue.move(queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
+    const queue = createQueue(createEvents(), () => {}, webhooks.onState);
+    const finish = () => move(queue, queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
     // The test does not wait for the pause between two tries.
     const skipWaits = () => {
       for (const job of jobsOf(db)) if (job.state === 'waiting') job.runAt = 0;
@@ -284,8 +288,8 @@ describe('worker slots', () => {
     worker.start();
     closers.push(() => worker.stop());
     const webhooks = createWebhooks({ enqueue: (input) => worker.enqueue(input) });
-    const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
-    for (const id of ['movie:1', 'movie:2', 'movie:3']) queue.move(queue.ensure(id, null, null), { stage: 'available' }, 'imported');
+    const queue = createQueue(createEvents(), () => {}, webhooks.onState);
+    for (const id of ['movie:1', 'movie:2', 'movie:3']) move(queue, queue.ensure(id, null, null), { stage: 'available' }, 'imported');
     await until(() => receiver.state.seen.length === 2);
 
     worker.enqueue({ type: 'work' });
@@ -296,34 +300,28 @@ describe('worker slots', () => {
 
 describe('import with a receiver outage', () => {
   it('finishes the import while the receiver does not answer, then sends the same event ID', async () => {
-    const pipe = await startPipeline();
-    closers.push(() => pipe.stop());
     const receiver = await startReceiver();
     closers.push(receiver.close);
     receiver.state.respond = () => 'hang';
-    pipe.db.data.webhooks = [{ id: 'hook', type: 'available', url: receiver.url }];
 
     // The webhook jobs run in their own worker, so the worker of the pipeline needs no change.
     const hookWorker = createWorker(async () => {}, webhookDeliverHandler({ timeoutMs: 60_000 }), { tickMs: 15 });
     hookWorker.start();
     closers.push(() => hookWorker.stop());
     const webhooks = createWebhooks({ enqueue: (input) => hookWorker.enqueue(input) });
-    const move = pipe.queue.move;
-    pipe.queue.move = (entry, change, cause, detail) => {
-      const before = { stage: entry.stage, branch: entry.branch, reason: entry.reason };
-      move(entry, change, cause, detail);
-      webhooks.onMove(entry, before);
-    };
+    const pipe = await startPipeline({ onState: webhooks.onState });
+    closers.push(() => pipe.stop());
+    pipe.db.data.webhooks = [{ id: 'hook', type: 'available', url: receiver.url }];
 
     const film = movie({ rootId: 'movie', meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
     pipe.db.data.titles[film.key] = film;
     const name = 'Movie.Name.2019.1080p.BluRay.x264-GRP';
     pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     pipe.complete(name, { [`${name}.mkv`]: 'video-data' });
 
-    await until(() => entry!.stage === 'available');
+    await until(() => stageOf(entry!) === 'available');
     expect(pipe.db.data.titles[film.key]!.fileId).not.toBeNull();
     // The request is open and waits for an answer, and the import is done.
     await until(() => receiver.state.seen.length === 1);
@@ -367,8 +365,8 @@ describe('redaction', () => {
 
     // Two failed tries on a receiver that answers 500, then two on a port that nobody listens on.
     const webhooks = createWebhooks({ enqueue: (input) => worker.enqueue(input) });
-    const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
-    queue.move(queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
+    const queue = createQueue(createEvents(), () => {}, webhooks.onState);
+    move(queue, queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
     const skipWaits = () => {
       for (const job of jobsOf(app.db)) if (job.state === 'waiting') job.runAt = 0;
       return false;
@@ -453,11 +451,11 @@ describe('API', () => {
     worker.start();
     closers.push(() => worker.stop());
     const webhooks = createWebhooks({ enqueue: (input) => worker.enqueue(input) });
-    const queue = createQueue(createEvents(), () => {}, webhooks.onMove);
+    const queue = createQueue(createEvents(), () => {}, webhooks.onState);
 
     await app.fetchJson('POST', '/webhook', { type: 'available', url: old.url });
     const oldId = app.db.data.webhooks[0]!.id;
-    queue.move(queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
+    move(queue, queue.ensure('movie:2', null, null), { stage: 'available' }, 'imported');
     // The first try fails, and the retry waits for the backoff.
     await until(() => jobsOf(app.db)[0]?.state === 'waiting' && jobsOf(app.db)[0]?.attempts === 1);
     await app.del(`/webhook/${oldId}`);

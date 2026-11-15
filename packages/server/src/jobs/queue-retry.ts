@@ -33,7 +33,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: D
     const file = db.data.files[id!]!;
     catalog.info('available', 'The file is in the library', itemFields(entry), { source: 'retry', path: file.path, sizeBytes: file.sizeBytes });
     queue.endAttempt(entry, 'imported', 'the file is in the library');
-    queue.move(entry, { stage: 'available', branch: null, reason: null }, 'file is in the library', file.path);
+    queue.complete(entry, 'file is in the library', file.path);
     return true;
   }
 
@@ -48,7 +48,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: D
   // one of them resolves them together: the import reads them as one group, and a file that holds two episodes stays
   // one file. A target that the user paused, or that the user did not retry, stays out.
   const torrentTargets = (entry: QueueEntry, hash: string) =>
-    Object.values(db.data.queue).filter((other) => other.titleKey === entry.titleKey && isActive(other) && other.branch !== 'paused' && retrying(other) && (other.transferHash === hash || other.release?.infoHash === hash));
+    Object.values(db.data.queue).filter((other) => other.titleKey === entry.titleKey && isActive(other) && other.state.kind !== 'paused' && retrying(other) && (other.transferHash === hash || other.release?.infoHash === hash));
 
   // The torrent that the target points at. The client that has it is read first, so a finished torrent goes to its
   // import and a torrent that still downloads is waited for. The release is never fetched again in this case.
@@ -74,10 +74,10 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: D
       if (target.release) target.release.infoHash = hash;
       if (torrent.complete) {
         catalog.info('download_found', `The download client has "${torrent.name}". The import runs again.`, itemFields(target), fields);
-        queue.move(target, { stage: 'validating', branch: null, reason: null }, 'retry: the client has the torrent', torrent.name);
+        queue.enter(target, 'validating', 'retry: the client has the torrent', torrent.name);
       } else {
         catalog.info('download_found', `The download client has "${torrent.name}" and it is not complete. The target waits for it.`, itemFields(target), fields);
-        queue.move(target, { stage: 'downloading', branch: null, reason: null }, 'retry: the client has the torrent', torrent.name);
+        queue.enter(target, 'downloading', 'retry: the client has the torrent', torrent.name);
       }
     }
     if (targets.length && torrent.complete) {
@@ -94,7 +94,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: D
     const release = entry.release;
     if (!release || (!release.link && !release.magnet)) return false;
     catalog.info('release_kept', `The release "${release.title}" stays with the target. It goes to the client again.`, itemFields(entry), { release: release.title, indexer: release.indexerName, kind: release.kind });
-    queue.move(entry, { stage: 'fetching', branch: null, reason: null }, 'retry: the target has its release', release.title);
+    queue.enter(entry, 'fetching', 'retry: the target has its release', release.title);
     enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, dedupeKey: `grab:${entry.id}`, runAt: entry.createdAt, priority: entry.priority !== null });
     return true;
   }
@@ -106,7 +106,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: D
     entry.transferHash = null;
     entry.clientId = null;
     entry.search = null;
-    queue.move(entry, { stage: 'queued', branch: null, reason: null }, 'retry');
+    queue.enter(entry, 'queued', 'retry');
     finder.enqueueSearch({ titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id], fresh: true, ...(entry.season === null ? {} : { manual: true }) });
   }
 
@@ -129,7 +129,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: D
           for (const entry of group) {
             signal.throwIfAborted();
             // The user can pause or cancel the target while the retry waits for its title.
-            if (!isActive(entry) || (entry.branch !== null && entry.branch !== 'waiting')) continue;
+            if (!isActive(entry) || entry.state.kind === 'paused') continue;
             if (await fromLibrary(entry, title, fresh)) continue;
             if (await fromClient(entry)) continue;
             if (fromRelease(entry)) continue;

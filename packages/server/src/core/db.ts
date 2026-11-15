@@ -11,6 +11,7 @@ import type { Indexer } from '../library/grab/indexers.ts';
 import { randomUUID } from 'node:crypto';
 import type { ClientConfig } from '../library/downloads/qbittorrent.ts';
 import type { QueueEntry } from '../library/downloads/queue.ts';
+import { migrateQueue } from '../library/downloads/queue-migrate.ts';
 import type { ImportJournal } from '../library/imports/importer.ts';
 import type { VerificationState } from '../library/verification.ts';
 import type { SourceDownload, SourceEpisode } from '../migration/migration-source.ts';
@@ -22,7 +23,8 @@ import type { WebhookState } from './webhook.ts';
 // Version 2 keeps the queue work in queue.json, so an older version must not open the new db.json.
 // Version 5 removes the region and the time zone from the settings.
 // Version 6 splits the size limits of the qualities into one table for movies and one for series.
-export const SCHEMA_VERSION = 6;
+// Version 7 keeps one state for each queue target, in place of the stage, the branch, and the reason.
+export const SCHEMA_VERSION = 7;
 
 export type Settings = {
   setupCompleted: boolean;
@@ -300,11 +302,9 @@ export function withDefaults(data: Data): Data {
   for (const client of next.downloadClients) client.maxDownloads ??= 0;
   // The recovery folder is gone, so its job goes too.
   for (const job of Object.values(next.jobs)) if (job.type === 'import.clean') delete next.jobs[job.id];
-  // An older file had a branch for a target that stopped. The reason stays, and the stage shows the state.
-  for (const entry of Object.values(next.queue)) {
-    if ((entry.branch as string | null) === 'attention') entry.branch = null;
-    for (const event of entry.history ?? []) if ((event.branch as string | null) === 'attention') event.branch = null;
-  }
+  // An older file had a branch for a target that stopped. The state of the entry keeps the reason, and the migration
+  // maps the stage, the branch, and the reason of every entry and of every history event.
+  migrateQueue(next.queue);
   return next;
 }
 

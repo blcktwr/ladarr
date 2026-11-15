@@ -1,3 +1,4 @@
+import { move } from '../helpers/test-queue.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -109,9 +110,9 @@ describe('library verification', () => {
     cleanups.push(test.cleanup);
     requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
     await test.run();
-    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ stage: 'validating', transferHash: HASH, clientId: 'client-1' });
+    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'validating' }, transferHash: HASH, clientId: 'client-1' });
     expect(test.db.data.queue[`${test.key}:1x1`]!.release).toMatchObject({ external: true, manual: true });
-    expect(test.db.data.queue[`${test.key}:1x2`]).toMatchObject({ stage: 'queued', transferHash: null });
+    expect(test.db.data.queue[`${test.key}:1x2`]).toMatchObject({ state: { kind: 'queued' }, transferHash: null });
     expect(test.db.data.verifications[test.key]!.pending).toBe(false);
   });
 
@@ -120,7 +121,7 @@ describe('library verification', () => {
     cleanups.push(test.cleanup);
     requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
     await test.run();
-    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ stage: 'queued', transferHash: null });
+    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'queued' }, transferHash: null });
   });
 
   it('searches when the newest event failed and the torrent is not complete', async () => {
@@ -128,7 +129,7 @@ describe('library verification', () => {
     cleanups.push(test.cleanup);
     requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 9, failed: true }] });
     await test.run();
-    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ stage: 'queued', transferHash: null });
+    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'queued' }, transferHash: null });
   });
 
   it('resumes a stopped partial torrent', async () => {
@@ -137,7 +138,7 @@ describe('library verification', () => {
     requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
     await test.run();
     expect(test.fake.calls).toContain(`resume:${HASH}`);
-    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ stage: 'downloading' });
+    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'downloading' } });
   });
 
   it('keeps the work pending and starts no search when the client is unreachable', async () => {
@@ -174,7 +175,7 @@ describe('library verification', () => {
     cleanups.push(attached.cleanup);
     requestVerification((input) => enqueue(input), attached.key, { downloads: [{ hash: HASH, episodes: [], at: 1, id: 5, failed: false }] });
     await attached.run();
-    expect(attached.db.data.queue[attached.key]).toMatchObject({ stage: 'validating', transferHash: HASH });
+    expect(attached.db.data.queue[attached.key]).toMatchObject({ state: { kind: 'validating' }, transferHash: HASH });
 
     const missing = await setup({ mediaType: 'movie', episodes: [] });
     cleanups.push(missing.cleanup);
@@ -192,7 +193,7 @@ describe('library verification', () => {
     test.db.data.queue['tv:2:1x1']!.transferHash = HASH;
     requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
     await test.run();
-    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ stage: 'queued', transferHash: null });
+    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'queued' }, transferHash: null });
   });
 
   it('returns a blocked import to the search after a delay', async () => {
@@ -201,10 +202,10 @@ describe('library verification', () => {
     requestVerification((input) => enqueue(input), test.key, { downloads: [] });
     const entry = test.queue.ensure(test.key, 1, 1);
     test.queue.startAttempt(entry, 'attached download');
-    test.queue.move(entry, { stage: 'validating', reason: { code: 'torrent_missing' } }, 'torrent gone');
-    entry.stageSince = Date.now() - 31 * 60_000;
+    move(test.queue, entry, { stage: 'validating', reason: { code: 'torrent_missing' } }, 'torrent gone');
+    entry.stateSince = Date.now() - 31 * 60_000;
     await test.run();
-    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ stage: 'queued', branch: null, reason: null, transferHash: null });
+    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'queued' }, transferHash: null });
   });
 
   it('merges a second import into the waiting work without losing a hash', async () => {
@@ -338,6 +339,6 @@ describe('the sweep', () => {
     const key = 'tv:90';
     db.data.titles[key] = title(key, 'tv', [episode(1, 1, { airDate: '2001-01-01' })]);
     finder.sweep();
-    expect(db.data.queue[`${key}:1x1`]).toMatchObject({ stage: 'queued' });
+    expect(db.data.queue[`${key}:1x1`]).toMatchObject({ state: { kind: 'queued' } });
   });
 });

@@ -5,9 +5,9 @@ import { deprioritize, prioritize, type EnqueueInput, type Job } from '../../../
 import type { Clients } from '../../../library/downloads/client-api.ts';
 import type { Poller } from '../../../library/downloads/poller.ts';
 import { ClientError, type ClientHandle, type Torrent } from '../../../library/downloads/qbittorrent.ts';
-import { addedByApp, isActive, queueKey, type Queue, type QueueEntry } from '../../../library/downloads/queue.ts';
+import { addedByApp, isActive, phaseOfEntry, type Queue, type QueueEntry } from '../../../library/downloads/queue.ts';
 import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts';
-import { bySeasonNumber, label, lanePositions, shown } from '../../../helpers/queue.ts';
+import { bySeasonNumber, label, lanePositions, shown, statusOf } from '../../../helpers/queue.ts';
 
 export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
   type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'remove_torrent' | 'replace';
@@ -22,18 +22,20 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
   const sharing = (entry: QueueEntry) => sharingOf(entry);
 
   // The torrent is one that a target of ladarr sent to the client.
-  // Says if the action fits the stage of the entry. A refusal is clear and changes nothing.
+  // Says if the action fits the state of the entry. A refusal is clear and changes nothing.
   function supports(action: Action, entry: QueueEntry, removal?: { torrents: Map<string, Torrent>; attached: Set<string> }): string | null {
-    const early = ['queued', 'searching', 'fetching', 'sending'].includes(entry.stage);
+    const phase = phaseOfEntry(entry);
+    const early = ['queued', 'searching', 'fetching', 'sending'].includes(phase);
+    const work = ['queued', 'searching', 'fetching', 'sending', 'downloading'].includes(entry.state.kind);
     switch (action) {
       case 'pause':
-        return entry.branch === null && (early || entry.stage === 'downloading') ? null : 'The stage of this target does not allow a pause.';
+        return work && (early || entry.state.kind === 'downloading') ? null : 'The state of this target does not allow a pause.';
       case 'resume':
-        return entry.branch === 'paused' ? null : 'This target is not paused.';
+        return entry.state.kind === 'paused' ? null : 'This target is not paused.';
       case 'retry':
-        return entry.branch !== 'paused' && entry.branch !== 'cancelled' && entry.reason !== null ? null : 'This target does not need a retry.';
+        return entry.state.kind === 'blocked' ? null : 'This target does not need a retry.';
       case 'priority':
-        return isActive(entry) && entry.priority === null && entry.branch !== 'paused' && early ? null : 'Only waiting work can have priority.';
+        return isActive(entry) && entry.priority === null && entry.state.kind !== 'paused' && early ? null : 'Only waiting work can have priority.';
       case 'unpriority':
         return entry.priority !== null ? null : 'This target has no priority.';
       case 'remove_torrent': {
@@ -46,7 +48,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
       }
       case 'replace':
         // A target that stopped on a taken destination name. The importer finds the exact file again.
-        return entry.reason?.code === 'destination_exists' ? null : 'This target has no file to replace.';
+        return entry.state.kind === 'blocked' && entry.state.problem.code === 'destination_exists' ? null : 'This target has no file to replace.';
     }
   }
 
@@ -54,8 +56,11 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
   function scope(action: Action, entry: QueueEntry) {
     // The torrent goes for all targets that point at it.
     if (action === 'remove_torrent') return Object.values(db.data.queue).filter((other) => other.transferHash === entry.transferHash);
-    if ((action === 'pause' || action === 'resume') && entry.stage === 'downloading' && entry.transferHash) {
-      return Object.values(db.data.queue).filter((other) => other.transferHash === entry.transferHash && other.stage === 'downloading' && (action === 'pause' ? other.branch === null : other.branch === 'paused'));
+    if ((action === 'pause' || action === 'resume') && entry.state.kind === 'downloading' && entry.transferHash) {
+      const matching = action === 'pause' ? 'downloading' : 'paused';
+      return Object.values(db.data.queue).filter(
+        (other) => other.transferHash === entry.transferHash && (other.state.kind === 'downloading' || other.state.kind === 'paused') && other.state.kind === matching,
+      );
     }
     return [entry];
   }
@@ -69,23 +74,24 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
       const api = clients.get(entry.clientId)?.api;
       switch (action) {
         case 'pause': {
-          if (entry.stage === 'downloading') {
+          if (entry.state.kind === 'downloading') {
             if (!api) throw new ClientError('unreachable', 'No download client.');
             await api.setPaused(entry.transferHash!, true);
           }
-          queue.move(entry, { branch: 'paused' }, 'paused by the user');
+          queue.pause(entry, 'paused by the user');
           break;
         }
         case 'resume': {
-          if (entry.stage === 'downloading') {
+          const was = entry.state.kind === 'paused' ? entry.state.resume : null;
+          if (was === 'downloading') {
             if (!api) throw new ClientError('unreachable', 'No download client.');
             await api.setPaused(entry.transferHash!, false);
-            queue.move(entry, { branch: null }, 'resumed by the user');
-          } else if ((entry.stage === 'fetching' || entry.stage === 'sending') && entry.release) {
-            queue.move(entry, { branch: null }, 'resumed by the user');
+            queue.resume(entry, 'resumed by the user');
+          } else if ((was === 'fetching' || was === 'sending') && entry.release) {
+            queue.resume(entry, 'resumed by the user');
             enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, dedupeKey: `grab:${entry.id}`, runAt: entry.createdAt });
           } else {
-            queue.move(entry, { stage: 'queued', branch: null, reason: null }, 'resumed by the user');
+            queue.resume(entry, 'resumed by the user');
             finder.enqueueSearch({ titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id] });
           }
           break;
@@ -116,7 +122,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
           removed.add(entry.transferHash!);
           // The torrent is gone, so the record of the torrents that ladarr sent no longer covers it.
           delete db.data.sentTorrents[entry.transferHash!];
-          queue.move(entry, {}, 'torrent removed from the client', 'The data stays on the disk.');
+          queue.observe(entry, 'torrent removed from the client', 'The data stays on the disk.');
           entry.transferHash = null;
           entry.clientId = null;
           break;
@@ -134,9 +140,9 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     const { action, ids, group, preview } = (req.body ?? {}) as { action?: Action; ids?: unknown; group?: { titleKey?: string; season?: number | null }; preview?: boolean };
     if (!action || !ACTIONS.includes(action)) return void res.status(400).json({ error: 'invalid_action' });
     let picked: QueueEntry[];
-    // The retry of a title starts again only the targets that a reason stops. A target that waits for its next search
+    // The retry of a title starts again only the targets that a problem stops. A target that waits for its next search
     // is not stopped, so the row of the title does not search it again.
-    if (group && typeof group.titleKey === 'string') picked = groupEntries(group.titleKey, group.season ?? null).filter((entry) => action !== 'retry' || queueKey(entry) === 'stuck');
+    if (group && typeof group.titleKey === 'string') picked = groupEntries(group.titleKey, group.season ?? null).filter((entry) => action !== 'retry' || entry.state.kind === 'blocked');
     else if (Array.isArray(ids) && ids.length <= 1000 && ids.every((id) => typeof id === 'string')) picked = ids.flatMap((id) => (db.data.queue[id] && shown(db.data.queue[id]!) ? [db.data.queue[id]!] : []));
     else return void res.status(400).json({ error: 'invalid_request' });
 
@@ -174,7 +180,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     const list = [...affected.values()];
     const transfers = new Map<string, number>();
     for (const entry of list) if (entry.transferHash && ['pause', 'resume', 'remove_torrent'].includes(action)) transfers.set(entry.transferHash, (transfers.get(entry.transferHash) ?? 0) + 1);
-    const summary = { action, affected: list.map((entry) => ({ id: entry.id, label: label(entry), stage: entry.stage, key: queueKey(entry), lane: lane.get(entry.id) ?? null })), unsupported, sharedTransfers: [...transfers].map(([hash, count]) => ({ name: poller.transfer(hash)?.name ?? removal?.torrents.get(hash)?.name ?? hash, entries: count })) };
+    const summary = { action, affected: list.map((entry) => ({ id: entry.id, label: label(entry), status: statusOf(entry), phase: phaseOfEntry(entry), lane: lane.get(entry.id) ?? null })), unsupported, sharedTransfers: [...transfers].map(([hash, count]) => ({ name: poller.transfer(hash)?.name ?? removal?.torrents.get(hash)?.name ?? hash, entries: count })) };
     if (preview) return void res.json(summary);
     if (!list.length) return void res.status(409).json({ error: 'action_not_supported', unsupported });
     try {

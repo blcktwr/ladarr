@@ -56,7 +56,7 @@ export function dropTitle(key: string, queue?: Queue, cancelJob?: (id: string) =
     for (const entry of entries) {
       if (entry.attempt === 0 || !isActive(entry)) continue;
       queue.endAttempt(entry, 'cancelled');
-      queue.move(entry, { branch: 'cancelled', reason: null }, 'title removed');
+      queue.cancel(entry, 'title removed');
     }
   }
   for (const entry of entries) {
@@ -90,7 +90,7 @@ export function dropSeason(key: string, season: number, queue?: Queue, cancelJob
     for (const entry of entries) {
       if (entry.attempt === 0 || !isActive(entry)) continue;
       queue.endAttempt(entry, 'cancelled');
-      queue.move(entry, { branch: 'cancelled', reason: null }, 'season removed');
+      queue.cancel(entry, 'season removed');
     }
   }
   for (const entry of entries) {

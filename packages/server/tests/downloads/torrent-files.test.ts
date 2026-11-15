@@ -1,3 +1,5 @@
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { movie } from '../helpers/test-fixtures.ts';
 import { MIB, hashOf, startPipeline, until } from '../helpers/test-pipeline.ts';
@@ -20,7 +22,7 @@ describe('the files of the torrent of a target', () => {
     pipe.db.data.titles[m.key] = m;
     pipe.tracker.state.items = [{ title: NAME, size: 100 * MIB, files: ['Movie.Name.mkv', 'Movie.Name.es.srt'], comment: 'A comment from the writer' }];
     const [entry] = pipe.finder.requestSearch(m.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
 
     const answer = await api.get(`/queue/entries/${entry!.id}/torrent`);
     expect(answer.status).toBe(200);
@@ -51,7 +53,7 @@ describe('the files of the torrent of a target', () => {
     pipe.db.data.titles[m.key] = m;
     pipe.tracker.state.items = [];
     const [entry] = pipe.finder.requestSearch(m.key);
-    await until(() => entry!.branch === 'waiting' && entry!.reason?.code === 'no_results');
+    await until(() => branchOf(entry!) === 'waiting' && reasonOfEntry(entry!)?.code === 'no_results');
 
     const answer = await api.get(`/queue/entries/${entry!.id}/torrent`);
     expect(answer.status).toBe(404);

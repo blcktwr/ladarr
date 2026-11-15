@@ -22,7 +22,7 @@ test.beforeEach(async ({ context }) => {
 });
 
 test('replaces the file that holds the destination name when the user asks', async ({ page }) => {
-  await expect.poll(async () => (await entry())?.stage, { timeout: 60_000 }).toBe('downloading');
+  await expect.poll(async () => (await entry())?.status, { timeout: 60_000 }).toBe('downloading');
 
   const folder = join(stack.folders.movies, 'Movie Name (2019)');
   const file = join(folder, 'Movie Name (2019).mkv');
@@ -41,6 +41,6 @@ test('replaces the file that holds the destination name when the user asks', asy
   await page.getByRole('button', { name: 'Replace the file', exact: true }).click();
   await page.getByRole('button', { name: 'Replace', exact: true }).click();
 
-  await expect.poll(async () => (await entry())?.stage, { timeout: 60_000 }).toBe('available');
+  await expect.poll(async () => (await entry())?.status, { timeout: 60_000 }).toBe('available');
   expect(readFileSync(file, 'utf8')).toBe('video-data');
 });

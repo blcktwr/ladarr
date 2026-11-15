@@ -1,3 +1,6 @@
+import { move } from './helpers/test-queue.ts';
+import { stageOf, reasonOfEntry } from '../src/library/downloads/queue.ts';
+import { branchOf } from './helpers/test-queue.ts';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -14,7 +17,7 @@ afterEach(async () => {
   pipe = undefined;
 });
 
-const stagesOf = (entry: { history: { stage: string; branch: string | null }[] }) => entry.history.map((event) => (event.branch ? `${event.stage}/${event.branch}` : event.stage)).filter((stage, i, all) => stage !== all[i - 1]);
+const stagesOf = (entry: { history: { stage: string }[] }) => entry.history.map((event) => event.stage).filter((stage, i, all) => stage !== all[i - 1]);
 
 describe('movie journey', () => {
   it('goes from a search to a file in the library, and keeps the seeding source', async () => {
@@ -29,13 +32,13 @@ describe('movie journey', () => {
 
     const [entry] = pipe.finder.requestSearch(film.key);
     expect(entry!.id).toBe('movie:2');
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(entry!.release).toMatchObject({ title: name, kind: 'single' });
     expect(entry!.transferHash).toBe(hashOf(name));
     expect(pipe.qbit.torrents.get(hashOf(name))).toMatchObject({ tags: '', save_path: pipe.folders.downloads });
 
     pipe.complete(name, { [`${name}.mkv`]: 'video-data', 'Sample/sample.mkv': 'x', 'info.nfo': 'n' });
-    await until(() => entry!.stage === 'available');
+    await until(() => stageOf(entry!) === 'available');
 
     const file = Object.values(pipe.db.data.files)[0]!;
     expect(file.path).toBe('Movie Name (2019)/Movie Name (2019).mkv');
@@ -57,9 +60,9 @@ describe('movie journey', () => {
     pipe.db.data.titles[film.key] = film;
     pipe.tracker.state.items = [{ title: 'Movie.Name.2018.1080p.BluRay-GRP', size: 100 * 120 * MIB }, { title: 'Movie.Name.2019.CAM-GRP', size: 500 * MIB }];
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.branch === 'waiting');
-    expect(entry!.stage).toBe('queued');
-    expect(entry!.reason?.code).toBe('all_rejected');
+    await until(() => branchOf(entry!) === 'waiting');
+    expect(stageOf(entry!)).toBe('queued');
+    expect(reasonOfEntry(entry!)?.code).toBe('all_rejected');
     expect(entry!.search).toMatchObject({ result: 'all_rejected', candidates: 2, accepted: 0, indexers: [{ state: 'done', count: 2 }] });
     expect(entry!.search!.nextAt).toBeGreaterThan(Date.now());
     expect(entry!.search!.topRejections).toContain('year_mismatch');
@@ -86,7 +89,7 @@ describe('release comment', () => {
     pipe.tracker.state.items = [{ title: 'Movie.Name.2019.1080p.BluRay-GRP', size: 100 * 120 * MIB, comment }];
 
     const [entry] = pipe.finder.requestSearch(item.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(entry!.release?.comment).toBe(comment);
   });
 
@@ -97,7 +100,7 @@ describe('release comment', () => {
     pipe.tracker.state.items = [{ title: 'Movie.Name.2019.1080p.BluRay-GRP', size: 100 * 120 * MIB }];
 
     const [entry] = pipe.finder.requestSearch(item.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(entry!.release?.comment).toBeUndefined();
   });
 });
@@ -117,7 +120,7 @@ describe('series journey', () => {
     ];
     const entries = pipe.finder.requestSearch(series.key);
     expect(entries.map((e) => e.id)).toEqual(['tv:1:1x1', 'tv:1:1x2', 'tv:1:1x3']);
-    await until(() => entries.every((e) => e.stage === 'downloading'));
+    await until(() => entries.every((e) => stageOf(e) === 'downloading'));
     expect(pipe.qbit.torrents.size).toBe(1);
     expect(new Set(entries.map((e) => e.transferHash))).toEqual(new Set([hashOf(pack)]));
     // One query for the whole season, not one for each episode.
@@ -126,7 +129,7 @@ describe('series journey', () => {
 
     // The pack has episode 3 under another name that the library can not match.
     pipe.complete(pack, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two', 'extras/Show.Name.S01E03.mkv': 'three-data' });
-    await until(() => entries.every((e) => e.stage === 'available'));
+    await until(() => entries.every((e) => stageOf(e) === 'available'));
     const paths = Object.values(pipe.db.data.files).map((f) => f.path).sort();
     expect(paths).toEqual(['Show Name (2020)/Season 01/Show Name - S01E01 - Episode 1.mkv', 'Show Name (2020)/Season 01/Show Name - S01E02 - Episode 2.mkv', 'Show Name (2020)/Season 01/Show Name - S01E03 - Episode 3.mkv']);
     expect(series.episodes.every((e) => e.fileId)).toBe(true);
@@ -140,12 +143,12 @@ describe('series journey', () => {
     const files = ['Show.Name.S02E01.mkv', 'Show.Name.S02E02.mkv', 'Show.Name.S02E03.mkv'];
     pipe.tracker.state.items = [{ title: pack, size: 3 * 60 * 45 * MIB, files }];
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((e) => e.stage === 'downloading'));
+    await until(() => entries.every((e) => stageOf(e) === 'downloading'));
     expect(pipe.qbit.torrents.size).toBe(1);
     expect(pipe.db.data.blocklist).toEqual({});
 
     pipe.complete(pack, { 'Show.Name.S02E01.mkv': 'one', 'Show.Name.S02E02.mkv': 'two', 'Show.Name.S02E03.mkv': 'three' }, hashOf(pack, files));
-    await until(() => entries.every((e) => e.stage === 'available'));
+    await until(() => entries.every((e) => stageOf(e) === 'available'));
     const paths = Object.values(pipe.db.data.files).map((f) => f.path).sort();
     expect(paths).toEqual(['Show Name (2020)/Season 02/Show Name - S02E33 - Episode 33.mkv', 'Show Name (2020)/Season 02/Show Name - S02E34 - Episode 34.mkv', 'Show Name (2020)/Season 02/Show Name - S02E35 - Episode 35.mkv']);
     expect(series.episodes.every((e) => e.fileId)).toBe(true);
@@ -160,7 +163,7 @@ describe('series journey', () => {
       pipe.db.data.titles[series.key] = series;
       pipe.tracker.state.items = [];
       const entries = pipe.finder.requestSearch(series.key);
-      await until(() => entries.every((entry) => entry.stage === 'queued' && entry.branch === 'waiting'));
+      await until(() => entries.every((entry) => stageOf(entry) === 'queued' && branchOf(entry) === 'waiting'));
       // The two names of the title are two queries to the same indexer.
       expect(pipe.tracker.state.searches.filter((url) => url.searchParams.get('t') === 'tvsearch')).toHaveLength(2);
       await closeLog();
@@ -183,14 +186,14 @@ describe('series journey', () => {
     const pack = 'Show.Name.S01.1080p.WEB-DL-GRP';
     pipe.tracker.state.items = [{ title: pack, size: 3 * 60 * 45 * MIB }];
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((e) => e.stage === 'downloading'));
+    await until(() => entries.every((e) => stageOf(e) === 'downloading'));
     // The new search of the missing episode finds nothing.
     pipe.tracker.state.items = [];
     pipe.complete(pack, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E03.mkv': 'three' });
-    await until(() => entries.filter((e) => e.stage === 'available').length === 2 && entries[1]!.transferHash === null && entries[1]!.reason === null);
-    expect(entries.map((e) => e.stage)).toEqual(['available', 'queued', 'available']);
+    await until(() => entries.filter((e) => stageOf(e) === 'available').length === 2 && entries[1]!.transferHash === null && reasonOfEntry(entries[1]!) === null);
+    expect(entries.map((e) => stageOf(e))).toEqual(['available', 'queued', 'available']);
     // The missing episode is not blocked: the import queues the search that covers it.
-    expect(entries[1]).toMatchObject({ branch: null, transferHash: null });
+    expect(entries[1]).toMatchObject({ state: { kind: 'queued' }, transferHash: null });
     expect(Object.values(pipe.db.data.jobs).some((job) => job.type === 'queue.initial' && job.dedupeKey === `initial:${series.key}`)).toBe(true);
   });
 
@@ -202,15 +205,15 @@ describe('series journey', () => {
     const good = 'Show.Name.S01E01.1080p.WEBRip-BBB';
     pipe.tracker.state.items = [{ title: bad, size: 60 * 45 * MIB }, { title: good, size: 55 * 45 * MIB }];
     const [entry] = pipe.finder.requestSearch(series.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     // The best release is the WEB-DL.
     expect(entry!.release!.title).toBe(bad);
     expect(pipe.tracker.state.searches[0]!.searchParams.get('ep')).toBe('1');
 
     // The client reports a fault: this is a problem of the client, not a bad release, so the release stays out of the blocklist.
     pipe.qbit.progress(hashOf(bad), 0.4, 'missingFiles');
-    await until(() => entry!.reason?.code === 'client_error');
-    expect(entry!.reason).toMatchObject({ code: 'client_error' });
+    await until(() => reasonOfEntry(entry!)?.code === 'client_error');
+    expect(reasonOfEntry(entry!)).toMatchObject({ code: 'client_error' });
     expect(pipe.db.data.blocklist).toEqual({});
   });
 });
@@ -226,7 +229,7 @@ describe('safety of the grab', () => {
     pipe.finder.requestSearch(film.key);
     pipe.finder.requestSearch(film.key);
     const entry = pipe.queue.get(film.key)!;
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(pipe.qbit.torrents.size).toBe(1);
     expect(entry.attempts).toHaveLength(1);
@@ -241,7 +244,7 @@ describe('safety of the grab', () => {
     pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
     pipe.qbit.control.swallowAdds = 1;
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(pipe.qbit.torrents.size).toBe(1);
     expect(pipe.qbit.calls.filter((c) => c.path === 'torrents/add')).toHaveLength(1);
   });
@@ -254,9 +257,9 @@ describe('safety of the grab', () => {
     pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
     pipe.qbit.control.listDelayMs = 30;
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading');
-    expect(entry!.reason).toBeNull();
-    expect(entry!.branch).toBeNull();
+    await until(() => stageOf(entry!) === 'downloading');
+    expect(reasonOfEntry(entry!)).toBeNull();
+    expect(branchOf(entry!)).toBeNull();
     expect(entry!.attempts).toHaveLength(1);
     // The try does not fail while the client lists the torrent.
     expect(entry!.history.filter((event) => event.cause === 'grab will be tried again')).toEqual([]);
@@ -271,7 +274,7 @@ describe('safety of the grab', () => {
     const good = 'Movie.Name.2019.1080p.BluRay-GRP';
     pipe.tracker.state.items = [{ title: bad, size: 100 * 60 * MIB, bad: true }, { title: good, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(entry!.release!.title).toBe(good);
 
     // The bad release fails while ladarr reads it. That attempt stops in fetching, before any request to the client.
@@ -289,15 +292,15 @@ describe('safety of the grab', () => {
     const name = 'Movie.Name.2019.1080p.BluRay-GRP';
     pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     pipe.qbit.progress(hashOf(name), 0.5);
     await until(() => pipe!.poller.transfer(hashOf(name))?.progress === 0.5);
 
     pipe.qbit.control.down = true;
     await until(() => pipe!.poller.status().state === 'unreachable');
     expect(pipe.poller.transfer(hashOf(name))).toMatchObject({ progress: 0.5, stale: true });
-    expect(entry!.stage).toBe('downloading');
-    expect(entry!.branch).toBeNull();
+    expect(stageOf(entry!)).toBe('downloading');
+    expect(branchOf(entry!)).toBeNull();
     expect(pipe.db.data.blocklist).toEqual({});
 
     pipe.qbit.control.down = false;
@@ -315,7 +318,7 @@ describe('safety of the grab', () => {
     const name = 'Movie.Name.2019.1080p.BluRay-GRP';
     pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(entry!.search!.indexers.map((i) => i.state).sort()).toEqual(['done', 'failed']);
     expect(pipe.db.data.indexers[2]!.health.failures).toBe(1);
   });
@@ -329,7 +332,7 @@ describe('import safety', () => {
     const name = 'Movie.Name.2019.1080p.BluRay-GRP';
     pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     return { film, name, entry: entry! };
   };
 
@@ -341,7 +344,7 @@ describe('import safety', () => {
   it('copies when a hard link is not possible, and leaves the source as it is', async () => {
     const { name, entry, film } = await setup({ fs: { link: noLink('EXDEV') } });
     pipe!.complete(name, { [`${name}.mkv`]: 'video-data' });
-    await until(() => entry.stage === 'available');
+    await until(() => stageOf(entry) === 'available');
     const file = pipe!.db.data.files[pipe!.db.data.titles[film.key]!.fileId!]!;
     expect(entry.importResult).toMatchObject({ method: 'copy' });
     const source = join(pipe!.folders.downloads, name, `${name}.mkv`);
@@ -363,8 +366,8 @@ describe('import safety', () => {
       },
     });
     pipe!.complete(name, { [`${name}.mkv`]: 'video-data' });
-    await until(() => entry.reason?.code === reason);
-    expect(entry.reason?.code).toBe(reason);
+    await until(() => reasonOfEntry(entry)?.code === reason);
+    expect(reasonOfEntry(entry)?.code).toBe(reason);
     expect(readdirSync(join(pipe!.folders.movies, 'Movie Name (2019)'))).toEqual([]);
     expect(Object.values(pipe!.db.data.files)).toHaveLength(0);
     expect(pipe!.db.data.imports).toEqual({});
@@ -377,8 +380,8 @@ describe('import safety', () => {
     mkdirSync(join(pipe!.folders.movies, 'Movie Name (2019)'));
     writeFileSync(join(pipe!.folders.movies, 'Movie Name (2019)', 'Movie Name (2019).mkv'), 'someone else');
     pipe!.complete(name, { [`${name}.mkv`]: 'video-data' });
-    await until(() => entry.reason?.code === 'destination_exists');
-    expect(entry.reason?.code).toBe('destination_exists');
+    await until(() => reasonOfEntry(entry)?.code === 'destination_exists');
+    expect(reasonOfEntry(entry)?.code).toBe('destination_exists');
     expect(readFileSync(join(pipe!.folders.movies, 'Movie Name (2019)', 'Movie Name (2019).mkv'), 'utf8')).toBe('someone else');
     expect(pipe!.db.data.titles[film.key]!.fileId).toBeNull();
     expect(readdirSync(join(pipe!.folders.movies, 'Movie Name (2019)'))).toEqual(['Movie Name (2019).mkv']);
@@ -395,7 +398,7 @@ describe('import safety', () => {
     await link(source, join(folder, 'Movie Name (2019).mkv'));
     pipe!.complete(name, { [`${name}.mkv`]: 'video-data' });
 
-    await until(() => entry.stage === 'available');
+    await until(() => stageOf(entry) === 'available');
     const file = Object.values(pipe!.db.data.files)[0]!;
     expect(file.path).toBe('Movie Name (2019)/Movie Name (2019).mkv');
     expect(pipe!.db.data.titles[film.key]!.fileId).toBe(file.id);
@@ -419,11 +422,11 @@ describe('import safety', () => {
     });
     pipe!.poller.stop();
     pipe!.complete(name, { [`${name}.mkv`]: 'video-data' });
-    pipe!.queue.move(entry, { stage: 'validating', reason: null }, 'download complete');
+    move(pipe!.queue, entry, { stage: 'validating', reason: null }, 'download complete');
     pipe!.worker.enqueue({ type: 'import.run', payload: { hash: hashOf(name) }, dedupeKey: `import:${hashOf(name)}` });
 
     // The next run of the import finishes the record. The file is not left without one.
-    await until(() => entry.stage === 'available', 15_000);
+    await until(() => stageOf(entry) === 'available', 15_000);
     const file = Object.values(pipe!.db.data.files)[0]!;
     expect(file.path).toBe('Movie Name (2019)/Movie Name (2019).mkv');
     expect(pipe!.db.data.titles[film.key]!.fileId).toBe(file.id);
@@ -434,8 +437,8 @@ describe('import safety', () => {
   it('blocks a file that ffprobe can not read', async () => {
     const { name, entry } = await setup({ probe: async () => ({ ok: false, reason: 'unreadable' }) });
     pipe!.complete(name, { [`${name}.mkv`]: 'broken' });
-    await until(() => entry.reason?.code === 'file_unreadable');
-    expect(entry.reason?.code).toBe('file_unreadable');
+    await until(() => reasonOfEntry(entry)?.code === 'file_unreadable');
+    expect(reasonOfEntry(entry)?.code).toBe('file_unreadable');
     expect(existsSync(join(pipe!.folders.movies, 'Movie Name (2019)'))).toBe(false);
   });
 
@@ -446,7 +449,7 @@ describe('import safety', () => {
     const name = 'Show.Name.S01.1080p.WEB-DL-GRP';
     pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
     pipe.finder.requestSearch(series.key);
-    await until(() => pipe!.queue.get('tv:1:1x2')?.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('tv:1:1x2')) === 'downloading');
     // The client created no folder for this torrent, so it reports the folder of every download as the content.
     const hash = hashOf(name);
     pipe.qbit.torrents.get(hash)!.content_path = pipe.folders.downloads;
@@ -461,7 +464,7 @@ describe('import safety', () => {
     writeFileSync(join(pipe.folders.downloads, 'Other.Show', 'Show.Name.S01E01.mkv'), 'x'.repeat(50));
     writeFileSync(join(pipe.folders.downloads, 'Other.Show', 'Show.Name.S01E02.mkv'), 'x'.repeat(50));
     pipe.qbit.progress(hash, 1);
-    await until(() => ['1x1', '1x2'].every((n) => pipe!.queue.get(`tv:1:${n}`)?.stage === 'available'), 15_000);
+    await until(() => ['1x1', '1x2'].every((n) => stageOf(pipe!.queue.get(`tv:1:${n}`)) === 'available'), 15_000);
     const contents = Object.values(pipe!.db.data.files).map((file) => readFileSync(join(pipe!.folders.tv, file.path), 'utf8'));
     expect(contents.sort()).toEqual(['own one', 'own two']);
   }, 20_000);
@@ -471,8 +474,8 @@ describe('import safety', () => {
     pipe!.qbit.torrents.get(hashOf(name))!.content_path = '/etc';
     pipe!.complete(name, { [`${name}.mkv`]: 'x' });
     pipe!.qbit.torrents.get(hashOf(name))!.content_path = '/etc';
-    await until(() => entry.reason?.code === 'path_outside_downloads');
-    expect(entry.reason?.code).toBe('path_outside_downloads');
+    await until(() => reasonOfEntry(entry)?.code === 'path_outside_downloads');
+    expect(reasonOfEntry(entry)?.code).toBe('path_outside_downloads');
   });
 
   // Every step of the journal: stop the import after the step, start again, and check the result.
@@ -493,7 +496,7 @@ describe('import safety', () => {
     // The journal is what remembers the work.
     expect(Object.keys(pipe!.db.data.imports)).toHaveLength(1);
     pipe!.worker.enqueue({ type: 'import.run', payload: { hash: hashOf(name) }, dedupeKey: `import:${hashOf(name)}` });
-    await until(() => entry.stage === 'available' && Object.keys(pipe!.db.data.imports).length === 0, 12_000);
+    await until(() => stageOf(entry) === 'available' && Object.keys(pipe!.db.data.imports).length === 0, 12_000);
     const file = pipe!.db.data.files[pipe!.db.data.titles[film.key]!.fileId!]!;
     expect(readFileSync(join(pipe!.folders.movies, file.path), 'utf8')).toBe('video-data');
     expect(Object.values(pipe!.db.data.files)).toHaveLength(1);
@@ -515,9 +518,9 @@ describe('item logs', () => {
       const name = 'Movie.Name.2019.1080p.BluRay.x264-GRP';
       pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
       const [entry] = pipe.finder.requestSearch(film.key);
-      await until(() => entry!.stage === 'downloading');
+      await until(() => stageOf(entry!) === 'downloading');
       pipe.complete(name, { [`${name}.mkv`]: 'video-data' });
-      await until(() => entry!.stage === 'available');
+      await until(() => stageOf(entry!) === 'available');
       await closeLog();
       const lines = await recentLogs(200, { itemId: entry!.id, itemType: 'movie' });
       const events = lines.map((line) => line.event);
@@ -568,7 +571,7 @@ describe('item logs', () => {
         { title: 'Other.Movie.2019.1080p.WEB-DL-GRP', size: 60 * 100 * MIB },
       ];
       const [entry] = pipe.finder.requestSearch(film.key);
-      await until(() => entry!.reason?.code === 'all_rejected');
+      await until(() => reasonOfEntry(entry!)?.code === 'all_rejected');
       await closeLog();
       const lines = await recentLogs(200, { itemId: entry!.id, itemType: 'movie' });
       const finished = lines.find((line) => line.event === 'finished');
@@ -605,7 +608,7 @@ describe('item logs', () => {
       pipe.db.data.titles[film.key] = film;
       pipe.tracker.state.items = [{ title: 'Movie.Name.2019.1080p.BluRay-GRP', size: 100 * 120 * MIB }];
       const [entry] = pipe.finder.requestSearch(film.key);
-      await until(() => entry!.reason?.code === 'grab_failed');
+      await until(() => reasonOfEntry(entry!)?.code === 'grab_failed');
       await closeLog();
       const entries = await recentLogs(200, { itemId: entry!.id, itemType: 'movie' });
       expect(entries.map((line) => line.event)).toContain('download_failed');
@@ -629,7 +632,7 @@ describe('paused queue', () => {
 
     // The row exists while the queue is paused, and no search goes out.
     await until(() => pipe!.db.data.queue[film.key]?.attempt === 1);
-    expect(pipe.db.data.queue[film.key]).toMatchObject({ stage: 'queued', branch: null });
+    expect(pipe.db.data.queue[film.key]).toMatchObject({ state: { kind: 'queued' } });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(pipe.tracker.state.searches).toEqual([]);
 

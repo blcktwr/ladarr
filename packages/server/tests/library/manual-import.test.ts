@@ -1,3 +1,6 @@
+import { move } from '../helpers/test-queue.ts';
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -293,25 +296,25 @@ describe('import', () => {
       queue.request(entry, 'test');
       return entry;
     });
-    queue.move(waiting!, { branch: 'waiting' }, 'no release');
-    queue.move(loading!, { stage: 'downloading' }, 'client has it');
+    move(queue, waiting!, { branch: 'waiting' }, 'no release');
+    move(queue, loading!, { stage: 'downloading' }, 'client has it');
     loading!.transferHash = 'a'.repeat(40);
-    queue.move(paused!, { branch: 'paused' }, 'paused');
-    queue.move(attention!, { stage: 'validating', reason: { code: 'file_not_found' } }, 'no file');
+    move(queue, paused!, { branch: 'paused' }, 'paused');
+    move(queue, attention!, { stage: 'validating', reason: { code: 'file_not_found' } }, 'no file');
     // A download import that met a full disk leaves the target in Importing with a block.
-    queue.move(blocked!, { stage: 'importing', reason: { code: 'disk_full' } }, 'import blocked');
+    move(queue, blocked!, { stage: 'importing', reason: { code: 'disk_full' } }, 'import blocked');
     t.write(t.inbox, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two', 'Show.Name.S01E03.mkv': 'three', 'Show.Name.S01E04.mkv': 'four', 'Show.Name.S01E05.mkv': 'five' });
     const started = await importFolder(t.inbox);
     await t.finished(started.body.id);
 
-    expect(waiting).toMatchObject({ stage: 'available', branch: null, reason: null, importResult: { ok: true, method: 'hardlink', path: E01 } });
+    expect(waiting).toMatchObject({ state: { kind: 'available' }, importResult: { ok: true, method: 'hardlink', path: E01 } });
     expect(waiting!.attempts.at(-1)).toMatchObject({ outcome: 'imported' });
     expect(waiting!.history.at(-1)).toMatchObject({ cause: 'imported by hand' });
-    expect(attention).toMatchObject({ stage: 'available', branch: null, reason: null });
-    expect(blocked).toMatchObject({ stage: 'available', branch: null, reason: null });
+    expect(attention).toMatchObject({ state: { kind: 'available' } });
+    expect(blocked).toMatchObject({ state: { kind: 'available' } });
     // A download in work and a pause are the choice of the user.
-    expect(loading).toMatchObject({ stage: 'downloading', branch: null, transferHash: 'a'.repeat(40) });
-    expect(paused).toMatchObject({ stage: 'queued', branch: 'paused' });
+    expect(loading).toMatchObject({ state: { kind: 'downloading' }, transferHash: 'a'.repeat(40) });
+    expect(paused).toMatchObject({ state: { kind: 'paused', resume: 'queued', problem: null } });
     expect(Object.values(t.pipe.db.data.files)).toHaveLength(5);
   });
 
@@ -320,12 +323,12 @@ describe('import', () => {
     const [entry] = t.pipe.finder.requestSearch('tv:1', { season: 1, number: 1 });
     // The indexer answers after the import: the answer has no release.
     t.pipe.tracker.state.answer = () => {
-      t!.pipe.queue.move(entry!, { stage: 'available', branch: null, reason: null }, 'imported by hand');
+      move(t!.pipe.queue, entry!, { stage: 'available', branch: null, reason: null }, 'imported by hand');
       return [];
     };
     await until(() => t!.pipe.tracker.state.searches.length > 0);
     await sleep(200);
-    expect(entry).toMatchObject({ stage: 'available', branch: null });
+    expect(entry).toMatchObject({ state: { kind: 'available' } });
     expect(entry!.history.at(-1)!.cause).toBe('imported by hand');
   });
 
@@ -336,14 +339,14 @@ describe('import', () => {
     const name = 'Movie.Name.2019.1080p.BluRay-GRP';
     t.pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
     const [entry] = t.pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     t.pipe.db.data.imports.busy = { id: 'busy', hash: 'rename:busy', titleKey: film.key, steps: [], createdAt: 0, kind: 'rename', sourceBase: t.pipe.folders.movies };
     t.pipe.complete(name, { [`${name}.mkv`]: 'video-data' });
     await sleep(300);
     // The target is not blocked. It waits.
-    expect(entry).toMatchObject({ stage: 'validating', branch: null, reason: null });
+    expect(entry).toMatchObject({ state: { kind: 'validating' } });
     delete t.pipe.db.data.imports.busy;
-    await until(() => entry!.stage === 'available');
+    await until(() => stageOf(entry!) === 'available');
   });
 
   it('does not start a second journal for a title that has one', async () => {

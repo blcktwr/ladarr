@@ -1,3 +1,5 @@
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -160,7 +162,7 @@ describe('Seerr request for a movie', () => {
     expect(pipe.db.data.titles['movie:603']).toMatchObject({ preset: 'p1080', rootId: 'movie', paused: false, manualRelease: false });
 
     // The search and the grab run in ladarr. The download tracker of Seerr asks for the queue.
-    await until(() => pipe.db.data.queue['movie:603']?.stage === 'downloading');
+    await until(() => stageOf(pipe.db.data.queue['movie:603']) === 'downloading');
     await radarr.refreshMonitoredDownloads();
     const [item] = await radarr.getQueue();
     expect(item).toMatchObject({ movieId: 603, title: RELEASE, status: 'downloading', protocol: 'torrent' });
@@ -170,7 +172,7 @@ describe('Seerr request for a movie', () => {
     expect((await radarr.getMovies()).find((m: any) => m.tmdbId === 603)).toMatchObject({ hasFile: false, monitored: true });
 
     pipe.complete(RELEASE, { [`${RELEASE}.mkv`]: 'video-data' });
-    await until(() => pipe.db.data.queue['movie:603']?.stage === 'available');
+    await until(() => stageOf(pipe.db.data.queue['movie:603']) === 'available');
 
     // The scanner and the availability sync of Seerr see the file.
     expect((await radarr.getMovies()).find((m: any) => m.tmdbId === 603)).toMatchObject({ id: 603, hasFile: true, monitored: true });
@@ -207,7 +209,7 @@ describe('Seerr request for a movie', () => {
     expect(done).toMatchObject({ id: 1, name: 'MoviesSearch', result: 'successful' });
     // The command ended because the search ended: the search found the release.
     expect(pipe.db.data.queue['movie:603']!.search).toMatchObject({ result: 'grabbed' });
-    expect(['fetching', 'sending', 'downloading']).toContain(pipe.db.data.queue['movie:603']!.stage);
+    expect(['fetching', 'sending', 'downloading']).toContain(stageOf(pipe.db.data.queue['movie:603']!));
 
     // The movie is monitored and in the queue. A search command has nothing to do, and it says so.
     expect(await radarr.searchMovie(603)).toMatchObject({ id: 2, status: 'completed', result: 'successful', message: expect.stringContaining('Nothing to search') });
@@ -218,7 +220,7 @@ describe('Seerr request for a movie', () => {
     const { pipe, radarr, key } = rig;
     pipe.tracker.state.items = [];
     await rig.app.post('/library', { mediaType: 'movie', tmdbId: 603, add: 'all' });
-    await eventually(async () => pipe.db.data.queue['movie:603'], (entry) => entry?.branch === 'waiting');
+    await eventually(async () => pipe.db.data.queue['movie:603'], (entry) => Boolean(entry && branchOf(entry) === 'waiting'));
 
     // The command is queued while its search runs, and the answer says so.
     const first = await radarr.searchMovie(603);
@@ -260,7 +262,7 @@ describe('Seerr request for a movie', () => {
     const { pipe, radarr, app } = rig;
     pipe.tracker.state.items = [];
     await app.post('/library', { mediaType: 'movie', tmdbId: 603, add: 'all' });
-    await eventually(async () => pipe.db.data.queue['movie:603'], (entry) => entry?.branch === 'waiting', 15_000);
+    await eventually(async () => pipe.db.data.queue['movie:603'], (entry) => Boolean(entry && branchOf(entry) === 'waiting'), 15_000);
     // A waiting search for a later time is not work that the command waits for.
     const jobsLeft = () =>
       Object.values(pipe.db.data.jobs).filter(
@@ -272,7 +274,7 @@ describe('Seerr request for a movie', () => {
     await until(() => jobsLeft() === 0);
 
     const first = await radarr.searchMovie(603);
-    await until(() => pipe.db.data.queue['movie:603']!.branch === 'waiting' && jobsLeft() === 0, 15_000);
+    await until(() => branchOf(pipe.db.data.queue['movie:603']) === 'waiting' && jobsLeft() === 0, 15_000);
     // The next search of the entry stays in the queue, and the first command does not wait for it.
     expect(Object.values(pipe.db.data.jobs).filter((job) => job.type === 'queue.search' && job.state === 'waiting' && job.runAt > Date.now()).map((job) => (job.payload as { entryIds: string[] }).entryIds)).toEqual([['movie:603']]);
     // The first search ended. The second search starts before anyone reads the first command.
@@ -331,7 +333,7 @@ describe('Seerr request for a series', () => {
     expect(pipe.db.data.titles['tv:1396']!.seasonOverrides).toEqual({ 2: 'unmonitored' });
 
     // The first search waits for the episodes. If it runs too early, it tries again after the backoff of the job queue, like the add form does.
-    await until(() => ['tv:1396:1x1', 'tv:1396:1x2'].every((id) => pipe.db.data.queue[id]?.stage === 'downloading'), 12_000);
+    await until(() => ['tv:1396:1x1', 'tv:1396:1x2'].every((id) => stageOf(pipe.db.data.queue[id]) === 'downloading'), 12_000);
     expect(Object.keys(pipe.db.data.queue).sort()).toEqual(['tv:1396:1x1', 'tv:1396:1x2']);
     await sonarr.refreshMonitoredDownloads();
     const queue = await sonarr.getQueue();
@@ -347,7 +349,7 @@ describe('Seerr request for a series', () => {
     expect(before.seasons.find((s: any) => s.seasonNumber === 1)).toMatchObject({ monitored: true, statistics: { episodeFileCount: 0, totalEpisodeCount: 2 } });
 
     pipe.complete(pack, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two' });
-    await until(() => ['tv:1396:1x1', 'tv:1396:1x2'].every((id) => pipe.db.data.queue[id]?.stage === 'available'));
+    await until(() => ['tv:1396:1x1', 'tv:1396:1x2'].every((id) => stageOf(pipe.db.data.queue[id]) === 'available'));
 
     const listed = (await sonarr.getSeries()).find((s: any) => s.tvdbId === 81189);
     expect(listed.seasons.map((s: any) => [s.seasonNumber, s.monitored, s.statistics.episodeFileCount, s.statistics.totalEpisodeCount])).toEqual([
@@ -401,7 +403,7 @@ describe('Seerr request for a series', () => {
     expect(done).toMatchObject({ name: 'MissingEpisodeSearch', body: { seriesId: 1396 }, result: 'successful' });
     // Three aired and monitored episodes had no file. Each one has a finished search.
     expect(Object.keys(pipe.db.data.queue).sort()).toEqual(['tv:1396:1x1', 'tv:1396:1x2', 'tv:1396:2x1']);
-    expect(Object.values(pipe.db.data.queue).map((entry) => entry.branch)).toEqual(['waiting', 'waiting', 'waiting']);
+    expect(Object.values(pipe.db.data.queue).map((entry) => branchOf(entry))).toEqual(['waiting', 'waiting', 'waiting']);
   });
 });
 

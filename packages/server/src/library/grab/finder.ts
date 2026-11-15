@@ -8,7 +8,7 @@ import { explainProfile } from './quality.ts';
 import { enqueue as enqueueJob, JobError, prioritize, type EnqueueInput, type Job } from '../../core/jobs.ts';
 import { isMonitored, movieEligibleAt, type Episode, type Title } from '../library.ts';
 import { catalog, itemFields, titleFields } from '../../core/log.ts';
-import { entryId, isActive, queueKey, type Queue, type QueueEntry, type ReleaseRef, type SearchState } from '../downloads/queue.ts';
+import { entryId, isActive, phaseOfEntry, type Queue, type QueueEntry, type ReleaseRef, type SearchState } from '../downloads/queue.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import type { IndexerService, RawRelease, SearchQuery } from './torznab.ts';
 import { manualUpgradeTargets } from './upgrades.ts';
@@ -77,7 +77,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
 
   function decideContext(manual = false): Context {
     const hashes = new Set<string>();
-    for (const entry of Object.values(db.data.queue)) if (entry.transferHash && isActive(entry) && entry.stage !== 'queued') hashes.add(entry.transferHash);
+    for (const entry of Object.values(db.data.queue)) if (entry.transferHash && isActive(entry) && phaseOfEntry(entry) !== 'queued') hashes.add(entry.transferHash);
     return {
       settings: db.data.settings,
       quality: db.data,
@@ -173,8 +173,8 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       if (only && !only.has(entryId(titleKey, targetSeason, targetNumber))) return undefined;
       const entry = queue.ensure(titleKey, targetSeason, targetNumber);
       // An entry that waits for a release searches again now. Any other active entry already has work.
-      if (entry.branch === 'waiting') {
-        queue.move(entry, { stage: 'queued', branch: null, reason: null }, reason);
+      if (entry.state.kind === 'waiting') {
+        queue.enter(entry, 'queued', reason);
         return entry;
       }
       return queue.request(entry, reason) ? entry : undefined;
@@ -418,7 +418,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       if (present(fileOf(title, entry))) {
         catalog.info('finished', 'No better release: the current file stays', itemFields(entry), { result: 'no_better_release', profiles: shownProfiles });
         queue.endAttempt(entry, 'failed', 'no_better_release');
-        queue.move(entry, { stage: 'available', branch: null, reason: null }, 'no better release');
+        queue.complete(entry, 'no better release');
         continue;
       }
       // Every release that the search found and rejected. A person can take any of them by hand, so the list keeps the
@@ -484,14 +484,15 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
         profiles: shownProfiles,
         nextSearchAt: entry.search?.nextAt ? new Date(entry.search.nextAt).toISOString() : null,
       });
-      if (code === 'no_indexers') queue.move(entry, { stage: 'queued', branch: null, reason: { code: 'no_indexers' } }, 'search ended');
-      else queue.move(entry, { stage: 'queued', branch: 'waiting', reason: { code, detail: rejections.join(',') } }, 'search ended', code);
+      // A target that cannot search now keeps its problem, so the sweep does not start it again at once.
+      if (code === 'no_indexers') queue.block(entry, { code: 'no_indexers' }, 'search ended');
+      else queue.wait(entry, code === 'no_results' || code === 'all_rejected' ? code : code === 'indexers_failed' ? 'indexers_failed' : 'unspecified', 'search ended', code);
     }
   }
 
   // The reservation. It checks and changes in one step, so two searches cannot both take a target.
   function reserve(entries: QueueEntry[], decision: Decision, manual = false): boolean {
-    if (entries.some((entry) => entry.release || !['queued', 'searching'].includes(entry.stage) || entry.branch === 'cancelled' || entry.branch === 'paused')) return false;
+    if (entries.some((entry) => entry.release || !['queued', 'searching'].includes(entry.state.kind) || entry.state.kind === 'cancelled' || entry.state.kind === 'paused')) return false;
     const { release } = decision;
     const indexer = db.data.indexers[release.indexerId];
     const title = db.data.titles[entries[0]!.titleKey];
@@ -527,7 +528,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
         covers: entries.map((item) => item.id),
         profiles: profiles.map(explainProfile),
       });
-      queue.move(entry, { stage: 'fetching', branch: null, reason: null }, 'release selected', release.title);
+      queue.enter(entry, 'fetching', 'release selected', release.title);
     }
     // The worker starts the downloads in the order of the queue, so the first target of the list takes a free slot first.
     // A title keeps the position of its first target, as its row does.
@@ -543,15 +544,15 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     // A search job can run for targets that wait for their next search, so the job itself opens those targets.
     const entries = payload.entryIds
       .map((id) => queue.get(id))
-      .filter((entry): entry is QueueEntry => Boolean(entry) && isActive(entry) && (entry!.branch === 'waiting' || (entry!.branch === null && ['queued', 'searching'].includes(entry!.stage))));
+      .filter((entry): entry is QueueEntry => Boolean(entry) && isActive(entry) && (entry!.state.kind === 'waiting' || entry!.state.kind === 'queued' || entry!.state.kind === 'searching'));
     if (!entries.length) return;
-    for (const entry of entries) if (entry.branch === 'waiting') queue.move(entry, { stage: 'queued', branch: null, reason: null }, 'search again');
+    for (const entry of entries) if (entry.state.kind === 'waiting') queue.enter(entry, 'queued', 'search again');
     const startedAt = now();
     const ctx = decideContext();
     const profiles = profilesFor(ctx.quality, title);
     for (const entry of entries) {
       entry.search = { at: startedAt, indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null, rejected: [] };
-      queue.move(entry, { stage: 'searching' }, 'search started');
+      queue.enter(entry, 'searching', 'search started');
     }
     let open = entries;
     let asked = 0;
@@ -571,9 +572,9 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     const noteSeriesFinished = () => {
       if (title.mediaType === 'movie') return;
       const active = Object.values(db.data.queue).filter((entry) => entry.titleKey === title.key && isActive(entry));
-      const pending = active.some((entry) => entry.stage === 'searching' || entry.branch === 'paused' || (entry.stage === 'queued' && entry.branch === null));
+      const pending = active.some((entry) => entry.state.kind === 'searching' || entry.state.kind === 'paused' || entry.state.kind === 'queued');
       if (pending) return;
-      const waiting = active.filter((entry) => entry.branch === 'waiting');
+      const waiting = active.filter((entry) => entry.state.kind === 'waiting');
       const next = waiting.flatMap((entry) => (entry.search?.nextAt == null ? [] : [entry.search.nextAt]));
       const accepted = entries.filter((entry) => entry.release !== null).length;
       catalog.info('finished', `Series search finished: ${active.length} targets, ${accepted} accepted`, titleFields(title), {
@@ -707,7 +708,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     // Stops this run at the budget. The targets still wait, and a new job continues the search soon. The season
     // queries run again from the cache, so the next run spends its budget on the queries that did not run yet.
     const defer = (next?: SearchResume) => {
-      const remaining = open.filter((entry) => entry.stage === 'searching');
+      const remaining = open.filter((entry) => entry.state.kind === 'searching');
       if (!remaining.length) return;
       const nextAt = now() + SEARCH_CONTINUE_MS;
       for (const entry of remaining) {
@@ -717,7 +718,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
           nextSearchAt: new Date(nextAt).toISOString(),
           run: runId,
         });
-        queue.move(entry, { stage: 'queued', branch: 'waiting', reason: { code: 'search_deferred' } }, 'search deferred', 'budget');
+        queue.wait(entry, 'deferred', 'search deferred', 'budget');
       }
       enqueueSearch({ titleKey: payload.titleKey, season: payload.season, entryIds: remaining.map((entry) => entry.id), ...(next ? { resume: next } : {}) }, { runAt: nextAt, afterRun: true });
     };
@@ -769,7 +770,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
         if (manual) {
           // The user selected the target. Try each name until one of them returns releases.
           for (const entry of [...targets]) {
-            if (!open.includes(entry) || entry.stage !== 'searching') continue;
+            if (!open.includes(entry) || entry.state.kind !== 'searching') continue;
             for (const name of names) {
               const result = await ask({ kind: 'episode', season: entry.season!, number: entry.number! }, name, [entry], (item) => [wantFor(title, item)]);
               grabBest([entry], result.decisionsOf);
@@ -785,7 +786,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
           const start = resume?.phase === 'episode' ? Math.max(0, targets.findIndex((entry) => entry.id === resume.entryId)) : 0;
           for (let index = start; index < targets.length; index++) {
             const entry = targets[index]!;
-            if (!open.includes(entry) || entry.stage !== 'searching') continue;
+            if (!open.includes(entry) || entry.state.kind !== 'searching') continue;
             if (budget && budget.left <= 0) {
               defer({ phase: 'episode', entryId: entry.id });
               return;
@@ -806,7 +807,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
         const start = resume?.phase === 'absolute' ? Math.max(0, absoluteTargets.findIndex((entry) => entry.id === resume.entryId)) : 0;
         for (let index = start; index < absoluteTargets.length; index++) {
           const entry = absoluteTargets[index]!;
-          if (!open.includes(entry) || entry.stage !== 'searching') continue;
+          if (!open.includes(entry) || entry.state.kind !== 'searching') continue;
           if (budget && budget.left <= 0) {
             defer({ phase: 'absolute', entryId: entry.id });
             return;
@@ -823,19 +824,20 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     }
 
     // A manual import can settle a target while the indexers answer. That target is done, so it does not go back to the queue.
-    open = open.filter((entry) => entry.stage === 'searching');
+    open = open.filter((entry) => entry.state.kind === 'searching');
     if (!open.length) {
       noteSeriesFinished();
       return;
     }
-    // Every indexer failed: the job tries again with a backoff, because the cause may pass soon.
+    // Every indexer failed: the job tries again with a backoff, because the cause may pass soon. The target waits for
+    // the next run, and its row shows Searching.
     if (asked > 0 && answered === 0 && !final) {
-      for (const entry of open) queue.move(entry, { stage: 'queued', reason: { code: 'indexers_failed' } }, 'indexers failed');
+      for (const entry of open) queue.wait(entry, 'indexers_failed', 'indexers failed');
       throw new JobError('outage', 'No indexer answered.');
     }
     noResult(open, title, (entry) => all.get(entry.id) ?? [], asked, answered, foundReleases.size, profiles);
     // A target that still waits keeps its next search in the queue, so the page shows the future work now.
-    const waiting = open.filter((entry) => entry.branch === 'waiting' && entry.search?.nextAt);
+    const waiting = open.filter((entry) => entry.state.kind === 'waiting' && entry.search?.nextAt);
     const seasons = new Map<number | null, QueueEntry[]>();
     for (const entry of waiting) seasons.set(entry.season, [...(seasons.get(entry.season) ?? []), entry]);
     for (const group of seasons.values()) {
@@ -950,9 +952,9 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     for (const { decision, entry } of best.values()) {
       const target = entry();
       // A target that the user cancelled stays out of the queue. The user starts it again.
-      if (target.branch === 'cancelled') continue;
+      if (target.state.kind === 'cancelled') continue;
       // The entry may be in the journey already, or waiting. A release that RSS found ends the wait.
-      if (target.branch === 'waiting') queue.move(target, { stage: 'queued', branch: null, reason: null }, 'found by RSS');
+      if (target.state.kind === 'waiting') queue.enter(target, 'queued', 'found by RSS');
       else if (!queue.request(target, 'found by RSS')) continue;
       reserve([target], decision);
     }
@@ -970,19 +972,13 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     const again = new Map<string, { titleKey: string; season: number | null; entryIds: string[] }>();
     for (const entry of Object.values(db.data.queue)) {
       if (titleKey && entry.titleKey !== titleKey) continue;
-      if (!isActive(entry) || entry.branch === 'paused' || entry.branch === 'cancelled') continue;
-      if (!entry.reason || !REPAIR.has(entry.reason.code)) continue;
-      if (t - entry.stageSince < REPAIR_MS) continue;
-      catalog.info('repair', `The import stopped on ${entry.reason.code}. The search starts again.`, itemFields(entry), { code: entry.reason.code });
+      if (!isActive(entry) || entry.state.kind === 'paused' || entry.state.kind === 'cancelled') continue;
+      const problem = entry.state.kind === 'blocked' ? entry.state.problem : null;
+      if (!problem || !REPAIR.has(problem.code)) continue;
+      if (t - entry.stateSince < REPAIR_MS) continue;
+      catalog.info('repair', `The import stopped on ${problem.code}. The search starts again.`, itemFields(entry), { code: problem.code });
       queue.endAttempt(entry, 'failed', 'verification repair');
-      queue.startAttempt(entry, 'verification repair');
-      entry.release = null;
-      entry.transferHash = null;
-      entry.clientId = null;
-      entry.search = null;
-      entry.manualMatch = null;
-      entry.importResult = null;
-      queue.move(entry, { stage: 'queued', branch: null, reason: null }, 'verification repair', entry.reason.code);
+      queue.fallback(entry, 'verification repair', problem.code, 'verification repair');
       const key = `${entry.titleKey}|${entry.season ?? ''}`;
       const group = again.get(key) ?? { titleKey: entry.titleKey, season: entry.season, entryIds: [] };
       group.entryIds.push(entry.id);
@@ -1002,13 +998,12 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     }
     const again = new Map<string, { titleKey: string; season: number | null; entryIds: string[] }>();
     for (const entry of Object.values(db.data.queue)) {
-      if (entry.stage !== 'queued' || entry.branch !== null || entry.reason !== null || entry.attempt === 0) continue;
+      if (entry.state.kind !== 'queued' || entry.attempt === 0) continue;
       if (held.has(entry.id) || entry.attempts.at(-1)?.outcome !== 'running') continue;
       const title = db.data.titles[entry.titleKey];
       if (!title || title.paused) continue;
       catalog.warn('repair', 'The search of this target was lost. It starts again.', itemFields(entry), { code: 'lost_search' });
-      queue.endAttempt(entry, 'failed', 'lost search');
-      queue.startAttempt(entry, 'lost search');
+      queue.retryAttempt(entry, 'lost search');
       const key = `${entry.titleKey}|${entry.season ?? ''}`;
       const group = again.get(key) ?? { titleKey: entry.titleKey, season: entry.season, entryIds: [] };
       group.entryIds.push(entry.id);
@@ -1024,13 +1019,13 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     // with work gets the indexers first. The sort is stable, so the other groups keep their order.
     const foundNothing = (group: { entryIds: string[] }) => group.entryIds.every((id) => {
       const entry = db.data.queue[id];
-      return entry !== undefined && queueKey(entry) === 'not_found';
+      return entry !== undefined && entry.state.kind === 'waiting' && entry.state.outcome === 'no_results';
     });
     const lastIfNotFound = <T extends { entryIds: string[] }>(list: T[]) => list.sort((a, b) => Number(foundNothing(a)) - Number(foundNothing(b)));
     // Every target that waits keeps its next search in the queue, so the future work is visible at once.
     const waiting = new Map<string, { titleKey: string; season: number | null; entryIds: string[]; nextAt: number }>();
     for (const entry of Object.values(db.data.queue)) {
-      if (entry.branch !== 'waiting' || !entry.search?.nextAt) continue;
+      if (entry.state.kind !== 'waiting' || !entry.search?.nextAt) continue;
       const title = db.data.titles[entry.titleKey];
       if (!title || title.paused) continue;
       const key = `${entry.titleKey}|${entry.season ?? ''}`;
@@ -1046,7 +1041,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       const wanted = payload.entryIds.some((id) => {
         const entry = db.data.queue[id];
         const title = entry ? db.data.titles[entry.titleKey] : undefined;
-        return entry?.branch === 'waiting' && Boolean(title && !title.paused);
+        return entry?.state.kind === 'waiting' && Boolean(title && !title.paused);
       });
       if (!wanted) delete db.data.jobs[job.id];
     }
@@ -1059,7 +1054,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
     // The targets that are due, a season at a time. One request covers the season and its pack, also when it arrives later.
     const again = new Map<string, { titleKey: string; season: number | null; entryIds: string[] }>();
     for (const entry of Object.values(db.data.queue)) {
-      if (entry.branch !== 'waiting' || !entry.search?.nextAt || entry.search.nextAt > t) continue;
+      if (entry.state.kind !== 'waiting' || !entry.search?.nextAt || entry.search.nextAt > t) continue;
       const key = `${entry.titleKey}|${entry.season ?? ''}`;
       const group = again.get(key) ?? { titleKey: entry.titleKey, season: entry.season, entryIds: [] };
       group.entryIds.push(entry.id);
@@ -1078,7 +1073,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
           if (!wantedEpisode(title, episode)) continue;
           const id = entryId(title.key, episode.season, episode.number);
           const entry = db.data.queue[id];
-          if (entry?.branch === 'cancelled') continue;
+          if (entry?.state.kind === 'cancelled') continue;
           if (!entry) requestSearch(title.key, { season: episode.season, number: episode.number, reason: 'episode aired' });
         }
       }
@@ -1128,7 +1123,7 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
   function grabManual(entries: QueueEntry[], release: RawRelease, want: Want) {
     const decision = decide(release, want, decideContext(true));
     for (const entry of entries) {
-      if (entry.branch === 'waiting') queue.move(entry, { stage: 'queued', branch: null, reason: null }, 'release chosen by the user');
+      if (entry.state.kind === 'waiting') queue.enter(entry, 'queued', 'release chosen by the user');
       else queue.request(entry, 'release chosen by the user');
     }
     return reserve(entries, decision, true) ? { reserved: true } : { rejections: ['already_downloading'] };
@@ -1151,15 +1146,12 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: ${cause}`, itemFields(entry), { code: cause, release: entry.release?.title ?? null, ...detail });
       if (entry.release) block(entry.release, cause, entry.titleKey, entry.season);
       queue.endAttempt(entry, 'failed', cause);
-      entry.release = null;
-      entry.transferHash = null;
-      entry.clientId = null;
+      Object.assign(entry, { release: null, transferHash: null, clientId: null });
       if (entry.attempt >= MAX_ATTEMPTS) {
-        queue.move(entry, { stage: 'queued', branch: null, reason: { code: 'too_many_attempts', detail: cause } }, 'attempts used', cause);
+        queue.block(entry, { code: 'too_many_attempts', detail: cause }, 'attempts used', cause);
         continue;
       }
-      queue.startAttempt(entry, `fallback: ${cause}`);
-      queue.move(entry, { stage: 'queued', branch: null, reason: null }, 'fallback', cause);
+      queue.fallback(entry, cause);
       again.push(entry);
     }
     const bySeason = new Map<string, QueueEntry[]>();

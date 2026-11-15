@@ -1,3 +1,5 @@
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -33,8 +35,9 @@ describe('multiple versions of a title', () => {
       // The entry of the old download is available and still knows the torrent that gave the file.
       const oldEntry = pipe.queue.ensure(film.key, null, null);
       Object.assign(oldEntry, {
-        stage: 'available',
-        stageSince: 1,
+        state: { kind: 'available' },
+        stateSince: 1,
+        phaseSince: 1,
         attempt: 1,
         attempts: [{ n: 1, startedAt: 1, endedAt: 2, reason: 'title added', release: 'Old Release', outcome: 'imported' }],
         release: { guid: 'old', indexerId: 1, indexerName: 'Indexer', title: 'Movie.Name.2019.720p.WEB-DL-GRP', sizeBytes: 1, infoHash: 'old-hash', link: null, magnet: null, kind: 'single' as const, seeders: 1, manual: false },
@@ -51,9 +54,9 @@ describe('multiple versions of a title', () => {
 
       await until(() => Boolean(pipe.queue.get(film.key)));
       const entry = pipe.queue.get(film.key)!;
-      await until(() => entry.stage === 'downloading');
+      await until(() => stageOf(entry) === 'downloading');
       pipe.complete(name, { [`${name}.mkv`]: 'new-data' });
-      await until(() => entry.stage === 'available', 12_000);
+      await until(() => stageOf(entry) === 'available', 12_000);
 
       const files = Object.values(pipe.db.data.files).filter((file) => file.titleKey === film.key);
       expect(files).toHaveLength(2);

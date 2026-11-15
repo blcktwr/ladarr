@@ -1,3 +1,5 @@
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { open } from 'node:fs/promises';
@@ -52,7 +54,7 @@ async function start(options: Parameters<typeof startPipeline>[0]) {
   pipe.db.data.titles[film.key] = film;
   pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
   const [entry] = pipe.finder.requestSearch(film.key);
-  await until(() => entry!.stage === 'downloading');
+  await until(() => stageOf(entry!) === 'downloading');
   return entry!;
 }
 
@@ -70,7 +72,7 @@ describe('copy progress', () => {
         seen.push(copy.copiedBytes);
         if (copy.copiedBytes > 0 && copy.copiedBytes < total) during ??= (await api!.get(`/queue/entries/${entry.id}`)).body.entry;
       }
-      return entry.stage === 'available';
+      return stageOf(entry) === 'available';
     });
 
     // The numbers come from the size of the staged file: they rise, and they stay inside the size of the file.
@@ -80,7 +82,7 @@ describe('copy progress', () => {
     expect([...seen].sort((a, b) => a - b)).toEqual(seen);
     expect(new Set(seen).size).toBeGreaterThan(2);
     // The queue API shows them with the entry. The method is not known before the copy ends, and the step is Planned.
-    expect(during).toMatchObject({ stage: 'importing', import: { state: 'planned', method: null } });
+    expect(during).toMatchObject({ phase: 'importing', import: { state: 'planned', method: null } });
     expect(during!.import.copy.copiedBytes).toBeGreaterThan(0);
     expect(during!.import.copy).toMatchObject({ totalBytes: total });
     expect(during!.import.copy.copiedBytes).toBeLessThan(total);
@@ -88,7 +90,7 @@ describe('copy progress', () => {
     // The copy is over: the bytes are gone from memory and from the API, and the result has the method.
     expect(pipe!.importStatus.copyOf(entry.id)).toBeUndefined();
     const done = (await api!.get(`/queue/entries/${entry.id}`)).body.entry;
-    expect(done).toMatchObject({ stage: 'available', import: null, importResult: { method: 'copy' } });
+    expect(done).toMatchObject({ phase: 'available', import: null, importResult: { method: 'copy' } });
     // The events carry the copies, and the last one is empty.
     const events = pipe!.published.filter((event) => event.type === 'import.copy');
     expect(events.length).toBeGreaterThan(1);
@@ -103,14 +105,14 @@ describe('copy progress', () => {
     // The import waits after "staged". The queue shows the step and the method, and no copy.
     let staged: Record<string, any> | undefined;
     await untilAsync(async () => {
-      if (entry.stage === 'importing') {
+      if (stageOf(entry) === 'importing') {
         const view = (await api!.get(`/queue/entries/${entry.id}`)).body.entry;
         if (view.import?.state === 'staged') staged = view;
       }
-      return staged || entry.stage === 'available';
+      return staged || stageOf(entry) === 'available';
     });
-    expect(staged).toMatchObject({ stage: 'importing', import: { state: 'staged', method: 'hardlink', copy: null } });
-    await until(() => entry.stage === 'available');
+    expect(staged).toMatchObject({ phase: 'importing', import: { state: 'staged', method: 'hardlink', copy: null } });
+    await until(() => stageOf(entry) === 'available');
     expect(pipe!.published.filter((event) => event.type === 'import.copy')).toEqual([]);
   });
 
@@ -129,7 +131,7 @@ describe('copy progress', () => {
       copyPollMs: 15,
     });
     pipe!.complete(NAME, { [`${NAME}.mkv`]: 'video-data' });
-    await until(() => entry.reason?.code === 'disk_full');
+    await until(() => reasonOfEntry(entry)?.code === 'disk_full');
     expect(pipe!.importStatus.copyOf(entry.id)).toBeUndefined();
     expect(pipe!.published.filter((event) => event.type === 'import.copy').at(-1)!.data.copies).toEqual([]);
   });

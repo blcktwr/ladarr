@@ -126,7 +126,7 @@ export function libraryVerifyHandler({ queue, clients, finder, events }: Deps): 
           : present(title.episodes.find((episode) => episode.season === entry.season && episode.number === entry.number)?.fileId ?? null);
       if (!hasFile) continue;
       queue.endAttempt(entry, 'imported', 'the file is in the library');
-      queue.move(entry, { stage: 'available', branch: null, reason: null }, 'file is in the library');
+      queue.complete(entry, 'file is in the library');
     }
 
     // A target that the import blocked because its pack lacks the episode, or because the torrent left the client,

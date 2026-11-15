@@ -1,3 +1,5 @@
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { movie } from '../helpers/test-fixtures.ts';
 import { type FakeItem, hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
@@ -28,7 +30,7 @@ async function rejectedFilm(items: FakeItem[]) {
   pipe.db.data.titles[m.key] = m;
   pipe.tracker.state.items = items;
   const [entry] = pipe.finder.requestSearch(m.key);
-  await until(() => entry!.branch === 'waiting' && entry!.reason?.code === 'all_rejected');
+  await until(() => branchOf(entry!) === 'waiting' && reasonOfEntry(entry!)?.code === 'all_rejected');
   const detail = async () => (await api!.get(`/queue/entries/${entry!.id}`)).body.entry;
   return { m, entry: entry!, detail };
 }
@@ -71,10 +73,16 @@ describe('the rejected releases of a search with no match', () => {
     expect(wrong).toMatchObject({ title: WRONG });
     expect(wrong.reasons).toContain('The title of the release is not this title.');
 
+    // A search of an older version kept the old text of a reason. The row shows the text of this version.
+    const old = entry.search!.rejected.find((release) => release.guid === LOW)!;
+    old.reasons = ['The quality of the release is not in any quality profile of the title.'];
+    const renamed = (await detail()).search.rejected.find((release: { title: string }) => release.title === LOW);
+    expect(renamed.reasons).toEqual(['The quality of the release is not in the allowed qualities.']);
+
     const grab = await api!.post(`/queue/entries/${entry.id}/releases/grab`, { indexerId: 1, guid: LOW });
     expect(grab.status).toBe(202);
     expect(grab.body).toEqual({ started: [entry.id] });
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     expect(entry.release).toMatchObject({ title: LOW, manual: true });
     expect(pipe!.qbit.torrents.has(hashOf(LOW))).toBe(true);
   });
@@ -90,7 +98,7 @@ describe('the rejected releases of a search with no match', () => {
       { title: LOW, size: LOW_SIZE },
     ];
     const [entry] = pipe.finder.requestSearch(m.key);
-    await until(() => entry!.branch === 'waiting' && entry!.reason?.code === 'all_rejected');
+    await until(() => branchOf(entry!) === 'waiting' && reasonOfEntry(entry!)?.code === 'all_rejected');
 
     const view = (await api.get(`/queue/entries/${entry!.id}`)).body.entry;
     // The blocklist keeps a failed release out of the automatic search. A person takes it by hand, so the list offers
@@ -111,7 +119,7 @@ describe('the rejected releases of a search with no match', () => {
 
     const grab = await api.post(`/queue/entries/${entry!.id}/releases/grab`, { indexerId: 1, guid: BLOCKED });
     expect(grab.status).toBe(202);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(entry!.release).toMatchObject({ title: BLOCKED, manual: true });
     expect(pipe.qbit.torrents.has(hashOf(BLOCKED))).toBe(true);
   });

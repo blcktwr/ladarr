@@ -903,7 +903,7 @@ export const es: Record<string, string> = {
   'The indexer of the release was removed.': 'Se quitó el indexador de la versión.',
   'The quality is not good enough (for example a camera copy).': 'La calidad no es suficiente (por ejemplo, una copia de cámara).',
   'The release has no seeders.': 'La versión no tiene semillas.',
-  'The quality of the release is not in any quality profile of the title.': 'La calidad de la versión no está en ningún perfil de calidad del título.',
+  'The quality of the release is not in the allowed qualities.': 'La calidad de la versión no está en las calidades permitidas.',
   'The file is smaller than the quality allows for this runtime.': 'El archivo es más pequeño de lo que permite la calidad para esta duración.',
   'The file is larger than the quality allows for this runtime.': 'El archivo es más grande de lo que permite la calidad para esta duración.',
   'The name of the release does not say which audio it has.': 'El nombre de la versión no indica qué audio tiene.',

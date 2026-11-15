@@ -7,6 +7,7 @@ import { createFinder } from '../../src/library/grab/finder.ts';
 import { enqueue, type Job } from '../../src/core/jobs.ts';
 import { createQueue } from '../../src/library/downloads/queue.ts';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
+import { entryOf } from '../helpers/test-queue.ts';
 import { startPipeline } from '../helpers/test-pipeline.ts';
 import type { Title } from '../../src/library/library.ts';
 
@@ -153,7 +154,7 @@ describe('selection API', () => {
   it('does not count a target that is in the journey, but counts one that waits for a release', async () => {
     const db = await library();
     const entry = (id: string, titleKey: string, extra: object) => {
-      db.data.queue[id] = { id, titleKey, season: null, number: null, stage: 'queued', branch: null, attempt: 1, ...extra } as never;
+      db.data.queue[id] = entryOf({ id, titleKey, ...extra }) as never;
     };
     entry('movie:1', 'movie:1', { stage: 'downloading' });
     entry('movie:5', 'movie:5', { branch: 'waiting' });

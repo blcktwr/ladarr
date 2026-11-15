@@ -114,11 +114,6 @@ const stageTexts: Record<string, string> = {
 };
 export const stageLabel = (key: string) => (Object.hasOwn(stageTexts, key) ? t(stageTexts[key]!) : key);
 
-// A target that waits for its turn in the queue is Waiting. A target that waits for its next search is Searching,
-// because the search runs again later.
-const shownStages: Record<string, string> = { waiting: 'searching' };
-export const shownKey = (key: string) => shownStages[key] ?? key;
-
 // The short status of a target. A column and a count hold one or two words, so this text stays short.
 const statusTexts: Record<string, string> = {
   queued: 'Waiting',
@@ -168,13 +163,6 @@ export function posterState(title: { availability?: Availability | null; queueSt
   if (title.availability === 'available') return { state: 'available', label: availabilityLabel.available };
   if (title.availability === 'waiting') return { state: 'upcoming', label: availabilityLabel.waiting };
   return null;
-}
-
-// The counts of a series or a season follow the same keys, so one stage is one count.
-export function shownCounts(counts: Record<string, number>) {
-  const shown: Record<string, number> = {};
-  for (const [key, count] of Object.entries(counts)) shown[shownKey(key)] = (shown[shownKey(key)] ?? 0) + count;
-  return shown;
 }
 
 // A status text is one word, so a Hint says what the word means and what the person does next. The text of a status that has no hint is empty.

@@ -16,7 +16,7 @@ import { probeFile, type ProbeResult } from '../probe.ts';
 import type { Clients } from '../downloads/client-api.ts';
 import type { ClientHandle, Torrent } from '../downloads/qbittorrent.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
-import { entryId, isActive, type Queue, type QueueEntry } from '../downloads/queue.ts';
+import { entryId, isActive, phaseOfEntry, type Queue, type QueueEntry } from '../downloads/queue.ts';
 import { checkRoot } from '../roots.ts';
 
 // One file of an import. The steps of a file go in this order, and each step is saved before the next one starts:
@@ -161,7 +161,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       }
       catalog.warn('import_blocked', `Import blocked: ${code}${detail ? ` (${detail})` : ''}`, itemFields(entry), { code, detail: detail ?? null });
       queue.endAttempt(entry, 'failed', code);
-      queue.move(entry, { reason: { code, ...(detail ? { detail } : {}) } }, 'import blocked', code);
+      queue.block(entry, { code, ...(detail ? { detail } : {}) }, 'import blocked', code);
     }
   };
 
@@ -171,15 +171,8 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     for (const entry of entries) {
       catalog.warn('import_uncovered', 'The download does not cover this episode. The search starts again.', itemFields(entry), { code: 'file_not_found' });
       queue.endAttempt(entry, 'failed', 'file_not_found');
-      entry.release = null;
-      entry.transferHash = null;
-      entry.clientId = null;
-      entry.search = null;
-      entry.importResult = null;
-      entry.replaceDestination = undefined;
-      // The target starts a new try when the first search starts after this import.
-      entry.attempt = 0;
-      queue.move(entry, { stage: 'queued', branch: null, reason: null }, 'the pack does not cover the episode', 'file_not_found');
+      // The target starts a new try at once, so it keeps its place and its history.
+      queue.fallback(entry, 'the pack does not cover the episode', 'file_not_found');
     }
   };
 
@@ -283,7 +276,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     status?.setCheck(key, 'download_complete', 'ok');
 
     // Checks 2-15 belong to Importing. Every target of the group moves there before the first one.
-    for (const entry of group) queue.move(entry, { stage: 'importing', branch: null, reason: null }, 'import started');
+    for (const entry of group) queue.enter(entry, 'importing', 'import started');
     status?.publishChecks(key);
 
     const found = await checked('title_folder', async () => {
@@ -569,13 +562,14 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
   function settleQueue(title: Title, step: JournalStep) {
     const ids = title.mediaType === 'movie' ? [title.key] : step.episodes.map((c) => entryId(title.key, c.season, c.number));
     for (const entry of ids.map((id) => queue.get(id))) {
-      if (!entry || entry.attempt === 0 || !isActive(entry) || entry.branch === 'paused') continue;
+      if (!entry || entry.attempt === 0 || !isActive(entry) || entry.state.kind === 'paused') continue;
       // A download import that stopped on a problem leaves its target in Validating or in Importing with a block. Its journal has ended.
-      if (!(entry.stage === 'queued' || entry.stage === 'searching' || ((entry.stage === 'validating' || entry.stage === 'importing') && entry.reason !== null))) continue;
+      const phase = phaseOfEntry(entry);
+      if (!(phase === 'queued' || phase === 'searching' || ((phase === 'validating' || phase === 'importing') && entry.state.kind === 'blocked'))) continue;
       queue.endAttempt(entry, 'imported', 'imported by hand');
       entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };
       catalog.info('import_completed', `Import completed by hand: ${step.dest}`, itemFields(entry), { path: step.dest, method: step.method, validation: step.validation, manual: true });
-      queue.move(entry, { stage: 'available', branch: null, reason: null }, 'imported by hand', step.method ?? undefined);
+      queue.complete(entry, 'imported by hand', step.method ?? undefined);
     }
   }
 
@@ -627,7 +621,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       if (!journal.sourceBase) continue;
       catalog.info('import_completed', `Import completed: ${step.dest}`, itemFields(entry), { path: step.dest, method: step.method, validation: step.validation });
       queue.endAttempt(entry, 'imported');
-      queue.move(entry, { stage: 'available', branch: null, reason: null }, 'imported', step.method ?? undefined);
+      queue.complete(entry, 'imported', step.method ?? undefined);
     }
     step.state = 'committed';
   }
@@ -671,7 +665,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
         entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };
         catalog.info('import_completed', `Import completed: ${step.dest}`, itemFields(entry), { path: step.dest, method: step.method, validation: step.validation });
         queue.endAttempt(entry, 'imported');
-        queue.move(entry, { stage: 'available', branch: null, reason: null }, 'imported', step.method ?? undefined);
+        queue.complete(entry, 'imported', step.method ?? undefined);
       }
     }
   }
@@ -866,7 +860,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     for (const journal of Object.values(db.data.imports).filter((item) => item.hash === hash)) await execute(journal);
 
     const inJournal = new Set(Object.values(db.data.imports).flatMap((journal) => journal.steps.flatMap((step) => step.entryIds)));
-    const ready = Object.values(db.data.queue).filter((entry) => entry.transferHash === hash && ['validating', 'importing'].includes(entry.stage) && !entry.branch && !entry.reason && !inJournal.has(entry.id));
+    const ready = Object.values(db.data.queue).filter((entry) => entry.transferHash === hash && ['validating', 'importing'].includes(entry.state.kind) && !inJournal.has(entry.id));
     // The targets of one torrent have the same client.
     const handle = clients.get(ready[0]?.clientId);
     if (!handle) return;
@@ -896,8 +890,9 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
 export const unfinishedImports = () => {
   const hashes = new Set(Object.values(db.data.imports).map((journal) => journal.hash));
   for (const entry of Object.values(db.data.queue)) {
-    if (!entry.transferHash || entry.branch === 'cancelled') continue;
-    if (entry.stage === 'validating' || entry.stage === 'importing') hashes.add(entry.transferHash);
+    if (!entry.transferHash || entry.state.kind === 'cancelled') continue;
+    const phase = phaseOfEntry(entry);
+    if (phase === 'validating' || phase === 'importing') hashes.add(entry.transferHash);
   }
   return [...hashes];
 };

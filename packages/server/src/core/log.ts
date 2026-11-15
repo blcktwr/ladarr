@@ -169,9 +169,9 @@ export function configureItemLogs() {
   itemsOn = db.data.settings.keepQueueLogs !== false;
   inQueue = (itemId) => {
     const entry = db.data.queue[itemId];
-    if (entry) return entry.stage !== 'available';
+    if (entry) return entry.state.kind !== 'available';
     // A title is not a target, but the targets of the title keep its file, with their lines and the lines of the title.
-    return Object.values(db.data.queue).some((other) => other.titleKey === itemId && other.stage !== 'available');
+    return Object.values(db.data.queue).some((other) => other.titleKey === itemId && other.state.kind !== 'available');
   };
   // A target begins when its entry enters the queue. A title begins when the person adds it.
   startedAt = (itemId) => db.data.queue[itemId]?.createdAt ?? db.data.titles[itemId]?.addedAt ?? 0;

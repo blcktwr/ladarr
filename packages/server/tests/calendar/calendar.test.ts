@@ -8,6 +8,7 @@ import { open, type Db } from '../../src/core/db.ts';
 import type { Title } from '../../src/library/library.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
+import { entryOf } from '../helpers/test-queue.ts';
 import type { ReleaseDate } from '../../src/metadata/tmdb.ts';
 
 const NOW = Date.UTC(2024, 5, 15, 12);
@@ -232,7 +233,7 @@ describe('library filters', () => {
   it('lists the titles that have a target in Needs attention', async () => {
     await library();
     const entry = (id: string, titleKey: string, extra: object) => {
-      app.db.data.queue[id] = { id, titleKey, season: null, number: null, stage: 'queued', branch: null, reason: { code: 'file_not_found' }, attempt: 1, clearedAt: null, ...extra } as never;
+      app.db.data.queue[id] = entryOf({ id, titleKey, reason: { code: 'file_not_found' }, ...extra }) as never;
     };
     entry('tv:1:1x1', 'tv:1', {});
     entry('movie:4', 'movie:4', { clearedAt: 5 });

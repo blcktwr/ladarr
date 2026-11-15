@@ -1,3 +1,5 @@
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -498,7 +500,7 @@ describe('restore with an interrupted import journal', () => {
     pipe.db.data.titles[film.key] = film;
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     pipe.complete(NAME, { [`${NAME}.mkv`]: 'video-data' });
     await until(() => !armed);
     await sleep(50);
@@ -514,14 +516,14 @@ describe('restore with an interrupted import journal', () => {
     const restorer = createRestorer({ dir: backupDir, worker: pipe.worker });
     const finishLive = async () => {
       pipe!.worker.enqueue({ type: 'import.run', payload: { hash: hashOf(NAME) }, dedupeKey: `import:${hashOf(NAME)}` });
-      await until(() => pipe!.db.data.queue[entry!.id]!.stage === 'available' && Object.keys(pipe!.db.data.imports).length === 0, 12_000);
+      await until(() => stageOf(pipe!.db.data.queue[entry!.id]!) === 'available' && Object.keys(pipe!.db.data.imports).length === 0, 12_000);
     };
     return { film, entry: entry!, backup: name, restorer, finishLive };
   }
 
   const expectDone = (entryId: string, filmKey: string) => {
     const { db, folders } = pipe!;
-    expect(db.data.queue[entryId]!.stage).toBe('available');
+    expect(stageOf(db.data.queue[entryId]!)).toBe('available');
     expect(db.data.imports).toEqual({});
     const files = Object.values(db.data.files);
     expect(files).toHaveLength(1);
@@ -536,7 +538,7 @@ describe('restore with an interrupted import journal', () => {
   it.each(['staged', 'published', 'committed'] as const)('finishes the import when the disk is as it was after %s', async (stopAfter) => {
     const { film, entry, backup, restorer } = await interrupted(stopAfter);
     await restorer.restore(backup);
-    await until(() => pipe!.db.data.queue[entry.id]!.stage === 'available' && Object.keys(pipe!.db.data.imports).length === 0, SOON);
+    await until(() => stageOf(pipe!.db.data.queue[entry.id]!) === 'available' && Object.keys(pipe!.db.data.imports).length === 0, SOON);
     expectDone(entry.id, film.key);
   }, 25_000);
 
@@ -548,7 +550,7 @@ describe('restore with an interrupted import journal', () => {
 
     await restorer.restore(backup);
     // The data went back: the file is not in the library again until the import reads the disk.
-    await until(() => pipe!.db.data.queue[entry.id]!.stage === 'available' && Object.keys(pipe!.db.data.imports).length === 0, SOON);
+    await until(() => stageOf(pipe!.db.data.queue[entry.id]!) === 'available' && Object.keys(pipe!.db.data.imports).length === 0, SOON);
     expect(finalFile).toBe('video-data');
     expectDone(entry.id, film.key);
   }, 40_000);
@@ -567,8 +569,8 @@ describe('restore with an interrupted import journal', () => {
     expect(readFileSync(dest, 'utf8')).toBe('video-data');
 
     await restorer.restore(backup);
-    await until(() => pipe!.db.data.queue[entry.id]!.reason?.code === 'destination_exists' && Object.keys(pipe!.db.data.imports).length === 0, SOON);
-    expect(pipe!.db.data.queue[entry.id]!.reason?.code).toBe('destination_exists');
+    await until(() => reasonOfEntry(pipe!.db.data.queue[entry.id]!)?.code === 'destination_exists' && Object.keys(pipe!.db.data.imports).length === 0, SOON);
+    expect(reasonOfEntry(pipe!.db.data.queue[entry.id]!)?.code).toBe('destination_exists');
     // No data is lost: the file is whole, nothing is staged, and the source of the seed is whole.
     expect(readFileSync(dest, 'utf8')).toBe('video-data');
     expect(readdirSync(join(pipe!.folders.movies, 'Movie Name (2019)'))).toEqual(['Movie Name (2019).mkv']);

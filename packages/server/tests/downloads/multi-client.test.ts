@@ -1,3 +1,5 @@
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -68,7 +70,7 @@ describe('several clients', () => {
     pipe.tracker.state.items = items;
 
     const [entry] = pipe.finder.requestSearch(title.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     expect(entry!.clientId).toBe(second.id);
     expect(extra!.torrents.has(hashOf(FIRST))).toBe(true);
     expect(pipe.qbit.torrents.size).toBe(0);
@@ -78,7 +80,7 @@ describe('several clients', () => {
     mkdirSync(join(pipe.folders.downloads, FIRST), { recursive: true });
     writeFileSync(join(pipe.folders.downloads, FIRST, `${FIRST}.mkv`), 'video-data');
     extra!.progress(hashOf(FIRST), 1);
-    await until(() => entry!.stage === 'available');
+    await until(() => stageOf(entry!) === 'available');
     expect(entry!.clientId).toBe(second.id);
     expect(pipe.qbit.torrents.size).toBe(0);
   });
@@ -94,10 +96,10 @@ describe('several clients', () => {
 
     // The first title goes to the first client, and the second title goes to the second one.
     const [one] = pipe.finder.requestSearch(first.key);
-    await until(() => one!.stage === 'downloading');
+    await until(() => stageOf(one!) === 'downloading');
     pipe.db.data.downloadClients[0]!.enabled = false;
     const [two] = pipe.finder.requestSearch(next.key);
-    await until(() => two!.stage === 'downloading');
+    await until(() => stageOf(two!) === 'downloading');
     expect([one!.clientId, two!.clientId]).toEqual(['client-1', second.id]);
     pipe.db.data.downloadClients[0]!.enabled = true;
     pipe.qbit.progress(hashOf(FIRST), 0.3);
@@ -122,12 +124,12 @@ describe('several clients', () => {
     pipe.db.data.titles[title.key] = title;
     pipe.tracker.state.items = items;
     const [entry] = pipe.finder.requestSearch(title.key);
-    await until(() => entry!.stage === 'downloading');
+    await until(() => stageOf(entry!) === 'downloading');
     pipe.qbit.progress(hashOf(FIRST), 0.4);
     await until(() => pipe!.poller.transfer(hashOf(FIRST))?.progress === 0.4);
 
     pipe.db.data.downloadClients[0]!.enabled = false;
     await until(() => pipe!.poller.transfer(hashOf(FIRST))?.stale === true);
-    expect(entry!.stage).toBe('downloading');
+    expect(stageOf(entry!)).toBe('downloading');
   });
 });

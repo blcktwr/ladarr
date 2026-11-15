@@ -20,7 +20,7 @@ import { createLimiter } from '../../src/core/limiter.ts';
 import { createPoller } from '../../src/library/downloads/poller.ts';
 import { createClients } from '../../src/library/downloads/client-api.ts';
 import type { ClientConfig } from '../../src/library/downloads/qbittorrent.ts';
-import { createQueue } from '../../src/library/downloads/queue.ts';
+import { createQueue, type StateHook } from '../../src/library/downloads/queue.ts';
 import { startFakeQbit } from './test-qbit.ts';
 import { indexer as indexerFixture } from './test-fixtures.ts';
 import { infoHashOf } from '../../src/library/grab/torrent.ts';
@@ -104,6 +104,8 @@ type Options = {
   copyPollMs?: number;
   // How long each import check stays in `running`. The production default is 100 ms.
   checkDelayMs?: number;
+  // The hook of the queue, for a test that watches the state changes.
+  onState?: StateHook;
   // More job handlers, for a test that needs the metadata or the first search.
   handlers?: (context: { db: Db; events: ReturnType<typeof createEvents>; queue: ReturnType<typeof createQueue>; finder: ReturnType<typeof createFinder> }) => Record<string, Handler>;
 };
@@ -134,7 +136,7 @@ export async function startPipeline(options: Options = {}) {
     return originalPublish(type, data);
   };
   const save = options.save ?? (async () => {});
-  const queue = createQueue(events, () => {});
+  const queue = createQueue(events, () => {}, options.onState);
   const limiter = createLimiter();
   const indexers = createIndexerService(limiter, { timeoutMs: 2_000 });
   const clients = createClients();

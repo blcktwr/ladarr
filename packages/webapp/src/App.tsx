@@ -35,8 +35,8 @@ const titlePage = /^\/catalog\/(movie|tv)\/\d+\/?$/;
 // Downloading is last: the line shows it only when no other stage runs.
 const WORKING = ['importing', 'validating', 'sending', 'searching', 'fetching', 'queued', 'downloading'];
 
-// The name of the task as the Activity page shows it: a season of a series, or a movie.
-const taskName = (row: QueueRow) => (row.kind === 'group' ? groupName(row) : row.label);
+// The name of the task as the Activity page shows it: a season of a series, a movie, or a series that loads its episodes.
+const taskName = (row: QueueRow) => (row.kind === 'entry' ? row.label : groupName(row));
 
 // The task that runs now is the job of the worker. Work without a job, such as a download, names the first target of its stage.
 function QueueStatus({ href, onOpen }: { href: string; onOpen: () => void }) {

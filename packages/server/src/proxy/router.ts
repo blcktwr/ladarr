@@ -60,7 +60,7 @@ function commandResource(command: CompatCommand) {
   };
 }
 
-const QUEUE_STAGES: QueueEntry['stage'][] = ['fetching', 'sending', 'downloading', 'validating', 'importing'];
+const QUEUE_STAGES: readonly string[] = ['fetching', 'sending', 'downloading', 'validating', 'importing'];
 
 export function compatRouter(app: IndexerApp, deps: CompatDeps) {
   const router = Router();
@@ -88,12 +88,12 @@ export function compatRouter(app: IndexerApp, deps: CompatDeps) {
     const page = parseId(req.query.page) ?? 1;
     const pageSize = parseId(req.query.pageSize);
     const withEpisode = req.query.includeEpisode === 'true';
-    const entries = Object.values(db.data.queue).filter((entry) => QUEUE_STAGES.includes(entry.stage) && entry.branch !== 'cancelled' && db.data.titles[entry.titleKey]?.mediaType === mediaType);
+    const entries = Object.values(db.data.queue).filter((entry) => QUEUE_STAGES.includes(entry.state.kind) && entry.state.kind !== 'cancelled' && db.data.titles[entry.titleKey]?.mediaType === mediaType);
     const records = entries.map((entry) => {
       const title = db.data.titles[entry.titleKey]!;
       const transfer = entry.transferHash ? poller?.transfer(entry.transferHash) : undefined;
       const size = transfer?.sizeBytes ?? entry.release?.sizeBytes ?? 0;
-      const done = entry.stage === 'validating' || entry.stage === 'importing';
+      const done = entry.state.kind === 'validating' || entry.state.kind === 'importing';
       const left = done ? 0 : transfer ? Math.round(size * (1 - transfer.progress)) : size;
       const eta = !done && transfer?.etaSeconds != null ? transfer.etaSeconds : null;
       const episode = entry.season === null ? undefined : title.episodes.find((item) => item.season === entry.season && item.number === entry.number);
@@ -101,9 +101,9 @@ export function compatRouter(app: IndexerApp, deps: CompatDeps) {
         title: entry.release?.title,
         size,
         sizeleft: left,
-        status: entry.branch === 'paused' ? 'paused' : entry.stage === 'fetching' || entry.stage === 'sending' ? 'queued' : done ? 'completed' : 'downloading',
-        trackedDownloadStatus: entry.branch === null && entry.reason ? 'warning' : 'ok',
-        trackedDownloadState: entry.stage === 'importing' ? 'importing' : done ? 'importPending' : 'downloading',
+        status: entry.state.kind === 'paused' ? 'paused' : entry.state.kind === 'fetching' || entry.state.kind === 'sending' ? 'queued' : done ? 'completed' : 'downloading',
+        trackedDownloadStatus: entry.state.kind === 'blocked' ? 'warning' : 'ok',
+        trackedDownloadState: entry.state.kind === 'importing' ? 'importing' : done ? 'importPending' : 'downloading',
         ...(eta === null ? {} : { timeleft: timespan(eta), estimatedCompletionTime: new Date(Date.now() + eta * 1000).toISOString() }),
         downloadId: entry.transferHash?.toUpperCase(),
         protocol: 'torrent',

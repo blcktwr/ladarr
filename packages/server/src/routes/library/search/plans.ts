@@ -23,7 +23,7 @@ export const isObject = (value: unknown): value is Record<string, unknown> => ty
 export function startable(finder: Finder, title: Title) {
   const free = (id: string) => {
     const entry = db.data.queue[id];
-    return !entry || entry.attempt === 0 || !isActive(entry) || entry.branch === 'waiting';
+    return !entry || entry.attempt === 0 || !isActive(entry) || entry.state.kind === 'waiting';
   };
   if (title.mediaType === 'movie') return finder.wantedMovie(title) && free(title.key) ? 1 : 0;
   return title.episodes.filter((episode) => finder.wantedEpisode(title, episode) && free(`${title.key}:${episode.season}x${episode.number}`)).length;

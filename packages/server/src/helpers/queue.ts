@@ -3,51 +3,86 @@ import { parseRelease } from '../library/grab/release.ts';
 import type { Finder } from '../library/grab/finder.ts';
 import { BLOCK_REASONS } from '../library/grab/blocklist.ts';
 import { REJECTION_TEXT } from '../library/grab/decide.ts';
-import { IMPORT_STAGES } from '@ladarr/shared/enums';
+import { aggregate, describe, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
+import type { QueueGroupRow, QueuePage, QueueRow } from '@ladarr/shared/types';
 import { type Db, db } from '../core/db.ts';
 import type { Job } from '../core/jobs.ts';
-import { reasonInfo } from '../core/reasons.ts';
+import { reasonInfo, type ReasonInfo } from '../core/reasons.ts';
 import type { ImportStatus } from '../library/imports/status.ts';
 import { availability, type Title } from '../library/library.ts';
 import type { Poller, Transfer } from '../library/downloads/poller.ts';
-import { isActive, queueKey, STAGES, type QueueEntry } from '../library/downloads/queue.ts';
+import { isActive, phaseOfEntry, reasonOfEntry, type QueueEntry } from '../library/downloads/queue.ts';
 
 export const DAY_MS = 24 * 60 * 60_000;
 export const MAX_PAGE = 200;
-// The key of an entry for a filter. A target whose last search found no release, or no release that fits the preset,
-// waits for its next search in Waiting, with its result. A target that searches or fetches its release shows in
-// Searching, because fetching belongs to the search.
-export const searchKey = (key: string) =>
-  key === 'not_found' || key === 'no_match' ? 'queued' : key === 'waiting' || key === 'fetching' ? 'searching' : key;
-// Validating belongs to the import, so it shows in the same tab.
-export const importKey = (key: string) => (key === 'validating' ? 'importing' : key);
-export const filterKeyOf = (entry: QueueEntry) => importKey(searchKey(queueKey(entry)));
+
+// The place of a phase in the journey, from the least to the most advanced.
+export const STAGE_ORDER = ['queued', 'searching', 'fetching', 'sending', 'downloading', 'validating', 'importing', 'available'] as const;
+export const STAGE_RANK = new Map(STAGE_ORDER.map((stage, index) => [stage, index]));
+// A target that waits for its next search or fetches its release ranks with the search. One that found nothing ranks
+// where it waits, because only a new release moves it.
+export const progressOf = (entry: QueueEntry) => {
+  const status = statusOf(entry);
+  const phase = status === 'searching' || status === 'fetching' ? 'searching' : status === 'not_found' || status === 'no_match' ? 'queued' : phaseOfEntry(entry);
+  return STAGE_RANK.get(phase)!;
+};
+
+export const pad = (n: number) => String(n).padStart(2, '0');
 
 // The jobs that move a target through the download flow. The jobs page shows only these.
 const ITEM_JOB_TYPES = new Set(['queue.initial', 'queue.search', 'queue.grab', 'import.run']);
 export const isItemJob = (job: Job) => job.type.startsWith('item.') || ITEM_JOB_TYPES.has(job.type);
 
-// The place of a stage in the journey, from the least to the most advanced. A target that searches or fetches its
-// release is at the searching place.
-export const STAGE_RANK = new Map(STAGES.map((stage, index) => [stage, index]));
-export const progressOf = (entry: QueueEntry) => {
-  const key = queueKey(entry);
-  const stage = searchKey(key) === 'searching' ? 'searching' : entry.stage;
-  return STAGE_RANK.get(stage)!;
-};
-
-export const pad = (n: number) => String(n).padStart(2, '0');
-
 // The targets of a group that finished each stage, for the line under its status.
 export function reachedOf(entries: QueueEntry[]) {
   const reached = { found: 0, completed: 0, validated: 0, imported: 0 };
   for (const entry of entries) {
+    const phase = phaseOfEntry(entry);
     if (entry.release) reached.found++;
-    if (entry.stage === 'validating' || entry.stage === 'importing' || entry.stage === 'available') reached.completed++;
-    if (entry.stage === 'importing' || entry.stage === 'available') reached.validated++;
-    if (entry.stage === 'available') reached.imported++;
+    if (phase === 'validating' || phase === 'importing' || phase === 'available') reached.completed++;
+    if (phase === 'importing' || phase === 'available') reached.validated++;
+    if (phase === 'available') reached.imported++;
   }
   return reached;
+}
+
+// The status of one target. The pages and the counters read it, and no caller derives it again.
+export const statusOf = (entry: QueueEntry): Status => describe(entry.state).status;
+export const tabOf = (entry: QueueEntry): Tab | null => describe(entry.state).tab;
+
+// The problem of a stuck target, or the result of the search that keeps it waiting. A target that moves has none.
+export function problemOf(entry: QueueEntry): StateProblem | null {
+  return reasonOfEntry(entry);
+}
+
+export function reasonOf(entry: QueueEntry): (ReasonInfo & { code: string }) | null {
+  const problem = problemOf(entry);
+  if (!problem) return null;
+  return { code: problem.code, ...reasonInfo(problem.code) };
+}
+// The reason of a group, from the problem that aggregate() chose.
+export const reasonOfProblem = (problem: StateProblem | null) => {
+  if (!problem) return null;
+  const info = reasonInfo(problem.code);
+  return { code: problem.code, message: info.message, action: info.action, settings: info.settings ?? null };
+};
+
+// The title whose first search waits for its episodes. A series has a target for each episode, so it has none until
+// the episodes arrive. The queue shows one pending row for the series meanwhile.
+export function pendingTitleKeys() {
+  const keys = new Set<string>();
+  for (const job of Object.values(db.data.jobs)) {
+    // A job that waits or runs can still be loading the episodes of a title that has no target yet.
+    if (job.type !== 'queue.initial' || (job.state !== 'waiting' && job.state !== 'running')) continue;
+    const key = (job.payload as { key?: unknown } | null)?.key;
+    if (typeof key === 'string') keys.add(key);
+  }
+  for (const key of [...keys]) {
+    const title = db.data.titles[key];
+    const target = Object.values(db.data.queue).some((entry) => entry.titleKey === key && entry.attempt > 0 && !entry.clearedAt);
+    if (!title || title.mediaType !== 'tv' || title.paused || target) keys.delete(key);
+  }
+  return keys;
 }
 
 // A search that waits for its next run is future work only while one of its targets still waits. A target that
@@ -59,7 +94,7 @@ export const showsSearch = (job: Job) => {
     payload?.entryIds?.some((id) => {
       const entry = db.data.queue[id];
       const title = entry ? db.data.titles[entry.titleKey] : undefined;
-      return entry?.branch === 'waiting' && Boolean(title && !title.paused);
+      return entry?.state.kind === 'waiting' && Boolean(title && !title.paused);
     }),
   );
 };
@@ -79,7 +114,7 @@ export function jobEntry(job: Job): QueueEntry | undefined {
   const payload = job.payload as { entryIds?: string[]; hash?: string } | null;
   const targets = payload?.entryIds?.map((id) => db.data.queue[id]).filter((entry): entry is QueueEntry => Boolean(entry)) ?? [];
   // A future search names a target that still waits, not one that its payload kept after the target moved on.
-  const first = job.type === 'queue.search' && job.state === 'waiting' ? (targets.find((entry) => entry.branch === 'waiting') ?? targets[0]) : targets[0];
+  const first = job.type === 'queue.search' && job.state === 'waiting' ? (targets.find((entry) => entry.state.kind === 'waiting') ?? targets[0]) : targets[0];
   if (first) return first;
   if (payload?.hash) return Object.values(db.data.queue).find((entry) => entry.transferHash === payload.hash);
   return undefined;
@@ -152,7 +187,7 @@ export function lanePositions() {
 
 // The step of the import journal for an entry. The hard link or copy and the step are separate from the bytes of a copy.
 export function importOf(importStatus: ImportStatus | undefined, entry: QueueEntry) {
-  if (entry.stage !== 'importing') return null;
+  if (phaseOfEntry(entry) !== 'importing') return null;
   for (const journal of Object.values(db.data.imports)) {
     const step = journal.steps.find((item) => item.entryIds.includes(entry.id));
     if (!step) continue;
@@ -175,10 +210,16 @@ export function fileOf(entry: QueueEntry, title: Title, transfer?: Transfer) {
   return file ? { name: file.path.split('/').at(-1)!, sizeBytes: file.sizeBytes } : null;
 }
 
+// The text of a reason that a search of an older version kept, when the text changed since then.
+const RENAMED_REASONS: Record<string, string> = {
+  'The quality of the release is not in any quality profile of the title.': REJECTION_TEXT.quality_not_in_profile!,
+};
+const currentText = (text: string) => RENAMED_REASONS[text] ?? text;
+
 // The reasons of a release that the search rejected. A release that the blocklist stopped says why the blocklist holds
 // it, not that it is on the blocklist. A search of an older version kept the blocklist as a reason, so the row drops it.
 function rejectedReasons(release: { reasons?: string[]; indexerId: number; guid: string; infoHash?: string | null }) {
-  const reasons = (release.reasons ?? []).filter((text) => text !== REJECTION_TEXT.blocklisted);
+  const reasons = (release.reasons ?? []).map(currentText).filter((text) => text !== REJECTION_TEXT.blocklisted);
   // A blocklist entry is keyed by the hash of its torrent, or by its indexer and guid when it has no hash.
   const block = (release.infoHash ? db.data.blocklist[release.infoHash] : undefined) ?? db.data.blocklist[`${release.indexerId}:${release.guid}`];
   const text = block ? BLOCK_REASONS[block.reason] : undefined;
@@ -187,12 +228,13 @@ function rejectedReasons(release: { reasons?: string[]; indexerId: number; guid:
 
 export function view(poller: Poller, importStatus: ImportStatus | undefined, entry: QueueEntry, lane: Map<string, number>, detail = false) {
   const title = titleOf(entry)!;
+  const description = describe(entry.state);
   const episode = entry.season === null ? undefined : title.episodes.find((e) => e.season === entry.season && e.number === entry.number);
   const transfer = entry.transferHash ? poller.transfer(entry.transferHash) : undefined;
   const parsed = entry.release ? parseRelease(entry.release.title) : null;
   // A release name that gives neither a source nor a resolution has no quality to show.
   const quality = parsed && (parsed.source !== 'unknown' || parsed.resolution !== null) ? qualityLabel(parsed.source, parsed.resolution) : null;
-  const info = entry.reason ? reasonInfo(entry.reason.code) : null;
+  const info = reasonOf(entry);
   const base = {
     id: entry.id,
     titleKey: entry.titleKey,
@@ -204,11 +246,11 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
     number: entry.number,
     episodeName: episode?.name ?? null,
     label: label(entry),
-    stage: entry.stage,
-    branch: entry.branch,
-    key: queueKey(entry),
-    reason: entry.reason && info ? { code: entry.reason.code, message: info.message, action: info.action, settings: info.settings ?? null } : null,
-    stageSince: entry.stageSince,
+    status: description.status,
+    tab: description.tab,
+    phase: description.phase,
+    reason: info ? { code: info.code, message: info.message, action: info.action, settings: info.settings ?? null } : null,
+    stateSince: entry.stateSince,
     revision: entry.revision,
     lane: lane.get(entry.id) ?? null,
     attempt: entry.attempt,
@@ -258,7 +300,7 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
     importResult: entry.importResult ?? null,
     import: importOf(importStatus, entry),
     // The checks belong to the import of the target. A target outside Validating and Importing has none.
-    checks: IMPORT_STAGES.includes(entry.stage) ? (importStatus?.checksOf(entry.id) ?? null) : null,
+    checks: description.phase === 'validating' || description.phase === 'importing' ? (importStatus?.checksOf(entry.id) ?? null) : null,
   };
   if (!detail) return base;
   return {
@@ -284,7 +326,7 @@ export const filtersOf = (query: Record<string, unknown>): Filters => ({
 export function matches(entry: QueueEntry, f: Filters) {
   if (!shown(entry)) return false;
   if (!f.cleared && entry.clearedAt) return false;
-  if (f.key && filterKeyOf(entry) !== f.key) return false;
+  if (f.key && tabOf(entry) !== f.key) return false;
   const title = titleOf(entry)!;
   if (f.type && title.mediaType !== f.type) return false;
   if (f.q && !title.meta.title.toLowerCase().includes(f.q)) return false;
@@ -293,3 +335,166 @@ export function matches(entry: QueueEntry, f: Filters) {
 }
 
 export const bySeasonNumber = (a: QueueEntry, b: QueueEntry) => (a.season ?? 0) - (b.season ?? 0) || (a.number ?? 0) - (b.number ?? 0);
+
+// A row of the list before the page cuts it: one season of a series, one movie, or a series that waits for its episodes.
+type RowGroup = {
+  key: string;
+  title: Title;
+  season: number | null;
+  entries: QueueEntry[];
+  matching: number;
+  first: number;
+  progress: number;
+  part: number;
+  download: number;
+  ready: boolean;
+  searching: boolean;
+  upcoming: boolean;
+  notFound: boolean;
+  pending: boolean;
+};
+
+// The rows of the queue, before the page and after the filters. The counters read the same rows, so a badge and the
+// rows of its tab always agree.
+function groupsOf(f: Filters, poller?: Poller): RowGroup[] {
+  const groups = new Map<string, RowGroup>();
+  for (const entry of Object.values(db.data.queue)) {
+    if (!shown(entry) || (!f.cleared && entry.clearedAt)) continue;
+    const title = titleOf(entry)!;
+    const key = entry.season === null ? entry.id : `${entry.titleKey}:${entry.season}`;
+    const group = groups.get(key) ?? {
+      key,
+      title,
+      season: entry.season,
+      entries: [],
+      matching: 0,
+      first: entry.createdAt,
+      progress: Number.POSITIVE_INFINITY,
+      part: -1,
+      download: -1,
+      ready: false,
+      searching: false,
+      upcoming: isUpcoming(title),
+      notFound: false,
+      pending: false,
+    };
+    group.entries.push(entry);
+    // A target that found no release waits for a new release, so its row goes after the rows that still have work.
+    if (statusOf(entry) === 'not_found') group.notFound = true;
+    if (matches(entry, f)) group.matching++;
+    group.first = Math.min(group.first, entry.createdAt);
+    // An available target is finished. It does not hold the group back.
+    if (entry.state.kind !== 'available') group.progress = Math.min(group.progress, progressOf(entry));
+    // A download that works: the client has a part of its file.
+    if (entry.state.kind === 'downloading' && poller) {
+      const transfer = entry.transferHash ? poller.transfer(entry.transferHash) : undefined;
+      // The part of the least advanced file, for the order of the rows. A pack downloads its files one by one.
+      const part = transfer ? (transfer.entryProgress?.[entry.id] ?? transfer.progress) : null;
+      if (part !== null) group.part = group.part < 0 ? part : Math.min(group.part, part);
+      // The bar of the group shows the part of the torrent that the client reports, as the client shows it.
+      if (transfer) group.download = group.download < 0 ? transfer.progress : Math.min(group.download, transfer.progress);
+    }
+    // A target that has its release waits for a free slot of its client. Its row goes above the rows that only
+    // search, because it is the target that takes the next slot.
+    if (entry.state.kind === 'fetching') group.ready = true;
+    // The search of a title runs now, so its row stays above the rows that wait for their next search.
+    if (entry.state.kind === 'searching') group.searching = true;
+    groups.set(key, group);
+  }
+  // A series that waits for its episodes has no target yet. One pending row shows it while its initial job runs.
+  for (const key of pendingTitleKeys()) {
+    const title = db.data.titles[key];
+    if (!title) continue;
+    const matching = !f.cleared && !f.priority && (!f.key || f.key === 'searching') && (!f.type || f.type === 'tv') && (!f.q || title.meta.title.toLowerCase().includes(f.q)) ? 1 : 0;
+    if (!matching) continue;
+    const group: RowGroup = {
+      key,
+      title,
+      season: null,
+      entries: [],
+      matching,
+      first: title.addedAt,
+      progress: STAGE_RANK.get('searching')!,
+      part: -1,
+      download: -1,
+      ready: false,
+      searching: true,
+      upcoming: isUpcoming(title),
+      notFound: false,
+      pending: true,
+    };
+    groups.set(key, group);
+  }
+  // A group with a target that found no release goes after every other row, because a new release is its only next
+  // step. A title that waits for its release has no work yet, so its row goes after the rest.
+  return [...groups.values()]
+    .filter((group) => group.matching > 0 && Number.isFinite(group.progress))
+    .sort(
+      (a, b) =>
+        Number(a.notFound) - Number(b.notFound) ||
+        Number(a.upcoming) - Number(b.upcoming) ||
+        b.progress - a.progress ||
+        b.part - a.part ||
+        Number(b.ready) - Number(a.ready) ||
+        Number(b.searching) - Number(a.searching) ||
+        a.first - b.first ||
+        a.key.localeCompare(b.key),
+    );
+}
+
+// The aggregate of a group. It covers every member of the season, before the tab filter and the page.
+export function groupAggregate(entries: QueueEntry[]) {
+  const result = aggregate(entries.map((entry) => entry.state));
+  return { status: result.status, counts: result.counts, tabs: result.tabs, total: result.total, problem: reasonOfProblem(result.problem) };
+}
+
+function groupRow(group: RowGroup): QueueGroupRow {
+  const summary = groupAggregate(group.entries);
+  return {
+    kind: 'group',
+    key: group.key,
+    titleKey: group.entries[0]!.titleKey,
+    title: group.title.meta.title,
+    year: group.title.meta.year,
+    posterPath: group.title.meta.posterPath,
+    season: group.season,
+    status: summary.status,
+    total: summary.total,
+    reached: reachedOf(group.entries),
+    download: group.download < 0 ? null : group.download,
+    matching: group.matching,
+    counts: summary.counts,
+    tabs: summary.tabs,
+    problem: summary.problem,
+    priority: group.entries.some((entry) => entry.priority !== null && isActive(entry)),
+  };
+}
+
+function groupRowOf(group: RowGroup, poller: Poller, importStatus: ImportStatus | undefined, lane: Map<string, number>): QueueRow {
+  if (group.pending) {
+    return { kind: 'pending', key: group.key, titleKey: group.key, title: group.title.meta.title, year: group.title.meta.year, posterPath: group.title.meta.posterPath, season: null, priority: false };
+  }
+  const first = group.entries[0]!;
+  if (first.season === null) return { kind: 'entry', ...view(poller, importStatus, first, lane) };
+  return groupRow(group);
+}
+
+export function queuePage(poller: Poller, importStatus: ImportStatus | undefined, f: Filters, limit: number, offset: number): QueuePage {
+  const lane = lanePositions();
+  const rows = groupsOf(f, poller);
+  return { cursor: db.data.queueRev, total: rows.length, items: rows.slice(offset, offset + limit).map((group) => groupRowOf(group, poller, importStatus, lane)) };
+}
+
+// The number of rows in each tab. A row counts once in each tab that holds one of its targets, so a mixed season can
+// count in more than one tab, as it can appear in more than one tab.
+export function queueTabCounts(): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const group of groupsOf(filtersOf({}))) {
+    const tabs = group.pending ? ['searching' as Tab] : groupAggregate(group.entries).tabs;
+    for (const tab of tabs) counts[tab] = (counts[tab] ?? 0) + 1;
+  }
+  return counts;
+}
+
+export { aggregate, describe, phaseOf };
+

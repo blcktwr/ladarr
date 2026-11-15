@@ -1,3 +1,6 @@
+import { move } from '../helpers/test-queue.ts';
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -29,13 +32,13 @@ describe('retry', () => {
 
     const entry = pipe.queue.ensure('tv:1', 1, 1);
     pipe.queue.request(entry, 'test');
-    pipe.queue.move(entry, { stage: 'queued', branch: null, reason: { code: 'too_many_attempts' } }, 'test');
+    move(pipe.queue, entry, { stage: 'queued', branch: null, reason: { code: 'too_many_attempts' } }, 'test');
 
     expect((await api.post('/queue/actions', { action: 'retry', ids: ['tv:1:1x1'] })).status).toBe(200);
 
     // The folder is read from the disk, so the target ends with no search and no client request.
-    await until(() => entry.stage === 'available');
-    expect(entry.reason).toBeNull();
+    await until(() => stageOf(entry) === 'available');
+    expect(reasonOfEntry(entry)).toBeNull();
     const files = Object.values(pipe.db.data.files);
     expect(files).toHaveLength(1);
     expect(files[0]!.path).toBe('Show Name (2020)/Season 01/Show Name E01.mkv');
@@ -52,7 +55,7 @@ describe('retry', () => {
     pipe.db.data.titles[film.key] = film;
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     await api.post('/queue/search', { titleKey: film.key });
-    await until(() => pipe!.queue.get('movie:2')!.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('movie:2')!) === 'downloading');
     const entry = pipe.queue.get('movie:2')!;
 
     // The file of the import is in the library already, so the import stops instead of replacing it.
@@ -60,7 +63,7 @@ describe('retry', () => {
     mkdirSync(folder, { recursive: true });
     writeFileSync(join(folder, 'Movie Name (2019).mkv'), 'someone else');
     pipe.complete(NAME, { [`${NAME}.mkv`]: 'video-data' });
-    await until(() => entry.reason?.code === 'destination_exists');
+    await until(() => reasonOfEntry(entry)?.code === 'destination_exists');
 
     rmSync(join(folder, 'Movie Name (2019).mkv'));
     const downloads = pipe.tracker.state.downloads.length;
@@ -69,8 +72,8 @@ describe('retry', () => {
     expect((await api.post('/queue/actions', { action: 'retry', ids: ['movie:2'] })).status).toBe(200);
 
     // The client has the finished torrent, so the target validates and imports it again.
-    await until(() => entry.stage === 'available');
-    expect(entry.reason).toBeNull();
+    await until(() => stageOf(entry) === 'available');
+    expect(reasonOfEntry(entry)).toBeNull();
     expect(entry.release).not.toBeNull();
     expect(pipe.tracker.state.downloads.length).toBe(downloads);
     expect(Object.values(pipe.db.data.files).some((file) => file.path === 'Movie Name (2019)/Movie Name (2019).mkv')).toBe(true);
@@ -85,12 +88,12 @@ describe('retry', () => {
     pipe.tracker.state.items = [{ title: release, size: 60 * 45 * MIB }];
     pipe.finder.requestSearch('tv:1');
     const entry = pipe.queue.get('tv:1:1x1')!;
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
 
     const hash = hashOf(release);
     pipe.qbit.progress(hash, 0.5);
     await until(() => pipe!.poller.transfer(hash)?.progress === 0.5);
-    pipe.queue.move(entry, { stage: 'downloading', reason: { code: 'client_error' } }, 'test');
+    move(pipe.queue, entry, { stage: 'downloading', reason: { code: 'client_error' } }, 'test');
 
     const searches = pipe.tracker.state.searches.length;
     const downloads = pipe.tracker.state.downloads.length;
@@ -98,8 +101,8 @@ describe('retry', () => {
     expect((await api.post('/queue/actions', { action: 'retry', ids: ['tv:1:1x1'] })).status).toBe(200);
 
     // The torrent is in the client and it has not finished, so the target downloads it again with no new search.
-    await until(() => entry.reason === null);
-    expect(entry.stage).toBe('downloading');
+    await until(() => reasonOfEntry(entry) === null);
+    expect(stageOf(entry)).toBe('downloading');
     expect(pipe.tracker.state.searches.length).toBe(searches);
     expect(pipe.tracker.state.downloads.length).toBe(downloads);
   });
@@ -111,14 +114,14 @@ describe('retry', () => {
     pipe.db.data.titles[series.key] = series;
     const entry = pipe.queue.ensure('tv:1', 1, 1);
     pipe.queue.request(entry, 'test');
-    pipe.queue.move(entry, { stage: 'queued', branch: null, reason: { code: 'too_many_attempts' } }, 'test');
+    move(pipe.queue, entry, { stage: 'queued', branch: null, reason: { code: 'too_many_attempts' } }, 'test');
 
     pipe.tracker.state.items = [{ title: 'Show.Name.S01E01.1080p.WEB-DL-GRP', size: 60 * 45 * MIB }];
 
     expect((await api.post('/queue/actions', { action: 'retry', ids: ['tv:1:1x1'] })).status).toBe(200);
 
     // No file, no torrent and no release: the target searches, finds the release, and downloads it.
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     expect(pipe.tracker.state.searches.length).toBeGreaterThan(0);
     expect(pipe.tracker.state.downloads.length).toBe(1);
   });

@@ -5,6 +5,7 @@ import { db, open } from '../../src/core/db.ts';
 import type { SearchResult } from '../../src/metadata/tmdb.ts';
 import { createTmdb } from '../../src/metadata/tmdb.ts';
 import { movie, title } from '../helpers/test-fixtures.ts';
+import { entryOf } from '../helpers/test-queue.ts';
 
 const KEY = 'secret-key-1234';
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -232,7 +233,7 @@ describe('discovery route', () => {
 
   it('carries the queue status of a title that is in the queue', async () => {
     db.data.titles['movie:603'] = movie({ key: 'movie:603', tmdbId: 603, meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
-    db.data.queue['movie:603'] = { id: 'movie:603', titleKey: 'movie:603', season: null, number: null, stage: 'downloading', branch: null, reason: null, attempt: 1, clearedAt: null } as never;
+    db.data.queue['movie:603'] = entryOf({ id: 'movie:603', titleKey: 'movie:603', stage: 'downloading' }) as never;
     try {
       const { body } = await discovery();
       expect(body.rows[0]!.results.find((result) => result.tmdbId === 603)).toMatchObject({ queueStatus: 'downloading', availability: 'missing' });
@@ -243,7 +244,7 @@ describe('discovery route', () => {
 
   it('carries the state of a series in the series row', async () => {
     db.data.titles['tv:1396'] = title({ key: 'tv:1396', tmdbId: 1396 });
-    db.data.queue['tv:1396'] = { id: 'tv:1396', titleKey: 'tv:1396', season: null, number: null, stage: 'searching', branch: null, reason: null, attempt: 1, clearedAt: null } as never;
+    db.data.queue['tv:1396'] = entryOf({ id: 'tv:1396', titleKey: 'tv:1396', stage: 'searching' }) as never;
     try {
       const { body } = await discovery();
       expect(body.rows[1]!.results.find((result) => result.tmdbId === 1396)).toMatchObject({ queueStatus: 'searching', availability: 'waiting' });

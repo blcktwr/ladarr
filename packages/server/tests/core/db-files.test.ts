@@ -13,12 +13,11 @@ const entry = {
   titleKey: 'movie:603',
   season: null,
   number: null,
-  stage: 'queued',
-  branch: null,
-  reason: null,
+  state: { kind: 'queued' },
   revision: 1,
   createdAt: 1,
-  stageSince: 1,
+  stateSince: 1,
+  phaseSince: 1,
   completedAt: null,
   clearedAt: null,
   priority: null,
@@ -134,6 +133,58 @@ describe('database files', () => {
       const config = readJson(file);
       for (const key of queueKeys) expect(config).not.toHaveProperty(key);
       expect(readJson(join(dir, 'queue.json'))).toEqual(queueWork);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('migrates an older queue file to one state per target', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ladarr-db-files-'));
+    const file = join(dir, 'db.json');
+    try {
+      const data = emptyData();
+      const app = { ...data } as Record<string, unknown>;
+      for (const key of queueKeys) delete app[key];
+      writeFileSync(file, JSON.stringify(app));
+      const legacy = {
+        id: 'movie:603',
+        titleKey: 'movie:603',
+        season: null,
+        number: null,
+        stage: 'validating',
+        branch: null,
+        reason: { code: 'file_not_found' },
+        revision: 1,
+        createdAt: 1,
+        stageSince: 4,
+        completedAt: null,
+        clearedAt: null,
+        priority: null,
+        attempt: 1,
+        attempts: [],
+        history: [{ at: 3, stage: 'validating', branch: null, attempt: 1, cause: 'import blocked' }],
+        search: null,
+        release: null,
+        transferHash: null,
+        clientId: null,
+        manualMatch: null,
+        importResult: null,
+      };
+      writeFileSync(join(dir, 'queue.json'), JSON.stringify({ queue: { [legacy.id]: legacy }, queueRev: 7, queuePaused: false, jobs: {}, jobSeq: 0, prioritySeq: 0 }));
+
+      vi.stubEnv('NODE_ENV', 'production');
+      const db = await open(file);
+      expect(db.data.queue[legacy.id]!.state).toEqual({ kind: 'blocked', at: 'validating', problem: { code: 'file_not_found' } });
+      expect(db.data.queue[legacy.id]!.stateSince).toBe(4);
+      expect(db.data.queue[legacy.id]!.history[0]).toMatchObject({ state: { kind: 'validating' }, stage: 'validating' });
+
+      await db.write();
+      const saved = readJson(join(dir, 'queue.json')).queue[legacy.id];
+      expect(saved).not.toHaveProperty('stage');
+      expect(saved).not.toHaveProperty('branch');
+      expect(saved).not.toHaveProperty('reason');
+      expect(saved.state).toEqual({ kind: 'blocked', at: 'validating', problem: { code: 'file_not_found' } });
     } finally {
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });

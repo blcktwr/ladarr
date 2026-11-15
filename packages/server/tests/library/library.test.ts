@@ -1,3 +1,4 @@
+import { move, entryOf } from '../helpers/test-queue.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -358,7 +359,7 @@ describe('library API', () => {
     const old = queue.ensure('tv:2000', 2, 1);
     queue.request(old, 'test');
     queue.endAttempt(old, 'cancelled');
-    queue.move(old, { branch: 'cancelled', reason: null }, 'title removed');
+    move(queue, old, { branch: 'cancelled', reason: null }, 'title removed');
     const job = enqueue({ type: 'queue.search', payload: { titleKey: 'tv:2000', season: 2, entryIds: [old.id] }, dedupeKey: 'search:tv:2000:2:tv:2000:2x1' });
 
     await app.del('/library/tv:2000');
@@ -401,7 +402,7 @@ describe('library API', () => {
   it('shows the queue status of the series and of each episode', async () => {
     const ids = ['tv:1396', 'tv:1396:1x1', 'tv:1396:1x2', 'tv:1396:1x3', 'tv:1396:1x4', 'movie:603'];
     const entry = (id: string, extra: object) => {
-      app.db.data.queue[id] = { id, titleKey: id.startsWith('movie:') ? id : 'tv:1396', season: null, number: null, stage: 'queued', branch: null, reason: null, attempt: 1, clearedAt: null, ...extra } as never;
+      app.db.data.queue[id] = entryOf({ id, titleKey: id.startsWith('movie:') ? id : 'tv:1396', ...extra }) as never;
     };
     try {
       entry('tv:1396:1x1', { season: 1, number: 1, stage: 'queued', branch: 'waiting' });
@@ -412,7 +413,7 @@ describe('library API', () => {
 
       const { body } = await app.get('/library/tv:1396/episodes?season=1');
       expect(body.episodes.map((e: { number: number; queue: string | null }) => [e.number, e.queue])).toEqual([
-        [1, 'waiting'],
+        [1, 'searching'],
         [2, 'sending'],
         [3, 'fetching'],
         [4, null],
@@ -465,8 +466,8 @@ describe('library API', () => {
       expect((await app.get('/library/tv:1396')).body.title.queueStatus).toBe('searching');
       const deferred = (await app.get('/library/tv:1396/episodes?season=1')).body;
       expect(deferred.episodes.map((e: { number: number; queue: string | null }) => [e.number, e.queue])).toEqual([
-        [1, 'waiting'],
-        [2, 'waiting'],
+        [1, 'searching'],
+        [2, 'searching'],
         [3, null],
         [4, null],
       ]);
@@ -476,7 +477,7 @@ describe('library API', () => {
       const blocked = (await app.get('/library/tv:1396/episodes?season=1')).body;
       expect(blocked.episodes.map((e: { number: number; queue: string | null }) => [e.number, e.queue])).toEqual([
         [1, 'stuck'],
-        [2, 'waiting'],
+        [2, 'searching'],
         [3, null],
         [4, null],
       ]);
@@ -494,7 +495,7 @@ describe('library API', () => {
   it('shows the queue status of each title in the list', async () => {
     const ids = ['tv:1396', 'movie:603'];
     const entry = (id: string, extra: object) => {
-      app.db.data.queue[id] = { id, titleKey: id, season: null, number: null, stage: 'queued', branch: null, reason: null, attempt: 1, clearedAt: null, ...extra } as never;
+      app.db.data.queue[id] = entryOf({ id, titleKey: id, ...extra }) as never;
     };
     try {
       for (const id of ids) delete app.db.data.queue[id];

@@ -10,7 +10,7 @@ import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, Empty
 import { Alert } from '../../components/alert.tsx';
 import { Link, LoadFailed, LoadingGallery, pageWidth } from '../../components/index.ts';
 import { ModalActions } from '../../components/modal-actions.tsx';
-import { availabilityLabel, catalogPath, contentType, posterUrl, describeError, posterState, shownKey, statusLabel } from '../../lib/format.ts';
+import { availabilityLabel, catalogPath, contentType, posterUrl, describeError, posterState, statusLabel } from '../../lib/format.ts';
 import { t, getLanguage } from '../../i18n/index.ts';
 import { useLive } from '../../lib/live.ts';
 import { StatusText } from '../../lib/status.tsx';
@@ -252,8 +252,7 @@ const seasonOrder = <T extends { seasonNumber: number }>(seasons: T[]) =>
 // because nothing searches for it.
 function EpisodeStatus({ episode }: { episode: EpisodeItem }) {
   if (episode.queue) {
-    const key = shownKey(episode.queue);
-    return <StatusText small status={statusLabel(key)} icon={key} />;
+    return <StatusText small status={statusLabel(episode.queue)} icon={episode.queue} />;
   }
   if (episode.hasFile) return <StatusText small status={statusLabel('available')} icon="available" />;
   if (episode.monitored === false) return <Text variant="small">{t('N/A')}</Text>;

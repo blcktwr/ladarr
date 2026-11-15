@@ -75,7 +75,7 @@ export const REJECTION_TEXT: Record<string, string> = {
   indexer_removed: 'The indexer of the release was removed.',
   quality_rejected: 'The quality is not good enough (for example a camera copy).',
   no_seeders: 'The release has no seeders.',
-  quality_not_in_profile: 'The quality of the release is not in any quality profile of the title.',
+  quality_not_in_profile: 'The quality of the release is not in the allowed qualities.',
   size_below_min: 'The file is smaller than the quality allows for this runtime.',
   size_above_max: 'The file is larger than the quality allows for this runtime.',
   audio_unverified: 'The name of the release does not say which audio it has.',

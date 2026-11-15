@@ -7,7 +7,7 @@ import { withOutboundRequests } from '../../core/outbound.ts';
 import { parseEpisodes, titleNumbers } from '../parse.ts';
 import type { Clients } from './client-api.ts';
 import { ClientError, type ClientHandle, type Torrent, type TorrentStatus } from './qbittorrent.ts';
-import { addedByApp, type Queue, type QueueEntry } from './queue.ts';
+import { addedByApp, isActive, phaseOfEntry, type Queue, type QueueEntry } from './queue.ts';
 
 // What the client reported about one torrent at the last good poll. One torrent is one transfer,
 // even when it covers many entries, so its bytes and rate count once.
@@ -59,7 +59,9 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
   let lastPublish = 0;
   let dirty = new Set<string>();
 
-  const tracked = () => Object.values(db.data.queue).filter((entry) => entry.transferHash && ['sending', 'downloading', 'validating'].includes(entry.stage) && entry.branch !== 'cancelled');
+  // A target that is blocked at its download keeps its torrent in the client, so the poll still reads it and clears
+  // the problem when the torrent or the client comes back.
+  const tracked = () => Object.values(db.data.queue).filter((entry) => isActive(entry) && entry.transferHash && ['sending', 'downloading', 'validating'].includes(phaseOfEntry(entry)));
 
   function publish(force = false) {
     const now = Date.now();
@@ -162,17 +164,17 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
     const groups = new Map<string, QueueEntry[]>();
     for (const entry of entries) {
       // A target in Sending next to an attached target keeps waiting. Only the grab decides about its torrent.
-      if (entry.stage === 'sending' && entry.transferHash && !addedByApp(entry.transferHash)) continue;
+      if (entry.state.kind === 'sending' && entry.transferHash && !addedByApp(entry.transferHash)) continue;
       groups.set(entry.transferHash!, [...(groups.get(entry.transferHash!) ?? []), entry]);
     }
 
     for (const [hash, group] of groups) {
       const torrent = byHash.get(hash);
       if (!torrent) {
-        const recent = group.every((entry) => Date.now() - entry.stageSince < GRACE_MS);
+        const recent = group.every((entry) => Date.now() - entry.phaseSince < GRACE_MS);
         // The torrent was there and is gone: someone removed it in the client.
         if (seen.has(hash) && !recent) {
-          for (const entry of group) if (entry.reason?.code !== 'torrent_missing') queue.move(entry, { reason: { code: 'torrent_missing' } }, 'torrent is not in the client');
+          for (const entry of group) if (entry.state.kind !== 'blocked' || entry.state.problem.code !== 'torrent_missing') queue.block(entry, { code: 'torrent_missing' }, 'torrent is not in the client');
           seen.delete(hash);
           transfers.delete(hash);
         }
@@ -185,21 +187,21 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
       const parts = !torrent.complete || !knownFiles ? await fileParts(handle, hash, group) : null;
       observe(group, hash, torrent, parts?.progress ?? null, parts?.files ?? null);
       for (const entry of group) {
-        if (entry.stage === 'sending') queue.move(entry, { stage: 'downloading', reason: null }, 'client reported the torrent');
+        if (entry.state.kind === 'sending') queue.enter(entry, 'downloading', 'client reported the torrent');
         // The torrent is back, or the client cleared its error.
-        if (entry.reason?.code === 'torrent_missing') queue.move(entry, { reason: null }, 'torrent is in the client again');
+        if (entry.state.kind === 'blocked' && entry.state.problem.code === 'torrent_missing') queue.unblock(entry, 'torrent is in the client again');
         if (torrent.status === 'error') {
-          if (entry.reason?.code !== 'client_error') queue.move(entry, { reason: { code: 'client_error' } }, 'client reported an error', torrent.state);
-        } else if (entry.reason?.code === 'client_error') {
-          queue.move(entry, { reason: null }, 'client error cleared');
+          if (entry.state.kind !== 'blocked' || entry.state.problem.code !== 'client_error') queue.block(entry, { code: 'client_error' }, 'client reported an error', torrent.state);
+        } else if (entry.state.kind === 'blocked' && entry.state.problem.code === 'client_error') {
+          queue.unblock(entry, 'client error cleared');
         }
-        if (torrent.complete && entry.stage === 'downloading' && entry.branch !== 'paused' && !entry.reason) {
+        if (torrent.complete && entry.state.kind === 'downloading') {
           // The client has all the data. The files are not in the library yet, so the next step is the check.
           catalog.info('download_completed', `Download completed: "${torrent.name}"`, itemFields(entry), { hash, name: torrent.name, sizeBytes: torrent.sizeBytes, seeds: torrent.seeds, peers: torrent.peers });
-          queue.move(entry, { stage: 'validating', reason: null }, 'download complete');
+          queue.enter(entry, 'validating', 'download complete');
         }
       }
-      if (torrent.complete && group.some((entry) => entry.stage === 'validating' && !entry.branch)) {
+      if (torrent.complete && group.some((entry) => entry.state.kind === 'validating')) {
         enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}`, priority: group.some((entry) => entry.priority !== null) });
       }
     }

@@ -1,3 +1,5 @@
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { movie } from '../helpers/test-fixtures.ts';
 import { MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
@@ -97,10 +99,10 @@ describe('download slots', () => {
 
     const one = pipe!.finder.requestSearch(first.key)[0]!;
     const two = pipe!.finder.requestSearch(next.key)[0]!;
-    await until(() => [one, two].filter((entry) => entry.stage === 'downloading').length === 1 && [one, two].some((entry) => entry.stage === 'fetching' && entry.release !== null));
-    const running = [one, two].find((entry) => entry.stage === 'downloading')!;
+    await until(() => [one, two].filter((entry) => stageOf(entry) === 'downloading').length === 1 && [one, two].some((entry) => stageOf(entry) === 'fetching' && entry.release !== null));
+    const running = [one, two].find((entry) => stageOf(entry) === 'downloading')!;
     const waiting = [one, two].find((entry) => entry !== running)!;
-    expect(waiting.stage).toBe('fetching');
+    expect(stageOf(waiting)).toBe('fetching');
     expect(waiting.release).not.toBeNull();
     expect(pipe!.qbit.torrents.size).toBe(1);
 
@@ -109,7 +111,7 @@ describe('download slots', () => {
     expect(pipe!.qbit.torrents.size).toBe(1);
 
     pipe!.qbit.progress(running.transferHash!, 1);
-    await until(() => waiting.stage === 'downloading');
+    await until(() => stageOf(waiting) === 'downloading');
     expect(pipe!.qbit.torrents.size).toBe(2);
   }, 15_000);
 
@@ -119,7 +121,7 @@ describe('download slots', () => {
 
     const one = pipe!.finder.requestSearch(first.key)[0]!;
     const two = pipe!.finder.requestSearch(next.key)[0]!;
-    await until(() => one.stage === 'downloading' && two.stage === 'downloading');
+    await until(() => stageOf(one) === 'downloading' && stageOf(two) === 'downloading');
     expect(pipe!.qbit.torrents.size).toBe(2);
   });
 
@@ -141,11 +143,11 @@ describe('download slots', () => {
     three.createdAt = 3;
 
     pipe!.finder.requestSearch(next.key);
-    await until(() => two.stage === 'downloading');
+    await until(() => stageOf(two) === 'downloading');
     pipe!.finder.requestSearch(third.key);
-    await until(() => three.stage === 'fetching' && three.release !== null);
+    await until(() => stageOf(three) === 'fetching' && three.release !== null);
     pipe!.finder.requestSearch(first.key);
-    await until(() => one.stage === 'fetching' && one.release !== null);
+    await until(() => stageOf(one) === 'fetching' && one.release !== null);
 
     // The list shows the oldest target first among the targets that fetch.
     const list = (await api!.get('/queue?stage=searching')).body.items;
@@ -153,8 +155,8 @@ describe('download slots', () => {
 
     // When the slot frees, the first target of the list takes it.
     pipe!.qbit.progress(two.transferHash!, 1);
-    await until(() => one.stage === 'downloading' || three.stage === 'downloading');
-    expect(one.stage).toBe('downloading');
-    expect(three.stage).toBe('fetching');
+    await until(() => stageOf(one) === 'downloading' || stageOf(three) === 'downloading');
+    expect(stageOf(one)).toBe('downloading');
+    expect(stageOf(three)).toBe('fetching');
   }, 15_000);
 });

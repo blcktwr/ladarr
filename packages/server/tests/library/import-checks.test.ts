@@ -1,3 +1,5 @@
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { QueueEntryView } from '@ladarr/shared/types';
 import type { ImportCheck } from '@ladarr/shared/types';
@@ -14,7 +16,7 @@ afterEach(async () => {
 });
 
 // The payload of an `import.checks` event, from the plan. The API is not implemented yet, so the test has its own shape.
-type CheckEvent = { at: number; entries: { id: string; stage: string; key: string; checks: ImportCheck[] }[] };
+type CheckEvent = { at: number; entries: { id: string; status: string; phase: string; checks: ImportCheck[] }[] };
 const checksPublished = () => pipe!.published.filter((event) => event.type === 'import.checks').map((event) => event.data as CheckEvent);
 
 const NAME = 'Movie.Name.2019.1080p.BluRay-GRP';
@@ -28,7 +30,7 @@ async function startMovie(options: Parameters<typeof startPipeline>[0] = {}) {
   pipe.db.data.titles[film.key] = film;
   pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
   const [entry] = pipe.finder.requestSearch(film.key);
-  await until(() => entry!.stage === 'downloading');
+  await until(() => stageOf(entry!) === 'downloading');
   return entry!;
 }
 
@@ -41,8 +43,8 @@ describe('import checks', () => {
     pipe!.complete(NAME, { [`${NAME}.mkv`]: 'video-data' });
     await until(() => {
       const current = view(pipe!.poller, pipe!.importStatus, entry, new Map()) as QueueEntryView & { checks: ImportCheck[] | null };
-      if (current.checks) views.push({ stage: current.stage, checks: current.checks });
-      return entry.stage === 'available';
+      if (current.checks) views.push({ stage: current.phase, checks: current.checks });
+      return stageOf(entry) === 'available';
     });
 
     expect(views.length).toBeGreaterThan(0);
@@ -59,7 +61,7 @@ describe('import checks', () => {
     // Every check is running and then ok. The running transition keeps the stage of the target.
     const transitions = new Map<string, string[]>(CHECK_IDS.map((id) => [id, []]));
     const order: string[] = [];
-    const stageOf = new Map<string, string>();
+    const stageAt = new Map<string, string>();
     const runningAt = new Map<string, number>();
     for (const event of events) {
       for (const item of event.entries) {
@@ -70,7 +72,7 @@ describe('import checks', () => {
           if (check.state !== previous) seen.push(check.state);
           if (check.state === 'running' && previous !== 'running') {
             order.push(check.id);
-            stageOf.set(check.id, item.stage);
+            stageAt.set(check.id, item.phase);
             // The check's own `at` is the moment of the state change; `event.at` is the publish time.
             runningAt.set(check.id, check.at!);
           }
@@ -79,8 +81,8 @@ describe('import checks', () => {
     }
     expect(order).toEqual([...CHECK_IDS]);
     for (const id of CHECK_IDS) expect(transitions.get(id)!.filter((state) => state !== 'pending')).toEqual(['running', 'ok']);
-    expect(stageOf.get('download_complete')).toBe('validating');
-    for (const id of CHECK_IDS.slice(1)) expect(stageOf.get(id)).toBe('importing');
+    expect(stageAt.get('download_complete')).toBe('validating');
+    for (const id of CHECK_IDS.slice(1)) expect(stageAt.get(id)).toBe('importing');
 
     // A check stays running for at least the configured delay, also between one check and the next.
     const starts = CHECK_IDS.map((id) => runningAt.get(id)!);
@@ -91,13 +93,13 @@ describe('import checks', () => {
       expect(gap, `gap ${CHECK_IDS[index - 1]} -> ${CHECK_IDS[index]} is ${gap} ms`).toBeGreaterThanOrEqual(CHECK_DELAY_MS - TIMER_TOLERANCE_MS);
     }
 
-    expect(entry.stage).toBe('available');
+    expect(stageOf(entry)).toBe('available');
   });
 
   it('marks the failed check, leaves the following checks pending, and blocks the target', async () => {
     const entry = await startMovie({ checkDelayMs: 10, probe: async () => ({ ok: false, reason: 'unreadable' }) });
     pipe!.complete(NAME, { [`${NAME}.mkv`]: 'broken' });
-    await until(() => entry.reason?.code === 'file_unreadable');
+    await until(() => reasonOfEntry(entry)?.code === 'file_unreadable');
 
     const events = checksPublished();
     expect(events.length).toBeGreaterThan(0);
@@ -108,9 +110,9 @@ describe('import checks', () => {
     const expected = CHECK_IDS.map((_, index) => (index < failedAt ? 'ok' : index === failedAt ? 'failed' : 'pending'));
     expect(item?.checks.map((check) => check.state)).toEqual(expected);
 
-    expect(entry.stage).toBe('importing');
-    expect(entry.branch).toBeNull();
-    expect(entry.reason).toMatchObject({ code: 'file_unreadable' });
+    expect(stageOf(entry)).toBe('importing');
+    expect(branchOf(entry)).toBeNull();
+    expect(reasonOfEntry(entry)).toMatchObject({ code: 'file_unreadable' });
   });
 
   it('shares one check list between the targets of a pack', async () => {
@@ -121,10 +123,10 @@ describe('import checks', () => {
     pipe.tracker.state.items = [{ title: pack, size: 2 * 60 * 45 * MIB }];
     const entries = pipe.finder.requestSearch(series.key);
     expect(entries.map((entry) => entry.id)).toEqual(['tv:1:1x1', 'tv:1:1x2']);
-    await until(() => entries.every((entry) => entry.stage === 'downloading'));
+    await until(() => entries.every((entry) => stageOf(entry) === 'downloading'));
 
     pipe.complete(pack, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two' });
-    await until(() => entries.every((entry) => entry.stage === 'available'));
+    await until(() => entries.every((entry) => stageOf(entry) === 'available'));
 
     const events = checksPublished();
     expect(events.length).toBeGreaterThanOrEqual(30);
@@ -144,7 +146,7 @@ describe('import checks', () => {
     pipe.db.data.titles[film.key] = film;
     const hash = hashOf(NAME);
     const entry = pipe.queue.ensure(film.key, null, null);
-    Object.assign(entry, { stage: 'importing', branch: null, reason: null, transferHash: hash, clientId: 'client-1', attempt: 1 });
+    Object.assign(entry, { state: { kind: 'importing' }, transferHash: hash, clientId: 'client-1', attempt: 1 });
 
     expect(pipe.db.data.imports).toEqual({});
     expect(unfinishedImports()).toContain(hash);

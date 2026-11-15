@@ -1,4 +1,6 @@
+import { move } from '../helpers/test-queue.ts';
 import type { LogEntry } from '@ladarr/shared/types';
+import type { Phase } from '@ladarr/shared/queue';
 import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -29,18 +31,17 @@ const itemEntries = (file: string, id: string): LogEntry[] =>
 // A catalog log follows one target of a title.
 const fields = (itemId: string, itemType: string, titleKey: string, title: string, target: string) => ({ itemId, itemType, titleKey, title, target });
 
-function entry(id: string, stage: QueueEntry['stage'] = 'queued'): QueueEntry {
+function entry(id: string, stage: Phase = 'queued'): QueueEntry {
   return {
     id,
     titleKey: id,
     season: null,
     number: null,
-    stage,
-    branch: null,
-    reason: null,
+    state: stage === 'available' ? { kind: 'available' } : { kind: stage },
     revision: 1,
     createdAt: 0,
-    stageSince: 0,
+    stateSince: 0,
+    phaseSince: 0,
     completedAt: null,
     clearedAt: null,
     priority: null,
@@ -211,7 +212,7 @@ describe('item logs', () => {
     configureItemLogs();
     const queue = createQueue(createEvents(), () => {});
 
-    queue.move(db.data.queue['movie:1']!, { stage: 'searching' }, 'search started');
+    move(queue, db.data.queue['movie:1']!, { stage: 'searching' }, 'search started');
 
     await closeLog();
     expect((await recentLogs(10, { itemId: 'movie:1' })).map((line) => line.message)).toContain('Search started');
@@ -227,8 +228,8 @@ describe('item logs', () => {
     catalog.info('search.started', 'Search started', fields('movie:1', 'movie', 'movie:1', 'Movie', 'Movie'));
     catalog.info('search.started', 'Search started', fields('movie:2', 'movie', 'movie:2', 'Other movie', 'Movie'));
 
-    queue.move(db.data.queue['movie:1']!, { stage: 'available' }, 'imported');
-    queue.move(db.data.queue['movie:2']!, { branch: 'cancelled' }, 'cancelled by the user');
+    move(queue, db.data.queue['movie:1']!, { stage: 'available' }, 'imported');
+    move(queue, db.data.queue['movie:2']!, { branch: 'cancelled' }, 'cancelled by the user');
 
     await closeLog();
     expect(existsSync(itemPath(file, 'movie:1'))).toBe(false);

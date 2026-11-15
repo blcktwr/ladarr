@@ -34,8 +34,8 @@ test.beforeAll(async () => {
   await expect
     .poll(
       async () => {
-        const items = (await stack.call('GET', '/queue/groups/tv:1')).body.items as { reason: unknown; branch: unknown }[];
-        return items.length === 3 && items.every((item) => item.reason && !item.branch);
+        const items = (await stack.call('GET', '/queue/groups/tv:1')).body.items as { status: string }[];
+        return items.length === 3 && items.every((item) => item.status === 'stuck');
       },
       { timeout: 60_000 },
     )
@@ -45,20 +45,21 @@ test.afterAll(() => stack.stop());
 
 test('shows the status on the series and on each episode in the catalog', async ({ page, context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
+  // The tile of the series in the catalog holds the status of its episodes.
+  await page.goto(`${URL_BASE}/catalog`);
+  await expect(page.locator('a[href$="/catalog/tv/1"]')).toContainText('Stuck');
   await page.goto(`${URL_BASE}/catalog/tv/1`);
-  // The header holds the status of the series.
-  await expect(page.getByText('Sending', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Show episodes of Season 1' }).click();
   // Each row of the table holds the status of its episode.
   const table = page.getByRole('table', { name: /Episodes/ });
-  await expect(table.getByText('Sending', { exact: true })).toHaveCount(3);
+  await expect(table.getByText('Stuck', { exact: true })).toHaveCount(3);
 });
 
 test('shows the status on the series and on each episode', async ({ page, context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
   await page.goto(`${URL_BASE}/activity`);
   // The row of the series holds the status of its episodes.
-  await expect(page.locator('[data-row="group:tv:1:1"]')).toContainText('Sending');
+  await expect(page.locator('[data-row="group:tv:1:1"]')).toContainText('Stuck');
   // A click on the row of the season opens its episodes under the table, and a second click closes them.
   const season = page.locator('[data-row="season:tv:1|1"]');
   await season.click();
@@ -67,7 +68,7 @@ test('shows the status on the series and on each episode', async ({ page, contex
   await expect(page.getByRole('table', { name: 'Episodes of season 1' })).toBeHidden();
   await season.click();
   // An episode shows its own status too.
-  await expect(page.locator('[data-row="entry:tv:1:1x1"]')).toContainText('Sending');
+  await expect(page.locator('[data-row="entry:tv:1:1x1"]')).toContainText('Stuck');
 });
 
 test('shows the reason that stops an episode under its row', async ({ page, context }) => {

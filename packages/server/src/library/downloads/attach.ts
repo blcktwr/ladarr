@@ -1,4 +1,4 @@
-import type { Queue, QueueEntry } from './queue.ts';
+import { isActive, type Queue, type QueueEntry } from './queue.ts';
 import type { ClientHandle, Torrent } from './qbittorrent.ts';
 
 // Attaches a torrent that is in the client already to one or more targets. The HTTP route and the import verification
@@ -9,6 +9,8 @@ export async function attachTorrent(
 ): Promise<void> {
   const hash = torrent.hash;
   for (const target of targets) {
+    // A cancelled or completed target stays as it is. A late attach must not revive it.
+    if (!isActive(target)) continue;
     queue.endAttempt(target, 'cancelled', 'replaced by an attached download');
     queue.startAttempt(target, 'attached download');
     target.release = {
@@ -34,7 +36,7 @@ export async function attachTorrent(
     target.manualMatch = null;
     target.transferHash = hash;
     target.clientId = handle.id;
-    queue.move(target, { stage: torrent.complete ? 'validating' : 'downloading', branch: null, reason: null }, cause, torrent.name);
+    queue.enter(target, torrent.complete ? 'validating' : 'downloading', cause, torrent.name);
   }
   // A partial torrent that the client keeps stopped never moves. The verification resumes it, so a restart of the
   // client or of ladarr does not leave the download dead.

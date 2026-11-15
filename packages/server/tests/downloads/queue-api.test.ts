@@ -1,3 +1,6 @@
+import { move } from '../helpers/test-queue.ts';
+import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { branchOf } from '../helpers/test-queue.ts';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -32,7 +35,7 @@ describe('requests and summary', () => {
     const started = await api!.post('/queue/search', { titleKey: film.key });
     expect(started.status).toBe(202);
     expect(started.body.started).toEqual(['movie:2']);
-    await until(() => pipe!.queue.get('movie:2')!.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('movie:2')!) === 'downloading');
 
     const summary = (await api!.get('/queue/summary')).body;
     expect(summary).toMatchObject({ targets: 1, counts: { downloading: 1 }, hasClient: true, indexers: 1 });
@@ -74,7 +77,7 @@ describe('requests and summary', () => {
   it('names the quality of the release of an entry', async () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });
-    await until(() => pipe!.queue.get('movie:2')!.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('movie:2')!) === 'downloading');
 
     const item = (await api!.get('/queue')).body.items[0];
     expect(item.release).toMatchObject({ title: NAME, sizeBytes: 100 * 120 * MIB, quality: 'BluRay 1080p' });
@@ -149,33 +152,33 @@ describe('requests and summary', () => {
 
     const detail = async () => (await api!.get(`/queue/entries/${entry.id}`)).body.entry;
     const total = async (stage: string) => (await api!.get(`/queue?stage=${stage}`)).body.total;
-    const move = (reason: { code: string } | null) => pipe!.queue.move(entry, { stage: 'queued', branch: 'waiting', reason }, 'test');
+    const force = (reason: { code: string } | null) => move(pipe!.queue, entry, { stage: 'queued', branch: 'waiting', reason }, 'test');
 
     // The indexers answered, and no release passed the profile. The target waits for its next search, so it is in
     // Waiting, and its row keeps the key that says it found no release.
-    move({ code: 'no_results' });
-    expect((await detail()).key).toBe('not_found');
-    expect((await api!.get('/queue/summary')).body.counts).toEqual({ not_found: 1 });
+    force({ code: 'no_results' });
+    expect((await detail()).status).toBe('not_found');
+    expect((await api!.get('/queue/summary')).body.counts).toEqual({ queued: 1 });
     expect(await total('queued')).toBe(1);
     expect(await total('searching')).toBe(0);
 
     // The indexers answered, and every release was rejected. The target also waits for its next search, so it is
     // in Waiting, and its row keeps the key that says it found no release that fits the preset.
-    move({ code: 'all_rejected' });
-    expect((await detail()).key).toBe('no_match');
-    expect((await api!.get('/queue/summary')).body.counts).toEqual({ no_match: 1 });
+    force({ code: 'all_rejected' });
+    expect((await detail()).status).toBe('no_match');
+    expect((await api!.get('/queue/summary')).body.counts).toEqual({ queued: 1 });
     expect(await total('queued')).toBe(1);
     expect(await total('searching')).toBe(0);
 
     // The search reached its budget. The target searches again, so it stays in the searching stage.
-    move({ code: 'search_deferred' });
-    expect((await detail()).key).toBe('waiting');
-    expect((await api!.get('/queue/summary')).body.counts).toEqual({ waiting: 1 });
+    force({ code: 'search_deferred' });
+    expect((await detail()).status).toBe('searching');
+    expect((await api!.get('/queue/summary')).body.counts).toEqual({ searching: 1 });
     expect(await total('searching')).toBe(1);
     expect(await total('queued')).toBe(0);
 
-    move(null);
-    expect((await detail()).key).toBe('waiting');
+    force(null);
+    expect((await detail()).status).toBe('searching');
   });
 
   it('keeps a target that waits for its turn apart from one that waits for its next search', async () => {
@@ -186,7 +189,7 @@ describe('requests and summary', () => {
     pipe.queue.request(pipe.queue.ensure(film.key, null, null), 'test');
 
     // The target is in the queue, before its first search. It is Waiting.
-    expect((await api.get('/queue')).body.items.map((i: { key: string }) => i.key)).toEqual(['queued']);
+    expect((await api.get('/queue')).body.items.map((i: { status: string }) => i.status)).toEqual(['queued']);
     expect((await api.get('/queue?stage=queued')).body.total).toBe(1);
     expect((await api.get('/queue?stage=searching')).body.total).toBe(0);
   });
@@ -205,14 +208,14 @@ describe('requests and summary', () => {
     // The searching title began first, so the order of creation alone would put it first.
     searchingEntry.createdAt = 1;
     fetchingEntry.createdAt = 2;
-    pipe.queue.move(fetchingEntry, { stage: 'fetching', branch: null, reason: null }, 'test');
-    pipe.queue.move(searchingEntry, { stage: 'searching' }, 'test');
+    move(pipe.queue, fetchingEntry, { stage: 'fetching', branch: null, reason: null }, 'test');
+    move(pipe.queue, searchingEntry, { stage: 'searching' }, 'test');
 
     const list = (await api.get('/queue?stage=searching')).body;
     expect(list.total).toBe(2);
-    expect(list.items.map((item: { key: string; counts: Record<string, number> }) => [item.key, item.counts])).toEqual([
-      ['tv:2:1', { fetching: 1 }],
-      ['tv:1:1', { searching: 1 }],
+    expect(list.items.map((item: { status: string; counts: Record<string, number> }) => [item.status, item.counts])).toEqual([
+      ['fetching', { fetching: 1 }],
+      ['searching', { searching: 1 }],
     ]);
     // Fetching has no tab of its own.
     expect((await api.get('/queue?stage=fetching')).body.total).toBe(0);
@@ -224,7 +227,7 @@ describe('requests and summary', () => {
     const series = title({ rootId: 'tv', episodes: [aired(1), aired(2), episode(2, 1, '2020-02-01')] });
     pipe.db.data.titles[series.key] = series;
     pipe.finder.requestSearch(series.key);
-    await until(() => pipe!.queue.get('tv:1:2x1')!.branch === 'waiting' && pipe!.queue.get('tv:1:1x2')!.branch === 'waiting');
+    await until(() => branchOf(pipe!.queue.get('tv:1:2x1')) === 'waiting' && branchOf(pipe!.queue.get('tv:1:1x2')) === 'waiting');
 
     const list = (await api.get('/queue')).body;
     expect(list.total).toBe(2);
@@ -234,7 +237,7 @@ describe('requests and summary', () => {
     ]);
     expect(list.items.map((i: { counts: Record<string, number> }) => i.counts)).toEqual([{ not_found: 2 }, { not_found: 1 }]);
     // The summary counts the series, not its seasons: every target of the series waits for its next search.
-    expect((await api.get('/queue/summary')).body.counts).toEqual({ not_found: 1 });
+    expect((await api.get('/queue/summary')).body.counts).toEqual({ queued: 2 });
     const children = (await api.get('/queue/groups/tv:1')).body.items;
     expect(children.map((c: { label: string }) => c.label)).toEqual(['Show Name S01E01', 'Show Name S01E02', 'Show Name S02E01']);
     expect(children[0].reason.message).toContain('Not found in any indexers');
@@ -261,18 +264,18 @@ describe('requests and summary', () => {
     const second = pipe.queue.ensure(series.key, 2, 1);
     pipe.queue.request(first, 'test');
     pipe.queue.request(second, 'test');
-    pipe.queue.move(first, { stage: 'fetching', branch: null, reason: null }, 'test');
-    pipe.queue.move(second, { stage: 'importing' }, 'test');
+    move(pipe.queue, first, { stage: 'fetching', branch: null, reason: null }, 'test');
+    move(pipe.queue, second, { stage: 'importing' }, 'test');
 
     // The season that fetches its release shows in Searching, and the season that imports shows in Importing.
     const searching = (await api.get('/queue?stage=searching')).body;
-    expect(searching.items.map((item: { key: string; season: number | null; counts: Record<string, number> }) => [item.key, item.season, item.counts])).toEqual([['tv:1:1', 1, { fetching: 1 }]]);
+    expect(searching.items.map((item: { status: string; season: number | null; counts: Record<string, number> }) => [item.status, item.season, item.counts])).toEqual([['fetching', 1, { fetching: 1 }]]);
     const importing = (await api.get('/queue?stage=importing')).body;
-    expect(importing.items.map((item: { key: string; season: number | null; counts: Record<string, number> }) => [item.key, item.season, item.counts])).toEqual([['tv:1:2', 2, { importing: 1 }]]);
+    expect(importing.items.map((item: { status: string; season: number | null; counts: Record<string, number> }) => [item.status, item.season, item.counts])).toEqual([['importing', 2, { importing: 1 }]]);
     // Both seasons are rows of the list, also when the same series has one in each stage.
     expect((await api.get('/queue')).body.items.map((item: { key: string }) => item.key)).toEqual(['tv:1:2', 'tv:1:1']);
     // The summary counts the series once for each stage that its seasons show.
-    expect((await api.get('/queue/summary')).body.counts).toEqual({ fetching: 1, importing: 1 });
+    expect((await api.get('/queue/summary')).body.counts).toEqual({ searching: 1, importing: 1 });
   });
 
   it('shows a series as searching from the add, before its episodes load', async () => {
@@ -285,13 +288,13 @@ describe('requests and summary', () => {
     // The series is one group that searches. It has no target yet, so it has no season and no episode row.
     const list = (await api.get('/queue')).body;
     expect(list.total).toBe(1);
-    expect(list.items).toEqual([expect.objectContaining({ kind: 'group', key: 'tv:1', titleKey: 'tv:1', season: null, total: 0, counts: { searching: 1 }, pending: true })]);
+    expect(list.items).toEqual([expect.objectContaining({ kind: 'pending', key: 'tv:1', titleKey: 'tv:1', season: null })]);
     expect((await api.get('/queue?stage=searching')).body.total).toBe(1);
     expect((await api.get('/queue?stage=downloading')).body.total).toBe(0);
     expect((await api.get('/queue?type=movie')).body.total).toBe(0);
     expect((await api.get('/queue?q=show')).body.total).toBe(1);
     expect((await api.get('/queue?q=other')).body.total).toBe(0);
-    expect((await api.get('/queue/summary')).body).toMatchObject({ targets: 1, counts: { searching: 1 }, working: { searching: 1 }, stopped: 0 });
+    expect((await api.get('/queue/summary')).body).toMatchObject({ targets: 0, counts: { searching: 1 }, working: {}, stopped: 0 });
 
     // The first search ended with no target, so the series leaves the queue.
     const job = Object.values(pipe.db.data.jobs).find((item) => item.dedupeKey === 'initial:tv:1')!;
@@ -317,15 +320,15 @@ describe('requests and summary', () => {
     const pack = 'Show.Name.S01.1080p.WEB-DL-GRP';
     pipe.tracker.state.items = [{ title: pack, size: 2 * 60 * 45 * MIB }];
     pipe.finder.requestSearch(series.key);
-    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => pipe!.queue.get(id)!.stage === 'downloading'));
+    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => stageOf(pipe!.queue.get(id)!) === 'downloading'));
     // The release of both episodes is in the client, so both are found, and no download finished.
     expect((await api.get('/queue')).body.items[0].reached).toEqual({ found: 2, completed: 0, validated: 0, imported: 0 });
     pipe.complete(pack, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two' });
-    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => pipe!.queue.get(id)!.stage === 'available'));
+    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => stageOf(pipe!.queue.get(id)!) === 'available'));
     // The group leaves the list when every episode is in the library. Its children keep the stages.
     expect((await api.get('/queue')).body.items).toEqual([]);
     const children = (await api.get('/queue/groups/tv:1')).body.items;
-    expect(children.map((child: { stage: string }) => child.stage)).toEqual(['available', 'available']);
+    expect(children.map((child: { phase: string }) => child.phase)).toEqual(['available', 'available']);
   });
 
   it('gives a group the part of the download that the client reports for its torrent', async () => {
@@ -337,7 +340,7 @@ describe('requests and summary', () => {
     const files = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'];
     pipe.tracker.state.items = [{ title: pack, size: 2 * 60 * 45 * MIB, files }];
     pipe.finder.requestSearch(series.key);
-    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => pipe!.queue.get(id)!.stage === 'downloading'));
+    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => stageOf(pipe!.queue.get(id)!) === 'downloading'));
 
     // The torrent has half of the pack, and each file has its own part. The group shows the part of the torrent, so the
     // bar of the inspector matches the percentage of the client, and not the part of the least advanced file.
@@ -363,7 +366,7 @@ describe('requests and summary', () => {
     for (const number of [1, 2]) {
       const entry = pipe.queue.ensure(series.key, 1, number);
       pipe.queue.request(entry, 'test');
-      pipe.queue.move(entry, { stage: 'searching' }, 'test');
+      move(pipe.queue, entry, { stage: 'searching' }, 'test');
     }
 
     expect((await api.get('/queue')).body.items[0]).toMatchObject({ kind: 'group', key: 'tv:1:1', download: null });
@@ -373,11 +376,11 @@ describe('requests and summary', () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });
     const entry = pipe!.queue.get('movie:2')!;
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     // The target works: it counts in the stage, and nothing is stopped.
     expect((await api!.get('/queue/summary')).body).toMatchObject({ counts: { downloading: 1 }, working: { downloading: 1 }, stopped: 0 });
     // The target stops with a reason. Its key becomes Stuck, and only the work counts as working.
-    pipe!.queue.move(entry, { reason: { code: 'too_many_attempts' } }, 'test');
+    move(pipe!.queue, entry, { reason: { code: 'too_many_attempts' } }, 'test');
     expect((await api!.get('/queue/summary')).body).toMatchObject({ counts: { stuck: 1 }, working: {}, stopped: 1 });
   });
 
@@ -389,20 +392,20 @@ describe('requests and summary', () => {
     const detail = async () => (await api!.get(`/queue/entries/${entry.id}`)).body.entry;
     const total = async (stage: string) => (await api!.get(`/queue?stage=${stage}`)).body.total;
 
-    pipe!.queue.move(entry, { stage: 'validating', reason: { code: 'client_error' } }, 'test');
-    expect(await detail()).toMatchObject({ key: 'stuck', stage: 'validating' });
+    move(pipe!.queue, entry, { stage: 'validating', reason: { code: 'client_error' } }, 'test');
+    expect(await detail()).toMatchObject({ status: 'stuck', phase: 'validating' });
     expect((await api!.get('/queue/summary')).body.counts).toEqual({ stuck: 1 });
     expect(await total('stuck')).toBe(1);
     expect(await total('validating')).toBe(0);
-    expect((await api!.get('/queue')).body.items[0].key).toBe('stuck');
+    expect((await api!.get('/queue')).body.items[0].status).toBe('stuck');
 
     // A target that waits for its next search keeps the key of the search.
-    pipe!.queue.move(entry, { stage: 'queued', branch: 'waiting', reason: { code: 'no_results' } }, 'test');
-    expect((await detail()).key).toBe('not_found');
+    move(pipe!.queue, entry, { stage: 'queued', branch: 'waiting', reason: { code: 'no_results' } }, 'test');
+    expect((await detail()).status).toBe('not_found');
 
     // Without a reason, the stage is the key.
-    pipe!.queue.move(entry, { stage: 'validating', branch: null, reason: null }, 'test');
-    expect((await detail()).key).toBe('validating');
+    move(pipe!.queue, entry, { stage: 'validating', branch: null, reason: null }, 'test');
+    expect((await detail()).status).toBe('validating');
     // Validating belongs to the import tab, so the filter of that tab returns the target.
     expect(await total('importing')).toBe(1);
     expect(await total('validating')).toBe(0);
@@ -445,8 +448,8 @@ describe('order', () => {
     // The first target is older. The second one is further in the journey.
     const first = target('movie:11', 1_000);
     const second = target('movie:12', 2_000);
-    pipe.queue.move(first, { stage: 'downloading' }, 'test');
-    pipe.queue.move(second, { stage: 'importing' }, 'test');
+    move(pipe.queue, first, { stage: 'downloading' }, 'test');
+    move(pipe.queue, second, { stage: 'importing' }, 'test');
 
     expect(await rows()).toEqual(['movie:12', 'movie:11']);
   });
@@ -457,8 +460,8 @@ describe('order', () => {
     for (const id of [11, 12, 13, 14]) addFilm(id);
     // The targets enter the queue from the least advanced to the most advanced.
     target('movie:11', 1_000);
-    pipe.queue.move(target('movie:12', 2_000), { stage: 'downloading' }, 'test');
-    pipe.queue.move(target('movie:13', 3_000), { stage: 'importing' }, 'test');
+    move(pipe.queue, target('movie:12', 2_000), { stage: 'downloading' }, 'test');
+    move(pipe.queue, target('movie:13', 3_000), { stage: 'importing' }, 'test');
     // A request of a movie that the user adds now goes after every target that the queue has.
     target('movie:14', 4_000);
 
@@ -472,9 +475,9 @@ describe('order', () => {
     // The rows enter the queue from the least advanced to the most advanced.
     const downloading = target('movie:11', 1_000);
     const validating = target('movie:12', 2_000);
-    pipe.queue.move(target('movie:13', 3_000), { stage: 'importing' }, 'test');
-    pipe.queue.move(downloading, { stage: 'downloading', branch: 'paused' }, 'test');
-    pipe.queue.move(validating, { stage: 'validating', reason: { code: 'client_error' } }, 'test');
+    move(pipe.queue, target('movie:13', 3_000), { stage: 'importing' }, 'test');
+    move(pipe.queue, downloading, { stage: 'downloading', branch: 'paused' }, 'test');
+    move(pipe.queue, validating, { stage: 'validating', reason: { code: 'client_error' } }, 'test');
 
     // The pause and the reason change no rank: validating is above downloading and below importing.
     expect(await rows()).toEqual(['movie:13', 'movie:12', 'movie:11']);
@@ -488,10 +491,10 @@ describe('order', () => {
     addFilm(11);
     addFilm(12);
     // The first episode is in the library. The second one is still downloading.
-    pipe.queue.move(target('tv:1', 1_000, 1, 1), { stage: 'available' }, 'test');
-    pipe.queue.move(target('tv:1', 1_001, 1, 2), { stage: 'downloading' }, 'test');
-    pipe.queue.move(target('movie:11', 2_000), { stage: 'searching' }, 'test');
-    pipe.queue.move(target('movie:12', 3_000), { stage: 'validating' }, 'test');
+    move(pipe.queue, target('tv:1', 1_000, 1, 1), { stage: 'available' }, 'test');
+    move(pipe.queue, target('tv:1', 1_001, 1, 2), { stage: 'downloading' }, 'test');
+    move(pipe.queue, target('movie:11', 2_000), { stage: 'searching' }, 'test');
+    move(pipe.queue, target('movie:12', 3_000), { stage: 'validating' }, 'test');
 
     // The group is at Downloading: above the search and below the validation.
     expect(await rows()).toEqual(['movie:12', 'group:tv:1:1', 'movie:11']);
@@ -504,9 +507,9 @@ describe('order', () => {
     // The target without a release came first, so the order of creation alone would put it first.
     const none = target('movie:11', 1_000);
     const rejected = target('movie:12', 2_000);
-    pipe.queue.move(none, { stage: 'queued', branch: 'waiting', reason: { code: 'no_results' } }, 'test');
-    pipe.queue.move(rejected, { stage: 'queued', branch: 'waiting', reason: { code: 'all_rejected' } }, 'test');
-    pipe.queue.move(target('movie:13', 3_000), { stage: 'searching' }, 'test');
+    move(pipe.queue, none, { stage: 'queued', branch: 'waiting', reason: { code: 'no_results' } }, 'test');
+    move(pipe.queue, rejected, { stage: 'queued', branch: 'waiting', reason: { code: 'all_rejected' } }, 'test');
+    move(pipe.queue, target('movie:13', 3_000), { stage: 'searching' }, 'test');
 
     expect(await rows()).toEqual(['movie:13', 'movie:12', 'movie:11']);
   });
@@ -518,10 +521,10 @@ describe('order', () => {
     pipe.db.data.titles[series.key] = series;
     for (const id of [11, 12]) addFilm(id);
     // The season is downloading, but one of its episodes found no release. The season came first.
-    pipe.queue.move(target('tv:1', 1_000, 1, 1), { stage: 'downloading' }, 'test');
-    pipe.queue.move(target('tv:1', 1_001, 1, 2), { stage: 'queued', branch: 'waiting', reason: { code: 'no_results' } }, 'test');
-    pipe.queue.move(target('movie:11', 2_000), { stage: 'queued', branch: 'waiting', reason: { code: 'all_rejected' } }, 'test');
-    pipe.queue.move(target('movie:12', 3_000), { stage: 'searching' }, 'test');
+    move(pipe.queue, target('tv:1', 1_000, 1, 1), { stage: 'downloading' }, 'test');
+    move(pipe.queue, target('tv:1', 1_001, 1, 2), { stage: 'queued', branch: 'waiting', reason: { code: 'no_results' } }, 'test');
+    move(pipe.queue, target('movie:11', 2_000), { stage: 'queued', branch: 'waiting', reason: { code: 'all_rejected' } }, 'test');
+    move(pipe.queue, target('movie:12', 3_000), { stage: 'searching' }, 'test');
 
     expect(await rows()).toEqual(['movie:12', 'movie:11', 'group:tv:1:1']);
   });
@@ -533,8 +536,8 @@ describe('order', () => {
     const newer = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
     pipe.db.data.titles[older.key] = older;
     pipe.db.data.titles[newer.key] = newer;
-    for (let number = 1; number <= 5; number++) pipe.queue.move(target('tv:2', 1_000 + number, 1, number), { stage: 'downloading' }, 'test');
-    for (let number = 1; number <= 2; number++) pipe.queue.move(target('tv:1', 2_000 + number, 1, number), { stage: 'downloading' }, 'test');
+    for (let number = 1; number <= 5; number++) move(pipe.queue, target('tv:2', 1_000 + number, 1, number), { stage: 'downloading' }, 'test');
+    for (let number = 1; number <= 2; number++) move(pipe.queue, target('tv:1', 2_000 + number, 1, number), { stage: 'downloading' }, 'test');
 
     // Both series are at Downloading, so the one that came first goes first.
     expect(await rows()).toEqual(['group:tv:2:1', 'group:tv:1:1']);
@@ -552,7 +555,7 @@ describe('order', () => {
       pipe!.queue.ensure(film.key, null, null).createdAt = createdAt;
       pipe!.tracker.state.items = [{ title: release, size: 100 * 120 * MIB }];
       pipe!.finder.requestSearch(film.key);
-      await until(() => pipe!.queue.get(film.key)!.stage === 'downloading');
+      await until(() => stageOf(pipe!.queue.get(film.key)!) === 'downloading');
       return hashOf(release);
     }
 
@@ -584,10 +587,10 @@ describe('order', () => {
     const fastFiles = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'];
     pipe.tracker.state.items = [{ title: slowPack, size: 2 * 60 * 45 * MIB, files: slowFiles }];
     pipe.finder.requestSearch('tv:2');
-    await until(() => ['tv:2:1x1', 'tv:2:1x2'].every((id) => pipe!.queue.get(id)!.stage === 'downloading'));
+    await until(() => ['tv:2:1x1', 'tv:2:1x2'].every((id) => stageOf(pipe!.queue.get(id)!) === 'downloading'));
     pipe.tracker.state.items = [{ title: fastPack, size: 2 * 60 * 45 * MIB, files: fastFiles }];
     pipe.finder.requestSearch('tv:1');
-    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => pipe!.queue.get(id)!.stage === 'downloading'));
+    await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => stageOf(pipe!.queue.get(id)!) === 'downloading'));
 
     const slowHash = hashOf(slowPack, slowFiles);
     const fastHash = hashOf(fastPack, fastFiles);
@@ -623,28 +626,28 @@ describe('order', () => {
     pipe.db.data.titles[partial.key] = partial;
     addFilm(11);
     // A finished movie.
-    pipe.queue.move(target('movie:11', 1_000), { stage: 'available' }, 'test');
+    move(pipe.queue, target('movie:11', 1_000), { stage: 'available' }, 'test');
     // A series that finished, and a series with one episode in the library.
-    pipe.queue.move(target('tv:2', 2_000, 1, 1), { stage: 'available' }, 'test');
-    pipe.queue.move(target('tv:2', 2_001, 1, 2), { stage: 'available' }, 'test');
-    pipe.queue.move(target('tv:1', 3_000, 1, 1), { stage: 'available' }, 'test');
-    pipe.queue.move(target('tv:1', 3_001, 1, 2), { stage: 'downloading' }, 'test');
+    move(pipe.queue, target('tv:2', 2_000, 1, 1), { stage: 'available' }, 'test');
+    move(pipe.queue, target('tv:2', 2_001, 1, 2), { stage: 'available' }, 'test');
+    move(pipe.queue, target('tv:1', 3_000, 1, 1), { stage: 'available' }, 'test');
+    move(pipe.queue, target('tv:1', 3_001, 1, 2), { stage: 'downloading' }, 'test');
 
     const list = (await api.get('/queue')).body;
     expect(list.items.map((row: { kind: string; key: string }) => [row.kind, row.key])).toEqual([['group', 'tv:1:1']]);
     expect(list.items[0].reached.imported).toBe(1);
 
     // The entry of a finished target still answers.
-    expect((await api.get('/queue/entries/movie:11')).body.entry.stage).toBe('available');
+    expect((await api.get('/queue/entries/movie:11')).body.entry.phase).toBe('available');
     // The group of the finished series keeps every episode.
     const episodes = (await api.get('/queue/groups/tv:2')).body.items;
-    expect(episodes.map((entry: { label: string; stage: string }) => [entry.label, entry.stage])).toEqual([
+    expect(episodes.map((entry: { label: string; phase: string }) => [entry.label, entry.phase])).toEqual([
       ['Other Show S01E01', 'available'],
       ['Other Show S01E02', 'available'],
     ]);
     // A group that is still in the list keeps its finished episodes in season and number order.
     const kept = (await api.get('/queue/groups/tv:1')).body.items;
-    expect(kept.map((entry: { label: string; stage: string }) => [entry.label, entry.stage])).toEqual([
+    expect(kept.map((entry: { label: string; phase: string }) => [entry.label, entry.phase])).toEqual([
       ['Show Name S01E01', 'available'],
       ['Show Name S01E02', 'downloading'],
     ]);
@@ -656,8 +659,8 @@ describe('order', () => {
     addFilm(11);
     addFilm(12);
     // The first target came first, but it only searches. The second one has its release and waits for a slot.
-    pipe.queue.move(target('movie:11', 1_000), { stage: 'searching' }, 'test');
-    pipe.queue.move(target('movie:12', 2_000), { stage: 'fetching', branch: null, reason: null }, 'test');
+    move(pipe.queue, target('movie:11', 1_000), { stage: 'searching' }, 'test');
+    move(pipe.queue, target('movie:12', 2_000), { stage: 'fetching', branch: null, reason: null }, 'test');
 
     expect(await rows()).toEqual(['movie:12', 'movie:11']);
     expect((await api.get('/queue?stage=searching')).body.items.map((item: { id: string }) => item.id)).toEqual(['movie:12', 'movie:11']);
@@ -672,9 +675,9 @@ describe('order', () => {
     addFilm(12);
     // The series waits for its next search. Its stage is Queued, and the page shows Searching.
     target('movie:11', 1_000);
-    pipe.queue.move(target('tv:1', 2_000, 1, 1), { branch: 'waiting' }, 'test');
-    pipe.queue.move(target('tv:1', 2_001, 1, 2), { branch: 'waiting' }, 'test');
-    pipe.queue.move(target('movie:12', 3_000), { stage: 'downloading' }, 'test');
+    move(pipe.queue, target('tv:1', 2_000, 1, 1), { branch: 'waiting' }, 'test');
+    move(pipe.queue, target('tv:1', 2_001, 1, 2), { branch: 'waiting' }, 'test');
+    move(pipe.queue, target('movie:12', 3_000), { stage: 'downloading' }, 'test');
 
     expect(await rows()).toEqual(['movie:12', 'group:tv:1:1', 'movie:11']);
   });
@@ -684,11 +687,11 @@ describe('actions', () => {
   it('previews an action and refuses one that the stage does not allow', async () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });
-    await until(() => pipe!.queue.get('movie:2')!.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('movie:2')!) === 'downloading');
 
     const preview = await api!.post('/queue/actions', { action: 'pause', ids: ['movie:2'], preview: true });
     expect(preview.body.affected).toHaveLength(1);
-    expect(pipe!.queue.get('movie:2')!.branch).toBeNull();
+    expect(branchOf(pipe!.queue.get('movie:2')!)).toBeNull();
     const refused = await api!.post('/queue/actions', { action: 'resume', ids: ['movie:2'] });
     expect(refused.status).toBe(409);
     expect(refused.body.unsupported[0].reason).toContain('not paused');
@@ -699,21 +702,21 @@ describe('actions', () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });
     const entry = pipe!.queue.get('movie:2')!;
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
 
     const folder = join(pipe!.folders.movies, 'Movie Name (2019)');
     mkdirSync(folder, { recursive: true });
     writeFileSync(join(folder, 'Movie Name (2019).mkv'), 'someone else');
     pipe!.complete(NAME, { [`${NAME}.mkv`]: 'video-data' });
 
-    await until(() => entry.reason?.code === 'destination_exists');
-    expect(entry.reason?.detail).toBe('Movie Name (2019)/Movie Name (2019).mkv');
+    await until(() => reasonOfEntry(entry)?.code === 'destination_exists');
+    expect(reasonOfEntry(entry)?.detail).toBe('Movie Name (2019)/Movie Name (2019).mkv');
     // A target that stopped before the check was kept still offers the fix.
-    entry.reason = { code: 'destination_exists' };
+    move(pipe!.queue, entry, { stage: 'validating', reason: { code: 'destination_exists' } }, 'test');
 
     expect((await api!.post('/queue/actions', { action: 'replace', ids: ['movie:2'] })).status).toBe(200);
-    await until(() => entry.stage === 'available');
-    expect(entry.reason).toBeNull();
+    await until(() => stageOf(entry) === 'available');
+    expect(reasonOfEntry(entry)).toBeNull();
     expect(readFileSync(join(folder, 'Movie Name (2019).mkv'), 'utf8')).toBe('video-data');
   });
 
@@ -721,14 +724,14 @@ describe('actions', () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });
     const entry = pipe!.queue.get('movie:2')!;
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     pipe!.qbit.progress(hashOf(NAME), 0.3);
 
     expect((await api!.post('/queue/actions', { action: 'pause', ids: ['movie:2'] })).status).toBe(200);
-    expect(entry.branch).toBe('paused');
+    expect(branchOf(entry)).toBe('paused');
     expect(pipe!.qbit.torrents.get(hashOf(NAME))!.state).toBe('stoppedDL');
     expect((await api!.post('/queue/actions', { action: 'resume', ids: ['movie:2'] })).status).toBe(200);
-    expect(entry.branch).toBeNull();
+    expect(branchOf(entry)).toBeNull();
     expect(pipe!.qbit.torrents.get(hashOf(NAME))!.state).toBe('downloading');
   });
 
@@ -739,7 +742,7 @@ describe('actions', () => {
     pipe.db.data.titles[series.key] = series;
     pipe.tracker.state.items = [{ title: 'Show.Name.S01.1080p.WEB-DL-GRP', size: 3 * 60 * 45 * MIB }];
     pipe.finder.requestSearch(series.key);
-    await until(() => pipe!.queue.get('tv:1:1x3')!.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('tv:1:1x3')!) === 'downloading');
 
     const preview = (await api.post('/queue/actions', { action: 'pause', ids: ['tv:1:1x2'], preview: true })).body;
     expect(preview.affected.map((a: { id: string }) => a.id)).toEqual(['tv:1:1x1', 'tv:1:1x2', 'tv:1:1x3']);
@@ -763,7 +766,7 @@ describe('actions', () => {
     const files = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'];
     pipe.tracker.state.items = [{ title: name, size: 2 * 60 * 45 * MIB, files }];
     pipe.finder.requestSearch(series.key);
-    await until(() => pipe!.queue.get('tv:1:1x2')!.stage === 'downloading');
+    await until(() => stageOf(pipe!.queue.get('tv:1:1x2')!) === 'downloading');
 
     // A pack downloads one file before the other, so the torrent has one part and each episode has its own.
     const hash = hashOf(name, files);
@@ -791,7 +794,7 @@ describe('actions', () => {
     const series = title({ rootId: 'tv', episodes: [aired(1), episode(2, 1, '2020-02-01')] });
     pipe.db.data.titles[series.key] = series;
     pipe.finder.requestSearch(series.key);
-    await until(() => pipe!.queue.get('tv:1:2x1')!.branch === 'waiting');
+    await until(() => branchOf(pipe!.queue.get('tv:1:2x1')) === 'waiting');
 
     const preview = (await api.post('/queue/actions', { action: 'priority', group: { titleKey: 'tv:1', season: null }, preview: true })).body;
     expect(preview.affected.map((a: { id: string }) => a.id)).toEqual(['tv:1:1x1', 'tv:1:2x1']);
@@ -804,10 +807,10 @@ describe('actions', () => {
     pipe.db.data.titles[series.key] = series;
     pipe.tracker.state.items = [];
     pipe.finder.requestSearch(series.key);
-    await until(() => ['1x1', '1x2'].every((n) => pipe!.queue.get(`tv:1:${n}`)!.branch === 'waiting'));
+    await until(() => ['1x1', '1x2'].every((n) => branchOf(pipe!.queue.get(`tv:1:${n}`)) === 'waiting'));
 
     // One episode stops with a reason. The other one waits for its next search, so the retry of the row leaves it.
-    pipe.queue.move(pipe.queue.get('tv:1:1x1')!, { branch: null, reason: { code: 'destination_exists' } }, 'test');
+    move(pipe.queue, pipe.queue.get('tv:1:1x1')!, { branch: null, reason: { code: 'destination_exists' } }, 'test');
     const preview = (await api.post('/queue/actions', { action: 'retry', group: { titleKey: 'tv:1', season: 1 }, preview: true })).body;
     expect(preview.affected.map((a: { id: string }) => a.id)).toEqual(['tv:1:1x1']);
   });
@@ -817,11 +820,12 @@ describe('actions', () => {
     pipe!.tracker.state.items = [];
     await api!.post('/queue/search', { titleKey: film.key });
     const entry = pipe!.queue.get('movie:2')!;
-    await until(() => entry.branch === 'waiting');
+    await until(() => branchOf(entry) === 'waiting');
+    move(pipe!.queue, entry, { branch: null, reason: { code: 'job_removed' } }, 'test');
 
     pipe!.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     expect((await api!.post('/queue/actions', { action: 'retry', ids: ['movie:2'] })).status).toBe(200);
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     expect(entry.id).toBe('movie:2');
     expect(entry.attempts.map((a) => [a.n, a.reason])).toEqual([[1, 'search requested'], [2, 'retry']]);
     expect(entry.attempts[0]!.outcome).toBe('failed');
@@ -859,10 +863,10 @@ describe('repair', () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });
     const entry = pipe!.queue.get('movie:2')!;
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     // The download holds two files. The largest one is the wrong one: an extra.
     pipe!.complete(NAME, { 'extras/behind-the-scenes.mkv': 'x'.repeat(5000), 'Movie.mkv': 'the-film' });
-    await until(() => entry.stage === 'available');
+    await until(() => stageOf(entry) === 'available');
     // The automatic pick is the largest file. The user wants the other, so this entry starts again from the files.
     const files = (await api!.get('/queue/entries/movie:2/files')).body;
     expect(files.files.map((f: { rel: string }) => f.rel).sort()).toEqual(['Movie.mkv', 'extras/behind-the-scenes.mkv']);
@@ -880,9 +884,9 @@ describe('repair', () => {
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     await api.post('/queue/search', { titleKey: film.key });
     const entry = pipe.queue.get('movie:2')!;
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     pipe.complete(NAME, { [`${NAME}.mkv`]: 'broken' });
-    await until(() => entry.reason?.code === 'file_unreadable');
+    await until(() => reasonOfEntry(entry)?.code === 'file_unreadable');
     const body = (await api.get('/queue/entries/movie:2')).body;
     expect(body.entry.reason).toMatchObject({ code: 'file_unreadable', action: 'none' });
   });
@@ -891,7 +895,7 @@ describe('repair', () => {
     const film = await withMovie();
     await api!.post('/queue/search', { titleKey: film.key });
     const entry = pipe!.queue.get('movie:2')!;
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     // The client created no folder for this torrent, so it reports the folder of every download as the content.
     const hash = hashOf(NAME);
     pipe!.qbit.torrents.get(hash)!.content_path = pipe!.folders.downloads;
@@ -912,14 +916,14 @@ describe('repair', () => {
     pipe.tracker.state.items = [{ title: name, size: 60 * 45 * MIB }];
     pipe.finder.requestSearch(series.key);
     const entry = pipe.queue.get('tv:1:1x1')!;
-    await until(() => entry.stage === 'downloading');
+    await until(() => stageOf(entry) === 'downloading');
     // Two videos, and no name that says the episode: ladarr can not pick one.
     pipe.complete(name, { 'a.mkv': 'first', 'b.mkv': 'second-file' });
-    await until(() => entry.reason?.code === 'file_not_found');
+    await until(() => reasonOfEntry(entry)?.code === 'file_not_found');
     expect((await api.get('/queue/entries/tv:1:1x1')).body.entry.reason).toMatchObject({ action: 'match' });
 
     expect((await api.post('/queue/entries/tv:1:1x1/match', { file: 'b.mkv', covers: [{ season: 1, number: 1 }] })).status).toBe(200);
-    await until(() => entry.stage === 'available');
+    await until(() => stageOf(entry) === 'available');
     const file = Object.values(pipe.db.data.files)[0]!;
     expect(file.path).toBe('Show Name (2020)/Season 01/Show Name - S01E01 - Episode 1.mkv');
     expect(entry.attempts.map((a) => a.reason)).toEqual(['search requested', 'retry']);
@@ -950,7 +954,7 @@ describe('jobs', () => {
     pipe.db.data.titles[film.key] = film;
     pipe.tracker.state.items = [];
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => entry!.branch === 'waiting');
+    await until(() => branchOf(entry!) === 'waiting');
     await until(() => !searchJobs().some((job) => job.state === 'running'));
     return { film, entry: entry! };
   }
@@ -1132,7 +1136,7 @@ describe('jobs', () => {
     // The job is listed while the target waits for its next search.
     expect((await api!.get('/queue/jobs')).body.items.filter((item: { type: string }) => item.type === 'queue.search')).toHaveLength(1);
 
-    pipe!.queue.move(entry, { stage: 'available', branch: null }, 'test');
+    move(pipe!.queue, entry, { stage: 'available', branch: null }, 'test');
     // Every target is complete, so the queue of the item flow has no job.
     expect((await api!.get('/queue/jobs')).body.items).toEqual([]);
   });
@@ -1207,7 +1211,7 @@ describe('jobs', () => {
 
     expect((await api!.del(`/queue/jobs/${job.id}`)).status).toBe(200);
     expect(pipe!.db.data.jobs[job.id]).toBeUndefined();
-    expect(entry).toMatchObject({ branch: null, reason: { code: 'job_removed' } });
+    expect(entry.state).toMatchObject({ kind: 'blocked', at: 'queued', problem: { code: 'job_removed' } });
     expect(entry.search!.nextAt).toBeNull();
 
     // The target waits no more, so the sweep puts no search for the same title back.
@@ -1225,12 +1229,12 @@ describe('download clients', () => {
     const film = await withMovie();
     pipe!.db.data.downloadClients = [];
     await api!.post('/queue/search', { titleKey: film.key });
-    await until(() => pipe!.queue.get('movie:2')!.reason?.code === 'client_missing');
+    await until(() => reasonOfEntry(pipe!.queue.get('movie:2')!)?.code === 'client_missing');
     // With no client, the release stops before the add, so it never left fetching.
-    expect(pipe!.queue.get('movie:2')).toMatchObject({ stage: 'fetching', reason: { code: 'client_missing' } });
+    expect(pipe!.queue.get('movie:2')!.state).toEqual({ kind: 'blocked', at: 'fetching', problem: { code: 'client_missing' } });
     expect((await api!.post('/clients', body(pipe!.qbit.port))).status).toBe(201);
-    await until(() => pipe!.queue.get('movie:2')!.stage === 'downloading');
-    expect(pipe!.queue.get('movie:2')!.reason).toBeNull();
+    await until(() => stageOf(pipe!.queue.get('movie:2')!) === 'downloading');
+    expect(reasonOfEntry(pipe!.queue.get('movie:2')!)).toBeNull();
   });
 
   it('sends a release of an indexer that is gone, with an indexer that ladarr has', async () => {
@@ -1238,17 +1242,17 @@ describe('download clients', () => {
     pipe!.db.data.downloadClients = [];
     await api!.post('/queue/search', { titleKey: film.key });
     const entry = pipe!.queue.get('movie:2')!;
-    await until(() => entry.reason?.code === 'client_missing');
+    await until(() => reasonOfEntry(entry)?.code === 'client_missing');
     // An entry from an older file keeps its stage and its release when no client is set.
-    pipe!.queue.move(entry, { stage: 'sending' }, 'test');
+    move(pipe!.queue, entry, { stage: 'sending', reason: { code: 'client_missing' } }, 'test');
     // The user removes the indexer and adds it again, so the id changes. The release keeps the old id.
     const old = pipe!.db.data.indexers[1]!;
     delete pipe!.db.data.indexers[1];
     pipe!.db.data.indexers[2] = indexerFixture({ id: 2, baseUrl: old.baseUrl });
     expect(entry.release?.indexerId).toBe(1);
     expect((await api!.post('/clients', body(pipe!.qbit.port))).status).toBe(201);
-    await until(() => entry.stage === 'downloading');
-    expect(entry.reason).toBeNull();
+    await until(() => stageOf(entry) === 'downloading');
+    expect(reasonOfEntry(entry)).toBeNull();
   });
 
   it('tests the settings before they are saved, adds a client to the list, and shows no secret', async () => {

@@ -75,8 +75,8 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
     if (!connection) {
       for (const entry of entries) {
         catalog.warn('download_no_client', `No download client is available for "${ref.title}"`, itemFields(entry), { release: ref.title });
-        // The release stops before the request, so the entry keeps the stage of the fetch and its release for the retry.
-        queue.move(entry, { reason: { code: 'client_missing' } }, 'no download client');
+        // The release stops before the request, so the entry keeps the phase of the fetch and its release for the retry.
+        queue.block(entry, { code: 'client_missing' }, 'no download client');
       }
       return;
     }
@@ -87,8 +87,8 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
     const adopt = (found: Torrent, external: boolean) => {
       for (const entry of entries) {
         // The user cancelled while the add was running. The torrent stays in the client, and the entry stays cancelled.
-        if (entry.branch === 'cancelled') {
-          queue.move(entry, {}, 'torrent added before the cancel', 'The torrent stays in the client.');
+        if (entry.state.kind === 'cancelled') {
+          queue.observe(entry, 'torrent added before the cancel', 'The torrent stays in the client.');
           continue;
         }
         entry.transferHash = found.hash;
@@ -100,7 +100,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
         }
         if (external) catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
         else catalog.info('download_added', `${connection.config.name} added "${found.name}"`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
-        queue.move(entry, { stage: 'downloading', branch: null, reason: null }, external ? 'torrent is in the client already' : 'client accepted', found.name);
+        queue.enter(entry, 'downloading', external ? 'torrent is in the client already' : 'client accepted', found.name);
       }
     };
     // A torrent in the client with the hash of the release is the release. A finished torrent is used as it is, also
@@ -110,7 +110,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
     const unowned = (found: Torrent) => {
       for (const entry of entries) {
         catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
-        queue.move(entry, { reason: { code: 'torrent_exists' } }, 'torrent is in the client already');
+        queue.block(entry, { code: 'torrent_exists' }, 'torrent is in the client already');
       }
     };
     const take = (found: Torrent) =>
@@ -127,7 +127,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
     if (ref.link) {
       const indexer = db.data.indexers[ref.indexerId] ?? downloaderOf(ref.link);
       if (!indexer) {
-        for (const entry of entries) queue.move(entry, { reason: { code: 'no_indexers' } }, 'no indexer for the release');
+        for (const entry of entries) queue.block(entry, { code: 'no_indexers' }, 'no indexer for the release');
         return;
       }
       // An earlier try of this season took the release, so the client has the torrent. ladarr reads its files from the
@@ -188,7 +188,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
     // The client did not have this torrent, so ladarr sends it now, and it belongs to the app from here on.
     db.data.sentTorrents[hash!] = Date.now();
     // The request to the client is the sending step. The fetch of the release ended before this line.
-    for (const entry of entries) queue.move(entry, { stage: 'sending', branch: null, reason: null }, 'sending to the client', ref.title);
+    for (const entry of entries) queue.enter(entry, 'sending', 'sending to the client', ref.title);
     try {
       for (const entry of entries) {
         catalog.info('download_started', `Sending "${ref.title}" to ${connection.config.name}`, itemFields(entry), {

@@ -1,39 +1,29 @@
 import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import type { Poller } from '../../../library/downloads/poller.ts';
-import { loadingTitleKeys, queueKey } from '../../../library/downloads/queue.ts';
-import { DAY_MS, itemJobs, jobLabel, shown } from '../../../helpers/queue.ts';
+import { describe } from '@ladarr/shared/queue';
+import { DAY_MS, itemJobs, jobLabel, queueTabCounts, shown } from '../../../helpers/queue.ts';
 
 export function queueSummaryGet(poller: Poller): RequestHandler {
   return (_req, res) => {
-    // The titles of each stage. A series counts once for each stage that its episodes show, so its number of episodes
-    // does not change the count of the menu.
-    const titles = new Map<string, Set<string>>();
+    // The counters count rows, so a badge equals the rows of its tab. A series counts once for each tab that holds one
+    // of its targets, as its row appears in each of those tabs.
+    const counts = queueTabCounts();
     const working: Record<string, number> = {};
     let stopped = 0;
     let targets = 0;
-    const add = (key: string, titleKey: string) => {
-      const found = titles.get(key) ?? new Set<string>();
-      found.add(titleKey);
-      titles.set(key, found);
-    };
+    let paused = 0;
     for (const entry of Object.values(db.data.queue)) {
       if (!shown(entry) || entry.clearedAt) continue;
       targets++;
-      add(queueKey(entry), entry.titleKey);
-      // A target that can still move has no branch and no reason. One with a reason waits for the person.
-      if (entry.branch !== null || entry.stage === 'available') continue;
-      if (entry.reason) stopped++;
-      else working[entry.stage] = (working[entry.stage] ?? 0) + 1;
+      const description = describe(entry.state);
+      if (entry.state.kind === 'paused') paused++;
+      // A target that cannot move without the user waits: it is blocked, paused, or waits for its next search.
+      if (description.working) working[description.phase] = (working[description.phase] ?? 0) + 1;
+      else if (description.status === 'stuck') stopped++;
     }
-    // A series that waits for its episodes counts as one target that searches.
-    for (const key of loadingTitleKeys()) {
-      targets++;
-      add('searching', key);
-      working.searching = (working.searching ?? 0) + 1;
-    }
-    const counts: Record<string, number> = {};
-    for (const [key, found] of titles) counts[key] = found.size;
+    // The line of the app asks whether any target is paused in its own word, not in a tab.
+    if (paused) counts.paused = paused;
     const transfers = poller.transfers().filter((t) => !t.complete);
     const since = Date.now() - DAY_MS;
     const current = itemJobs().find((job) => job.state === 'running');

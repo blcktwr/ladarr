@@ -22,10 +22,12 @@ export function queueJobDelete(queue: Queue, persist: () => void = () => {}): Re
     const targets = targetsOf(job);
     delete db.data.jobs[job.id];
     for (const entry of targets) {
-      if (!isActive(entry) || entry.branch === 'paused' || entry.branch === 'cancelled') continue;
-      if (entry.branch === 'waiting' && entry.search) entry.search.nextAt = null;
-      queue.move(entry, { branch: null, reason: { code: 'job_removed' } }, 'job removed by the user');
+      if (!isActive(entry) || entry.state.kind === 'paused') continue;
+      if (entry.state.kind === 'waiting' && entry.search) entry.search.nextAt = null;
+      queue.block(entry, { code: 'job_removed' }, 'job removed by the user');
     }
+    // A pending row of a title whose first job is gone leaves the page with this message.
+    queue.notify();
     persist();
     res.json({ done: true });
   };
