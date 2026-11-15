@@ -536,6 +536,8 @@ export const es: Record<string, string> = {
   // Releases
   'This release cannot be taken: it breaks a safety check.': 'Esta versión no se puede tomar: incumple una comprobación de seguridad.',
   'Releases for {label}': 'Versiones de {label}',
+  'Choose a release': 'Elegir una versión',
+  'Choose a release for {label}': 'Elegir una versión para {label}',
   'Rejected releases': 'Versiones rechazadas',
   'Search again': 'Buscar de nuevo',
   'The search did not complete.': 'La búsqueda no se completó.',
@@ -870,6 +872,11 @@ export const es: Record<string, string> = {
   'The torrent is not in the client now.': 'El torrent ya no está en el cliente.',
   'The release did not reach the client.': 'La versión no llegó al cliente.',
   'Several releases failed. Select a release by hand, or try again.': 'Varias versiones fallaron. Selecciona una versión a mano o inténtalo de nuevo.',
+  // The cause of the failure that used the attempts of a target.
+  'The last release had a damaged .torrent file.': 'La última versión tenía un archivo .torrent dañado.',
+  'The last release had no download link.': 'La última versión no tenía enlace de descarga.',
+  'The last release had a damaged magnet link.': 'La última versión tenía un enlace magnet dañado.',
+  'The last pack did not hold every episode of the season.': 'El último pack no contenía todos los episodios de la temporada.',
   'The download has no file for this target.': 'La descarga no tiene ningún archivo para este objetivo.',
   'A file with this name is in the library folder already. It is not replaced.': 'Ya hay un archivo con este nombre en la carpeta de la biblioteca. No se reemplaza.',
   'The destination is outside the library folder.': 'El destino está fuera de la carpeta de la biblioteca.',

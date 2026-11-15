@@ -54,16 +54,16 @@ export function problemOf(entry: QueueEntry): StateProblem | null {
   return reasonOfEntry(entry);
 }
 
-export function reasonOf(entry: QueueEntry): (ReasonInfo & { code: string }) | null {
+export function reasonOf(entry: QueueEntry): (ReasonInfo & { code: string; detail: string | null }) | null {
   const problem = problemOf(entry);
   if (!problem) return null;
-  return { code: problem.code, ...reasonInfo(problem.code) };
+  return { code: problem.code, ...reasonInfo(problem.code), detail: problem.detail ?? null };
 }
 // The reason of a group, from the problem that aggregate() chose.
 export const reasonOfProblem = (problem: StateProblem | null) => {
   if (!problem) return null;
   const info = reasonInfo(problem.code);
-  return { code: problem.code, message: info.message, action: info.action, settings: info.settings ?? null };
+  return { code: problem.code, message: info.message, action: info.action, settings: info.settings ?? null, detail: problem.detail ?? null };
 };
 
 // The title whose first search waits for its episodes. A series has a target for each episode, so it has none until
@@ -258,7 +258,7 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
     status: description.status,
     tab: description.tab,
     phase: description.phase,
-    reason: info ? { code: info.code, message: info.message, action: info.action, settings: info.settings ?? null } : null,
+    reason: info ? { code: info.code, message: info.message, action: info.action, settings: info.settings ?? null, detail: info.detail } : null,
     stateSince: entry.stateSince,
     revision: entry.revision,
     lane: lane.get(entry.id) ?? null,
@@ -505,4 +505,3 @@ export function queueTabCounts(): Record<string, number> {
 }
 
 export { aggregate, describe, phaseOf };
-

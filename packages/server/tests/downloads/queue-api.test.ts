@@ -411,6 +411,23 @@ describe('requests and summary', () => {
     expect(await total('validating')).toBe(0);
   });
 
+  it('sends the cause of the failure with the reason of a target that used its attempts', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const series = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
+    pipe.db.data.titles[series.key] = series;
+    const entry = pipe.queue.ensure(series.key, 1, 1);
+    pipe.queue.request(entry, 'test');
+    // The cause names the failure of the last release, so the page says what went wrong.
+    move(pipe.queue, entry, { reason: { code: 'too_many_attempts', detail: 'no_download_link' } }, 'test');
+
+    const reason = (await api.get(`/queue/entries/${entry.id}`)).body.entry.reason;
+    expect(reason).toMatchObject({ code: 'too_many_attempts', action: 'retry', detail: 'no_download_link' });
+    // The row of the season carries the same cause.
+    const group = (await api.get(`/queue/groups/${series.key}?season=1`)).body.group;
+    expect(group.problem).toMatchObject({ code: 'too_many_attempts', detail: 'no_download_link' });
+  });
+
   it('pauses the queue from the API and shows it in the summary', async () => {
     await withMovie();
     expect((await api!.get('/queue/summary')).body.paused).toBe(false);

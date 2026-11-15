@@ -1,6 +1,6 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
 import { RETRY_STATUSES } from '@ladarr/shared/queue';
-import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueRow, QueueSummary, QueueTorrent } from '@ladarr/shared/types';
+import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueReason, QueueRejectedRelease, QueueRow, QueueSummary, QueueTorrent } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, FileText, FileVideo, Info, LoaderCircle, Pause, Play, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
@@ -12,9 +12,10 @@ import { Confirm } from '../../components/confirm.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
 import { MatchDialog } from './activity-match.tsx';
 import { AttachDialog } from './activity-client.tsx';
+import { ReleasePicker } from './activity-releases.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
-import { catalogPath, formatBytes, groupName, posterUrl, seasonName, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
+import { catalogPath, causeLabel, formatBytes, groupName, posterUrl, seasonName, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
 import { commentParts } from '../../lib/links.ts';
@@ -66,7 +67,7 @@ function DetailStatus({ status, icon, message, bar, divider = true, action, chil
         <StatusText small status={status} icon={icon} help={message ?? statusHelpText(icon)} />
         {bar}
         {message && <Text variant="small">{message}</Text>}
-        {action && <div className="flex justify-start mt-2">{action}</div>}
+        {action && <div className="flex justify-start gap-2 mt-2">{action}</div>}
         {children}
       </div>
       {divider && <Divider />}
@@ -86,9 +87,89 @@ const canReplace = (entry: QueueEntryView) => {
   return entry.reason?.code === 'destination_exists' && failed;
 };
 
-function StuckFix({ entry, run }: { entry: QueueEntryView; run: Run }) {
+// The same fix for one target or for several targets of a season. The preview of the action names every target that it
+// changes.
+function ReplaceAllFix({ ids, run }: { ids: string[]; run: Run }) {
+  return <Confirm label={t('Replace the file')} title={t('Replace the file?')} confirm={t('Replace')} onConfirm={() => void run('replace', ids)} />;
+}
+
+function ReplaceFix({ entry, run }: { entry: QueueEntryView; run: Run }) {
   if (!canReplace(entry)) return null;
-  return <Confirm label={t('Replace the file')} title={t('Replace the file?')} confirm={t('Replace')} onConfirm={() => void run('replace', [entry.id])} />;
+  return <ReplaceAllFix ids={[entry.id]} run={run} />;
+}
+
+// The target of a manual search: the title, and the season and the episode when the target has them.
+const targetOf = (entry: QueueEntryView) => ({ titleKey: entry.titleKey, ...(entry.season === null ? {} : { season: entry.season }), ...(entry.number === null ? {} : { number: entry.number }) });
+
+// The options that end the problem of a target. The reason of the target says which one applies: the file of the
+// destination is replaced, the download in the client is attached, the file is matched by hand, or the phases of the
+// target run again. A target that used its attempts also takes a release by hand.
+function EntryFix({ entry, run, refresh }: { entry: QueueEntryView; run: Run; refresh: () => void }) {
+  if (entry.reason?.code === 'too_many_attempts') {
+    return (
+      <>
+        <ReleasePicker target={targetOf(entry)} label={entry.label} onDone={refresh} />
+        <Button onClick={() => void run('retry', [entry.id])}>{t('Try again')}</Button>
+      </>
+    );
+  }
+  if (canReplace(entry)) return <ReplaceFix entry={entry} run={run} />;
+  if (entry.reason?.code === 'file_unreadable') {
+    return (
+      <>
+        <ReleasePicker target={targetOf(entry)} label={entry.label} onDone={refresh} />
+        <MatchDialog entry={entry} onDone={refresh} />
+      </>
+    );
+  }
+  if (entry.reason?.action === 'attach') return <AttachDialog entry={entry} onDone={refresh} />;
+  if (entry.reason?.action === 'match') return <MatchDialog entry={entry} onDone={refresh} />;
+  if (entry.reason?.action === 'retry') return <Button onClick={() => void run('retry', [entry.id])}>{t('Try again')}</Button>;
+  return null;
+}
+
+// The options that end the problem of a season. The problem picks the fix: one replacement for every episode with a
+// taken destination name, the download or the file of the first stopped episode, a release for a damaged file, or the
+// retry of the whole season.
+function GroupFix({ reason, stopped, titleKey, season, label, run, refresh }: { reason: QueueReason | null; stopped: QueueEntryView[]; titleKey: string; season: number | null; label: string; run: Run; refresh: () => void }) {
+  if (!reason) return null;
+  const retry = () => void run('retry', [], { titleKey, season });
+  const target = { titleKey, ...(season === null ? {} : { season }) };
+  if (reason.code === 'too_many_attempts') {
+    return (
+      <>
+        <ReleasePicker target={target} label={label} onDone={refresh} />
+        <Button onClick={retry}>{t('Try again')}</Button>
+      </>
+    );
+  }
+  if (reason.code === 'file_unreadable') {
+    return (
+      <>
+        <ReleasePicker target={target} label={label} onDone={refresh} />
+        {stopped.length === 1 && <MatchDialog entry={stopped[0]!} onDone={refresh} />}
+      </>
+    );
+  }
+  // The client answers again by itself, so the target waits and shows no action.
+  if (reason.code === 'client_unreachable') return null;
+  if (reason.code === 'destination_exists') {
+    const ids = stopped.filter(canReplace).map((entry) => entry.id);
+    if (ids.length) return <ReplaceAllFix ids={ids} run={run} />;
+  }
+  if (reason.action === 'attach') {
+    const entry = stopped.find((item) => item.reason?.action === 'attach');
+    if (entry) return <AttachDialog entry={entry} onDone={refresh} />;
+  }
+  if (reason.action === 'match') {
+    const entry = stopped.find((item) => item.reason?.action === 'match');
+    if (entry) return <MatchDialog entry={entry} onDone={refresh} />;
+  }
+  if (reason.action === 'retry') {
+    const only = stopped.length === 1 ? stopped[0]! : null;
+    if (only) return <EntryFix entry={only} run={run} refresh={refresh} />;
+  }
+  return <Button onClick={retry}>{t('Try again')}</Button>;
 }
 
 // The comment of a release can hold more than one link, with text beside it. Each link opens in a new tab, and the
@@ -214,12 +295,17 @@ function FileDetails({ file }: { file: NonNullable<QueueEntryView['file']> }) {
 // The checks belong to a target that validates or imports. A target outside those stages has none.
 const hasChecks = (entry: QueueEntryView) => Boolean(entry.checks?.length);
 
+// The checklist belongs to the importing indicator. A target that stopped keeps its checks, but the reason and its
+// options replace the list.
+const showsChecks = (entry: QueueEntryView) => entry.status === 'importing' && hasChecks(entry);
+
 // The checks that ladarr does before a target is complete, in the order that the server sends them.
 function ImportChecks({ entry }: { entry: QueueEntryView }) {
-  if (!entry.checks?.length) return null;
+  const checks = showsChecks(entry) ? entry.checks : null;
+  if (!checks) return null;
   return (
     <List>
-      {entry.checks.map((check) => (
+      {checks.map((check) => (
         <Row key={check.id}>
           {check.state === 'running' ? (
             <LoaderCircle className="size-4.5 shrink-0 text-accent animate-spin motion-reduce:animate-none" role="img" aria-label={t('Importing')} />
@@ -381,9 +467,9 @@ function downloadPercent(entry: QueueEntryView) {
 
 // One target. An episode keeps its indicator next to its name, above the fields of its file. The inspector of a movie
 // shows the indicator of its status and the reason that stops it above the progress of the work, under the name, then
-// the checks of the import, then the fields of its release. The label is off in the inspector of a movie, where the
-// heading of the panel says the name. The actions of an episode, such as the match of a file, follow its indicator.
-// An episode of a series shows the percent of its download in its name.
+// the checks of the import while it imports, then the fields of its release. The label is off in the inspector of a
+// movie, where the heading of the panel says the name. The actions of an episode, such as the match of a file, follow
+// its indicator. An episode of a series shows the percent of its download in its name.
 function EntryDetails({ entry, label = true, inline = false, actions, fix }: { entry: QueueEntryView; label?: boolean; inline?: boolean; actions?: ReactNode; fix?: ReactNode }) {
   const percent = inline ? downloadPercent(entry) : null;
   const data = !inline && entry.release ? <ReleaseDetails entryId={entry.id} release={entry.release} /> : inline && entry.file ? <FileDetails file={entry.file} /> : null;
@@ -391,10 +477,11 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
   const status = entry.status;
   // The reason shows under the status of a movie, and under the status of an episode that a problem stops, above its
   // file. The list keeps the status and the hint.
-  const reason = entry.reason ? t(entry.reason.message) : null;
-  const checks = hasChecks(entry);
-  // The container of the action is not rendered when the action has no button to show.
-  const hasFix = canReplace(entry) || entry.reason?.action === 'attach';
+  const reason = entry.reason ? [t(entry.reason.message), causeLabel(entry.reason.detail)].filter(Boolean).join(' ') : null;
+  const checks = showsChecks(entry);
+  // The container of the action is not rendered when the reason has no option to show. A target that stopped also
+  // takes a retry for a reason that has no fix of its own.
+  const hasFix = canReplace(entry) || entry.reason?.code === 'file_unreadable' || entry.reason?.action === 'attach' || entry.reason?.action === 'match' || (entry.status === 'stuck' && entry.reason?.action === 'retry');
   const action = hasFix ? fix : undefined;
   if (inline) {
     return (
@@ -418,7 +505,7 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
       <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={!checks && Boolean(data)} action={action}>
         <TransferProgress entry={entry} />
       </DetailStatus>
-      <ImportChecks entry={entry} />
+      {checks && <ImportChecks entry={entry} />}
       {checks && data && <Divider />}
       {data}
     </div>
@@ -564,7 +651,7 @@ function SeasonEpisodes({ season, entries, run, refresh, openLogs }: { season: n
               inline
               fix={
                 <>
-                  <StuckFix entry={entry} run={run} />
+                  <ReplaceFix entry={entry} run={run} />
                   {entry.reason?.action === 'attach' && <AttachDialog entry={entry} onDone={refresh} />}
                 </>
               }
@@ -632,7 +719,8 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   const completed = summary?.reached.completed ?? group.reached.completed;
   const total = summary?.total ?? group.total;
   const download = summary?.download ?? group.download;
-  const stuckReason = summary?.problem?.message ?? group.problem?.message ?? null;
+  const problem = summary?.problem ?? group.problem ?? null;
+  const stuck = status === 'stuck' ? problem : null;
   const toggle = (number: number) => setSeason((current) => (current === number ? null : number));
   // The releases of the series. A pack is one release. Several episodes can have their own.
   const releases = new Map<string, NonNullable<QueueEntryView['release']>>();
@@ -641,14 +729,16 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   // The target that carries the release of the series. The .torrent of the release is the same for every episode of a pack.
   const releaseEntry = entries.find((entry) => entry.release);
   const qualities = [...new Set(unique.flatMap((release) => (release.quality ? [release.quality] : [])))];
-  // The target of the checklist: an episode with checks that moves, or one that a problem stopped. Every target of a
-  // pack carries the same list.
-  const importing = entries.find((entry) => hasChecks(entry) && entry.status !== 'stuck') ?? entries.find(hasChecks);
+  // The checklist belongs to the importing indicator. Every target of a pack carries the same list, so the first
+  // importing episode shows it.
+  const importing = status === 'importing' ? entries.find(showsChecks) : undefined;
+  // The episodes that a problem stopped. One of them shows its own fix on the row of the season.
+  const stopped = entries.filter((entry) => entry.status === 'stuck');
   const message =
     status === 'no_match'
       ? t('The indexers have releases, but none fits your selected qualities.')
-      : status === 'stuck' && stuckReason
-        ? t(stuckReason)
+      : stuck
+        ? [t(stuck.message), causeLabel(stuck.detail)].filter(Boolean).join(' ')
         : t('{count} / {total} episodes', { count: completed, total });
   // The bar of the whole series: the part of its episodes that is complete, or the part of its download that the
   // client reports while it downloads. A series that searches, that the search did not find, that found no match, or
@@ -663,7 +753,28 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
   return (
     <div className="grid min-w-0">
       <div className="grid gap-4">
-        {status ? <DetailStatus status={statusLabel(status)} icon={status} bar={bar} message={message} divider={!importing} /> : <Text>—</Text>}
+        {status ? (
+          <DetailStatus
+            status={statusLabel(status)}
+            icon={status}
+            bar={bar}
+            message={message}
+            divider={!importing}
+            action={
+              <GroupFix
+                reason={stuck}
+                stopped={stopped}
+                titleKey={group.titleKey}
+                season={group.season}
+                label={groupName(group)}
+                run={run}
+                refresh={refresh}
+              />
+            }
+          />
+        ) : (
+          <Text>—</Text>
+        )}
         {importing && <ImportChecks entry={importing} />}
         {importing && unique.length > 0 && <Divider />}
         {unique.length > 0 && (
@@ -702,17 +813,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
 function MovieDetail({ entry, run, refresh }: { entry: QueueEntryView; run: Run; refresh: () => void }) {
   return (
     <div className="grid gap-3">
-      <EntryDetails
-        entry={entry}
-        label={false}
-        fix={
-          <>
-            <StuckFix entry={entry} run={run} />
-            {entry.reason?.action === 'attach' && <AttachDialog entry={entry} onDone={refresh} />}
-          </>
-        }
-      />
-      {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
+      <EntryDetails entry={entry} label={false} fix={<EntryFix entry={entry} run={run} refresh={refresh} />} />
     </div>
   );
 }

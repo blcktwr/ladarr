@@ -24,7 +24,7 @@ export function Confirm({ label, title, confirm, onConfirm, disabled, children }
       onOpenChange={setOpen}
       title={title}
       trigger={
-        <Button variant="danger" disabled={disabled}>
+        <Button disabled={disabled}>
           {label}
         </Button>
       }
@@ -35,7 +35,6 @@ export function Confirm({ label, title, confirm, onConfirm, disabled, children }
           {t('Cancel')}
         </Button>
         <Button
-          variant="danger"
           onClick={() => {
             setOpen(false);
             onConfirm();

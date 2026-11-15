@@ -437,7 +437,9 @@ export type MigrationProgress = { pending: number; imported: number; matched: nu
 
 // --- Queue ---------------------------------------------------------------------------------
 
-export type QueueReason = { code: string; message: string; action: 'retry' | 'match' | 'attach' | 'settings' | 'none'; settings: 'client' | 'indexers' | 'library' | null };
+// The cause of the problem, when the server kept one. A target that used its attempts keeps the failure of its last
+// release, such as a damaged .torrent or a pack that lacks episodes.
+export type QueueReason = { code: string; message: string; action: 'retry' | 'match' | 'attach' | 'settings' | 'none'; settings: 'client' | 'indexers' | 'library' | null; detail: string | null };
 
 export type QueueTransfer = {
   hash: string;

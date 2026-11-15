@@ -132,6 +132,16 @@ const statusTexts: Record<string, string> = {
 };
 export const statusLabel = (key: string) => (Object.hasOwn(statusTexts, key) ? t(statusTexts[key]!) : key);
 
+// The cause of a failure that used the attempts of a target. The server sends the code of the cause with the reason, so
+// the page says what went wrong with the last release. A code that no text covers shows nothing.
+const causeTexts: Record<string, string> = {
+  invalid_torrent: 'The last release had a damaged .torrent file.',
+  no_download_link: 'The last release had no download link.',
+  invalid_magnet: 'The last release had a damaged magnet link.',
+  pack_partial: 'The last pack did not hold every episode of the season.',
+};
+export const causeLabel = (code: string | null) => (code && Object.hasOwn(causeTexts, code) ? t(causeTexts[code]!) : null);
+
 // The queue state that the bookmark of a poster shows. A state that has no icon in the design does not show one.
 const bookmarkStates: Record<string, ThumbnailState> = {
   searching: 'searching',
@@ -202,4 +212,3 @@ export const seasonName = (season: number) => (season === 0 ? t('Specials') : t(
 // The name of a group: its title and its year, and its season. A series that waits for its episodes has no season.
 export const groupName = (group: Pick<QueueGroupRow, 'title' | 'year' | 'season'>) =>
   `${group.title}${group.year ? ` (${group.year})` : ''}${group.season === null ? '' : ` ${seasonName(group.season)}`}`;
-

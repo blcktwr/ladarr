@@ -32,8 +32,15 @@ test('starts the episodes of a series that stopped again from the menu of the se
   stack.complete(SERIES_PACK, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two', 'Show.Name.S01E03.mkv': 'three' });
   await expect.poll(async () => (await entry())?.reason?.code, { timeout: 60_000 }).toBe('destination_exists');
 
-  // The row of the series offers the retry of its stopped episodes. The action shows what it changes first.
   await page.goto(`${URL_BASE}/activity`);
+  // The card of the season shows the reason of the episode that stopped, and the fix that ends it. The checklist belongs
+  // to the importing indicator, so a stuck season does not show it.
+  const main = page.getByRole('main');
+  await expect(main.getByText('A file with this name is in the library folder already. It is not replaced.')).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Replace the file', exact: true })).toBeVisible();
+  await expect(main.getByText('The download is complete.')).toBeHidden();
+
+  // The row of the series offers the retry of its stopped episodes. The action shows what it changes first.
   await page.getByRole('button', { name: 'Actions for Show Name (2020) Season 1' }).click();
   await page.getByRole('menuitem', { name: 'Try again', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Try again 1 target?' });
