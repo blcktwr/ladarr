@@ -455,7 +455,7 @@ function Controls({ children }: { children?: ReactNode }) {
   // A page that the user opens first has no page before it in the app, so Back opens the catalog.
   const first = useLocation().key === 'default';
   return (
-    <div className="flex items-center justify-between gap-4 mb-4">
+    <div className="flex items-center justify-between gap-4">
       <Button iconOnly aria-label={t('Back')} onClick={() => (first ? void navigate('/catalog') : void navigate(-1))}>
         <ArrowLeft />
       </Button>
@@ -498,13 +498,11 @@ const factsOf = (header: Header, mediaType?: string) =>
 function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutions, onResolution, controls, children }: { header: Header; posterSize?: 'w342' | 'h632'; mediaType?: string; tmdbId?: number; resolutions?: number[]; onResolution?: (resolution: number) => void; controls?: ReactNode; children?: ReactNode }) {
   const facts = factsOf(header, mediaType);
   return (
-    <>
-      <div className={`${pageWidthContent} mt-6`}>
+    <Backdrop image={posterUrl(header.backdropPath, 'w1280') ?? ''} className="mb-8">
+      {/* The image spans the window, and the controls lie over it at the top. The content keeps the width of the page. */}
+      <div className={`${pageWidthContent} grid gap-4`}>
         <Controls>{controls}</Controls>
-      </div>
-      {/* The backdrop spans the window. Its content keeps the width of the page. */}
-      <Backdrop image={posterUrl(header.backdropPath, 'w1280') ?? ''} className="mb-8">
-        <div className={`${pageWidthContent} flex flex-wrap items-end gap-6`}>
+        <div className="flex flex-wrap items-end gap-6">
           {/* The header has the title and the year, so the poster has no title and no year. */}
           {/* The empty caption leaves 16 px under the poster. The margin takes them back, so the poster is at the center of the backdrop. */}
           <div className="-mb-4">
@@ -528,27 +526,25 @@ function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutio
             {children && <Actions>{children}</Actions>}
           </div>
         </div>
-      </Backdrop>
-    </>
+      </div>
+    </Backdrop>
   );
 }
 
 function TitleHeaderLoading() {
   return (
-    <>
-      <div className={`${pageWidthContent} mt-6`}>
+    <Backdrop loading className="mb-8">
+      <div className={`${pageWidthContent} grid gap-4`}>
         <Controls />
-      </div>
-      <Backdrop loading className="mb-8">
-        <div className={`${pageWidthContent} flex flex-wrap items-end gap-6`}>
+        <div className="flex flex-wrap items-end gap-6">
           <Thumbnail size="lg" loading />
           <div className="grid gap-3 grow basis-64 min-w-0 self-center">
             <Text variant="title" loading />
             <Text loading />
           </div>
         </div>
-      </Backdrop>
-    </>
+      </div>
+    </Backdrop>
   );
 }
 
