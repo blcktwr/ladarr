@@ -270,7 +270,7 @@ function EpisodeTable({ rows, loading = false, library = false }: { rows?: Episo
       aria-label={t('Episodes')}
       loading={loading}
       columns={[
-        { label: '#', width: '6rem' },
+        { label: '#', width: '3.5rem' },
         { label: t('Title'), width: '24rem' },
         { label: t('Air date'), width: '8rem' },
         ...(library ? [{ label: t('Status'), width: '9rem' }] : []),
