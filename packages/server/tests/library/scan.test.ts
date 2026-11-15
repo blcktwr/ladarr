@@ -155,6 +155,57 @@ describe('series scan', () => {
     expect(seriesCounts(db.data.titles['tv:1']!, clock())).toMatchObject({ eligible: 4, available: 1 });
     expect(db.data.titles['tv:1']!.episodes[1]!.fileId).toBeTruthy();
   });
+
+  it('clears a pointer to an episode that the file does not cover', async () => {
+    write(join(tv, 'Show', 'Show.S01E01.mkv'));
+    db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes());
+    await scanTitle('tv:1');
+    const id = db.data.titles['tv:1']!.episodes[0]!.fileId!;
+
+    // A correction or an import can leave a coverage that is larger than the name at that path.
+    db.data.files[id]!.episodes = [{ season: 1, number: 1 }, { season: 1, number: 2 }];
+    db.data.titles['tv:1']!.episodes[1]!.fileId = id;
+    const before = seriesCounts(db.data.titles['tv:1']!, clock());
+    expect(before.available).toBe(2);
+
+    await scanTitle('tv:1');
+
+    const [one, two] = db.data.titles['tv:1']!.episodes;
+    expect(db.data.files[id]!.episodes).toEqual([{ season: 1, number: 1 }]);
+    expect(one!.fileId).toBe(id);
+    expect(two!.fileId).toBeNull();
+    expect(seriesCounts(db.data.titles['tv:1']!, clock()).available).toBe(before.available - 1);
+  });
+
+  it('keeps the pointer of an episode whose file is missing', async () => {
+    write(join(tv, 'Show', 'Show.S01E01.mkv'));
+    db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes());
+    await scanTitle('tv:1');
+    const id = db.data.titles['tv:1']!.episodes[0]!.fileId;
+
+    rmSync(join(tv, 'Show', 'Show.S01E01.mkv'));
+    await scanTitle('tv:1');
+
+    expect(db.data.titles['tv:1']!.episodes[0]!.fileId).toBe(id);
+    expect(db.data.files[id!]!.missing).toBe(true);
+    expect(seriesCounts(db.data.titles['tv:1']!, clock()).available).toBe(0);
+  });
+
+  it('changes nothing on a second scan', async () => {
+    write(join(tv, 'Show', 'Show.S01E01.mkv'));
+    write(join(tv, 'Show', 'Show.S01E02E03.mkv'));
+    write(join(tv, 'Show', 'Show.S01E04.mkv'));
+    db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes());
+    await scanTitle('tv:1');
+    const ids = Object.keys(db.data.files).sort();
+    const pointers = db.data.titles['tv:1']!.episodes.map((one) => one.fileId);
+    const counts = seriesCounts(db.data.titles['tv:1']!, clock());
+
+    expect(await scanTitle('tv:1')).toMatchObject({ added: 0, missing: 0 });
+    expect(Object.keys(db.data.files).sort()).toEqual(ids);
+    expect(db.data.titles['tv:1']!.episodes.map((one) => one.fileId)).toEqual(pointers);
+    expect(seriesCounts(db.data.titles['tv:1']!, clock())).toEqual(counts);
+  });
 });
 
 describe('safety', () => {

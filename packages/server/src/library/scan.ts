@@ -169,6 +169,14 @@ export async function scanTitle(key: string): Promise<ScanResult> {
       result.missing++;
     }
   }
+  // A pointer to a file that does not cover the episode is stale. It would show the episode as available while the
+  // file holds other content. A file that is gone keeps its pointer, so the episode shows as missing.
+  if (title.mediaType !== 'movie') {
+    for (const episode of title.episodes) {
+      const file = episode.fileId ? db.data.files[episode.fileId] : undefined;
+      if (file && !file.missing && !file.episodes.some((item) => item.season === episode.season && item.number === episode.number)) episode.fileId = null;
+    }
+  }
   return result;
 }
 

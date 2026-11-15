@@ -23,6 +23,28 @@ describe('default names', () => {
     expect(moviePath(film, 'x', '.mkv')).toBe('x/What If (2019).mkv');
     expect(sanitize('  a/b\\c.  ')).toBe('abc');
   });
+
+  it('reads three episodes from one name', () => {
+    const path = episodePath(title(), 'Show Name (2020)', [episode(1, 2), episode(1, 3), episode(1, 4)], '.mkv');
+    expect(path).toBe('Show Name (2020)/Season 01/Show Name - S01E02E03E04.mkv');
+    expect(parseEpisodes(path.split('/').pop()!)).toEqual({ season: 1, numbers: [2, 3, 4] });
+  });
+
+  it('reads numbers that are not one after another', () => {
+    const path = episodePath(title(), 'Show Name (2020)', [episode(2, 74), episode(2, 75), episode(2, 77)], '.mkv');
+    expect(path.split('/').pop()!.endsWith('S02E74E75E77.mkv')).toBe(true);
+    expect(parseEpisodes(path.split('/').pop()!)).toEqual({ season: 2, numbers: [74, 75, 77] });
+  });
+
+  it('reads back one file of three episodes for every episode of a season', () => {
+    const show = title();
+    const season = Array.from({ length: 12 }, (_, index) => episode(1, index + 1));
+    const chunks = [season.slice(0, 3), season.slice(3, 6), season.slice(6, 9), season.slice(9, 12)];
+    const names = chunks.map((chunk) => episodePath(show, 'Show Name (2020)', chunk, '.mkv'));
+    const read = names.map((name) => parseEpisodes(name.split('/').pop()!));
+    expect(read.map((one) => one!.season)).toEqual([1, 1, 1, 1]);
+    expect(read.map((one) => one!.numbers)).toEqual([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]);
+  });
 });
 
 describe('templates', () => {

@@ -3,8 +3,12 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 
+// The tags of a release that name the content of a file. `season` and `episode` hold the numbering of the release,
+// which is not always the numbering of TMDB.
+export type FormatTags = { title: string | null; season: number | null; episode: number | null };
+
 export type ProbeResult =
-  | { ok: true; durationSeconds: number; container: string; videoCodec: string; audioLanguages: string[] }
+  | { ok: true; durationSeconds: number; container: string; videoCodec: string; audioLanguages: string[]; tags?: FormatTags }
   // `unreadable`: ffprobe cannot read the file. `no_video`: it has no video stream. `too_short`: it is shorter than a second.
   | { ok: false; reason: 'unreadable' | 'no_video' | 'too_short' }
   // ffprobe is not installed. The check is skipped, and the caller says so.
@@ -24,7 +28,7 @@ export type Stream = {
   side_data_list?: SideData[];
   tags?: { language?: string };
 };
-export type Raw = { format?: { duration?: string; format_name?: string; bit_rate?: string }; streams?: Stream[] };
+export type Raw = { format?: { duration?: string; format_name?: string; bit_rate?: string; tags?: Record<string, string> }; streams?: Stream[] };
 
 // Runs ffprobe and returns what it printed. `skipped`: ffprobe is not installed. `unreadable`: ffprobe cannot read the file.
 export async function ffprobeRaw(path: string): Promise<{ data: Raw } | { error: 'skipped' | 'unreadable' }> {
@@ -41,7 +45,21 @@ export async function ffprobeRaw(path: string): Promise<{ data: Raw } | { error:
   }
 }
 
-// Reads the duration, the container, the video codec, and the audio languages with ffprobe.
+// The tag keys of a file do not have one letter case, so the reader compares them in upper case.
+export function formatTags(raw: Raw['format']): FormatTags {
+  const tags = new Map(Object.entries(raw?.tags ?? {}).map(([key, value]) => [key.trim().toUpperCase(), value.trim()]));
+  const text = (key: string) => tags.get(key) || null;
+  const number = (key: string) => {
+    const value = tags.get(key);
+    if (!value) return null;
+    const parsed = Number(value);
+    return Number.isInteger(parsed) ? parsed : null;
+  };
+  return { title: text('TITLE'), season: number('SEASON_NUMBER'), episode: number('EPISODE_ID') };
+}
+
+// Reads the duration, the container, the video codec, the audio languages and the tags that name the content, with
+// ffprobe.
 export async function probeFile(path: string): Promise<ProbeResult> {
   const raw = await ffprobeRaw(path);
   if ('error' in raw) return raw.error === 'skipped' ? { ok: 'skipped' } : { ok: false, reason: 'unreadable' };
@@ -57,6 +75,7 @@ export async function probeFile(path: string): Promise<ProbeResult> {
     container: data.format?.format_name ?? 'unknown',
     videoCodec: video.codec_name ?? 'unknown',
     audioLanguages: streams.filter((stream) => stream.codec_type === 'audio').map((stream) => stream.tags?.language ?? 'und'),
+    tags: formatTags(data.format),
   };
 }
 
