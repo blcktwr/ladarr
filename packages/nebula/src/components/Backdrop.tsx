@@ -4,7 +4,7 @@ import { block } from '../theme/stone.ts';
 import { Skeleton } from './Skeleton.tsx';
 
 type BackdropProps = {
-  // The wide image of a film or a series. It is cropped at the center. No image shows the bare block.
+  // The wide image of a film or a series. It shows from its top edge, because the faces of the image are there. No image shows the bare block.
   image?: string;
   // The skeleton of the banner while its data loads: a pulse on the block. Set loading on its content too.
   loading?: boolean;
@@ -28,7 +28,7 @@ export function Backdrop({ image = '', loading = false, children, className = ''
         {/* The image is decoration, so it has no text. It fades in with its gradient. */}
         {!loading && image && (
           <div className={`absolute inset-0 transition-opacity duration-200 ease-stone motion-reduce:transition-none after:absolute after:inset-0 after:bg-linear-to-b after:from-night/50 after:to-night ${ready ? 'opacity-100' : 'opacity-0'}`}>
-            <img src={image} alt="" onLoad={() => setDone(image)} onError={() => setDone(image)} className="size-full object-cover" />
+            <img src={image} alt="" onLoad={() => setDone(image)} onError={() => setDone(image)} className="size-full object-cover object-top" />
           </div>
         )}
       </div>
