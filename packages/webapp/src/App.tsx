@@ -97,6 +97,7 @@ function Shell() {
     return () => clearTimeout(timer);
   }, [query]);
   const onActivity = pathname.startsWith('/activity');
+  const onSearch = pathname.startsWith('/search');
   // The page of a title has the address of the catalog, whatever section opened it, so the menu keeps the section that
   // the person was on while the page is open.
   const onTitle = titlePage.test(pathname);
@@ -105,8 +106,8 @@ function Shell() {
   useEffect(() => {
     if (section && section !== '/alerts') lastSection.current = section;
   }, [section]);
-  // No menu link is selected on the Activity page, or on the Alerts page, whose item is an icon only.
-  const selected = onActivity || pathname.startsWith('/alerts') ? '' : (section ?? (onTitle ? lastSection.current : '/catalog'));
+  // No menu link is selected on the Activity page, on the search results, or on the Alerts page, whose item is an icon only.
+  const selected = onActivity || onSearch || pathname.startsWith('/alerts') ? '' : (section ?? (onTitle ? lastSection.current : '/catalog'));
 
   return (
     <>
