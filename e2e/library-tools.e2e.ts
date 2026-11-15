@@ -127,6 +127,31 @@ test('a search starts while the person types, without Enter', async ({ page }) =
   await expect(page.getByRole('checkbox', { name: 'Movie Name', exact: true })).toBeVisible();
 });
 
+test('a bare TMDB ID of a movie opens its page', async ({ page }) => {
+  await page.goto(`${URL_BASE}/search?q=2`);
+  await expect(page).toHaveURL(/\/catalog\/movie\/2$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Movie Name (2019)' })).toBeVisible();
+});
+
+test('a bare TMDB ID of a series opens its page', async ({ page }) => {
+  await page.goto(`${URL_BASE}/search?q=1`);
+  await expect(page).toHaveURL(/\/catalog\/tv\/1$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Show Name (2020)' })).toBeVisible();
+});
+
+test('a number that is no TMDB ID stays on the search page', async ({ page }) => {
+  await page.goto(`${URL_BASE}/search?q=9999`);
+  await expect(page).toHaveURL(/\/search\?q=9999$/);
+  await expect(page.getByText('No titles match.', { exact: true })).toBeVisible();
+});
+
+test('a bare TMDB ID typed in the search box opens its page', async ({ page }) => {
+  await page.goto(`${URL_BASE}/catalog`);
+  await page.getByRole('searchbox', { name: 'Search' }).fill('2');
+  await expect(page).toHaveURL(/\/catalog\/movie\/2$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Movie Name (2019)' })).toBeVisible();
+});
+
 test('the page of a title shows the TMDB score, the cast, and the recommendations', async ({ page }) => {
   await page.goto(`${URL_BASE}/catalog/movie/2`);
   await expect(page.getByText('TMDB 7.5')).toBeVisible();

@@ -2,20 +2,29 @@ import type { SearchResult } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { EmptyState, Gallery, Pane, Spinner } from 'nebula';
 import { useEffect } from 'react';
-import { useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/index.ts';
+import { catalogPath } from '../../lib/format.ts';
 import { useSelection } from '../library/library-bulk.tsx';
 import { ResultItem } from './result-item.tsx';
 import { t } from '../../i18n/index.ts';
 
 export function SearchPage() {
   const [params] = useSearchParams();
+  const navigate = useNavigate();
   const query = params.get('q')?.trim() ?? '';
+  // A bare number is a TMDB ID, and its title opens at once.
+  const id = /^\d+$/.test(query) ? Number(query) : null;
   const selection = useSelection();
   const { data, error, isFetching: loading, refetch: reload } = useQuery<{ results: SearchResult[]; needsMatch?: boolean }>({ queryKey: [`/search?query=${encodeURIComponent(query)}`], placeholderData: keepPreviousData });
   // A new search shows other titles, so the old selection ends.
   useEffect(() => selection.clear(), [query]);
+  useEffect(() => {
+    // The previous answer stands in while the new one loads, so the redirect waits for the answer of its own query.
+    const found = !loading && data?.results.length === 1 ? data.results[0] : undefined;
+    if (found && found.tmdbId === id) void navigate(catalogPath(`${found.mediaType}:${found.tmdbId}`), { replace: true });
+  }, [data, id, loading, navigate]);
 
   if (!query) return <Pane><EmptyState>{t('Type a title in the search box.')}</EmptyState></Pane>;
   if (error && !data) return <Pane><LoadFailed onRetry={reload} /></Pane>;

@@ -5,7 +5,7 @@ import { inLibrary, notFoundAsEmpty, newestFirst } from '../../helpers/search.ts
 
 const MAX_QUERY = 200;
 
-// Finds titles by name, or by `tmdb:<id>` with a media type, or by `tvdb:<id>` for a series.
+// Finds titles by name, by a bare TMDB ID, by `tmdb:<id>` with a media type, or by `tvdb:<id>` for a series.
 export function searchGet(tmdb: Tmdb | undefined): RequestHandler {
   const map = inLibrary();
   return async (req, res) => {
@@ -19,6 +19,14 @@ export function searchGet(tmdb: Tmdb | undefined): RequestHandler {
       if (!type) return void res.status(400).json({ error: 'media_type_required' });
       const found = await tmdb.details(type, Number(byTmdb[1])).catch(notFoundAsEmpty);
       return void res.json({ results: map(found ? [found] : []) });
+    }
+
+    // A bare number is a TMDB ID. A movie comes first, then a series. A number that is no ID is a name search.
+    const byNumber = /^\d+$/.exec(query);
+    if (byNumber) {
+      const id = Number(byNumber[0]);
+      const found = (await tmdb.details('movie', id).catch(notFoundAsEmpty)) ?? (await tmdb.details('tv', id).catch(notFoundAsEmpty));
+      if (found) return void res.json({ results: map([found]) });
     }
 
     const byTvdb = /^tvdb:(\d+)$/i.exec(query);

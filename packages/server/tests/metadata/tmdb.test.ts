@@ -332,7 +332,7 @@ describe('search route', () => {
   let base = '';
   let close: () => void;
   let cookie = '';
-  const { send } = fakeTmdb({
+  const { send, calls } = fakeTmdb({
     '/search/multi': (url) => {
       const query = url.searchParams.get('query');
       if (query === 'boom') return json({ results: [] });
@@ -347,6 +347,7 @@ describe('search route', () => {
       return json({ results: [{ media_type: 'movie', id: 603, title: 'The Matrix', release_date: '1999-03-31' }] });
     },
     '/movie/603': () => json(movie),
+    '/tv/1396': () => json(series),
     '/find/81189': () => json({ tv_results: [{ id: 1396, name: 'Breaking Bad', first_air_date: '2008-01-20' }] }),
     '/find/5': () => json({ tv_results: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }] }),
     '/find/6': () => json({ tv_results: [] }),
@@ -401,6 +402,26 @@ describe('search route', () => {
     expect((await search('tvdb:81189')).body).toMatchObject({ needsMatch: false, results: [{ tmdbId: 1396 }] });
     expect((await search('tvdb:5')).body).toMatchObject({ needsMatch: true });
     expect((await search('tvdb:6')).body).toEqual({ results: [], needsMatch: true });
+  });
+
+  it('finds a movie by a bare TMDB ID', async () => {
+    const { status, body } = await search('603');
+    expect(status).toBe(200);
+    expect(body.results).toMatchObject([{ mediaType: 'movie', tmdbId: 603 }]);
+  });
+
+  it('finds a series by a bare TMDB ID when no movie has it', async () => {
+    const { status, body } = await search('1396');
+    expect(status).toBe(200);
+    expect(body.results).toMatchObject([{ mediaType: 'tv', tmdbId: 1396 }]);
+  });
+
+  it('searches by name when the number is no TMDB ID', async () => {
+    const seen = calls.length;
+    const { status, body } = await search('777');
+    expect(status).toBe(200);
+    expect(body.results).toMatchObject([{ mediaType: 'movie', tmdbId: 603 }]);
+    expect(calls.slice(seen).map((url) => url.pathname)).toContain('/3/search/multi');
   });
 });
 
