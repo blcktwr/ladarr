@@ -69,7 +69,7 @@ export const es: Record<string, string> = {
   'No indexer yet': 'Aún no hay indexadores',
 
   // Search
-  'No options. Type a value and press Enter.': 'No hay opciones. Escribe un valor y presiona Enter.',
+  'No options.': 'No hay opciones.',
   'Type a title in the search box.': 'Escribe un título en el cuadro de búsqueda.',
   'This ID does not match exactly one series. Select the right one.': 'Este ID no coincide con una sola serie. Selecciona la correcta.',
   'No titles match.': 'Ningún título coincide.',

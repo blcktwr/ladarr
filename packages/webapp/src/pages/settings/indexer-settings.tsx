@@ -204,9 +204,10 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
           value={draft.languages}
           onValueChange={(languages) => set({ languages })}
           options={languageOptions}
+          allowCustom={false}
           width="full"
           description={t('A search sends an alias only to an indexer with one of these languages. No languages means every language.')}
-          emptyText={t('No options. Type a value and press Enter.')}
+          emptyText={t('No options.')}
           error={errors.preferredLanguages}
         />
         {!managed && (

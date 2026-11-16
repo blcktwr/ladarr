@@ -13,6 +13,8 @@ type TagInputProps = {
   onValueChange: (value: string[]) => void;
   // The tags that a person can select. A typed text that is not in the list becomes a tag of its own.
   options?: TagOption[];
+  // Whether a typed text that is not in the list becomes a tag of its own. Defaults to true.
+  allowCustom?: boolean;
   placeholder?: string;
   description?: string;
   error?: string;
@@ -25,8 +27,9 @@ type TagInputProps = {
 const normalize = (options: TagOption[]) => options.map((option) => (typeof option === 'string' ? { value: option } : option));
 
 // An input with tags. A tag has a cross that removes it. The list of options filters as the person types, and Enter
-// adds the highlighted option, the one that matches the text, or the text itself as a new tag.
-export function TagInput({ label, value, onValueChange, options = [], placeholder, description, error, emptyText = 'No options.', disabled, width = 'md' }: TagInputProps) {
+// adds the highlighted option or the one that matches the text. Without a match, the text itself becomes a tag,
+// unless allowCustom is false.
+export function TagInput({ label, value, onValueChange, options = [], allowCustom = true, placeholder, description, error, emptyText = 'No options.', disabled, width = 'md' }: TagInputProps) {
   const id = useId();
   const descriptionId = useId();
   const errorId = useId();
@@ -57,7 +60,8 @@ export function TagInput({ label, value, onValueChange, options = [], placeholde
     event.preventDefault();
     const typed = inputValue.trim();
     const match = all.find((option) => option.value === typed || (option.label ?? option.value).toLowerCase() === typed.toLowerCase());
-    add(match?.value ?? typed);
+    if (match) add(match.value);
+    else if (allowCustom) add(typed);
   };
 
   return (

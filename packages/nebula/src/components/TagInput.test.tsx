@@ -100,8 +100,18 @@ describe('TagInput', () => {
     expect(onValueChange).toHaveBeenCalledWith(['Klingon']);
   });
 
+  it('adds nothing when no option matches and allowCustom is false', () => {
+    const { onValueChange, input } = renderTagInput({ allowCustom: false });
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'Klingon' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
   it('adds the option value and not its label when the typed text matches an option', async () => {
-    const { onValueChange, input } = renderTagInput();
+    const { onValueChange, input } = renderTagInput({ allowCustom: false });
 
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: 'Thai' } });
