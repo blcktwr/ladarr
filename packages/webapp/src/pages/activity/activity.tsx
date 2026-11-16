@@ -102,16 +102,11 @@ function ReplaceFix({ entry, run }: { entry: QueueEntryView; run: Run }) {
 const targetOf = (entry: QueueEntryView) => ({ titleKey: entry.titleKey, ...(entry.season === null ? {} : { season: entry.season }), ...(entry.number === null ? {} : { number: entry.number }) });
 
 // The options that end the problem of a target. The reason of the target says which one applies: the file of the
-// destination is replaced, the download in the client is attached, the file is matched by hand, or the phases of the
-// target run again. A target that used its attempts also takes a release by hand.
+// destination is replaced, the download in the client is attached, the file is matched by hand, or a release is taken
+// by hand. The retry of the target comes from the menu.
 function EntryFix({ entry, run, refresh }: { entry: QueueEntryView; run: Run; refresh: () => void }) {
   if (entry.reason?.code === 'too_many_attempts') {
-    return (
-      <>
-        <ReleasePicker target={targetOf(entry)} label={entry.label} onDone={refresh} />
-        <Button onClick={() => void run('retry', [entry.id])}>{t('Try again')}</Button>
-      </>
-    );
+    return <ReleasePicker target={targetOf(entry)} label={entry.label} onDone={refresh} />;
   }
   if (canReplace(entry)) return <ReplaceFix entry={entry} run={run} />;
   if (entry.reason?.code === 'file_unreadable') {
@@ -124,24 +119,17 @@ function EntryFix({ entry, run, refresh }: { entry: QueueEntryView; run: Run; re
   }
   if (entry.reason?.action === 'attach') return <AttachDialog entry={entry} onDone={refresh} />;
   if (entry.reason?.action === 'match') return <MatchDialog entry={entry} onDone={refresh} />;
-  if (entry.reason?.action === 'retry') return <Button onClick={() => void run('retry', [entry.id])}>{t('Try again')}</Button>;
   return null;
 }
 
 // The options that end the problem of a season. The problem picks the fix: one replacement for every episode with a
-// taken destination name, the download or the file of the first stopped episode, a release for a damaged file, or the
-// retry of the whole season.
+// taken destination name, the download or the file of the first stopped episode, or a release for a damaged file. The
+// retry of the season comes from the menu.
 function GroupFix({ reason, stopped, titleKey, season, label, run, refresh }: { reason: QueueReason | null; stopped: QueueEntryView[]; titleKey: string; season: number | null; label: string; run: Run; refresh: () => void }) {
   if (!reason) return null;
-  const retry = () => void run('retry', [], { titleKey, season });
   const target = { titleKey, ...(season === null ? {} : { season }) };
   if (reason.code === 'too_many_attempts') {
-    return (
-      <>
-        <ReleasePicker target={target} label={label} onDone={refresh} />
-        <Button onClick={retry}>{t('Try again')}</Button>
-      </>
-    );
+    return <ReleasePicker target={target} label={label} onDone={refresh} />;
   }
   if (reason.code === 'file_unreadable') {
     return (
@@ -165,11 +153,7 @@ function GroupFix({ reason, stopped, titleKey, season, label, run, refresh }: { 
     const entry = stopped.find((item) => item.reason?.action === 'match');
     if (entry) return <MatchDialog entry={entry} onDone={refresh} />;
   }
-  if (reason.action === 'retry') {
-    const only = stopped.length === 1 ? stopped[0]! : null;
-    if (only) return <EntryFix entry={only} run={run} refresh={refresh} />;
-  }
-  return <Button onClick={retry}>{t('Try again')}</Button>;
+  return null;
 }
 
 // The comment of a release can hold more than one link, with text beside it. Each link opens in a new tab, and the
@@ -479,9 +463,8 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
   // file. The list keeps the status and the hint.
   const reason = entry.reason ? [t(entry.reason.message), causeLabel(entry.reason.detail)].filter(Boolean).join(' ') : null;
   const checks = showsChecks(entry);
-  // The container of the action is not rendered when the reason has no option to show. A target that stopped also
-  // takes a retry for a reason that has no fix of its own.
-  const hasFix = canReplace(entry) || entry.reason?.code === 'file_unreadable' || entry.reason?.action === 'attach' || entry.reason?.action === 'match' || (entry.status === 'stuck' && entry.reason?.action === 'retry');
+  // The container of the action is not rendered when the reason has no option to show.
+  const hasFix = canReplace(entry) || entry.reason?.code === 'file_unreadable' || entry.reason?.action === 'attach' || entry.reason?.action === 'match';
   const action = hasFix ? fix : undefined;
   if (inline) {
     return (

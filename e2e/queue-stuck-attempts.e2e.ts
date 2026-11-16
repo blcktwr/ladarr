@@ -21,7 +21,7 @@ test.beforeEach(async ({ context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
 });
 
-test('says what failed and offers the two fixes on the card of the season', async ({ page }) => {
+test('says what failed and offers the release by hand on the card of the season', async ({ page }) => {
   // The reason carries the failure of the last release, so the page says what went wrong.
   await expect.poll(reason, { timeout: 60_000 }).toMatchObject({ code: 'too_many_attempts', detail: 'invalid_torrent' });
 
@@ -30,8 +30,8 @@ test('says what failed and offers the two fixes on the card of the season', asyn
   const main = page.getByRole('main');
   await expect(main.getByText('Several releases failed. Select a release by hand, or try again. The last release had a damaged .torrent file.')).toBeVisible();
 
-  // The card offers the two fixes that the reason names: a release by hand, or the phases of the target again.
-  await expect(main.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  // The card offers the release by hand. The retry of the season comes from its menu only.
+  await expect(main.getByRole('button', { name: 'Try again', exact: true })).toBeHidden();
   await main.getByRole('button', { name: 'Choose a release for Show Name (2020) Season 1' }).click();
 
   // The panel searches the indexers, and the person takes any release that it finds.
