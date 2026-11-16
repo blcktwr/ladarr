@@ -6,7 +6,7 @@ import { ArrowLeft, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
 import { Link as RouterLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
 import { ResultItem } from '../search/result-item.tsx';
-import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, EmptyState, Gallery, Modal, Pane, Section, Spinner, SubMenu, Table, Text, Thumbnail } from 'nebula';
+import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, EmptyState, Gallery, Modal, Pane, Section, Spinner, SubMenu, Table, Text, Thumbnail, type ThumbnailState } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { Link, LoadFailed, LoadingGallery, pageWidth, pageWidthContent } from '../../components/index.ts';
 import { ModalActions } from '../../components/modal-actions.tsx';
@@ -495,7 +495,7 @@ const factsOf = (header: Header, mediaType?: string) =>
 
 // The hero of a title has one shape for a movie and for a series. The parts below it are the ones that differ.
 // The children are the extra facts of a person. A photo of a person is not a poster, so it has its own size.
-function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutions, onResolution, controls, children }: { header: Header; posterSize?: 'w342' | 'h632'; mediaType?: string; tmdbId?: number; resolutions?: number[]; onResolution?: (resolution: number) => void; controls?: ReactNode; children?: ReactNode }) {
+function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutions, onResolution, type, state, stateLabel, controls, children }: { header: Header; posterSize?: 'w342' | 'h632'; mediaType?: string; tmdbId?: number; resolutions?: number[]; onResolution?: (resolution: number) => void; type?: string; state?: ThumbnailState; stateLabel?: string; controls?: ReactNode; children?: ReactNode }) {
   const facts = factsOf(header, mediaType);
   return (
     <Backdrop image={posterUrl(header.backdropPath, 'w1280') ?? ''} className="mb-8">
@@ -506,7 +506,7 @@ function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutio
           {/* The header has the title and the year, so the poster has no title and no year. */}
           {/* The empty caption leaves 16 px under the poster. The margin takes them back, so the poster is at the center of the backdrop. */}
           <div className="-mb-4">
-            <Thumbnail size="lg" image={posterUrl(header.posterPath, posterSize) ?? ''} title="" year="" />
+            <Thumbnail size="lg" image={posterUrl(header.posterPath, posterSize) ?? ''} title="" year="" type={type} state={state} stateLabel={stateLabel} />
           </div>
           <div className="grid gap-3 grow basis-64 min-w-0 self-center">
             <Text variant="title">{`${header.title}${header.year ? ` (${header.year})` : ''}`}</Text>
@@ -654,6 +654,8 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
   }
 
   const series = header.mediaType === 'tv';
+  // The bookmark of the poster names the type of the title and its state, as the poster of the catalog does.
+  const state = posterState(title ?? header);
   // The seasons of a series that is not in the library decide whether the Add needs the modal.
   const seasons = useQuery<SeriesEpisodes>({ queryKey: [`/search/tv/${header.tmdbId}/seasons`], enabled: series && !title });
   const seasonList = seasonOrder((seasons.data?.seasons ?? []).filter((season) => season.episodes.length > 0));
@@ -680,6 +682,9 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
         header={header}
         mediaType={header.mediaType}
         tmdbId={header.tmdbId}
+        type={contentType(header.mediaType, header.seriesType)}
+        state={state?.state}
+        stateLabel={state?.label}
         resolutions={title?.resolutions}
         onResolution={title ? setInfo : undefined}
         controls={

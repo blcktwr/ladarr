@@ -16,8 +16,12 @@ import { WaitingIcon } from './indicators/WaitingIcon.tsx';
 // The width of the poster. xs is for a row of a list, which has its own data next to the poster. md is the size of a list of posters. lg is for a single poster, such as on a Backdrop.
 const sizes = { xs: 'w-20', sm: 'w-32', md: 'w-40', lg: 'w-56' };
 
+// The bookmark keeps its share of the poster at each size. Its parts are in em, so the text of the size sets the whole
+// shape: md has 11px, and xs, sm and lg follow the width of the poster.
+const bookmarkText = { xs: 'text-[5.5px]', sm: 'text-[8.8px]', md: 'text-[11px]', lg: 'text-[15.4px]' };
+
 // The bottom edge of the bookmark rises in the middle, so the tag hangs like a ribbon.
-const notch = '[clip-path:polygon(0_0,100%_0,100%_100%,50%_calc(100%_-_0.5rem),0_100%)]';
+const notch = '[clip-path:polygon(0_0,100%_0,100%_100%,50%_calc(100%_-_0.727em),0_100%)]';
 
 // The state of a title in the queue, or that it is downloaded. It shows as an icon at the bottom of the bookmark.
 export type ThumbnailState = 'waiting' | 'upcoming' | 'searching' | 'downloading' | 'validating' | 'importing' | 'available' | 'stuck';
@@ -142,13 +146,13 @@ export function Thumbnail({ image = '', title = '', year = '', loading = false, 
             {!noCaption && !status && year !== undefined && <span className="text-fog text-[13px]/none">{year}</span>}
             {/* The bookmark hangs from the top edge of the poster, with a notch in the bottom edge. It is in the caption, after its text, so it names the figure after the title and the year. The line is a face 1px inside the shape, so it follows the notch, and the shadow sits on the wrapper, outside the clip. The state shows as a tooltip when the pointer is on it. */}
             {type && (
-              <span className={`${bookmarkShadow} absolute top-0 left-1.5 w-7`} title={state && stateLabel ? stateLabel : undefined}>
-                <span className={`${bookmark} relative flex w-full min-h-14 flex-col items-center ${StateIcon ? 'justify-between' : 'justify-center'} gap-2 pt-2 pb-4 text-center text-[11px]/none font-[550] tracking-[.02em] ${notch}`}>
+              <span className={`${bookmarkShadow} absolute top-0 left-[0.545em] w-[2.545em] ${bookmarkText[size]}`} title={state && stateLabel ? stateLabel : undefined}>
+                <span className={`${bookmark} relative flex w-full min-h-[5.091em] flex-col items-center ${StateIcon ? 'justify-between' : 'justify-center'} gap-[0.727em] pt-[0.727em] pb-[1.455em] text-center leading-none font-[550] tracking-[.02em] ${notch}`}>
                   <span aria-hidden="true" className={`${bookmarkFace} absolute top-0 right-px bottom-px left-px ${notch}`} />
                   <span className="relative rotate-180 [writing-mode:vertical-rl]">{type}</span>
                   {StateIcon && (
                     <span className={`relative ${state === 'waiting' ? 'translate-y-0.5' : ''}`}>
-                      <StateIcon className="size-4.5" />
+                      <StateIcon className="size-[1.636em]" />
                     </span>
                   )}
                   {state && stateLabel && <span className="sr-only">{stateLabel}</span>}
