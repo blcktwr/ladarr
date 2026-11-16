@@ -73,6 +73,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
   const [categoriesUpdated, setCategoriesUpdated] = useState(false);
   const [failed, setFailed] = useState(false);
   const [pending, setPending] = useState<'test' | 'save' | null>(null);
+  const [delayFocused, setDelayFocused] = useState(false);
   // The list does not hold the key, so the form asks for the key of the indexer that it edits.
   const saved = useQuery<{ apiKey: string }>({ queryKey: [`/indexers/${indexer?.id}/key`], enabled: editing && !managed, gcTime: 0 });
   const language = useLanguage();
@@ -199,7 +200,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
         )}
         <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_auto] gap-x-4 items-start w-full">
           {!managed && <Field width="full" label={t('API key')} aria-required={!editing} type="password" error={errors.apiKey} value={draft.apiKey} onValueChange={(apiKey) => set({ apiKey })} />}
-          <Field width="sm" suffix={t('sec')} label={t('Delay requests')} aria-required="true" inputMode="decimal" action={<Hint label={t('About the delay')}>{t('The least time, in seconds, between two requests to the indexer.')}</Hint>} error={errors.delaySeconds} value={draft.delay} onValueChange={(delay) => set({ delay })} />
+          <Field width="sm" suffix={t('sec')} label={t('Delay requests')} aria-required="true" inputMode="decimal" action={<Hint label={t('About the delay')}>{t('The least time, in seconds, between two requests to the indexer.')}</Hint>} error={errors.delaySeconds} value={!delayFocused && draft.delay.trim() === '0' ? '∞' : draft.delay} onFocus={() => setDelayFocused(true)} onBlur={() => setDelayFocused(false)} onValueChange={(delay) => set({ delay })} />
         </div>
         <TagInput
           label={t('Preferred languages')}
