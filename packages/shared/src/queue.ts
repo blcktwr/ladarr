@@ -83,6 +83,11 @@ export const RETRY_STATUSES: readonly Status[] = ['stuck', 'not_found', 'no_matc
 // A retry runs the phases of the target again, so a target that waits for its next search starts it at once.
 export const canRetry = (state: QueueState) => RETRY_STATUSES.includes(describe(state).status);
 
+// A target whose pack did not hold every episode of its season. The user can search the other seasons of the releases.
+// An older state keeps the cause of the pack as the detail of its attempt limit.
+export const needsOtherSeasons = (state: QueueState): boolean =>
+  state.kind === 'blocked' && (state.problem.code === 'pack_partial' || (state.problem.code === 'too_many_attempts' && state.problem.detail === 'pack_partial'));
+
 export function describe(state: QueueState): Description {
   const phase = phaseOf(state);
   const active = isActiveState(state);

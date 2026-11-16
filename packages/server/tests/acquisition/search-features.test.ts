@@ -351,7 +351,7 @@ describe('the content of a pack', () => {
     expect(pipe.qbit.torrents.size).toBe(1);
   });
 
-  it('keeps the pack for the episodes that it holds, and searches the missing episode on its own', async () => {
+  it('keeps the pack for the episodes that it holds, and leaves the missing episode stuck with the pack as the reason', async () => {
     pipe = await startPipeline();
     const series = season();
     pipe.db.data.titles[series.key] = series;
@@ -359,15 +359,18 @@ describe('the content of a pack', () => {
     const single = 'Show.Name.S01E03.1080p.WEB-DL-SGL';
     pipe.tracker.state.items = [{ title: PACK, size: packSize, files }, { title: single, size: 60 * 45 * MIB }];
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((e) => stageOf(e) === 'downloading'));
+    await until(() => stageOf(entries[0]!) === 'downloading' && reasonOfEntry(entries[2]!)?.code === 'pack_partial');
 
+    // The pack goes to the client for the two episodes that it holds.
     expect(entries[0]!.transferHash).toBe(hashOf(PACK, files));
     expect(entries[1]!.transferHash).toBe(hashOf(PACK, files));
-    expect(entries[2]!.release!.title).toBe(single);
-    expect(pipe.qbit.torrents.size).toBe(2);
-    // A later search knows the files of the pack from its record.
-    expect(entries[2]!.attempts.map((a) => [a.n, a.outcome, a.reason])).toEqual([[1, 'failed', 'search requested'], [2, 'running', 'fallback: pack_partial']]);
-    expect(entries[0]!.attempts).toHaveLength(1);
+    expect(pipe.qbit.torrents.size).toBe(1);
+    // The third episode stays stuck with the pack as the reason, and no second release is chosen for it.
+    expect(entries[2]!.state).toMatchObject({ kind: 'blocked', at: 'fetching', problem: { code: 'pack_partial' } });
+    expect(entries[2]!.release).toBeNull();
+    // The single release of the tracker is never downloaded: no search follows the partial pack.
+    expect(pipe.tracker.state.downloads).toEqual([PACK]);
+    expect(entries[2]!.attempts.map((attempt) => [attempt.n, attempt.outcome, attempt.reason])).toEqual([[1, 'failed', 'search requested']]);
   });
 
   it('reads a pack that the client has from the client, and never downloads it from the indexer again', async () => {
@@ -383,10 +386,11 @@ describe('the content of a pack', () => {
     pipe.complete(PACK, { 'Show.Name.S01E01.mkv': 'the-first', 'Show.Name.S01E02.mkv': 'the-second' }, hash);
 
     // New episodes air. The client still has the pack, so the search reads its files there. The release is not downloaded
-    // from the indexer a second time, and the episodes that the pack cannot give do not cost its ratio.
+    // from the indexer a second time, and the episodes that the pack cannot give stop with the pack as the reason.
     series.episodes.push(episode(1, 3, '2020-01-03'), episode(1, 4, '2020-01-04'));
     pipe.finder.requestSearch(series.key);
-    await until(() => ['tv:1:1x3', 'tv:1:1x4'].every((id) => branchOf(pipe!.queue.get(id)) === 'waiting'));
+    await until(() => ['tv:1:1x3', 'tv:1:1x4'].every((id) => reasonOfEntry(pipe!.queue.get(id)!)?.code === 'pack_partial'));
+    expect(['tv:1:1x3', 'tv:1:1x4'].map((id) => stageOf(pipe!.queue.get(id)!))).toEqual(['fetching', 'fetching']);
 
     expect(pipe.tracker.state.downloads.filter((file) => file === PACK)).toHaveLength(1);
     expect(pipe.qbit.torrents.size).toBe(1);
@@ -398,6 +402,7 @@ describe('the content of a pack', () => {
     pipe.db.data.titles[series.key] = series;
     pipe.tracker.state.items = [{ title: PACK, size: packSize, files: ['Show.Name.S01.part1.rar', 'Show.Name.S01.part2.rar'] }];
     const entries = pipe.finder.requestSearch(series.key);
+    // A pack that names no episode is a release that failed: the targets try their own season again.
     await until(() => entries.every((e) => branchOf(e) === 'waiting' && e.search?.topRejections.includes('pack_covers_others')));
     expect(pipe.qbit.torrents.size).toBe(0);
     expect(pipe.qbit.calls.filter((c) => c.path === 'torrents/add')).toEqual([]);

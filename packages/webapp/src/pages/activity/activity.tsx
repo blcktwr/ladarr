@@ -15,7 +15,7 @@ import { AttachDialog } from './activity-client.tsx';
 import { ReleasePicker } from './activity-releases.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
-import { catalogPath, causeLabel, formatBytes, groupName, posterUrl, seasonName, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
+import { catalogPath, formatBytes, groupName, posterUrl, reasonText, seasonName, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
 import { commentParts } from '../../lib/links.ts';
@@ -102,12 +102,10 @@ function ReplaceFix({ entry, run }: { entry: QueueEntryView; run: Run }) {
 const targetOf = (entry: QueueEntryView) => ({ titleKey: entry.titleKey, ...(entry.season === null ? {} : { season: entry.season }), ...(entry.number === null ? {} : { number: entry.number }) });
 
 // The options that end the problem of a target. The reason of the target says which one applies: the file of the
-// destination is replaced, the download in the client is attached, the file is matched by hand, or a release is taken
-// by hand. The retry of the target comes from the menu.
+// destination is replaced, the download in the client is attached, or the file is matched by hand. A target that used
+// its attempts has no option here: it shows why the last release failed, and the rejected releases of its search stay
+// under the inspector. The retry of the target comes from the menu.
 function EntryFix({ entry, run, refresh }: { entry: QueueEntryView; run: Run; refresh: () => void }) {
-  if (entry.reason?.code === 'too_many_attempts') {
-    return <ReleasePicker target={targetOf(entry)} label={entry.label} onDone={refresh} />;
-  }
   if (canReplace(entry)) return <ReplaceFix entry={entry} run={run} />;
   if (entry.reason?.code === 'file_unreadable') {
     return (
@@ -123,14 +121,44 @@ function EntryFix({ entry, run, refresh }: { entry: QueueEntryView; run: Run; re
 }
 
 // The options that end the problem of a season. The problem picks the fix: one replacement for every episode with a
-// taken destination name, the download or the file of the first stopped episode, or a release for a damaged file. The
-// retry of the season comes from the menu.
-function GroupFix({ reason, stopped, titleKey, season, label, run, refresh }: { reason: QueueReason | null; stopped: QueueEntryView[]; titleKey: string; season: number | null; label: string; run: Run; refresh: () => void }) {
+// taken destination name, the download or the file of the first stopped episode, or a release for a damaged file. A
+// season that used its attempts shows no option here, because the rejected releases of its search are enough. The retry
+// of the season comes from the menu. A pack that held a part of the season adds the search of the other seasons of the
+// releases, because the releases can count the season in another way.
+function GroupFix(props: { reason: QueueReason | null; otherSeasons: number; stopped: QueueEntryView[]; titleKey: string; season: number | null; label: string; run: Run; refresh: () => void }) {
+  const other = props.otherSeasons > 0 ? <OtherSeasonsFix titleKey={props.titleKey} season={props.season} run={props.run} /> : null;
+  const fix = fixOfGroup(props);
+  return fix || other ? (
+    <>
+      {fix}
+      {other}
+    </>
+  ) : null;
+}
+
+// The search of the other seasons of the releases. The user starts it, and the cards of the season follow its work.
+function OtherSeasonsFix({ titleKey, season, run }: { titleKey: string; season: number | null; run: Run }) {
+  const [pending, setPending] = useState(false);
+  return (
+    <Button
+      pending={pending}
+      onClick={async () => {
+        setPending(true);
+        try {
+          await run('search_other_seasons', [], { titleKey, season });
+        } finally {
+          setPending(false);
+        }
+      }}
+    >
+      {t('Search other seasons')}
+    </Button>
+  );
+}
+
+function fixOfGroup({ reason, stopped, titleKey, season, label, run, refresh }: { reason: QueueReason | null; stopped: QueueEntryView[]; titleKey: string; season: number | null; label: string; run: Run; refresh: () => void }) {
   if (!reason) return null;
   const target = { titleKey, ...(season === null ? {} : { season }) };
-  if (reason.code === 'too_many_attempts') {
-    return <ReleasePicker target={target} label={label} onDone={refresh} />;
-  }
   if (reason.code === 'file_unreadable') {
     return (
       <>
@@ -411,9 +439,10 @@ function RejectedPane({ items, onDone }: { items: { entry: QueueEntryView; relea
   );
 }
 
-// The rejected releases of a movie. Only a target that found no match keeps them.
+// The rejected releases of a movie. A target that found no match keeps them, and so does a target that used its attempts,
+// because the rejected releases are the way to take one by hand.
 function MovieRejected({ entry, refresh }: { entry: QueueEntryView; refresh: () => void }) {
-  const releases = entry.status === 'no_match' ? (entry.search?.rejected ?? []) : [];
+  const releases = entry.status === 'no_match' || entry.status === 'stuck' ? (entry.search?.rejected ?? []) : [];
   return <RejectedPane items={releases.map((release) => ({ entry, release }))} onDone={refresh} />;
 }
 
@@ -461,7 +490,7 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
   const status = entry.status;
   // The reason shows under the status of a movie, and under the status of an episode that a problem stops, above its
   // file. The list keeps the status and the hint.
-  const reason = entry.reason ? [t(entry.reason.message), causeLabel(entry.reason.detail)].filter(Boolean).join(' ') : null;
+  const reason = entry.reason ? reasonText(entry.reason) : null;
   const checks = showsChecks(entry);
   // The container of the action is not rendered when the reason has no option to show.
   const hasFix = canReplace(entry) || entry.reason?.code === 'file_unreadable' || entry.reason?.action === 'attach' || entry.reason?.action === 'match';
@@ -495,7 +524,7 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
   );
 }
 
-type Run = (action: QueueActionName, ids: string[], group?: { titleKey: string; season: number | null }) => void;
+type Run = (action: QueueActionName, ids: string[], group?: { titleKey: string; season: number | null }) => Promise<void>;
 
 // The actions of a row, in its menu. A target that a problem stops, and a target that waits for its next search with a
 // result, take a retry: the phases of the target run again, from the file in the library to a new search.
@@ -721,7 +750,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
     status === 'no_match'
       ? t('The indexers have releases, but none fits your selected qualities.')
       : stuck
-        ? [t(stuck.message), causeLabel(stuck.detail)].filter(Boolean).join(' ')
+        ? reasonText(stuck)
         : t('{count} / {total} episodes', { count: completed, total });
   // The bar of the whole series: the part of its episodes that is complete, or the part of its download that the
   // client reports while it downloads. A series that searches, that the search did not find, that found no match, or
@@ -746,6 +775,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
             action={
               <GroupFix
                 reason={stuck}
+                otherSeasons={summary?.otherSeasons ?? group.otherSeasons}
                 stopped={stopped}
                 titleKey={group.titleKey}
                 season={group.season}
@@ -914,6 +944,7 @@ const actionLabel: Record<QueueActionName, string> = {
   unpriority: 'Delete priority from',
   remove_torrent: 'Delete the torrent of',
   replace: 'Replace',
+  search_other_seasons: 'Search other seasons',
 };
 
 // A text for a screen reader that changes at most once in a while, so a burst of changes reads as one message.

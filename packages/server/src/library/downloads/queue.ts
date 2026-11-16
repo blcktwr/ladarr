@@ -116,6 +116,9 @@ export type QueueEntry = {
   // Set when the releases count as two seasons what the title counts as one. The targets of the rest of the season then
   // search the next season of the release. Null or absent for the numbering of the title.
   continuation?: Continuation | null;
+  // The files of the pack that left this target without one: the season of the release and the numbers of the episodes
+  // that it holds. The manual search of the other seasons reads the candidate seasons from it.
+  partialPack?: { releaseSeason: number | null; numbers: number[] } | null;
 };
 
 const MAX_HISTORY = 100;

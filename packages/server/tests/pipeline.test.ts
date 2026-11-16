@@ -12,9 +12,11 @@ import { episode, movie, title } from './helpers/test-fixtures.ts';
 import { hashOf, MIB, startPipeline, until } from './helpers/test-pipeline.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
+let api: Awaited<ReturnType<Awaited<ReturnType<typeof startPipeline>>['api']>> | undefined;
 afterEach(async () => {
+  api?.close();
   await pipe?.stop();
-  pipe = undefined;
+  pipe = api = undefined;
 });
 
 const stagesOf = (entry: { history: { stage: string }[] }) => entry.history.map((event) => event.stage).filter((stage, i, all) => stage !== all[i - 1]);
@@ -210,12 +212,19 @@ describe('series journey', () => {
     expect(entries.map((e) => stageOf(e))).toEqual(['available', 'queued', 'available']);
     // The missing episode waits for a release of its own, and it has no torrent.
     expect(entries[1]).toMatchObject({ state: { kind: 'waiting' }, transferHash: null });
+    // A torrent that ladarr cannot read before the download is a release that failed: the target tries its season again.
+    // The record of the pack keeps the episodes that it holds.
+    expect(entries[1]!.attempts.map((attempt) => [attempt.n, attempt.outcome, attempt.reason])).toEqual([
+      [1, 'failed', 'search requested'],
+      [2, 'running', 'fallback: pack_partial'],
+    ]);
+    expect(pipe.db.data.releaseCoverage[`1:${pack}`]).toMatchObject({ titleKey: series.key, season: 1, numbers: [1, 3] });
     expect(Object.values(pipe.db.data.jobs).some((job) => job.type === 'queue.initial' && job.dedupeKey === `initial:${series.key}`)).toBe(true);
   });
 
-  it('takes a pack that holds a part of a season, and finds the rest as the next season', async () => {
+  it('takes a pack that holds a part of a season, and completes the season with the action of the user', async () => {
     pipe = await startPipeline();
-    // TMDB counts 23 episodes in season 1, and no season 2. The releases count the last ten as season 2.
+    // TMDB counts 23 episodes in season 1, and no season 2. The releases count the first 13 in season 1.
     const series = title({ rootId: 'tv', episodes: Array.from({ length: 23 }, (_, index) => episode(1, index + 1, '2020-01-01')) });
     pipe.db.data.titles[series.key] = series;
     const first = 'Show.Name.S01.1080p.WEB-DL-GRP';
@@ -224,34 +233,41 @@ describe('series journey', () => {
     const firstFiles = named(1, 13);
     const secondFiles = named(2, 10);
     const content = (files: string[]) => Object.fromEntries(files.map((file) => [file, `data-of-${file}`]));
+    pipe.tracker.state.items = [{ title: first, size: 13 * 600 * MIB, files: firstFiles }];
+
+    const entries = pipe.finder.requestSearch(series.key);
+    // The pack holds 13 of the 23 episodes. The other ten stop with the pack as the reason, and no search follows.
+    await until(() => entries.slice(13).every((entry) => reasonOfEntry(entry)?.code === 'pack_partial'));
+    expect(entries.slice(0, 13).every((entry) => entry.transferHash === hashOf(first, firstFiles))).toBe(true);
+    expect(entries.slice(13).every((entry) => entry.attempt === 1 && entry.continuation == null)).toBe(true);
+    expect(pipe.tracker.state.downloads).toEqual([first]);
+    // The record of the files of the pack keeps the episodes that it holds.
+    expect(pipe.db.data.releaseCoverage[`1:${first}`]).toMatchObject({ titleKey: series.key, season: 1, numbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] });
+
+    // The releases count the rest of the season as their season 2. The user starts the search of the other seasons.
     pipe.tracker.state.items = [
       { title: first, size: 13 * 600 * MIB, files: firstFiles },
       { title: second, size: 10 * 600 * MIB, files: secondFiles },
     ];
-    const entries = pipe.finder.requestSearch(series.key);
-    // The pack arrives with 13 of the 23 episodes, so the other ten take the numbering of the rest of the season.
-    await until(() => entries.filter((entry) => entry.continuation).length === 10 && pipe!.qbit.torrents.size === 2);
-    expect(entries.slice(0, 13).every((entry) => entry.transferHash)).toBe(true);
-    expect(entries[13]!.continuation).toMatchObject({ releaseSeason: 2, season: 1, from: 14 });
+    api = await pipe.api();
+    expect((await api.post('/queue/actions', { action: 'search_other_seasons', group: { titleKey: series.key, season: 1 } })).status).toBe(200);
+    await until(() => entries.slice(13).every((entry) => entry.release?.title === second && stageOf(entry) === 'downloading'), 20_000);
 
-    // The ten go back to the search, and the record of the files of the pack keeps them.
     pipe.complete(first, content(firstFiles), hashOf(first, firstFiles));
-    await until(() => entries.slice(13).every((entry) => entry.release?.title === second));
-    expect(pipe.db.data.releaseCoverage[`1:${first}`]).toMatchObject({ titleKey: series.key, season: 1, numbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] });
-
     pipe.complete(second, content(secondFiles), hashOf(second, secondFiles));
-    await until(() => entries.every((entry) => stageOf(entry) === 'available'));
+    await until(() => entries.every((entry) => stageOf(entry) === 'available'), 20_000);
     const paths = Object.values(pipe.db.data.files).map((file) => file.path);
     expect(paths).toHaveLength(23);
     // The files of the second pack take the numbers of the season of the title.
     expect(paths).toContain('Show Name (2020)/Season 01/Show Name - S01E14 - Episode 14.mkv');
     expect(paths).toContain('Show Name (2020)/Season 01/Show Name - S01E23 - Episode 23.mkv');
     expect(series.episodes.every((episode) => episode.fileId)).toBe(true);
-  });
+  }, 30_000);
 
-  // A title that TMDB counts as one season of 23 episodes. The first `available` episodes are in the library, and
-  // `regular` names other pending episodes of that season that the releases do not count as the next season. The rest
-  // of the pending episodes wait for the next release season.
+  // A title that TMDB counts as one season of 23 episodes. The first `available` episodes are in the library, and a pack
+  // of 12 episodes of the season holds them, so the record of the pack says what it holds. `regular` names other pending
+  // episodes of the season that the pack holds too. The other pending episodes are the rest of the season: the pack did
+  // not hold them, so they are stuck with `pack_partial`, and they store the numbering that an older version wrote.
   function seasonSplit({ available = 12, regular = [] as number[] } = {}) {
     const episodes = Array.from({ length: 23 }, (_, index) => episode(1, index + 1, '2020-01-01'));
     const series = title({ rootId: 'tv', episodes });
@@ -261,107 +277,104 @@ describe('series journey', () => {
       pipe!.db.data.files[id] = { id, titleKey: series.key, path: `Show Name (2020)/Season 01/Show Name - S01E${String(item.number).padStart(2, '0')} - Episode ${item.number}.mkv`, sizeBytes: 1, mtimeMs: 0, episodes: [{ season: 1, number: item.number }], missing: false, addedAt: Date.now() };
       item.fileId = id;
     }
-    const entries = episodes
-      .filter((item) => item.number > available || regular.includes(item.number))
-      .map((item) => {
-        const entry = pipe!.queue.ensure(series.key, 1, item.number);
-        if (item.number > available && !regular.includes(item.number)) entry.continuation = { releaseSeason: 2, season: 1, from: 13 };
-        pipe!.queue.request(entry, 'search requested');
-        return entry;
-      });
     const named = (season: number, count: number) => Array.from({ length: count }, (_, index) => `Show.Name.S0${season}E${String(index + 1).padStart(2, '0')}.mkv`);
     const first = { title: 'Show.Name.S01.1080p.WEB-DL-GRP', size: 12 * 600 * MIB, files: named(1, 12) };
     const second = { title: 'Show.Name.S02.1080p.WEB-DL-GRP', size: 11 * 600 * MIB, files: named(2, 11) };
+    // The record of the partial pack: its files are the first 12 episodes of the release season.
+    pipe!.db.data.releaseCoverage[`1:${first.title}`] = { titleKey: series.key, season: 1, numbers: Array.from({ length: 12 }, (_, index) => index + 1) };
+    const entries = episodes
+      .filter((item) => item.number > available && !regular.includes(item.number))
+      .map((item) => {
+        const entry = pipe!.queue.ensure(series.key, 1, item.number);
+        pipe!.queue.request(entry, 'search requested');
+        entry.continuation = { releaseSeason: 2, season: 1, from: 13 };
+        move(pipe!.queue, entry, { stage: 'fetching', reason: { code: 'pack_partial' } }, 'pack does not hold every episode');
+        return entry;
+      });
     return { series, entries, named, first, second };
   }
 
-  it('searches the next release season for the rest of a season that TMDB counts as one', async () => {
-    pipe = await startPipeline();
-    const { series, entries, named, first, second } = seasonSplit();
-    pipe.tracker.state.items = [first, second];
-    pipe.finder.enqueueSearch({ titleKey: series.key, season: 1, entryIds: entries.map((entry) => entry.id) });
-    await until(() => entries.every((entry) => entry.release?.title === second.title));
-    // The pack of the title season does not come back for the rest of the season.
-    expect(pipe.tracker.state.downloads).not.toContain(first.title);
-    expect(entries.every((entry) => entry.attempt === 1)).toBe(true);
-    expect(pipe.tracker.state.searches.some((url) => url.searchParams.get('season') === '2')).toBe(true);
-    await until(() => entries.every((entry) => stageOf(entry) === 'downloading'));
-
-    const files = named(2, 11);
-    pipe.complete(second.title, Object.fromEntries(files.map((file) => [file, `data-of-${file}`])), hashOf(second.title, files));
-    await until(() => entries.every((entry) => stageOf(entry) === 'available'));
-    // The files of the next season take the numbers of the season of the title.
-    const paths = Object.values(pipe.db.data.files).map((file) => file.path);
-    expect(paths).toContain('Show Name (2020)/Season 01/Show Name - S01E13 - Episode 13.mkv');
-    expect(paths).toContain('Show Name (2020)/Season 01/Show Name - S01E23 - Episode 23.mkv');
-  }, 20_000);
-
-  it('searches the next release season on a manual search of the rest of a season', async () => {
-    pipe = await startPipeline();
-    const { series, entries, first, second } = seasonSplit();
-    pipe.tracker.state.items = [first, second];
-    pipe.finder.enqueueSearch({ titleKey: series.key, season: 1, entryIds: entries.map((entry) => entry.id), manual: true, fresh: true });
-    await until(() => entries.every((entry) => entry.release?.title === second.title));
-    expect(entries.every((entry) => entry.release?.title !== first.title)).toBe(true);
-  }, 20_000);
-
-  it('keeps the target of the title season and the rest of the season in separate searches', async () => {
+  it('keeps the target of the title season and the rest of the season apart, and searches only the rest', async () => {
     pipe = await startPipeline();
     const { series, entries, first, second } = seasonSplit({ available: 11, regular: [12] });
-    pipe.tracker.state.items = [first, second];
-    pipe.finder.enqueueSearch({ titleKey: series.key, season: 1, entryIds: entries.map((entry) => entry.id) });
-    const normal = entries.find((entry) => entry.number === 12)!;
-    const rest = entries.filter((entry) => entry.number !== null && entry.number > 12);
-    await until(() => normal.release?.title === first.title && rest.every((entry) => entry.release?.title === second.title));
-    expect(normal.continuation).toBeUndefined();
-    expect(rest.every((entry) => entry.continuation?.releaseSeason === 2)).toBe(true);
-    expect(pipe.tracker.state.searches.some((url) => url.searchParams.get('season') === '1')).toBe(true);
-    expect(pipe.tracker.state.searches.some((url) => url.searchParams.get('season') === '2')).toBe(true);
-  }, 20_000);
+    const single = 'Show.Name.S01E12.1080p.WEB-DL-GRP';
+    pipe.tracker.state.items = [first, { title: single, size: 60 * 45 * MIB }, second];
 
-  it('finds a single episode of the next release season on a manual search', async () => {
+    // Episode 12 belongs to the numbering of the title. Its own search takes the release of its own season.
+    const [regular] = pipe.finder.requestSearch(series.key, { season: 1, number: 12 });
+    await until(() => regular!.release?.title === single && stageOf(regular!) === 'downloading');
+    expect(regular!.continuation).toBeUndefined();
+    // The rest of the season keeps the numbering of the release season, and it is stuck.
+    expect(entries.every((entry) => entry.continuation?.releaseSeason === 2)).toBe(true);
+    expect(entries.every((entry) => reasonOfEntry(entry)?.code === 'pack_partial')).toBe(true);
+
+    // The action covers the targets of the rest only.
+    api = await pipe.api();
+    const group = { titleKey: series.key, season: 1 };
+    const preview = await api.post('/queue/actions', { action: 'search_other_seasons', group, preview: true });
+    expect(preview.body.affected.map((item: { id: string }) => item.id)).toEqual(entries.map((entry) => entry.id));
+    expect((await api.post('/queue/actions', { action: 'search_other_seasons', group })).status).toBe(200);
+    await until(() => entries.every((entry) => entry.release?.title === second.title && stageOf(entry) === 'downloading'), 20_000);
+    // The two numberings stay apart: the target of the title season keeps its own release.
+    expect(regular!.release?.title).toBe(single);
+  }, 30_000);
+
+  it('finds a single file of another release season for a target that stores its numbering', async () => {
     pipe = await startPipeline();
     const { series, entries } = seasonSplit();
     const target = entries.find((entry) => entry.number === 13)!;
     const single = 'Show.Name.S02E01.1080p.WEB-DL-GRP';
-    pipe.tracker.state.items = [{ title: single, size: 60 * 45 * MIB }];
-    pipe.finder.enqueueSearch({ titleKey: series.key, season: 1, entryIds: [target.id], manual: true, fresh: true });
-    await until(() => target.release?.title === single);
-    await until(() => stageOf(target) === 'downloading');
-    pipe.complete(single, { [`${single}.mkv`]: 'data' }, hashOf(single));
-    await until(() => stageOf(target) === 'available');
-    const file = Object.values(pipe.db.data.files).find((item) => item.episodes.some((episode) => episode.season === 1 && episode.number === 13));
-    expect(file?.path).toBe('Show Name (2020)/Season 01/Show Name - S01E13 - Episode 13.mkv');
-  }, 20_000);
+    // The release season 2 numbers episode 13 of the title as its first file. No pack answers.
+    pipe.tracker.state.answer = (url) => (url.searchParams.get('season') === '2' && url.searchParams.get('ep') === '1' ? [{ title: single, size: 60 * 45 * MIB }] : []);
+    api = await pipe.api();
 
-  it('finds a single episode of the next release season under an alias on a manual search', async () => {
+    expect((await api.post('/queue/actions', { action: 'search_other_seasons', group: { titleKey: series.key, season: 1 } })).status).toBe(200);
+    await until(() => target.release?.title === single, 20_000);
+    await until(() => stageOf(target) === 'downloading', 20_000);
+    pipe.complete(single, { [`${single}.mkv`]: 'data' }, hashOf(single));
+    await until(() => stageOf(target) === 'available', 20_000);
+
+    const file = Object.values(pipe.db.data.files).find((item) => item.episodes.some((one) => one.season === 1 && one.number === 13));
+    expect(file?.path).toBe('Show Name (2020)/Season 01/Show Name - S01E13 - Episode 13.mkv');
+  }, 30_000);
+
+  it('finds the file of another release season under an alias', async () => {
     pipe = await startPipeline();
     const { series, entries } = seasonSplit();
     series.meta.aliases = ['Show Alias'];
     const target = entries.find((entry) => entry.number === 13)!;
     const single = 'Show.Name.S02E01.1080p.WEB-DL-GRP';
-    pipe.tracker.state.answer = (url) => (url.searchParams.get('q') === 'Show Alias' ? [{ title: single, size: 60 * 45 * MIB }] : []);
-    pipe.finder.enqueueSearch({ titleKey: series.key, season: 1, entryIds: [target.id], manual: true, fresh: true });
-    await until(() => Boolean(target.release) || branchOf(target) === 'waiting');
-    expect(target.release?.title).toBe(single);
-    await until(() => stageOf(target) === 'downloading');
-    pipe.complete(single, { [`${single}.mkv`]: 'data' }, hashOf(single));
-    await until(() => stageOf(target) === 'available');
-    const file = Object.values(pipe.db.data.files).find((item) => item.episodes.some((episode) => episode.season === 1 && episode.number === 13));
-    expect(file?.path).toBe('Show Name (2020)/Season 01/Show Name - S01E13 - Episode 13.mkv');
-  }, 20_000);
+    pipe.tracker.state.answer = (url) =>
+      url.searchParams.get('q') === 'Show Alias' && url.searchParams.get('season') === '2' && url.searchParams.get('ep') === '1' ? [{ title: single, size: 60 * 45 * MIB }] : [];
+    api = await pipe.api();
 
-  it('keeps the rest of the season waiting when the next season has no release', async () => {
+    expect((await api.post('/queue/actions', { action: 'search_other_seasons', group: { titleKey: series.key, season: 1 } })).status).toBe(200);
+    await until(() => target.release?.title === single, 20_000);
+    await until(() => stageOf(target) === 'downloading', 20_000);
+    pipe.complete(single, { [`${single}.mkv`]: 'data' }, hashOf(single));
+    await until(() => stageOf(target) === 'available', 20_000);
+
+    const file = Object.values(pipe.db.data.files).find((item) => item.episodes.some((one) => one.season === 1 && one.number === 13));
+    expect(file?.path).toBe('Show Name (2020)/Season 01/Show Name - S01E13 - Episode 13.mkv');
+  }, 30_000);
+
+  it('keeps the rest of the season stuck when no release of another season fits', async () => {
     pipe = await startPipeline();
     const { series, entries, first } = seasonSplit();
     pipe.tracker.state.items = [first];
-    pipe.finder.enqueueSearch({ titleKey: series.key, season: 1, entryIds: entries.map((entry) => entry.id) });
-    await until(() => entries.every((entry) => branchOf(entry) === 'waiting'));
-    expect(entries.every((entry) => entry.state.kind === 'waiting')).toBe(true);
-    expect(pipe.tracker.state.downloads).not.toContain(first.title);
-  }, 20_000);
+    api = await pipe.api();
 
-  it('takes the pack of 12 episodes and finds the other 11 as the next season', async () => {
+    expect((await api.post('/queue/actions', { action: 'search_other_seasons', group: { titleKey: series.key, season: 1 } })).status).toBe(200);
+    // The run records its own result, and the targets stay stuck with the pack as the reason.
+    await until(() => entries.every((entry) => entry.search !== null && entry.search.result !== null && entry.search.result !== 'grabbed'), 20_000);
+    expect(entries.every((entry) => reasonOfEntry(entry)?.code === 'pack_partial')).toBe(true);
+    // The pack of the title season does not come back for the rest of the season.
+    expect(pipe.tracker.state.downloads).not.toContain(first.title);
+    // The run leaves no search of another season in the queue.
+    expect(Object.values(pipe.db.data.jobs).filter((job) => job.type === 'queue.search' && Boolean((job.payload as { otherSeasons?: boolean } | null)?.otherSeasons))).toEqual([]);
+  }, 30_000);
+
+  it('takes the pack of 12 episodes, and the action gives the other 11 their files', async () => {
     pipe = await startPipeline();
     const series = title({ rootId: 'tv', episodes: Array.from({ length: 23 }, (_, index) => episode(1, index + 1, '2020-01-01')) });
     pipe.db.data.titles[series.key] = series;
@@ -370,39 +383,32 @@ describe('series journey', () => {
     const secondFiles = named(2, 11);
     const first = 'Show.Name.S01.1080p.WEB-DL-GRP';
     const second = 'Show.Name.S02.1080p.WEB-DL-GRP';
+    const content = (files: string[]) => Object.fromEntries(files.map((file) => [file, `data-of-${file}`]));
+    pipe.tracker.state.items = [{ title: first, size: 12 * 600 * MIB, files: firstFiles }];
+
+    const entries = pipe.finder.requestSearch(series.key);
+    // The pack holds 12 of the 23 episodes. The other 11 stop with the pack as the reason.
+    await until(() => entries.slice(12).every((entry) => reasonOfEntry(entry)?.code === 'pack_partial'));
+    expect(pipe.db.data.releaseCoverage[`1:${first}`]).toMatchObject({ titleKey: series.key, season: 1, numbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] });
+
+    // The releases number the rest of the season as their season 2. The user starts the action.
     pipe.tracker.state.items = [
       { title: first, size: 12 * 600 * MIB, files: firstFiles },
       { title: second, size: 11 * 600 * MIB, files: secondFiles },
     ];
-    const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.slice(0, 12).every((entry) => entry.transferHash === hashOf(first, firstFiles)) && entries.slice(12).every((entry) => entry.release?.title === second));
-    await until(() => pipe!.qbit.torrents.size === 2);
-    pipe.complete(first, Object.fromEntries(firstFiles.map((file) => [file, `data-of-${file}`])), hashOf(first, firstFiles));
-    pipe.complete(second, Object.fromEntries(secondFiles.map((file) => [file, `data-of-${file}`])), hashOf(second, secondFiles));
-    await until(() => entries.every((entry) => stageOf(entry) === 'available'));
+    api = await pipe.api();
+    expect((await api.post('/queue/actions', { action: 'search_other_seasons', group: { titleKey: series.key, season: 1 } })).status).toBe(200);
+    await until(() => entries.slice(12).every((entry) => entry.release?.title === second && stageOf(entry) === 'downloading'), 20_000);
+    expect(pipe.qbit.torrents.size).toBe(2);
+
+    pipe.complete(first, content(firstFiles), hashOf(first, firstFiles));
+    pipe.complete(second, content(secondFiles), hashOf(second, secondFiles));
+    await until(() => entries.every((entry) => stageOf(entry) === 'available'), 20_000);
     const paths = Object.values(pipe.db.data.files).map((file) => file.path);
+    expect(paths).toHaveLength(23);
     expect(paths).toContain('Show Name (2020)/Season 01/Show Name - S01E13 - Episode 13.mkv');
     expect(paths).toContain('Show Name (2020)/Season 01/Show Name - S01E23 - Episode 23.mkv');
-  }, 20_000);
-
-  it('resumes the rest of the season after the budget stops the regular episodes', async () => {
-    pipe = await startPipeline();
-    const recent = new Date(Date.now() - 24 * 60 * 60_000).toISOString().slice(0, 10);
-    const series = title({ rootId: 'tv', episodes: Array.from({ length: 23 }, (_, index) => episode(1, index + 1, recent)) });
-    pipe.db.data.titles[series.key] = series;
-    const entries = series.episodes.map((item) => {
-      const entry = pipe!.queue.ensure(series.key, 1, item.number);
-      if (item.number >= 13) entry.continuation = { releaseSeason: 2, season: 1, from: 13 };
-      pipe!.queue.request(entry, 'search requested');
-      return entry;
-    });
-    const named = (season: number, count: number) => Array.from({ length: count }, (_, index) => `Show.Name.S0${season}E${String(index + 1).padStart(2, '0')}.mkv`);
-    const second = { title: 'Show.Name.S02.1080p.WEB-DL-GRP', size: 11 * 600 * MIB, files: named(2, 11) };
-    pipe.tracker.state.items = [second];
-    pipe.finder.enqueueSearch({ titleKey: series.key, season: 1, entryIds: entries.map((entry) => entry.id) });
-    await until(() => entries.filter((entry) => entry.number !== null && entry.number >= 13).every((entry) => entry.release?.title === second.title), 20_000);
-    expect(entries.some((entry) => entry.history.some((event) => event.state.kind === 'waiting' && event.state.outcome === 'deferred'))).toBe(true);
-  }, 20_000);
+  }, 30_000);
 
   it('searches an episode on its own when no pack fits, and takes a fallback after a bad file', async () => {
     pipe = await startPipeline();

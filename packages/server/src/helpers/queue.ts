@@ -2,7 +2,7 @@ import { qualityLabel } from '../library/grab/quality.ts';
 import { parseRelease } from '../library/grab/release.ts';
 import type { Finder } from '../library/grab/finder.ts';
 import { REJECTION_TEXT } from '../library/grab/decide.ts';
-import { aggregate, describe, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
+import { aggregate, describe, needsOtherSeasons, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
 import type { QueueGroupRow, QueuePage, QueueRow } from '@ladarr/shared/types';
 import { type Db, db } from '../core/db.ts';
 import { seasonOf, type Job } from '../core/jobs.ts';
@@ -451,10 +451,24 @@ function groupsOf(f: Filters, poller?: Poller): RowGroup[] {
     );
 }
 
+// The targets of a season that the manual search of the other seasons of the releases can take. A pack that held a part
+// of the season stops them, and the search of the other seasons is the way out.
+export const otherSeasonsTargets = (titleKey: string, season: number | null) =>
+  Object.values(db.data.queue).filter(
+    (entry) => entry.titleKey === titleKey && (season === null || entry.season === season) && shown(entry) && needsOtherSeasons(entry.state),
+  );
+
 // The aggregate of a group. It covers every member of the season, before the tab filter and the page.
 export function groupAggregate(entries: QueueEntry[]) {
   const result = aggregate(entries.map((entry) => entry.state));
-  return { status: result.status, counts: result.counts, tabs: result.tabs, total: result.total, problem: reasonOfProblem(result.problem) };
+  return {
+    status: result.status,
+    counts: result.counts,
+    tabs: result.tabs,
+    total: result.total,
+    problem: reasonOfProblem(result.problem),
+    otherSeasons: entries.filter((entry) => needsOtherSeasons(entry.state)).length,
+  };
 }
 
 function groupRow(group: RowGroup): QueueGroupRow {
@@ -475,6 +489,7 @@ function groupRow(group: RowGroup): QueueGroupRow {
     counts: summary.counts,
     tabs: summary.tabs,
     problem: summary.problem,
+    otherSeasons: summary.otherSeasons,
     priority: group.entries.some((entry) => entry.priority !== null && isActive(entry)),
   };
 }

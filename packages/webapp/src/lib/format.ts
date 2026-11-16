@@ -142,6 +142,15 @@ const causeTexts: Record<string, string> = {
 };
 export const causeLabel = (code: string | null) => (code && Object.hasOwn(causeTexts, code) ? t(causeTexts[code]!) : null);
 
+// The text of a reason under the status. A target that used its attempts says why the last release failed, because the
+// cause is the fact that the person needs. Every other reason shows its message, with the cause when it adds a fact.
+export function reasonText(reason: { code: string; message: string; detail: string | null }) {
+  const cause = causeLabel(reason.detail);
+  if (reason.code === 'too_many_attempts' && cause) return cause;
+  if (cause && t(reason.message) !== cause) return `${t(reason.message)} ${cause}`;
+  return t(reason.message);
+}
+
 // The queue state that the bookmark of a poster shows. A state that has no icon in the design does not show one.
 const bookmarkStates: Record<string, ThumbnailState> = {
   searching: 'searching',

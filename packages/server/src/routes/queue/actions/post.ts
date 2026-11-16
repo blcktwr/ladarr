@@ -7,12 +7,12 @@ import type { Poller } from '../../../library/downloads/poller.ts';
 import { ClientError, type ClientHandle, type Torrent } from '../../../library/downloads/qbittorrent.ts';
 import { addedByApp, isActive, phaseOfEntry, type Queue, type QueueEntry } from '../../../library/downloads/queue.ts';
 import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts';
-import { bySeasonNumber, label, lanePositions, shown, statusOf } from '../../../helpers/queue.ts';
-import { canRetry } from '@ladarr/shared/queue';
+import { bySeasonNumber, label, lanePositions, otherSeasonsTargets, shown, statusOf } from '../../../helpers/queue.ts';
+import { canRetry, needsOtherSeasons } from '@ladarr/shared/queue';
 
 export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
-  type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'remove_torrent' | 'replace';
-  const ACTIONS: Action[] = ['pause', 'resume', 'retry', 'priority', 'unpriority', 'remove_torrent', 'replace'];
+  type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'remove_torrent' | 'replace' | 'search_other_seasons';
+  const ACTIONS: Action[] = ['pause', 'resume', 'retry', 'priority', 'unpriority', 'remove_torrent', 'replace', 'search_other_seasons'];
 
   const jobsOf = (entry: QueueEntry) =>
     Object.values(db.data.jobs).filter((job) => {
@@ -50,6 +50,9 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
       case 'replace':
         // A target that stopped on a taken destination name. The importer finds the exact file again.
         return entry.state.kind === 'blocked' && entry.state.problem.code === 'destination_exists' ? null : 'This target has no file to replace.';
+      case 'search_other_seasons':
+        // A pack that held a part of its season. The user starts the search of the other seasons of the releases.
+        return needsOtherSeasons(entry.state) ? null : 'This target does not need a search of other seasons.';
     }
   }
 
@@ -142,8 +145,14 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     if (!action || !ACTIONS.includes(action)) return void res.status(400).json({ error: 'invalid_action' });
     let picked: QueueEntry[];
     // The retry of a title starts again the targets that wait for its work: the ones that a problem stops, and the ones
-    // that wait for their next search with a result.
-    if (group && typeof group.titleKey === 'string') picked = groupEntries(group.titleKey, group.season ?? null).filter((entry) => action !== 'retry' || canRetry(entry.state));
+    // that wait for their next search with a result. The search of the other seasons takes the targets of the season that
+    // a pack left without a file, in the state that they have now.
+    if (group && typeof group.titleKey === 'string') {
+      picked =
+        action === 'search_other_seasons'
+          ? otherSeasonsTargets(group.titleKey, group.season ?? null)
+          : groupEntries(group.titleKey, group.season ?? null).filter((entry) => action !== 'retry' || canRetry(entry.state));
+    } else if (action === 'search_other_seasons') return void res.status(400).json({ error: 'invalid_request' });
     else if (Array.isArray(ids) && ids.length <= 1000 && ids.every((id) => typeof id === 'string')) picked = ids.flatMap((id) => (db.data.queue[id] && shown(db.data.queue[id]!) ? [db.data.queue[id]!] : []));
     else return void res.status(400).json({ error: 'invalid_request' });
 
@@ -184,6 +193,12 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     const summary = { action, affected: list.map((entry) => ({ id: entry.id, label: label(entry), status: statusOf(entry), phase: phaseOfEntry(entry), lane: lane.get(entry.id) ?? null })), unsupported, sharedTransfers: [...transfers].map(([hash, count]) => ({ name: poller.transfer(hash)?.name ?? removal?.torrents.get(hash)?.name ?? hash, entries: count })) };
     if (preview) return void res.json(summary);
     if (!list.length) return void res.status(409).json({ error: 'action_not_supported', unsupported });
+    // The search of the other seasons moves the targets to the queue and starts one job for the season. It needs no
+    // request to the download client.
+    if (action === 'search_other_seasons') {
+      finder.startOtherSeasons(list);
+      return void res.json({ ...summary, done: true });
+    }
     try {
       await apply(action, list);
     } catch (error) {

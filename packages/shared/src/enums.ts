@@ -84,7 +84,7 @@ export type ImportNote =
 
 export type MigrationStatus = 'new' | 'matched' | 'conflict' | 'unmatched' | 'imported' | 'pending' | 'failed';
 
-export type QueueActionName = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'remove_torrent' | 'replace';
+export type QueueActionName = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'remove_torrent' | 'replace' | 'search_other_seasons';
 
 export type LibraryFilter = 'missing' | 'waiting' | 'attention' | 'available';
 

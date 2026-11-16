@@ -563,6 +563,9 @@ export type QueueGroupRow = {
   tabs: Tab[];
   // The most frequent problem of the blocked targets of the group.
   problem: QueueReason | null;
+  // The targets of the group whose pack did not hold every episode of the season. The card of the season offers the
+  // search of the other seasons of the releases while the count is above zero.
+  otherSeasons: number;
   priority: boolean;
 };
 
@@ -585,7 +588,7 @@ export type QueuePage = { cursor: number; total: number; items: QueueRow[] };
 
 // The aggregate of a whole group, before the tab filter and the page. The inspector header reads it beside the
 // filtered items, so the row and the header show the same status.
-export type QueueGroupSummary = Pick<QueueGroupRow, 'status' | 'counts' | 'tabs' | 'total' | 'reached' | 'download' | 'problem'>;
+export type QueueGroupSummary = Pick<QueueGroupRow, 'status' | 'counts' | 'tabs' | 'total' | 'reached' | 'download' | 'problem' | 'otherSeasons'>;
 
 export type QueueGroupPage = { cursor: number; group: QueueGroupSummary; items: QueueEntryView[] };
 

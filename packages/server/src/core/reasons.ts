@@ -9,6 +9,9 @@ export const REASONS: Record<string, ReasonInfo> = {
   all_rejected: { message: 'The indexers have releases, but none fits your selected qualities.', action: 'retry' },
   indexers_failed: { message: 'No indexer answered. The search tries again.', action: 'retry' },
   search_deferred: { message: 'The search reached its request budget. It continues in the next run.', action: 'none' },
+  // The pack held a part of its season. The releases count the season in another way, so the user starts the search of
+  // the other seasons from the card of the season.
+  pack_partial: { message: 'The pack did not hold every episode of the season.', action: 'none' },
   no_indexers: { message: 'No indexer configured', action: 'settings', settings: 'indexers' },
   indexer_unavailable: { message: 'The indexer does not answer. The search tries again.', action: 'none' },
   indexer_rejected: { message: 'The indexer rejects the API key. Sync the indexers again.', action: 'settings', settings: 'indexers' },
