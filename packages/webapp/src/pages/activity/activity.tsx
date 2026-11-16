@@ -105,8 +105,7 @@ const targetOf = (entry: QueueEntryView) => ({ titleKey: entry.titleKey, ...(ent
 
 // The options that end the problem of a target. The reason of the target says which one applies: the file of the
 // destination is replaced, the download in the client is attached, or the file is matched by hand. A target that used
-// its attempts has no option here: it shows why the last release failed, and the rejected releases of its search stay
-// under the inspector. The retry of the target comes from the menu.
+// its attempts has no option here: it shows why the last release failed. The retry of the target comes from the menu.
 function EntryFix({ entry, run, refresh }: { entry: QueueEntryView; run: Run; refresh: () => void }) {
   if (canReplace(entry)) return <ReplaceFix entry={entry} run={run} />;
   if (entry.reason?.code === 'file_unreadable') {
@@ -124,9 +123,9 @@ function EntryFix({ entry, run, refresh }: { entry: QueueEntryView; run: Run; re
 
 // The options that end the problem of a season. The problem picks the fix: one replacement for every episode with a
 // taken destination name, the download or the file of the first stopped episode, or a release for a damaged file. A
-// season that used its attempts shows no option here, because the rejected releases of its search are enough. The retry
-// of the season comes from the menu. A pack that held a part of the season adds the search of the other seasons of the
-// releases, because the releases can count the season in another way.
+// season that used its attempts shows no option here. The retry of the season comes from the menu. A pack that held a
+// part of the season adds the search of the other seasons of the releases, because the releases can count the season in
+// another way.
 function GroupFix(props: { reason: QueueReason | null; otherSeasons: number; stopped: QueueEntryView[]; titleKey: string; season: number | null; label: string; run: Run; refresh: () => void }) {
   const other = props.otherSeasons > 0 ? <OtherSeasonsFix titleKey={props.titleKey} season={props.season} run={props.run} /> : null;
   const fix = fixOfGroup(props);
@@ -456,18 +455,20 @@ function RejectedPane({ items, onDone }: { items: { entry: QueueEntryView; relea
   );
 }
 
-// The rejected releases of a movie. A target that found no match keeps them, and so does a target that used its attempts,
-// because the rejected releases are the way to take one by hand.
+// The rejected releases of a movie. Only a target that found no match keeps them.
 function MovieRejected({ entry, refresh }: { entry: QueueEntryView; refresh: () => void }) {
-  const releases = entry.status === 'no_match' || entry.status === 'stuck' ? (entry.search?.rejected ?? []) : [];
+  const releases = entry.status === 'no_match' ? (entry.search?.rejected ?? []) : [];
   return <RejectedPane items={releases.map((release) => ({ entry, release }))} onDone={refresh} />;
 }
 
-// The rejected releases of a series, one row for each release. Several episodes can have their own.
+// The rejected releases of a series, one row for each release. Only a series that found no match keeps them.
 function GroupRejected({ group, filters, refresh }: { group: QueueGroupRow; filters: Filters; refresh: () => void }) {
   const { data } = useGroupEntries(group, filters);
+  const status = data?.group?.status ?? group.status;
+  if (status !== 'no_match') return null;
   const rejected = new Map<string, { entry: QueueEntryView; release: QueueRejectedRelease }>();
   for (const entry of data?.items ?? []) {
+    if (entry.status !== 'no_match') continue;
     for (const release of entry.search?.rejected ?? []) {
       const key = `${release.indexerId}:${release.guid}`;
       if (!rejected.has(key)) rejected.set(key, { entry, release });
