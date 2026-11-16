@@ -1,7 +1,7 @@
 import { ApiError } from './api.ts';
 import { t } from '../i18n/index.ts';
 import type { Availability, MediaType, RootProblem } from '@ladarr/shared/enums';
-import type { QueueGroupRow, TitleSummary } from '@ladarr/shared/types';
+import type { EpisodeCounts, QueueGroupRow, TitleSummary } from '@ladarr/shared/types';
 import type { ThumbnailState } from 'nebula';
 
 // A map of labels. The text goes through t() when a page reads it, so a map made at import time follows the language.
@@ -176,13 +176,17 @@ const statusName = (status: string) => {
   return stage ? `${statusLabel(stage)} (${statusLabel(status).toLowerCase()})` : statusLabel(status);
 };
 
+// The tick of the bookmark means that the files of the title are in the library. A series with nothing downloaded does
+// not show it, also when its availability says that every episode it wants has a file, which is true when it wants none.
+const downloaded = (title: { counts?: EpisodeCounts | null }) => !title.counts || title.counts.available > 0;
+
 // The state of a title, and its name. The queue wins over the availability of the title. A title that is not in the
 // library has neither, so it shows no state.
-export function posterState(title: { availability?: Availability | null; queueStatus?: string | null }): { state: ThumbnailState; label: string } | null {
+export function posterState(title: { availability?: Availability | null; queueStatus?: string | null; counts?: EpisodeCounts | null }): { state: ThumbnailState; label: string } | null {
   const state = title.queueStatus ? bookmarkStates[title.queueStatus] : undefined;
   if (state) return { state, label: statusName(title.queueStatus!) };
   if (title.queueStatus) return null;
-  if (title.availability === 'available') return { state: 'available', label: availabilityLabel.available };
+  if (title.availability === 'available' && downloaded(title)) return { state: 'available', label: availabilityLabel.available };
   if (title.availability === 'waiting') return { state: 'upcoming', label: availabilityLabel.waiting };
   return null;
 }

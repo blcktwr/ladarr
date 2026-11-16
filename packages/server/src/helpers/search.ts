@@ -1,7 +1,7 @@
 import type { SearchResult } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { db } from '../core/db.ts';
-import { availability, titleKey } from '../library/library.ts';
+import { availability, seriesCounts, titleKey } from '../library/library.ts';
 import { clock } from '../library/tools/api.ts';
 import { queueStatusOf } from '../library/tools/queue-status.ts';
 import { TmdbError } from '../metadata/tmdb.ts';
@@ -29,6 +29,7 @@ export function inLibrary() {
         seriesType: mediaType === 'tv' ? (library?.seriesType ?? null) : null,
         queueStatus: library ? queueStatusOf(library.key) : null,
         availability: library ? availability(library, at) : null,
+        counts: library && mediaType === 'tv' ? seriesCounts(library, at) : null,
       };
     });
   };

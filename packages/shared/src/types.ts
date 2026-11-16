@@ -60,6 +60,8 @@ export type SearchResult = {
   // The state of a title in the library, for the bookmark of its poster. Both are null for a title that is not in the library.
   queueStatus?: string | null;
   availability?: Availability | null;
+  // Series only. The counts of the title in the library, which the bookmark uses to show a downloaded series.
+  counts?: EpisodeCounts | null;
 };
 
 // A list of the discovery page. The page names the row and keeps its order.
