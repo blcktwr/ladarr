@@ -30,6 +30,13 @@ import type { Phase, QueueState, Status, Tab } from './queue.ts';
 // A season and an episode number. A movie file covers none.
 export type EpisodeRef = { season: number; number: number };
 
+// One correspondence between the episodes of the catalog and the episodes of a release. The catalog episodes run from
+// `from` to `to`, and the release numbers the first one as `releaseFrom`. The release end follows from the length.
+export type NumberingRange = { season: number; from: number; to: number; releaseSeason: number; releaseFrom: number };
+
+// The numbering of a series: how the releases count the seasons and the episodes. `revision` rises with each save.
+export type Numbering = { revision: number; ranges: NumberingRange[] };
+
 // MiB for each minute of runtime. A limit that is null is not checked.
 export type SizeLimits = { min: number | null; preferred: number | null; max: number | null };
 
@@ -136,6 +143,8 @@ export type TitleDetail = TitleSummary & {
   seasons: SeasonRow[];
   // The resolutions of the files of the title, the highest first, without duplicates.
   resolutions: number[];
+  // Series only. How the releases number the seasons and the episodes.
+  numbering: Numbering;
 };
 
 // The TMDB facts of an episode. A title that is not in the library has them too.
@@ -439,7 +448,7 @@ export type MigrationProgress = { pending: number; imported: number; matched: nu
 
 // The cause of the problem, when the server kept one. A target that used its attempts keeps the failure of its last
 // release, such as a damaged .torrent or a pack that lacks episodes.
-export type QueueReason = { code: string; message: string; action: 'retry' | 'match' | 'attach' | 'settings' | 'none'; settings: 'client' | 'indexers' | 'library' | null; detail: string | null };
+export type QueueReason = { code: string; message: string; action: 'retry' | 'match' | 'attach' | 'settings' | 'none' | 'numbering'; settings: 'client' | 'indexers' | 'library' | null; detail: string | null };
 
 export type QueueTransfer = {
   hash: string;

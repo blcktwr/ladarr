@@ -84,9 +84,11 @@ export const RETRY_STATUSES: readonly Status[] = ['stuck', 'not_found', 'no_matc
 export const canRetry = (state: QueueState) => RETRY_STATUSES.includes(describe(state).status);
 
 // A target whose pack did not hold every episode of its season. The user can search the other seasons of the releases.
-// An older state keeps the cause of the pack as the detail of its attempt limit.
+// A target that needs a saved numbering opens the same search after the user saves the map. An older state keeps the
+// cause of the pack as the detail of its attempt limit.
 export const needsOtherSeasons = (state: QueueState): boolean =>
-  state.kind === 'blocked' && (state.problem.code === 'pack_partial' || (state.problem.code === 'too_many_attempts' && state.problem.detail === 'pack_partial'));
+  state.kind === 'blocked' &&
+  (state.problem.code === 'pack_partial' || state.problem.code === 'numbering_required' || (state.problem.code === 'too_many_attempts' && (state.problem.detail === 'pack_partial' || state.problem.detail === 'numbering_required')));
 
 export function describe(state: QueueState): Description {
   const phase = phaseOf(state);

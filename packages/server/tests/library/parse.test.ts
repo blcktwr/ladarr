@@ -165,8 +165,9 @@ describe('release episodes with markers', () => {
     expect(releaseEpisodes('Show.S02E21.mkv', seasonEpisodes(2, 33, 53))).toEqual({ season: 2, numbers: [53] });
   });
 
-  it('maps the numbers of a continuation', () => {
-    expect(releaseEpisodes('Show S02E03.mkv', seasonEpisodes(1, 1, 36), { releaseSeason: 2, season: 1, from: 25 })).toEqual({ season: 1, numbers: [27] });
+  it('maps the numbers of a saved range', () => {
+    const numbering = { revision: 1, ranges: [{ season: 1, from: 25, to: 36, releaseSeason: 2, releaseFrom: 1 }] };
+    expect(releaseEpisodes('Show S02E03.mkv', seasonEpisodes(1, 1, 36), numbering)).toEqual({ season: 1, numbers: [27] });
   });
 
   it('keeps a correct SxxExx ahead of the episode name and the air date', () => {

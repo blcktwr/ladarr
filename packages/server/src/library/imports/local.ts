@@ -84,7 +84,7 @@ function matches(title: Title, entry: QueueEntry, torrent: Torrent) {
   if (!namesOf(title).includes(normalizeTitle(parsed.title))) return false;
   if (title.mediaType === 'movie') return parsed.year === null || title.meta.year === null || parsed.year === title.meta.year;
   if (parsed.pack && !parsed.part && !parsed.multiSeason && parsed.season === entry.season) return true;
-  const found = releaseEpisodes(torrent.name, title.episodes, null, entry.season, title.meta.title);
+  const found = releaseEpisodes(torrent.name, title.episodes, entry.numbering ?? title.numbering ?? null, entry.season, title.meta.title);
   return Boolean(found && found.season === entry.season && found.numbers.includes(entry.number!));
 }
 

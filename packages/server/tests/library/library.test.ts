@@ -138,6 +138,12 @@ describe('episode merge', () => {
     expect(mergeEpisodes(before, []).map((e) => e.number)).toEqual([2, 3]);
   });
 
+  it('keeps a removed episode that the predicate names', () => {
+    const before = [episode(1, 1, null), episode(1, 2, null)];
+    const after = mergeEpisodes(before, [], (one) => one.season === 1 && one.number === 2);
+    expect(after.map((e) => e.number)).toEqual([2]);
+  });
+
   it('sorts by season and number', () => {
     const fetched = [episode(1, 2, null), episode(0, 1, null), episode(1, 1, null)];
     expect(mergeEpisodes([], fetched).map((e) => [e.season, e.number])).toEqual([[0, 1], [1, 1], [1, 2]]);
@@ -154,6 +160,8 @@ describe('title identity', () => {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 let tmdbDown = false;
+// The episodes of season 1 of tv:1396 that the fake TMDB leaves out of its answer. A test sets them and clears them.
+let droppedEpisodes: number[] = [];
 const fakeFetch = (async (input: URL | string) => {
   const url = new URL(String(input));
   const path = url.pathname.replace('/3', '');
@@ -176,12 +184,13 @@ const fakeFetch = (async (input: URL | string) => {
   }
   if (path === '/tv/1396/season/0') return json({ episodes: [{ id: 1, episode_number: 1, name: 'Special', air_date: '2009-01-01' }] });
   if (path === '/tv/1396/season/1') {
-    return json({ episodes: [
+    const episodes = [
       { id: 10, episode_number: 1, name: 'Pilot', air_date: '2008-01-20' },
       { id: 11, episode_number: 2, name: 'Cat in the Bag', air_date: '2008-01-27' },
       { id: 12, episode_number: 3, name: 'Next year', air_date: '2999-01-01' },
       { id: 13, episode_number: 4, name: 'TBA', air_date: null },
-    ] });
+    ];
+    return json({ episodes: episodes.filter((one) => !droppedEpisodes.includes(one.episode_number)) });
   }
   if (path === '/tv/2000') {
     return json({
@@ -537,6 +546,24 @@ describe('library API', () => {
     await expect(refresh('tv:1396')).rejects.toMatchObject({ code: 'unavailable', kind: 'outage' });
     tmdbDown = false;
     expect(app.db.data.titles['tv:1396']).toEqual(before);
+  });
+
+  it('keeps an episode that the numbering names when TMDB drops it', async () => {
+    const title = app.db.data.titles['tv:1396']!;
+    const numbering = title.numbering;
+    expect(title.episodes.some((one) => one.season === 1 && one.number === 4)).toBe(true);
+    // The map names 1x4. Episode 1x3 has no map, no choice, no file, and no acquisition.
+    title.numbering = { revision: 1, ranges: [{ season: 1, from: 4, to: 4, releaseSeason: 2, releaseFrom: 1 }] };
+    droppedEpisodes = [3, 4];
+    try {
+      await refresh('tv:1396');
+      const numbers = app.db.data.titles['tv:1396']!.episodes.filter((one) => one.season === 1).map((one) => one.number);
+      expect(numbers).toContain(4);
+      expect(numbers).not.toContain(3);
+    } finally {
+      droppedEpisodes = [];
+      app.db.data.titles['tv:1396']!.numbering = numbering;
+    }
   });
 
   it('keeps the policy when the user pauses and resumes', async () => {

@@ -245,7 +245,8 @@ describe('series journey', () => {
     // The record of the files of the pack keeps the episodes that it holds.
     expect(pipe.db.data.releaseCoverage[`1:${first}`]).toMatchObject({ titleKey: series.key, season: 1, numbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] });
 
-    // The releases count the rest of the season as their season 2. The user starts the search of the other seasons.
+    // The releases count the rest of the season as their season 2. The user saves the map and starts the action.
+    series.numbering = { revision: 1, ranges: [{ season: 1, from: 14, to: 23, releaseSeason: 2, releaseFrom: 1 }] };
     pipe.tracker.state.items = [
       { title: first, size: 13 * 600 * MIB, files: firstFiles },
       { title: second, size: 10 * 600 * MIB, files: secondFiles },
@@ -272,6 +273,8 @@ describe('series journey', () => {
   function seasonSplit({ available = 12, regular = [] as number[] } = {}) {
     const episodes = Array.from({ length: 23 }, (_, index) => episode(1, index + 1, '2020-01-01'));
     const series = title({ rootId: 'tv', episodes });
+    // The releases count the last eleven episodes of the season as their season 2.
+    series.numbering = { revision: 1, ranges: [{ season: 1, from: 13, to: 23, releaseSeason: 2, releaseFrom: 1 }] };
     pipe!.db.data.titles[series.key] = series;
     for (const item of episodes.filter((item) => item.number <= available)) {
       const id = `file-${item.number}`;
@@ -282,13 +285,12 @@ describe('series journey', () => {
     const first = { title: 'Show.Name.S01.1080p.WEB-DL-GRP', size: 12 * 600 * MIB, files: named(1, 12) };
     const second = { title: 'Show.Name.S02.1080p.WEB-DL-GRP', size: 11 * 600 * MIB, files: named(2, 11) };
     // The record of the partial pack: its files are the first 12 episodes of the release season.
-    pipe!.db.data.releaseCoverage[`1:${first.title}`] = { titleKey: series.key, season: 1, numbers: Array.from({ length: 12 }, (_, index) => index + 1) };
+    pipe!.db.data.releaseCoverage[`1:${first.title}`] = { titleKey: series.key, season: 1, numbers: Array.from({ length: 12 }, (_, index) => index + 1), numberingRevision: 1 };
     const entries = episodes
       .filter((item) => item.number > available && !regular.includes(item.number))
       .map((item) => {
         const entry = pipe!.queue.ensure(series.key, 1, item.number);
         pipe!.queue.request(entry, 'search requested');
-        entry.continuation = { releaseSeason: 2, season: 1, from: 13 };
         move(pipe!.queue, entry, { stage: 'fetching', reason: { code: 'pack_partial' } }, 'pack does not hold every episode');
         return entry;
       });
@@ -304,9 +306,9 @@ describe('series journey', () => {
     // Episode 12 belongs to the numbering of the title. Its own search takes the release of its own season.
     const [regular] = pipe.finder.requestSearch(series.key, { season: 1, number: 12 });
     await until(() => regular!.release?.title === single && stageOf(regular!) === 'downloading');
-    expect(regular!.continuation).toBeUndefined();
-    // The rest of the season keeps the numbering of the release season, and it is stuck.
-    expect(entries.every((entry) => entry.continuation?.releaseSeason === 2)).toBe(true);
+    expect(regular!.numbering).toEqual(series.numbering);
+    // The rest of the season is the part of the saved range, and it is stuck.
+    expect(entries.every((entry) => series.numbering!.ranges.some((range) => entry.number! >= range.from && entry.number! <= range.to))).toBe(true);
     expect(entries.every((entry) => reasonOfEntry(entry)?.code === 'pack_partial')).toBe(true);
 
     // The action covers the targets of the rest only.
@@ -392,7 +394,8 @@ describe('series journey', () => {
     await until(() => entries.slice(12).every((entry) => reasonOfEntry(entry)?.code === 'pack_partial'));
     expect(pipe.db.data.releaseCoverage[`1:${first}`]).toMatchObject({ titleKey: series.key, season: 1, numbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] });
 
-    // The releases number the rest of the season as their season 2. The user starts the action.
+    // The releases number the rest of the season as their season 2. The user saves the map and starts the action.
+    series.numbering = { revision: 1, ranges: [{ season: 1, from: 13, to: 23, releaseSeason: 2, releaseFrom: 1 }] };
     pipe.tracker.state.items = [
       { title: first, size: 12 * 600 * MIB, files: firstFiles },
       { title: second, size: 11 * 600 * MIB, files: secondFiles },

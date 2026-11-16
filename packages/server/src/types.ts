@@ -1,6 +1,7 @@
 import type { Language, MediaType, Override, WebhookEventType, ClientState, TorrentStatus, TrackerStatus, WANT_KIND, IndexerApp, Policy, RootProblem, AddMode, ImportNote, BackupKind } from '@ladarr/shared/enums';
 import type { Phase, QueueState } from '@ladarr/shared/queue';
-import type { SizeLimits, QueueClientDetail, IndexerHealth, QualityProfile, UpgradeQuality, ImportCheck, PlanPreview, SearchResult, MigrationRow } from '@ladarr/shared/types';
+import type { SizeLimits, QueueClientDetail, IndexerHealth, QualityProfile, UpgradeQuality, ImportCheck, PlanPreview, SearchResult, MigrationRow, Numbering } from '@ladarr/shared/types';
+export type { Numbering } from '@ladarr/shared/types';
 import type { Low } from 'lowdb';
 import type { copyFile as fsCopyFile, link as fsLink, rename as fsRename } from 'node:fs/promises';
 import type { QUEUE_KEYS } from './core/db.ts';
@@ -126,8 +127,9 @@ export type Data = {
   // The steps of the imports that are not done. See importer.ts.
   imports: Record<string, ImportJournal>;
   // The episodes that the files of a release held, keyed by `<indexer ID>:<GUID>`. A pack can hold fewer episodes than
-  // TMDB gives its season, so a later search reads this record instead of the count of the season.
-  releaseCoverage: Record<string, { titleKey: string; season: number; numbers: number[] }>;
+  // TMDB gives its season, so a later search reads this record instead of the count of the season. The record belongs to
+  // the numbering revision that read the files.
+  releaseCoverage: Record<string, { titleKey: string; season: number; numbers: number[]; numberingRevision: number }>;
   // The torrents that ladarr sent to a client, keyed by info hash. A torrent in this record belongs to the app, also
   // when its target searches again or the target that sent it is gone. A torrent that the user added is not here.
   sentTorrents: Record<string, number>;
@@ -206,7 +208,7 @@ export type OutboundRequest = { requestId: string; system: string };
 export type Work = { requests: OutboundRequest[]; ids: Map<string, string> };
 // What the user reads when a target waits or stops, and the action that helps.
 // The code is stable. The message is the key of the web i18n. The webhook sends the English text.
-export type ReasonAction = 'retry' | 'match' | 'attach' | 'settings' | 'none';
+export type ReasonAction = 'retry' | 'match' | 'attach' | 'settings' | 'none' | 'numbering';
 export type ReasonInfo = { message: string; action: ReasonAction; settings?: 'client' | 'indexers' | 'library' };
 // The destination of one event type. The address is a secret, because it can hold a token.
 // It never goes to a log or to an API answer.
@@ -553,8 +555,12 @@ export type QueueEntry = {
   // Set when the user chose to replace the file that holds the destination name. The importer clears it.
   replaceDestination?: boolean;
   importResult: ImportResult | null;
+  // The numbering that the acquisition uses. It is saved with the release and stays through the download and the
+  // import, so a change of the title cannot reinterpret the same torrent. Null before a release is selected.
+  numbering?: Numbering | null;
   // Set when the releases count as two seasons what the title counts as one. The targets of the rest of the season then
-  // search the next season of the release. Null or absent for the numbering of the title.
+  // search the next season of the release. Null or absent for the numbering of the title. It is the numbering of an
+  // older version: the ranges of the title replace it.
   continuation?: Continuation | null;
   // The files of the pack that left this target without one: the season of the release and the numbers of the episodes
   // that it holds. The manual search of the other seasons reads the candidate seasons from it.
@@ -565,11 +571,13 @@ export type StateHook = (entry: QueueEntry, before: QueueState) => void;
 export type Queue = ReturnType<typeof createQueue>;
 // What a search looks for. A season want accepts a pack only.
 // `upgradeQuality` is the quality of a manual upgrade. The want then accepts a release of exactly that quality.
-// `continuation` is the numbering of a release that counts as two seasons what the title counts as one.
+// `numbering` is the numbering snapshot of the search, so a later edit of the title does not change the decision.
+// `releaseSeason` is the season of the release that a season want asks for. It differs from the catalog season when
+// the release counts the seasons in another way.
 export type Want =
   | { kind: typeof WANT_KIND.movie; title: Title; upgradeQuality?: string }
-  | { kind: typeof WANT_KIND.episode; title: Title; season: number; number: number; upgradeQuality?: string; continuation?: Continuation }
-  | { kind: typeof WANT_KIND.season; title: Title; season: number; continuation?: Continuation };
+  | { kind: typeof WANT_KIND.episode; title: Title; season: number; number: number; upgradeQuality?: string; numbering?: Numbering }
+  | { kind: typeof WANT_KIND.season; title: Title; season: number; releaseSeason?: number; numbering?: Numbering };
 export type DecideContext = {
   settings: Settings;
   // The quality profiles and the sizes of the qualities.
@@ -593,6 +601,8 @@ export type Decision = {
   accepted: boolean;
   kind: 'single' | 'multi' | 'pack';
   covers: Covered[];
+  // The numbering snapshot that the decision used. Null for a movie.
+  numbering: Numbering | null;
   mibPerMinute: number | null;
   // The rank of the release in the profile of the title. A lower rank is better.
   rank: number;
@@ -855,6 +865,8 @@ export type Title = {
   // Null uses the default preset of the settings.
   preset: string | null;
   rootId: string;
+  // How the releases number the seasons and the episodes. A record from before this field has no ranges.
+  numbering?: Numbering;
   // The folder of the title, relative to its root. Null until a folder is known.
   folder: string | null;
   // A movie with this flag can be searched before a known digital or physical release date.
@@ -939,7 +951,6 @@ export type ScanResult = {
 export type InventoryFile = { path: string; sizeBytes: number; mtimeMs: number; parsed: ParsedEpisodes | undefined };
 export type FolderInventory = { status: 'ok' | 'no_folder' | 'root_unavailable' | 'folder_missing'; rootReal: string | null; files: InventoryFile[] };
 export type ScanFound = { path: string; sizeBytes: number; mtimeMs: number };
-export type Split = { from: number };
 export type AddInput = {
   mediaType: MediaType;
   tmdbId: number;

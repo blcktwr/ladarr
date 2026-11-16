@@ -3,11 +3,11 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { reasonOfEntry, stageOf } from '../../src/library/downloads/queue.ts';
-import { splitOf } from '../../src/library/split.ts';
 import { episode, title } from '../helpers/test-fixtures.ts';
 import { move } from '../helpers/test-queue.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 import type { MediaFile, QueueEntry, Title } from '../../src/types.ts';
+import type { Numbering, NumberingRange } from '@ladarr/shared/types';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
 let api: Awaited<ReturnType<Awaited<ReturnType<typeof startPipeline>>['api']>> | undefined;
@@ -88,6 +88,13 @@ const askOtherSeasons = (item: Title, season: number) => ({
   action: 'search_other_seasons',
   group: { titleKey: item.key, season },
 });
+// The map of the releases: the catalog episodes of each range and the release episodes that they name.
+function mapReleases(item: Title, ranges: NumberingRange[]): Numbering {
+  item.numbering = { revision: 1, ranges };
+  return item.numbering;
+}
+// The rest of catalog season 1 is release season 2 from its first episode.
+const REST_OF_SEASON: NumberingRange = { season: 1, from: 11, to: 20, releaseSeason: 2, releaseFrom: 1 };
 // A query that does not name the season of the target. A search of other seasons names another season, or none.
 const otherSeasonQueries = () => pipe!.tracker.state.searches.filter((url) => url.searchParams.get('season') !== '1');
 
@@ -130,6 +137,7 @@ describe('a partial pack waits for the user', () => {
 describe('the action of the user', () => {
   it('previews the stuck targets of the season and starts nothing', async () => {
     const { item, targets } = await partial();
+    mapReleases(item, [REST_OF_SEASON]);
     api = await pipe!.api();
     const before = pipe!.tracker.state.searches.length;
 
@@ -146,6 +154,7 @@ describe('the action of the user', () => {
 
   it('starts the search for the targets of the action', async () => {
     const { item, targets } = await partial();
+    mapReleases(item, [REST_OF_SEASON]);
     pipe!.tracker.state.items = [
       { title: FIRST, size: 10 * MIB_PER_EPISODE, files: filesOf(1, 10) },
       { title: SECOND, size: 10 * MIB_PER_EPISODE, files: filesOf(2, 10) },
@@ -165,6 +174,7 @@ describe('the action of the user', () => {
 
   it('refuses a second request for the same targets', async () => {
     const { item } = await partial();
+    mapReleases(item, [REST_OF_SEASON]);
     pipe!.tracker.state.items = [
       { title: FIRST, size: 10 * MIB_PER_EPISODE, files: filesOf(1, 10) },
       { title: SECOND, size: 10 * MIB_PER_EPISODE, files: filesOf(2, 10) },
@@ -175,6 +185,22 @@ describe('the action of the user', () => {
     const again = await api.post('/queue/actions', askOtherSeasons(item, 1));
     expect(again.status).toBe(409);
     expect(again.body).toMatchObject({ error: 'action_not_supported' });
+  });
+
+  it('refuses the action when the season has no saved range', async () => {
+    const { item, targets } = await partial();
+    api = await pipe!.api();
+    const before = pipe!.tracker.state.searches.length;
+
+    const refused = await api.post('/queue/actions', askOtherSeasons(item, 1));
+
+    expect(refused.status).toBe(409);
+    expect(refused.body).toEqual({ error: 'numbering_required' });
+    // The action starts no query of another season, and the targets keep the reason of the pack.
+    expect(pipe!.tracker.state.searches).toHaveLength(before);
+    expect(otherSeasonQueries()).toEqual([]);
+    expect(searchJobs(true)).toEqual([]);
+    expect(targets.every((entry) => reasonOfEntry(entry)?.code === 'pack_partial')).toBe(true);
   });
 
   it('takes the states that an older version left, with their attempt counters', async () => {
@@ -188,6 +214,7 @@ describe('the action of the user', () => {
       stuck(item, 1, 13, { code: 'too_many_attempts', detail: 'pack_partial' }, 5),
     ];
     expect(targets.every((entry) => needsOtherSeasons(entry.state))).toBe(true);
+    mapReleases(item, [REST_OF_SEASON]);
     pipe.tracker.state.items = [{ title: SECOND, size: 10 * MIB_PER_EPISODE, files: filesOf(2, 10) }];
     api = await pipe.api();
 
@@ -205,6 +232,7 @@ describe('the action of the user', () => {
 describe('the mapping of the release numbering', () => {
   it('gives each release episode of another season to its own episode of TMDB', async () => {
     const { item, targets } = await partial();
+    mapReleases(item, [REST_OF_SEASON]);
     const files = filesOf(2, 10);
     pipe!.tracker.state.items = [
       { title: FIRST, size: 10 * MIB_PER_EPISODE, files: filesOf(1, 10) },
@@ -232,6 +260,7 @@ describe('the mapping of the release numbering', () => {
     // Episodes 12 to 15 have their files. The pack of the next release season holds 1 to 10 of its own numbering.
     const { item, targets } = await partial([...range(1, 10), ...range(12, 15)]);
     expect(targets.map((entry) => entry.number)).toEqual([11, 16, 17, 18, 19, 20]);
+    mapReleases(item, [REST_OF_SEASON]);
     const files = filesOf(2, 10);
     pipe!.tracker.state.items = [
       { title: FIRST, size: 10 * MIB_PER_EPISODE, files: filesOf(1, 10) },
@@ -275,9 +304,11 @@ describe('Lupin', () => {
     // TMDB season 2 has 7 episodes, and it has a season 3 of its own.
     const item = addTitle([...range(1, 7).map((number) => ({ season: 2, number })), ...range(1, 8).map((number) => ({ season: 3, number }))]);
     inLibrary(item, 2, range(1, 5));
+    // The last episodes of TMDB season 2 are release season 3, from its sixth episode.
+    mapReleases(item, [{ season: 2, from: 6, to: 7, releaseSeason: 3, releaseFrom: 6 }]);
     // The pack of season 2 held episodes 1 to 5, and the app wrote the record of what it holds.
     const heldBySeason2 = filesOf(2, 5);
-    pipe.db.data.releaseCoverage[`1:${SECOND}`] = { titleKey: item.key, season: 2, numbers: range(1, 5) };
+    pipe.db.data.releaseCoverage[`1:${SECOND}`] = { titleKey: item.key, season: 2, numbers: range(1, 5), numberingRevision: 1 };
     const targets = [
       stuck(item, 2, 6, { code: 'too_many_attempts', detail: 'pack_partial' }, 3),
       stuck(item, 2, 7, { code: 'too_many_attempts', detail: 'pack_partial' }, 3),
@@ -295,8 +326,10 @@ describe('Lupin', () => {
 
     expect((await api.post('/queue/actions', askOtherSeasons(item, 2))).status).toBe(200);
     await until(() => targets.every((entry) => entry.release?.title === THIRD && stageOf(entry) === 'downloading'), 20_000);
-    // The action asks for the season of the pack that the targets hold, and takes no file from it.
-    expect(pipe!.tracker.state.searches.some((url) => url.searchParams.get('season') === '2')).toBe(true);
+    // The action asks for the release season of the saved range only, and takes no file from the pack of the catalog
+    // season.
+    expect(pipe!.tracker.state.searches.some((url) => url.searchParams.get('season') === '3')).toBe(true);
+    expect(pipe!.tracker.state.searches.some((url) => url.searchParams.get('season') === '2')).toBe(false);
     expect(pipe!.tracker.state.downloads).toEqual([THIRD]);
 
     pipe!.complete(THIRD, contentsOf(files), hashOf(THIRD, files));
@@ -317,24 +350,21 @@ describe('Lupin', () => {
 });
 
 describe('Jujutsu Kaisen', () => {
-  // TMDB season 1 of 59 episodes. The first 47 are in the library. The rest are stuck with the numbering of an older
-  // version, which counts them as the season 2 of the releases from episode `from`.
-  function jujutsu(from: number) {
+  // TMDB season 1 of 59 episodes. The first 47 are in the library. The rest are stuck until the user declares the
+  // release season that holds them.
+  function jujutsu(ranges: NumberingRange[]) {
     const item = addTitle(range(1, 59).map((number) => ({ season: 1, number })));
     inLibrary(item, 1, range(1, 47));
+    if (ranges.length) mapReleases(item, ranges);
     const files = filesOf(2, 12);
-    const targets = range(48, 59).map((number) => {
-      const entry = stuck(item, 1, number, { code: 'pack_partial', detail: 'pack_partial' }, number <= 52 ? 4 : 5);
-      entry.continuation = { releaseSeason: 2, season: 1, from };
-      return entry;
-    });
+    const targets = range(48, 59).map((number) => stuck(item, 1, number, { code: 'pack_partial', detail: 'pack_partial' }, number <= 52 ? 4 : 5));
     pipe!.tracker.state.items = [{ title: SECOND, size: files.length * MIB_PER_EPISODE, files }];
     return { item, targets, files };
   }
 
   it('gives the pack of the next release season to the last episodes of the season', async () => {
     pipe = await startPipeline();
-    const { item, targets, files } = jujutsu(48);
+    const { item, targets, files } = jujutsu([{ season: 1, from: 48, to: 59, releaseSeason: 2, releaseFrom: 1 }]);
     api = await pipe.api();
 
     expect((await api.post('/queue/actions', askOtherSeasons(item, 1))).status).toBe(200);
@@ -351,31 +381,29 @@ describe('Jujutsu Kaisen', () => {
     expect(Object.values(pipe!.db.data.files)).toHaveLength(59);
   }, 20_000);
 
-  it('rebuilds the mapping from the files when the stored continuation is wrong', async () => {
+  it('does not invent a range from the files of the pack', async () => {
     pipe = await startPipeline();
-    const { item, targets, files } = jujutsu(1);
+    const { item, targets } = jujutsu([]);
     api = await pipe.api();
+    const before = pipe.tracker.state.searches.length;
 
-    expect((await api.post('/queue/actions', askOtherSeasons(item, 1))).status).toBe(200);
-    await until(() => targets.every((entry) => entry.release?.title === SECOND && stageOf(entry) === 'downloading'), 20_000);
-    pipe!.complete(SECOND, contentsOf(files), hashOf(SECOND, files));
-    await until(() => targets.every((entry) => stageOf(entry) === 'available'), 20_000);
+    const refused = await api.post('/queue/actions', askOtherSeasons(item, 1));
 
-    // The last file of the pack is the last episode of the season, so the first file is episode 48. An old hypothesis
-    // with `from: 1` does not decide the mapping.
-    for (const [index, entry] of targets.entries()) {
-      const file = importedFile(item, entry)!;
-      expect(file.path).toBe(pathOf(1, entry.number!));
-      expect(readInLibrary(file.path)).toBe(dataOf(files[index]!));
-    }
-    expect(targets.every((entry) => entry.continuation?.from === 48)).toBe(true);
-    expect(Object.values(pipe!.db.data.files)).toHaveLength(59);
+    // Without a saved range the action asks for no other season, and the targets stay stuck.
+    expect(refused.status).toBe(409);
+    expect(refused.body).toEqual({ error: 'numbering_required' });
+    expect(pipe.tracker.state.searches).toHaveLength(before);
+    expect(searchJobs(true)).toEqual([]);
+    expect(targets.every((entry) => reasonOfEntry(entry)?.code === 'pack_partial')).toBe(true);
+    expect(targets.every((entry) => entry.continuation == null)).toBe(true);
+    expect(item.numbering?.ranges ?? []).toEqual([]);
   }, 20_000);
 });
 
 describe('no solution', () => {
   it('keeps the targets stuck, records the search, and leaves no search in the queue', async () => {
     const { item, targets } = await partial();
+    mapReleases(item, [REST_OF_SEASON]);
     api = await pipe!.api();
 
     expect((await api.post('/queue/actions', askOtherSeasons(item, 1))).status).toBe(200);
@@ -410,28 +438,5 @@ describe('recovery', () => {
     const jobs = Object.values(pipe.db.data.jobs).filter((job) => job.type === 'queue.search' && ((job.payload as { entryIds?: string[] }).entryIds ?? []).includes(entry.id));
     expect(jobs).toHaveLength(1);
     expect(jobs[0]!.payload).toMatchObject({ titleKey: item.key, season: 1, otherSeasons: true });
-  });
-});
-
-describe('the split of a release season', () => {
-  it('maps a contiguous pack that starts at 1 onto the end of the season', () => {
-    expect(splitOf({ season: 1, total: 20, numbers: range(1, 10), missing: range(11, 20) })).toEqual({ from: 11 });
-  });
-
-  it('refuses numbers that do not start at 1', () => {
-    expect(splitOf({ season: 2, total: 20, numbers: [2, 3, 4], missing: [19, 20] })).toBeNull();
-  });
-
-  it('refuses a pack with more numbers than the season has', () => {
-    expect(splitOf({ season: 2, total: 3, numbers: [1, 2, 3, 4], missing: [3] })).toBeNull();
-  });
-
-  it('refuses a pack that reaches none of the missing episodes', () => {
-    // The pack ends at the end of the season, so its first file is episode 9, and the missing episodes are 3 and 4.
-    expect(splitOf({ season: 2, total: 10, numbers: [1, 2], missing: [3, 4] })).toBeNull();
-  });
-
-  it('maps only the end of the season, so an earlier missing run gets no place', () => {
-    expect(splitOf({ season: 2, total: 7, numbers: range(1, 5), missing: range(6, 7) })).toEqual({ from: 3 });
   });
 });

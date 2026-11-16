@@ -14,7 +14,8 @@ import type { SizeLimits } from '@ladarr/shared/types';
 // Version 5 removes the region and the time zone from the settings.
 // Version 6 splits the size limits of the qualities into one table for movies and one for series.
 // Version 7 keeps one state for each queue target, in place of the stage, the branch, and the reason.
-export const SCHEMA_VERSION = 7;
+// Version 8 keeps the episode numbering of a series, and the snapshot that each acquisition uses.
+export const SCHEMA_VERSION = 8;
 
 export const emptyData = (): Data => ({
   schemaVersion: SCHEMA_VERSION,
@@ -166,6 +167,17 @@ export function withDefaults(data: Data): Data {
   // An older file had a branch for a target that stopped. The state of the entry keeps the reason, and the migration
   // maps the stage, the branch, and the reason of every entry and of every history event.
   migrateQueue(next.queue);
+  // A title that an older version saved has no numbering, and neither does its acquisitions. The old inference of the
+  // releases is not a confirmed map, so the migration makes no range from it.
+  for (const title of Object.values(next.titles)) title.numbering ??= { revision: 0, ranges: [] };
+  for (const entry of Object.values(next.queue)) {
+    if (entry.numbering) continue;
+    // A target of an older version without the old inference keeps the numbering of the catalog. A target that the old
+    // inference numbered waits for its map, because the inference is not a confirmed range.
+    entry.numbering = entry.release && !entry.continuation ? { revision: 0, ranges: [] } : null;
+  }
+  // The coverage of an older version came from a numbering that no longer exists. Read the files again.
+  for (const [id, held] of Object.entries(next.releaseCoverage)) if (!Number.isInteger(held.numberingRevision)) delete next.releaseCoverage[id];
   return next;
 }
 

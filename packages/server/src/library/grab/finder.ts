@@ -14,8 +14,9 @@ import { importLocal } from '../imports/local.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import { manualUpgradeTargets } from './upgrades.ts';
 import { requestIdFor } from '../../core/outbound.ts';
+import { catalogPoint, catalogSeasons, normalizeNumbering, releasePoint, releaseSeasons } from '../numbering.ts';
 import { needsOtherSeasons } from '@ladarr/shared/queue';
-import type { Continuation, Db, DecideContext, Decision, Episode, FinderDeps, Indexer, Job, QueueEntry, RawRelease, ReleaseRef, Scope, SearchPayload, SearchQuery, SearchResume, SearchState, Title, TitleName, Want } from '../../types.ts';
+import type { Db, DecideContext, Decision, Episode, FinderDeps, Indexer, Job, Numbering, QueueEntry, RawRelease, ReleaseRef, Scope, SearchPayload, SearchQuery, SearchResume, SearchState, Title, TitleName, Want } from '../../types.ts';
 import type { IndexerApp } from '@ladarr/shared/enums';
 
 // The reason of the attempt that the manual search of the other seasons of the releases starts. A target that a lost
@@ -390,9 +391,15 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
 
   const fileOf = (title: Title, entry: QueueEntry) => (title.mediaType === 'movie' ? title.fileId : (title.episodes.find((e) => e.season === entry.season && e.number === entry.number)?.fileId ?? null));
 
-  function wantFor(title: Title, entry: QueueEntry): Want {
-    return title.mediaType === 'movie' ? { kind: 'movie', title } : { kind: 'episode', title, season: entry.season!, number: entry.number! };
+  const numberingOf = (title: Title): Numbering => normalizeNumbering(title.numbering);
+
+  function wantFor(title: Title, entry: QueueEntry, numbering: Numbering): Want {
+    return title.mediaType === 'movie' ? { kind: 'movie', title } : { kind: 'episode', title, season: entry.season!, number: entry.number!, numbering };
   }
+
+  // The release coordinate that a target asks the indexers for. Null when a saved range gives that release coordinate
+  // to another episode, so the target needs an explicit range before it can search.
+  const releaseTarget = (numbering: Numbering, entry: QueueEntry) => (entry.season === null || entry.number === null ? null : releasePoint(numbering, { season: entry.season, number: entry.number }));
 
   const RESULT_MESSAGE: Record<string, string> = {
     no_indexers: 'No release found: no indexer to ask',
@@ -500,6 +507,9 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     const { release } = decision;
     const indexer = db.data.indexers[release.indexerId];
     const title = db.data.titles[entries[0]!.titleKey];
+    // The map changed while the indexers answered. The decision came from the old numbering, so it can not take the
+    // target: a new search reads the current map.
+    if (title && title.mediaType !== 'movie' && decision.numbering && numberingOf(title).revision !== decision.numbering.revision) return false;
     const ref: ReleaseRef = {
       guid: release.guid,
       indexerId: release.indexerId,
@@ -520,6 +530,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       : null;
     for (const entry of entries) {
       entry.release = ref;
+      entry.numbering = decision.numbering;
       entry.transferHash = decision.hash;
       entry.source = null;
       entry.importTries = 0;
@@ -555,6 +566,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     for (const entry of entries) if (entry.state.kind === 'waiting') queue.enter(entry, 'queued', 'search again');
     const startedAt = now();
     const ctx = decideContext();
+    const numbering = numberingOf(title);
     const profiles = profilesFor(ctx.quality, title);
     for (const entry of entries) {
       entry.search = { at: startedAt, indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null, rejected: [] };
@@ -712,6 +724,15 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       });
     };
 
+    // A target whose release coordinate another episode claims has no number to ask for. The user saves an explicit
+    // range, and the target waits for it instead of taking a release of another episode.
+    const blockNumbering = (entry: QueueEntry, list: QueueEntry[]) => {
+      catalog.warn('release_failed', 'The release numbering gives this episode no release episode', itemFields(entry), { code: 'numbering_required' });
+      queue.endAttempt(entry, 'failed', 'numbering_required');
+      queue.block(entry, { code: 'numbering_required' }, 'the release numbering has no coordinate', 'numbering_required');
+      return list.filter((item) => item !== entry);
+    };
+
     // Stops this run at the budget. The targets still wait, and a new job continues the search soon. The season
     // queries run again from the cache, so the next run spends its budget on the queries that did not run yet.
     const defer = (next?: SearchResume) => {
@@ -730,48 +751,29 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       enqueueSearch({ titleKey: payload.titleKey, season: payload.season, entryIds: remaining.map((entry) => entry.id), ...(next ? { resume: next } : {}) }, { runAt: nextAt, afterRun: true });
     };
 
-    // The seasons of the releases that can hold the episodes that the season of the title misses. The season of the pack
-    // that a target remembers comes first, then the season of the title, then the seasons after it.
-    const candidateSeasons = (season: number, group: QueueEntry[]) => {
-      const list: number[] = [];
-      const add = (value: number | null | undefined) => {
-        if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 99 || list.includes(value)) return;
-        list.push(value);
-      };
-      for (const entry of group) {
-        add(entry.partialPack?.releaseSeason);
-        add(entry.continuation?.releaseSeason);
-      }
-      add(season);
-      for (let next = season + 1; next <= Math.min(season + 4, 99); next++) add(next);
-      return list;
-    };
-
-    // The mapping that a target uses for a release season. The mapping that the target stores comes first. A release
-    // season with no stored mapping starts at the first episode of its season, and the files of the pack establish the
-    // real mapping at the grab.
-    const mappingFor = (season: number, entry: QueueEntry, releaseSeason: number): Continuation | null => {
-      if (releaseSeason === season) return null;
-      const known = entry.continuation;
-      if (known && known.releaseSeason === releaseSeason && known.season === season) return known;
-      return { releaseSeason, season, from: 1 };
-    };
-
-    // The manual search of the other seasons of the releases. A release counts its seasons in its own way: a pack that it
-    // names as another season can hold the files of the episodes that the season of the title misses. The files of the
-    // pack return to their target through the mapping of the pack, which the grab establishes.
+    // The manual search of the other seasons of the releases. The saved ranges say which release season holds the
+    // episodes that the catalog season misses. The app asks those seasons and no other: a missing range is a question
+    // for the user, not something to guess from a pack.
     async function otherSeasons(group: QueueEntry[], signal: AbortSignal) {
       const season = group[0]?.season ?? null;
       if (season === null) {
         noResult(group, title, () => [], 0, 0, 0, profiles, { partial: true });
         return;
       }
-      for (const releaseSeason of candidateSeasons(season, group)) {
+      const releaseSeasonList = releaseSeasons(numbering, season).filter((releaseSeason) => releaseSeason !== season);
+      if (!releaseSeasonList.length) {
+        for (const entry of group) {
+          catalog.warn('release_failed', 'The release numbering is not saved for this season', itemFields(entry), { code: 'numbering_required', season });
+          queue.endAttempt(entry, 'failed', 'numbering_required');
+          queue.block(entry, { code: 'numbering_required' }, 'the release numbering is not saved', 'numbering_required');
+        }
+        return;
+      }
+      for (const releaseSeason of releaseSeasonList) {
         if (!open.length) break;
         const wantsOf = (entry: QueueEntry): Want[] => {
-          const continuation = mappingFor(season, entry, releaseSeason);
-          const seasonWant: Want = { kind: 'season', title, season, ...(continuation ? { continuation } : {}) };
-          const episodeWant: Want = { kind: 'episode', title, season, number: entry.number!, ...(continuation ? { continuation } : {}) };
+          const seasonWant: Want = { kind: 'season', title, season, releaseSeason, numbering };
+          const episodeWant: Want = { kind: 'episode', title, season, number: entry.number!, numbering };
           return [seasonWant, episodeWant];
         };
         for (const name of names) {
@@ -787,17 +789,14 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           // A name that returns releases is not a solution: the next name of the title can still hold the targets that
           // this one does not cover, so the loop goes on while a target is open.
         }
-        // The episodes of the release season also arrive one file at a time. That query needs the numbering of the
-        // season: a release season with no stored mapping gives no number to ask for.
+        // The episodes of the release season also arrive one file at a time. The saved range gives the release number.
         for (const entry of [...open]) {
           if (!open.includes(entry) || entry.state.kind !== 'searching') continue;
-          const known = entry.continuation && entry.continuation.releaseSeason === releaseSeason && entry.continuation.season === season ? entry.continuation : null;
-          if (releaseSeason !== season && !known) continue;
-          const releaseNumber = known ? entry.number! - known.from + 1 : entry.number!;
-          if (releaseNumber < 1) continue;
+          const point = releaseTarget(numbering, entry);
+          if (!point || point.season !== releaseSeason) continue;
           for (const name of names) {
-            const want: Want = { kind: 'episode', title, season, number: entry.number!, ...(known ? { continuation: known } : {}) };
-            const single = await ask({ kind: 'episode', season: releaseSeason, number: releaseNumber }, name, [entry], () => [want]);
+            const want: Want = { kind: 'episode', title, season, number: entry.number!, numbering };
+            const single = await ask({ kind: 'episode', season: point.season, number: point.number }, name, [entry], () => [want]);
             grabBest([entry], single.decisionsOf);
             // The target stops asking names when it has its release. A name that gives nothing, or releases that do not
             // fit, leaves the next name its chance.
@@ -834,7 +833,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     if (title.mediaType === 'movie') {
       for (const name of names) {
         if (!open.length) break;
-        const result = await ask({ kind: 'movie' }, name, open, (entry) => [wantFor(title, entry)]);
+        const result = await ask({ kind: 'movie' }, name, open, (entry) => [wantFor(title, entry, numbering)]);
         open = grabBest(open, result.decisionsOf);
         // A name that returns releases is the name of the search. The aliases after it do not run.
         if (result.releases.length) break;
@@ -848,31 +847,37 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       const season = payload.season;
       const counts: number[] = [];
       // The season queries come first. They give the packs, the singles, and the number of releases of each name,
-      // which selects the name of the individual queries.
+      // which selects the name of the individual queries. A catalog season can be the release season itself and one or
+      // more other release seasons, so each of them gets a query.
       if (!manual && season !== null && open.length > 1 && resume?.phase !== 'absolute') {
-        for (const name of names) {
-          const group = open;
-          if (!group.length || open.length <= 1) break;
-          if (budget && budget.left <= 0) {
-            defer();
-            return;
+        for (const releaseSeason of releaseSeasons(numbering, season)) {
+          for (const [nameIndex, name] of names.entries()) {
+            const group = open;
+            if (!group.length || open.length <= 1) break;
+            if (budget && budget.left <= 0) {
+              defer();
+              return;
+            }
+            const result = await ask({ kind: 'season', season: releaseSeason }, name, group, (entry) => [
+              { kind: 'season', title, season, releaseSeason, numbering },
+              wantFor(title, entry, numbering),
+            ]);
+            counts[nameIndex] = (counts[nameIndex] ?? 0) + result.releases.length;
+            const pack = bestOf(group.flatMap((entry) => result.decisionsOf(entry).filter((decision) => decision.kind === 'pack')));
+            if (pack) {
+              // The pack covers the episodes that it names. The other targets keep their own searches.
+              const covered = group.filter((entry) => pack.covers.some((c) => c.season === entry.season && c.number === entry.number));
+              // The files of an earlier download can hold none of these targets, and then the pack gives nothing here.
+              if (covered.length && reserve(covered, pack)) open = open.filter((entry) => !covered.includes(entry));
+            }
+            open = grabBest(open, (entry) => result.decisionsOf(entry).filter((decision) => decision.kind !== 'pack'));
+            if (result.incomplete) {
+              defer();
+              return;
+            }
+            // A name that returns releases is the name of the search. The aliases after it do not run.
+            if (result.releases.length) break;
           }
-          const result = await ask({ kind: 'season', season }, name, group, (entry) => [{ kind: 'season', title, season }, wantFor(title, entry)]);
-          counts.push(result.releases.length);
-          const pack = bestOf(group.flatMap((entry) => result.decisionsOf(entry).filter((decision) => decision.kind === 'pack')));
-          if (pack) {
-            // The pack covers the episodes that it names. The other targets keep their own searches.
-            const covered = group.filter((entry) => pack.covers.some((c) => c.season === entry.season && c.number === entry.number));
-            // The files of an earlier download can hold none of these targets, and then the pack gives nothing here.
-            if (covered.length && reserve(covered, pack)) open = open.filter((entry) => !covered.includes(entry));
-          }
-          open = grabBest(open, (entry) => result.decisionsOf(entry).filter((decision) => decision.kind !== 'pack'));
-          if (result.incomplete) {
-            defer();
-            return;
-          }
-          // A name that returns releases is the name of the search. The aliases after it do not run.
-          if (result.releases.length) break;
         }
       }
 
@@ -886,8 +891,13 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           // The user selected the target. Try each name until one of them returns releases.
           for (const entry of [...targets]) {
             if (!open.includes(entry) || entry.state.kind !== 'searching') continue;
+            const point = releaseTarget(numbering, entry);
+            if (!point) {
+              open = blockNumbering(entry, open);
+              continue;
+            }
             for (const name of names) {
-              const result = await ask({ kind: 'episode', season: entry.season!, number: entry.number! }, name, [entry], (item) => [wantFor(title, item)]);
+              const result = await ask({ kind: 'episode', season: point.season, number: point.number }, name, [entry], (item) => [wantFor(title, item, numbering)]);
               grabBest([entry], result.decisionsOf);
               // A name that returns releases is the name of the search. The aliases after it do not run.
               if (result.releases.length) break;
@@ -902,11 +912,16 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           for (let index = start; index < targets.length; index++) {
             const entry = targets[index]!;
             if (!open.includes(entry) || entry.state.kind !== 'searching') continue;
+            const point = releaseTarget(numbering, entry);
+            if (!point) {
+              open = blockNumbering(entry, open);
+              continue;
+            }
             if (budget && budget.left <= 0) {
               defer({ phase: 'episode', entryId: entry.id });
               return;
             }
-            const result = await ask({ kind: 'episode', season: entry.season!, number: entry.number! }, names[selected]!, [entry], (item) => [wantFor(title, item)]);
+            const result = await ask({ kind: 'episode', season: point.season, number: point.number }, names[selected]!, [entry], (item) => [wantFor(title, item, numbering)]);
             if (!grabBest([entry], result.decisionsOf).length) open = open.filter((item) => item !== entry);
             if (result.incomplete) {
               defer({ phase: 'episode', entryId: entry.id });
@@ -917,7 +932,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       }
 
       // The second numbering scheme: the absolute number of an Anime episode, only when the first scheme gave nothing.
-      if (open.length && title.seriesType === 'anime') {
+      // A saved range is an explicit numbering, so the absolute position of an anime release does not replace it.
+      if (open.length && title.seriesType === 'anime' && !numbering.ranges.length) {
         const absoluteTargets = open.filter((entry) => manual || open.length === 1 || recentEpisode(entry));
         const start = resume?.phase === 'absolute' ? Math.max(0, absoluteTargets.findIndex((entry) => entry.id === resume.entryId)) : 0;
         for (let index = start; index < absoluteTargets.length; index++) {
@@ -928,7 +944,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
             return;
           }
           const absolute = absoluteNumber(title, entry.season!, entry.number!);
-          const result = await ask({ kind: 'absolute', number: absolute }, names[0]!, [entry], (item) => [wantFor(title, item)]);
+          const result = await ask({ kind: 'absolute', number: absolute }, names[0]!, [entry], (item) => [wantFor(title, item, numbering)]);
           if (!grabBest([entry], result.decisionsOf).length) open = open.filter((item) => item !== entry);
           if (result.incomplete) {
             defer({ phase: 'absolute', entryId: entry.id });
@@ -978,8 +994,11 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   // Looks for a release of the chosen quality for one file. It makes no queue entry until it finds a release to take.
   async function upgradeTarget(target: ReturnType<typeof manualUpgradeTargets>[number], quality: string, signal: AbortSignal) {
     const { title, season, number } = target;
-    const scope: Scope = season === null ? { kind: 'movie' } : { kind: 'episode', season, number: number! };
-    const want: Want = season === null ? { kind: 'movie', title, upgradeQuality: quality } : { kind: 'episode', title, season, number: number!, upgradeQuality: quality };
+    const numbering = numberingOf(title);
+    const point = season === null ? null : releasePoint(numbering, { season, number: number! });
+    if (season !== null && !point) return;
+    const scope: Scope = season === null ? { kind: 'movie' } : { kind: 'episode', season: point!.season, number: point!.number };
+    const want: Want = season === null ? { kind: 'movie', title, upgradeQuality: quality } : { kind: 'episode', title, season, number: number!, upgradeQuality: quality, numbering };
     for (const name of titleNames(title)) {
       const found = await queryAll(title, scope, name, [], signal, { fresh: true });
       if (!stillUpgrade(title, season, number, quality)) break;
@@ -1016,11 +1035,12 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     for (const title of Object.values(db.data.titles)) {
       if (title.paused) continue;
       const wants: Slot['wants'] = [];
+      const numbering = numberingOf(title);
       if (title.mediaType === 'movie') {
         if (wantedMovie(title)) wants.push({ want: { kind: 'movie', title }, entry: () => queue.ensure(title.key, null, null) });
       } else {
         for (const episode of title.episodes) {
-          if (wantedEpisode(title, episode)) wants.push({ want: { kind: 'episode', title, season: episode.season, number: episode.number }, entry: () => queue.ensure(title.key, episode.season, episode.number) });
+          if (wantedEpisode(title, episode)) wants.push({ want: { kind: 'episode', title, season: episode.season, number: episode.number, numbering }, entry: () => queue.ensure(title.key, episode.season, episode.number) });
         }
       }
       if (!wants.length) continue;
@@ -1201,32 +1221,50 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
 
   // --- Interactive search -----------------------------------------------------------------
 
-  // The target that a release names. A pack covers its season, an episode covers itself, and a release that does not
-  // say which episode it has falls back to the target that the user opened.
+  // The target that a release names. A pack covers its release season, an episode covers itself, and a release that
+  // does not say which episode it has falls back to the target that the user opened. The numbers of the release go to
+  // the catalog through the saved numbering.
   function wantForRelease(title: Title, release: RawRelease, season?: number, number?: number): Want | undefined {
     if (title.mediaType === 'movie') return { kind: 'movie', title };
+    const numbering = numberingOf(title);
     const parsed = parseRelease(release.title);
-    if (parsed.pack && parsed.season !== null) return { kind: 'season', title, season: parsed.season };
+    if (parsed.pack && parsed.season !== null) {
+      const seasons = catalogSeasons(numbering, parsed.season);
+      const catalog = season !== undefined && seasons.includes(season) ? season : seasons[0]!;
+      return { kind: 'season', title, season: catalog, releaseSeason: parsed.season, numbering };
+    }
     const first = parsed.episodes[0];
-    if (parsed.season !== null && first !== undefined) return { kind: 'episode', title, season: parsed.season, number: first };
-    return number !== undefined && season !== undefined ? { kind: 'episode', title, season, number } : undefined;
+    if (parsed.season !== null && first !== undefined) {
+      const point = catalogPoint(numbering, { season: parsed.season, number: first });
+      // The release names an episode that the map gives to no catalog episode. It is not a release of this title.
+      return point ? { kind: 'episode', title, season: point.season, number: point.number, numbering } : undefined;
+    }
+    return number !== undefined && season !== undefined ? { kind: 'episode', title, season, number, numbering } : undefined;
   }
 
   // Searches for the user to look at. It uses the interactive switch of the indexer and creates no queue entry.
   async function interactive(titleKey: string, { season, number, fresh }: { season?: number; number?: number; fresh?: boolean }, signal: AbortSignal) {
     const title = db.data.titles[titleKey];
     if (!title) return;
-    const scope: Scope = title.mediaType === 'movie' ? { kind: 'movie' } : number !== undefined && season !== undefined ? { kind: 'episode', season, number } : { kind: 'season', season: season ?? 1 };
+    const numbering = numberingOf(title);
+    let scopes: Scope[];
+    if (title.mediaType === 'movie') scopes = [{ kind: 'movie' }];
+    else if (number !== undefined && season !== undefined) {
+      const point = releasePoint(numbering, { season, number }) ?? { season, number };
+      scopes = [{ kind: 'episode', season: point.season, number: point.number }];
+    } else scopes = releaseSeasons(numbering, season ?? 1).map((releaseSeason) => ({ kind: 'season', season: releaseSeason }));
     // The aliases are asked only when the names before gave no release.
     const releases: RawRelease[] = [];
     let asked = 0;
     let answered = 0;
-    for (const name of titleNames(title)) {
-      const found = await queryAll(title, scope, name, [], signal, { forUser: true, fresh });
-      asked = Math.max(asked, found.asked);
-      answered += found.answered;
-      releases.push(...found.releases);
-      if (releases.length) break;
+    for (const scope of scopes) {
+      for (const name of titleNames(title)) {
+        const found = await queryAll(title, scope, name, [], signal, { forUser: true, fresh });
+        asked = Math.max(asked, found.asked);
+        answered += found.answered;
+        releases.push(...found.releases);
+        if (releases.length) break;
+      }
     }
     const ctx = decideContext();
     const decisions = releases.flatMap((release) => {
@@ -1265,11 +1303,18 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     const ref = leader?.release ?? null;
     const season = missing[0]?.season ?? null;
     if (leader && ref && season !== null) {
-      db.data.releaseCoverage[`${ref.indexerId}:${ref.guid}`] = {
-        titleKey: leader.titleKey,
-        season,
-        numbers: entries.filter((entry) => !missing.includes(entry) && entry.season === season).map((entry) => entry.number!),
-      };
+      const revision = normalizeNumbering(leader.numbering ?? db.data.titles[leader.titleKey]?.numbering).revision;
+      const key = `${ref.indexerId}:${ref.guid}`;
+      const previous = db.data.releaseCoverage[key];
+      // An acquisition of an older map does not replace the coverage that a newer map read.
+      if (!previous || previous.numberingRevision <= revision) {
+        db.data.releaseCoverage[key] = {
+          titleKey: leader.titleKey,
+          season,
+          numbers: entries.filter((entry) => !missing.includes(entry) && entry.season === season).map((entry) => entry.number!),
+          numberingRevision: revision,
+        };
+      }
     }
     // A pack that names no episode holds nothing of the season, so it is a release that failed: the target tries its
     // season again. A pack that names its episodes and still misses some of its targets is a difference of numbering,
@@ -1287,17 +1332,6 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       queue.block(entry, { code: 'pack_partial' }, 'pack does not hold every episode', 'pack_partial');
     }
     return entries.filter((entry) => !missing.includes(entry));
-  }
-
-  // A pack of another season whose files give no mapping. It gives no file to this season, and its targets stop as a
-  // partial pack gives them: the user starts the search of the other seasons again.
-  function refusePack(entries: QueueEntry[], cause: string) {
-    for (const entry of entries) {
-      catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: ${cause}`, itemFields(entry), { code: cause, release: entry.release?.title ?? null });
-      queue.endAttempt(entry, 'failed', cause);
-      Object.assign(entry, { release: null, transferHash: null, clientId: null });
-      queue.block(entry, { code: 'pack_partial' }, 'pack does not hold every episode', cause);
-    }
   }
 
   // The manual search of the other seasons of the releases, for the targets of one season that a pack left without a
@@ -1337,5 +1371,5 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     for (const group of bySeason.values()) enqueueSearch({ titleKey: group[0]!.titleKey, season: group[0]!.season, entryIds: group.map((e) => e.id) }, { afterRun: true });
   }
 
-  return { requestSearch, reserve, fallback, partial, refusePack, startOtherSeasons, enqueueSearch, interactive, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
+  return { requestSearch, reserve, fallback, partial, startOtherSeasons, enqueueSearch, interactive, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
 }

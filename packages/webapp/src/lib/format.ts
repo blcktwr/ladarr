@@ -83,6 +83,8 @@ Object.assign(errorTexts, {
   plan_not_found: 'The preview expired. Start the preview again.',
   nothing_to_search: 'Nothing to search, not released yet or not available digitally.',
   no_better_qualities: 'The quality profile has no better quality than the current file.',
+  numbering_changed: 'The episode map changed in another place. Open it again.',
+  invalid_numbering: 'The episode map is not valid. Check the ranges.',
 });
 
 export const errorMessages = labels(errorTexts);

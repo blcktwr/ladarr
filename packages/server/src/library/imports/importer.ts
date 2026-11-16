@@ -7,7 +7,7 @@ import { db } from '../../core/db.ts';
 import { enqueue as enqueueJob, JobError } from '../../core/jobs.ts';
 import { catalog, itemFields, log } from '../../core/log.ts';
 import { episodePath, folderName, moviePath, versionedPath } from '../naming.ts';
-import { isSample, isVideoFile, releaseEpisodes } from '../parse.ts';
+import { isSample, isVideoFile, parseEpisodes, releaseEpisodes } from '../parse.ts';
 import { parseRelease } from '../grab/release.ts';
 import { probeFile } from '../probe.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
@@ -152,12 +152,13 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       taken.add(file.rel);
     }
     const done = () => new Set(picks.flatMap((p) => p.entries.map((e) => e.id)));
-    // The numbering of the release, when it counts as two seasons what the title counts as one.
-    const continuation = group.find((entry) => entry.continuation)?.continuation ?? null;
+    // The numbering of the acquisition, saved with its release. A target of an older version has none, so the title map
+    // applies. The release numbers go to the catalog episodes through it.
+    const numbering = group.find((entry) => entry.numbering)?.numbering ?? title.numbering ?? null;
     for (const file of [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)) {
       if (taken.has(file.rel)) continue;
       // The folder of the file can name the season: "Season 02/Berserk E01.mkv".
-      const found = releaseEpisodes(file.rel, title.episodes, continuation, seasonHint, title.meta.title);
+      const found = releaseEpisodes(file.rel, title.episodes, numbering, seasonHint, title.meta.title);
       if (!found) continue;
       const covered = group.filter((entry) => entry.season === found.season && found.numbers.includes(entry.number!) && !done().has(entry.id));
       // A file for an episode that was not asked for is part of the pack. It is not imported.
@@ -166,9 +167,11 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       taken.add(file.rel);
     }
     const left = group.filter((entry) => !done().has(entry.id));
-    // A release for one episode with a name that gives no number: the one video is the episode.
+    // A release for one episode with a name that gives no number: the one video is the episode. A file that names an
+    // episode contradicts the target when the earlier pass did not give it, so it is not a fallback. A pack gives no
+    // fallback either: a missing episode of a pack is a question for the user.
     const loose = files.filter((file) => !taken.has(file.rel));
-    if (left.length === 1 && group.length === 1 && loose.length === 1) {
+    if (left.length === 1 && group.length === 1 && loose.length === 1 && group[0]!.release?.kind !== 'pack' && !parseEpisodes(loose[0]!.rel, seasonHint)) {
       picks.push({ file: loose[0]!, entries: left, episodes: [episodeOf(left[0]!)].filter((e): e is Episode => Boolean(e)) });
       return { picks, missing: [] };
     }

@@ -60,7 +60,7 @@ describe('restore through the API', () => {
   it('replaces the data with the backup, makes a safety backup, and ends the sessions', async () => {
     const db = await start();
     db.data.settings.naming.movie = 'FR';
-    db.data.releaseCoverage = { a: { titleKey: 'tv:1', season: 1, numbers: [1, 2] } };
+    db.data.releaseCoverage = { a: { titleKey: 'tv:1', season: 1, numbers: [1, 2], numberingRevision: 0 } };
     const apiKey = db.data.apiKey;
     const { backup } = (await app.post('/backups')).body;
 
@@ -71,7 +71,7 @@ describe('restore through the API', () => {
     const res = await app.post(`/backups/${backup.name}/restore`);
     expect(res.status).toBe(200);
     expect(db.data.settings.naming.movie).toBe('FR');
-    expect(db.data.releaseCoverage).toEqual({ a: { titleKey: 'tv:1', season: 1, numbers: [1, 2] } });
+    expect(db.data.releaseCoverage).toEqual({ a: { titleKey: 'tv:1', season: 1, numbers: [1, 2], numberingRevision: 0 } });
     expect(db.data.apiKey).toBe(apiKey);
     expect(db.data.sessions).toEqual({});
     // The session of the request is gone with the others.

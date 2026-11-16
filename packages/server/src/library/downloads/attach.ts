@@ -1,3 +1,5 @@
+import { db } from '../../core/db.ts';
+import { normalizeNumbering } from '../numbering.ts';
 import { isActive } from './queue.ts';
 import type { ClientHandle, Queue, QueueEntry, ReleaseRef, Torrent } from '../../types.ts';
 
@@ -43,6 +45,9 @@ export async function attachTorrent(
     queue.endAttempt(target, 'cancelled', 'replaced by an attached download');
     queue.startAttempt(target, 'attached download');
     recordTorrent(target, { handle, torrent, kind: targets.length > 1 ? 'pack' : 'single', external: true });
+    // A torrent that the user attaches enters the acquisition with the numbering of the title now. A target that has a
+    // snapshot already keeps it, so a restart does not reinterpret its download.
+    target.numbering ??= normalizeNumbering(db.data.titles[target.titleKey]?.numbering);
     // The old work of the target is gone. A search result, an import result, or a manual match of another download
     // must not stay next to the attached torrent.
     target.search = null;

@@ -1,6 +1,6 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
 import { RETRY_STATUSES } from '@ladarr/shared/queue';
-import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueReason, QueueRejectedRelease, QueueRow, QueueSummary, QueueTorrent } from '@ladarr/shared/types';
+import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueReason, QueueRejectedRelease, QueueRow, QueueSummary, QueueTorrent, TitleDetail } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, FileText, FileVideo, Info, LoaderCircle, Pause, Play, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
@@ -16,6 +16,7 @@ import { AttachDialog } from './activity-client.tsx';
 import { ReleasePicker } from './activity-releases.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
+import { NumberingDialog } from '../../components/numbering.tsx';
 import { catalogPath, formatBytes, groupName, posterUrl, reasonText, seasonName, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
@@ -137,23 +138,38 @@ function GroupFix(props: { reason: QueueReason | null; otherSeasons: number; sto
   ) : null;
 }
 
-// The search of the other seasons of the releases. The user starts it, and the cards of the season follow its work.
+// The search of the other seasons of the releases. It needs the saved numbering of the season, so a season without a
+// range opens the editor first, and the save starts the search. The user manages the episodes of a stuck target here,
+// in the queue, and not on the page of the series.
 function OtherSeasonsFix({ titleKey, season, run }: { titleKey: string; season: number | null; run: Run }) {
   const [pending, setPending] = useState(false);
+  const [numbering, setNumbering] = useState(false);
+  const search = () => run('search_other_seasons', [], { titleKey, season });
   return (
-    <Button
-      pending={pending}
-      onClick={async () => {
-        setPending(true);
-        try {
-          await run('search_other_seasons', [], { titleKey, season });
-        } finally {
-          setPending(false);
-        }
-      }}
-    >
-      {t('Search individually')}
-    </Button>
+    <>
+      <Button
+        pending={pending}
+        onClick={async () => {
+          setPending(true);
+          try {
+            if (season === null) return await search();
+            const { title } = await api<{ title: TitleDetail }>(`/library/${titleKey}`);
+            if (title.numbering.ranges.some((range) => range.season === season)) await search();
+            else setNumbering(true);
+          } catch {
+            // The page shows the failure of the action in its own alert.
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        {t('Search individually')}
+      </Button>
+      <Button variant="ghost" onClick={() => setNumbering(true)}>
+        {t('Choose episodes')}
+      </Button>
+      <NumberingDialog titleKey={titleKey} open={numbering} onOpenChange={setNumbering} submitLabel={t('Save and search')} onSaved={search} />
+    </>
   );
 }
 
@@ -749,11 +765,11 @@ function GroupDetail({ group, filters, run, refresh }: { group: QueueGroupRow; f
         ? reasonText(stuck)
         : t('{count} / {total} episodes', { count: completed, total });
   // The bar of the whole series: the part of its episodes that is complete, or the part of its download that the
-  // client reports while it downloads. A series that searches, that the search did not find, that found no match, or
-  // that is stuck has no work to fill.
+  // client reports while it downloads. A series that waits for its turn, that searches, that the search did not find,
+  // that found no match, or that is stuck has no work to fill.
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
   const bar =
-    status === 'searching' || status === 'not_found' || status === 'no_match' || status === 'stuck' ? undefined : status === 'downloading' ? (
+    status === 'queued' || status === 'searching' || status === 'not_found' || status === 'no_match' || status === 'stuck' ? undefined : status === 'downloading' ? (
       <Progress value={Math.round((download ?? 0) * 100)} label={`${groupName(group)} ${t('Download')}`} />
     ) : (
       <Progress value={percent} label={t('{count} / {total} episodes', { count: completed, total })} />

@@ -4,6 +4,7 @@ import { defaultProfiles, defaultSizes, unlimitedSizes } from '../../src/library
 import { episode, indexer, movie, NOW, release, title } from '../helpers/test-fixtures.ts';
 import { emptyData } from '../../src/core/db.ts';
 import type { DecideContext, Profile, Want } from '../../src/types.ts';
+import type { Numbering } from '@ladarr/shared/types';
 
 const settings = { ...emptyData().settings };
 const ctx = (extra: Partial<DecideContext> = {}): DecideContext => ({
@@ -152,7 +153,7 @@ describe('packs', () => {
   it('checks the size and preferred distance against the known coverage of a pack', () => {
     const quality = emptyData();
     quality.qualitySizes.tv['webdl-1080'] = { min: 12.5, preferred: 60, max: 100 };
-    const context = ctx({ quality, coverage: () => ({ titleKey: show.key, season: 1, numbers: [2] }) });
+    const context = ctx({ quality, coverage: () => ({ titleKey: show.key, season: 1, numbers: [2], numberingRevision: 0 }) });
     const name = 'Show.Name.S01.1080p.WEB-DL-GRP';
     expect(decide(release(name), season1, context)).toMatchObject({ accepted: true, mibPerMinute: 60, distance: 0 });
     expect(decide(release(name, { sizeBytes: 120 * 45 * 1024 * 1024 }), season1, context)).toMatchObject({
@@ -168,16 +169,19 @@ describe('a season that the releases count as two', () => {
   // TMDB counts 23 episodes in season 1. The releases count the last ten as season 2, which TMDB does not have.
   const split = title({ episodes: Array.from({ length: 23 }, (_, index) => episode(1, index + 1, '2020-01-01')) });
   const rest = [14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
-  const continuation = { releaseSeason: 2, season: 1, from: 14 };
-  const restEpisode: Want = { kind: 'episode', title: split, season: 1, number: 14, continuation };
-  const restSeason: Want = { kind: 'season', title: split, season: 1, continuation };
+  // The last ten episodes of TMDB season 1 are release season 2, from its first episode.
+  const numbering: Numbering = { revision: 1, ranges: [{ season: 1, from: 14, to: 23, releaseSeason: 2, releaseFrom: 1 }] };
+  const restEpisode: Want = { kind: 'episode', title: split, season: 1, number: 14, numbering };
+  const restSeason: Want = { kind: 'season', title: split, season: 1, releaseSeason: 2, numbering };
   const restPack = () => release('Show.Name.S02.1080p.WEB-DL-GRP', { sizeBytes: 10 * 600 * MIB });
 
   it('reads the number of the release as a place in the rest of the season', () => {
     expect(codes('Show.Name.S02E01.1080p.WEB-DL-GRP', restEpisode)).toEqual([]);
     expect(codes('Show.Name.S02E02.1080p.WEB-DL-GRP', restEpisode)).toEqual(['wrong_episode']);
-    // The numbering of the title still matches its own target.
-    expect(codes('Show.Name.S01E14.1080p.WEB-DL-GRP', restEpisode)).toEqual([]);
+    // An episode outside the range keeps the numbering of the title.
+    expect(codes('Show.Name.S01E13.1080p.WEB-DL-GRP', { ...restEpisode, number: 13 })).toEqual([]);
+    // The range gives 1x14 to release 2x01, so a release of season 1 cannot claim that target too.
+    expect(codes('Show.Name.S01E14.1080p.WEB-DL-GRP', restEpisode)).toEqual(['wrong_episode']);
     expect(codes('Show.Name.S01E01.1080p.WEB-DL-GRP', restEpisode)).toEqual(['wrong_episode']);
   });
 
@@ -187,7 +191,7 @@ describe('a season that the releases count as two', () => {
     expect(decision.covers).toEqual(rest.map((number) => ({ season: 1, number })));
   });
 
-  it('checks the size of a continuation pack against only the remaining episodes', () => {
+  it('checks the size of a mapped pack against only the remaining episodes', () => {
     const quality = emptyData();
     quality.qualitySizes.tv['webdl-1080'] = { min: 12.5, preferred: 60, max: 100 };
     const decision = decide(release('Show.Name.S02.1080p.WEB-DL-GRP', { sizeBytes: 10 * 120 * 45 * MIB }), restSeason, ctx({ quality }));
@@ -199,14 +203,14 @@ describe('a season that the releases count as two', () => {
   });
 
   it('takes only the episodes that an earlier download of the pack held', () => {
-    const held = (numbers: number[]) => ctx({ coverage: () => ({ titleKey: 'tv:1', season: 1, numbers }) });
+    const held = (numbers: number[], revision = numbering.revision) => ctx({ coverage: () => ({ titleKey: 'tv:1', season: 1, numbers, numberingRevision: revision }) });
     expect(decide(restPack(), restSeason, held(rest)).covers).toEqual(rest.map((number) => ({ season: 1, number })));
     // The pack held the first part of the season, so it holds nothing of the rest: the search does not take it again.
     const first = decide(restPack(), restSeason, held([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]));
     expect(first.covers).toEqual([]);
     expect(first.rejections).toContain('pack_covers_others');
     // A pack of the season that held a part of it covers that part only.
-    const part = decide(release('Show.Name.S01.1080p.WEB-DL-GRP'), season1, held([1, 2]));
+    const part = decide(release('Show.Name.S01.1080p.WEB-DL-GRP'), season1, held([1, 2], 0));
     expect(part).toMatchObject({ accepted: true, kind: 'pack', covers: [{ season: 1, number: 1 }, { season: 1, number: 2 }] });
   });
 

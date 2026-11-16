@@ -29,6 +29,7 @@ const entry = {
   clientId: null,
   manualMatch: null,
   importResult: null,
+  numbering: null,
 } as unknown as QueueEntry;
 
 const job = {

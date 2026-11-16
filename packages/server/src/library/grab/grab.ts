@@ -5,7 +5,7 @@ import { ClientError } from '../downloads/qbittorrent.ts';
 import { addedByApp, isActive } from '../downloads/queue.ts';
 import { hasFreeSlot } from '../downloads/slots.ts';
 import { isSample, isVideoFile, parseEpisodes, releaseEpisodes } from '../parse.ts';
-import { splitOf } from '../split.ts';
+import { NO_NUMBERING } from '../numbering.ts';
 import { infoHashOf, magnetHash, torrentComment, torrentFiles } from './torrent.ts';
 import { IndexerError } from './torznab.ts';
 import type { ClientHandle, GrabberDeps, ParsedEpisodes, QueueEntry, Torrent } from '../../types.ts';
@@ -38,45 +38,25 @@ const decode = (entry: QueueEntry): Source | null =>
 export function createGrabber({ queue, finder, indexers, clients, save, enqueue, reconcileMs = 1_000 }: GrabberDeps) {
   // The entries of a pack that its files do not cover, and the number of files that name an episode. The check is the
   // same as the check of the import. The names come from the torrent file, before the client has the release, or from
-  // the client, when it has the release already.
+  // the client, when it has the release already. The numbering of the acquisition turns the release numbers into the
+  // catalog episodes, so a file of another release season still finds its target.
   function missingFrom(files: string[], entries: QueueEntry[]) {
-    // A torrent with one file has no list to compare.
-    if (files.length < 2) return { missing: [] as QueueEntry[], releaseSeason: null as number | null, numbers: [] as number[] };
     const title = db.data.titles[entries[0]!.titleKey];
-    const continuation = entries.find((entry) => entry.continuation)?.continuation ?? null;
+    const numbering = entries.find((entry) => entry.numbering)?.numbering ?? title?.numbering ?? NO_NUMBERING;
     const videos = files.filter((file) => isVideoFile(file) && !isSample(file));
     // The numbers of the release, which the record of the pack keeps for the manual search of the other seasons.
     const readings = videos.map((file) => parseEpisodes(file)).filter((item): item is ParsedEpisodes => Boolean(item));
+    // A torrent of one file, or a list that names no episode, gives no evidence about the episodes that it holds. The
+    // import reads the files of the client and finds the episode there. A pack of several files that name no episode
+    // is a release that failed, so the record of its files says that it holds none of the season.
+    if (files.length <= 1 && !readings.length) return { missing: [] as QueueEntry[], releaseSeason: null as number | null, numbers: [] as number[] };
     const seasons = new Set(readings.map((item) => item.season));
-    const held = videos.map((file) => releaseEpisodes(file, title?.episodes ?? [], continuation, null, title?.meta.title ?? null));
+    const held = videos.map((file) => releaseEpisodes(file, title?.episodes ?? [], numbering, null, title?.meta.title ?? null));
     return {
       missing: entries.filter((entry) => !held.some((found) => found?.season === entry.season && found.numbers.includes(entry.number!))),
       releaseSeason: seasons.size === 1 ? [...seasons][0]! : null,
       numbers: [...new Set(readings.flatMap((item) => item.numbers))].sort((a, b) => a - b),
     };
-  }
-
-  // The mapping that the files of a pack establish, when the release numbers its seasons in another way than the title.
-  // The files are the evidence: a release that names its season 2 for the last episodes of season 1 of the title makes
-  // those files the episodes from `from` up. A pack of the season of the title keeps the numbering of the title. False
-  // stops the pack: its files give no mapping, and its targets stay stuck with the reason of the partial pack.
-  function applyMapping(entries: QueueEntry[], files: string[]): boolean {
-    const title = db.data.titles[entries[0]!.titleKey];
-    const season = entries[0]!.season;
-    if (!title || season === null || files.length < 2) return true;
-    const readings = files.filter((file) => isVideoFile(file) && !isSample(file)).map((file) => parseEpisodes(file)).filter((item): item is ParsedEpisodes => Boolean(item));
-    if (!readings.length) return true;
-    const seasons = new Set(readings.map((item) => item.season));
-    if (seasons.size !== 1) return true;
-    const releaseSeason = [...seasons][0]!;
-    if (releaseSeason === season) return true;
-    const numbers = [...new Set(readings.flatMap((item) => item.numbers))];
-    const total = title.episodes.filter((episode) => episode.season === season).length;
-    const missing = entries.flatMap((entry) => (entry.number === null ? [] : [entry.number]));
-    const split = splitOf({ season, total, numbers, missing });
-    if (!split) return false;
-    for (const entry of entries) entry.continuation = { releaseSeason, season, from: split.from };
-    return true;
   }
 
   // The files of the .torrent, or null when ladarr cannot read the list.
@@ -172,7 +152,6 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
         const held = seen ? await clients.find(connection, seen) : undefined;
         if (held) {
           const files = ref.kind === 'pack' ? (await api.files(held.hash)).map((file) => file.name) : [];
-          if (ref.kind === 'pack' && !applyMapping(entries, files)) return finder.refusePack(entries, 'pack_mapping_unknown');
           const pack = missingFrom(files, entries);
           if (pack.missing.length) entries = finder.partial(entries, pack.missing, { files: files.length, releaseSeason: pack.releaseSeason, numbers: pack.numbers });
           if (entries.length) take(entries, connection, held);
@@ -191,9 +170,8 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
           // A pack must hold the episodes that it covers. The torrent file lists its files before the client has any data.
           if (ref.kind === 'pack') {
             const files = packFiles(got.torrent);
-            // A list that ladarr cannot read gives no mapping. The import still blocks a missing episode.
+            // A list that ladarr cannot read gives no check. The import still blocks a missing episode.
             if (files) {
-              if (!applyMapping(entries, files)) return finder.refusePack(entries, 'pack_mapping_unknown');
               const pack = missingFrom(files, entries);
               if (pack.missing.length) entries = finder.partial(entries, pack.missing, { files: files.length, releaseSeason: pack.releaseSeason, numbers: pack.numbers });
               if (!entries.length) return;

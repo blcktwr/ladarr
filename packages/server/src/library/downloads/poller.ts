@@ -97,7 +97,7 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
           : files.find((item) => {
               if (manual) return item.name === manual || item.name.endsWith(`/${manual}`);
               // The whole name of the file, so a folder that names the season is read.
-              const parsed = releaseEpisodes(item.name, title?.episodes ?? [], entry.continuation ?? null, null, title?.meta.title ?? null);
+              const parsed = releaseEpisodes(item.name, title?.episodes ?? [], entry.numbering ?? title?.numbering ?? null, null, title?.meta.title ?? null);
               return entry.number !== null && parsed?.season === entry.season && parsed.numbers.includes(entry.number);
             });
       if (file) {

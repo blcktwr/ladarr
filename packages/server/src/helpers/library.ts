@@ -92,6 +92,7 @@ export function detail(title: Title): TitleDetail {
     episodesLoadedAt: title.episodesLoadedAt,
     seasons,
     resolutions: resolutionsOf(title),
+    numbering: title.numbering ?? { revision: 0, ranges: [] },
   };
 }
 

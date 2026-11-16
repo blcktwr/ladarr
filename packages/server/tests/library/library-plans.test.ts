@@ -119,8 +119,8 @@ describe('apply of a removal with files', () => {
   it('removes the coverage of a removed title and keeps the coverage of other titles', async () => {
     await seedShow();
     app.db.data.releaseCoverage = {
-      show: { titleKey: 'tv:1', season: 1, numbers: [1, 2] },
-      other: { titleKey: 'tv:9', season: 1, numbers: [1] },
+      show: { titleKey: 'tv:1', season: 1, numbers: [1, 2], numberingRevision: 0 },
+      other: { titleKey: 'tv:9', season: 1, numbers: [1], numberingRevision: 0 },
     };
     await app.del('/library/tv:1');
     expect(Object.keys(app.db.data.releaseCoverage)).toEqual(['other']);
@@ -482,9 +482,9 @@ describe('removal of one season', () => {
   it('removes only the coverage of the season that is removed', async () => {
     await seedTwoSeasons();
     app.db.data.releaseCoverage = {
-      s1: { titleKey: 'tv:1', season: 1, numbers: [1, 2] },
-      s2: { titleKey: 'tv:1', season: 2, numbers: [1] },
-      other: { titleKey: 'tv:9', season: 1, numbers: [1] },
+      s1: { titleKey: 'tv:1', season: 1, numbers: [1, 2], numberingRevision: 0 },
+      s2: { titleKey: 'tv:1', season: 2, numbers: [1], numberingRevision: 0 },
+      other: { titleKey: 'tv:9', season: 1, numbers: [1], numberingRevision: 0 },
     };
     await apply((await preview({ action: 'remove', keys: ['tv:1'], season: 1 })).planId);
     expect(Object.keys(app.db.data.releaseCoverage).sort()).toEqual(['other', 's2']);

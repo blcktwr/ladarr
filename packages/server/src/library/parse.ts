@@ -1,4 +1,5 @@
-import type { Continuation, EpisodeFacts, ParsedEpisodes } from '../types.ts';
+import type { EpisodeFacts, Numbering, ParsedEpisodes } from '../types.ts';
+import { catalogPoints } from './numbering.ts';
 const MAX_RANGE = 50;
 const VIDEO = /\.(mkv|mp4|m4v|avi|mov|wmv|ts|webm)$/i;
 const SAMPLE = /(^|[^a-z0-9])sample([^a-z0-9]|$)/i;
@@ -101,15 +102,18 @@ export function titleNumbers(parsed: ParsedEpisodes, episodes: { season: number;
   });
 }
 
-// The season and the episodes of the title that a file of a release names. A release of the rest of a season numbers its
-// own season from 1, so its numbers are the places in that rest.
+// The season and the episodes of the title that a file of a release names. The numbers of the file are the numbers of
+// the release, and the numbering maps them to the episodes of the title. A number outside the saved ranges keeps its
+// own season and episode. A number that an explicit range claims for another episode gives no match: the file
+// contradicts the map, so no fallback takes it.
 // The file and its path give more than a marker: an air date, the absolute position of an anime release, and the name of
 // the episode. They count in that order, because a marker in the name is the most precise signal.
-export function releaseEpisodes(name: string, episodes: EpisodeFacts[], continuation?: Continuation | null, seasonHint?: number | null, titleName?: string | null): ParsedEpisodes | undefined {
+export function releaseEpisodes(name: string, episodes: EpisodeFacts[], numbering?: Numbering | null, seasonHint?: number | null, titleName?: string | null): ParsedEpisodes | undefined {
   const parsed = parseEpisodes(name, seasonHint);
   if (parsed) {
-    if (continuation && parsed.season === continuation.releaseSeason) {
-      return { season: continuation.season, numbers: titleNumbers({ season: continuation.season, numbers: parsed.numbers.map((number) => continuation.from + number - 1) }, episodes) };
+    if (numbering?.ranges.length) {
+      const converted = catalogPoints(numbering, parsed.season, parsed.numbers);
+      return converted ? { season: converted.season, numbers: titleNumbers(converted, episodes) } : undefined;
     }
     return { season: parsed.season, numbers: titleNumbers(parsed, episodes) };
   }

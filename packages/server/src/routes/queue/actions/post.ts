@@ -1,4 +1,5 @@
 import { db } from '../../../core/db.ts';
+import { normalizeNumbering, releaseSeasons } from '../../../library/numbering.ts';
 import type { RequestHandler } from 'express';
 import { deprioritize, prioritize } from '../../../core/jobs.ts';
 import { ClientError } from '../../../library/downloads/qbittorrent.ts';
@@ -155,6 +156,15 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     } else if (action === 'search_other_seasons') return void res.status(400).json({ error: 'invalid_request' });
     else if (Array.isArray(ids) && ids.length <= 1000 && ids.every((id) => typeof id === 'string')) picked = ids.flatMap((id) => (db.data.queue[id] && shown(db.data.queue[id]!) ? [db.data.queue[id]!] : []));
     else return void res.status(400).json({ error: 'invalid_request' });
+
+    // The search of the other seasons needs the saved numbering of the season. The map is a decision of the user, so a
+    // missing one opens the editor instead of guessing from the files of a pack.
+    if (action === 'search_other_seasons' && group && typeof group.titleKey === 'string') {
+      const title = db.data.titles[group.titleKey];
+      const season = group.season ?? null;
+      const mapped = title && season !== null ? releaseSeasons(normalizeNumbering(title.numbering), season).filter((releaseSeason) => releaseSeason !== season) : [];
+      if (!mapped.length) return void res.status(409).json({ error: 'numbering_required' });
+    }
 
     // Before a removal, read the torrents in the client. The queue decides if ladarr added a torrent.
     let removal: { torrents: Map<string, Torrent>; attached: Set<string> } | undefined;

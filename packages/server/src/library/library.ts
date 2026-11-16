@@ -67,16 +67,17 @@ export function availability(title: Title, clock: Clock): Availability {
 
 const bySeasonNumber = (a: Episode, b: Episode) => a.season - b.season || a.number - b.number;
 
-// Takes the fresh TMDB episodes and keeps the choices and files of the user.
-export function mergeEpisodes(existing: Episode[], fetched: EpisodeMeta[]): Episode[] {
+// Takes the fresh TMDB episodes and keeps the choices and files of the user. An episode that TMDB drops stays when the
+// caller says that a saved map, an acquisition, or an import step still refers to it.
+export function mergeEpisodes(existing: Episode[], fetched: EpisodeMeta[], keep: (episode: Episode) => boolean = () => false): Episode[] {
   const before = new Map(existing.map((episode) => [episodeKey(episode), episode]));
   const merged = fetched.map((meta) => {
     const old = before.get(episodeKey(meta));
     return { ...meta, override: old?.override ?? null, fileId: old?.fileId ?? null };
   });
   const fresh = new Set(merged.map(episodeKey));
-  // TMDB can drop an episode. The user keeps one that has a choice or a file.
+  // TMDB can drop an episode. The user keeps one that has a choice, a file, or a reference from the numbering.
   // A file links to its episode through fileId, so this check covers files too.
-  const kept = existing.filter((episode) => !fresh.has(episodeKey(episode)) && (episode.override || episode.fileId));
+  const kept = existing.filter((episode) => !fresh.has(episodeKey(episode)) && (episode.override || episode.fileId || keep(episode)));
   return [...merged, ...kept].sort(bySeasonNumber);
 }

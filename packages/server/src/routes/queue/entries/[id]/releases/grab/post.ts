@@ -1,6 +1,7 @@
 import { db } from '../../../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { REJECTION_TEXT } from '../../../../../../library/grab/decide.ts';
+import { normalizeNumbering, releasePoint } from '../../../../../../library/numbering.ts';
 import { shown, titleOf } from '../../../../../../helpers/queue.ts';
 import type { Finder, Queue, RawRelease } from '../../../../../../types.ts';
 
@@ -33,8 +34,13 @@ export function queueEntryReleaseGrabPost(queue: Queue, finder: Finder): Request
       const rejections = [{ code: 'not_an_episode', message: REJECTION_TEXT.not_an_episode }];
       return void res.status(409).json({ error: 'release_rejected', rejections });
     }
+    const numbering = normalizeNumbering(title.numbering);
     const targets: [number | null, number | null][] =
-      want.kind === 'movie' ? [[null, null]] : want.kind === 'episode' ? [[want.season, want.number]] : title.episodes.filter((episode) => episode.season === want.season).map((episode) => [episode.season, episode.number]);
+      want.kind === 'movie'
+        ? [[null, null]]
+        : want.kind === 'episode'
+          ? [[want.season, want.number]]
+          : title.episodes.filter((episode) => releasePoint(numbering, episode)?.season === want.releaseSeason).map((episode) => [episode.season, episode.number]);
     if (!targets.length) return void res.status(409).json({ error: 'release_rejected', rejections: [{ code: 'wrong_season', message: REJECTION_TEXT.wrong_season }] });
     const entries = targets.map(([season, number]) => queue.ensure(entry.titleKey, season, number));
     const outcome = finder.grabManual(entries, release, want);

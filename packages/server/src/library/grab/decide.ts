@@ -1,8 +1,9 @@
 import { profilesFor } from '../../core/db.ts';
+import { catalogPoints, normalizeNumbering, rangeOfCatalog, releasePoint } from '../numbering.ts';
 import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE } from './quality.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import { magnetHash } from './torrent.ts';
-import type { Covered, DecideContext, Decision, Episode, ExplainedDecision, Profile, RawRelease, Title, Want } from '../../types.ts';
+import type { Covered, DecideContext, Decision, Episode, ExplainedDecision, Numbering, Profile, RawRelease, Title, Want } from '../../types.ts';
 
 // The text for each code. It is the key of the web i18n, and it names the affected title in the user interface, so it has no title in it.
 export const REJECTION_TEXT: Record<string, string> = {
@@ -34,6 +35,10 @@ export const REJECTION_TEXT: Record<string, string> = {
 };
 
 const alias = (title: Title) => [title.meta.title, title.meta.originalTitle, ...title.meta.aliases].filter(Boolean).map(normalizeTitle);
+
+// A manual choice takes any release, also one of another title, but it can not invent the episode that the release
+// holds. A person says which episode a file has through the match of the import.
+const MANUAL_KEEPS = new Set(['wrong_season', 'wrong_episode', 'not_an_episode', 'not_a_pack', 'multi_season_pack', 'daily_ambiguous', 'pack_covers_others']);
 
 // The year when the title started. A release cannot be older than the title that it names, and a later year can be the
 // year of a season.
@@ -69,17 +74,18 @@ export function decide(release: RawRelease, want: Want, ctx: DecideContext): Dec
       else if (parsed.year !== title.meta.year) reject('year_mismatch');
     }
   } else if (want.kind === 'episode') {
+    const numbering = normalizeNumbering(want.numbering);
     let numbers = parsed.episodes;
     let season = parsed.season;
-    // A release of the rest of a season numbers its own season from 1, so its numbers give the places in that rest.
-    const continuation = want.continuation;
-    if (continuation && season === continuation.releaseSeason) {
-      numbers = numbers.map((number) => continuation.from + number - 1);
-      season = continuation.season;
-    }
+    // The numbers of the release go to the numbers of the catalog through the saved numbering. A number that the map
+    // can not convert stops the release: a fallback would give the target a file of another episode.
+    const converted = parsed.season !== null && numbers.length ? catalogPoints(numbering, parsed.season, numbers) : null;
+    const unresolved = numbering.ranges.length > 0 && parsed.season !== null && numbers.length > 0 && !converted;
+    const mapped = rangeOfCatalog(numbering, want.season, want.number) !== null;
     // A pack is not an episode, also when its name carries the air date of one.
     if (parsed.pack || parsed.multiSeason) reject(parsed.multiSeason ? 'multi_season_pack' : 'not_an_episode');
-    else if (parsed.absolute !== null && !continuation) {
+    else if (unresolved) reject('wrong_episode');
+    else if (parsed.absolute !== null && !mapped) {
       // An anime release names the absolute number of the episode. It matches the episode with that number.
       if (want.season === 0 || absoluteNumber(title, want.season, want.number) !== parsed.absolute) reject('wrong_episode');
       else {
@@ -93,6 +99,9 @@ export function decide(release: RawRelease, want: Want, ctx: DecideContext): Dec
         season = same[0]!.season;
         numbers = [same[0]!.number];
       } else reject('daily_ambiguous');
+    } else if (converted) {
+      season = converted.season;
+      numbers = converted.numbers;
     } else if (season === null || !numbers.length) reject('not_an_episode');
     if (!rejections.includes('daily_ambiguous') && season !== null && numbers.length) {
       if (season !== want.season) reject('wrong_season');
@@ -108,19 +117,19 @@ export function decide(release: RawRelease, want: Want, ctx: DecideContext): Dec
     }
   } else {
     kind = 'pack';
-    // A release of the rest of a season names the next season, and holds the episodes of the season from `from` up.
-    const continuation = want.continuation;
-    const releaseSeason = continuation?.releaseSeason ?? want.season;
+    const numbering = normalizeNumbering(want.numbering);
+    // A pack names one release season. The saved ranges say which catalog episodes that season holds.
+    const releaseSeason = want.releaseSeason ?? want.season;
     if (parsed.multiSeason) reject('multi_season_pack');
     else if (!parsed.pack) reject('not_a_pack');
     else if (parsed.season !== releaseSeason) reject('wrong_season');
     else {
-      const from = continuation?.from ?? 0;
-      const inSeason = title.episodes.filter((episode) => episode.season === want.season && episode.number >= from);
+      const inSeason = title.episodes.filter((episode) => releasePoint(numbering, episode)?.season === releaseSeason);
       // The files of an earlier download of this pack say which episodes it holds. A pack can hold fewer episodes than
-      // TMDB gives the season, so the record decides instead of the count of the season.
+      // TMDB gives the season, so the record decides instead of the count of the season. A record of another numbering
+      // says nothing about this one.
       const held = ctx.coverage(release);
-      const known = held && held.titleKey === title.key && held.season === want.season ? new Set(held.numbers) : null;
+      const known = held && held.titleKey === title.key && held.season === want.season && held.numberingRevision === numbering.revision ? new Set(held.numbers) : null;
       covers = inSeason.filter((episode) => !known || known.has(episode.number)).map((episode) => ({ season: episode.season, number: episode.number }));
       if (!inSeason.length) reject('wrong_season');
       // The pack held other episodes of the season, so it gives none of this target.
@@ -173,8 +182,9 @@ export function decide(release: RawRelease, want: Want, ctx: DecideContext): Dec
     if (episode && ctx.hasFile(episode) && !ctx.manual) reject('already_available');
   }
 
-  // A person can take any release by hand, so a manual choice has no rejection.
-  const finalRejections = ctx.manual ? [] : [...new Set(rejections)];
+  // A person can take any release by hand, so a manual choice has no rejection except the episode correspondence of the
+  // release. A person says which episode a file holds through the match of the import.
+  const finalRejections = ctx.manual ? [...new Set(rejections.filter((code) => MANUAL_KEEPS.has(code)))] : [...new Set(rejections)];
 
   return {
     release,
@@ -183,6 +193,7 @@ export function decide(release: RawRelease, want: Want, ctx: DecideContext): Dec
     accepted: finalRejections.length === 0,
     kind,
     covers,
+    numbering: want.kind === 'movie' ? null : normalizeNumbering(want.numbering),
     mibPerMinute: quality.mibPerMinute,
     rank: quality.rank ?? profiles.length * RANK_STRIDE,
     indexerPriority: push?.priority ?? 50,
