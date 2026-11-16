@@ -35,3 +35,18 @@ test('offers the search of the other seasons on the card of the season', async (
   // The retry of the season comes from the menu of the three points, not from the card.
   await expect(main.getByRole('button', { name: 'Try again', exact: true })).toBeHidden();
 });
+
+test('lists every episode of the season under the tab that filters the rows', async ({ page }) => {
+  await expect.poll(reason, { timeout: 60_000 }).toMatchObject({ code: 'pack_partial' });
+
+  await page.goto(`${URL_BASE}/activity`);
+  await page.getByRole('tab', { name: /Stuck/ }).click();
+  await page.locator('[data-row="group:tv:1:1"]').click();
+  await page.locator('[data-row="season:tv:1|1"]').click();
+  // The tab filters the rows of the page. The season keeps its whole list, and the episodes of the pack show with
+  // their own status beside the one that waits for the user.
+  const episodes = page.getByRole('table', { name: 'Episodes of season 1' });
+  await expect(episodes.locator('[data-row="entry:tv:1:1x1"]')).toBeVisible();
+  await expect(episodes.locator('[data-row="entry:tv:1:1x2"]')).toBeVisible();
+  await expect(episodes.locator('[data-row="entry:tv:1:1x3"]')).toContainText('Stuck');
+});

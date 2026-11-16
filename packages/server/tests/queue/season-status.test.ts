@@ -39,10 +39,11 @@ describe('season status', () => {
     expect((await api.get('/queue?stage=importing')).body.total).toBe(0);
     expect((await api.get('/queue?stage=downloading')).body.total).toBe(0);
 
-    // The inspector reads the aggregate of the whole season beside the children of its tab.
+    // The inspector reads the aggregate of the whole season, and it lists every episode of the season: the tab
+    // filters the rows, not the children.
     const group = (await api.get('/queue/groups/tv:1?stage=downloading')).body;
     expect(group.group).toMatchObject({ status: 'stuck', total: 2, counts: { downloading: 1, stuck: 1 }, problem: { code: 'file_not_found' } });
-    expect(group.items.map((entry: { status: string }) => entry.status)).toEqual(['downloading']);
+    expect(group.items.map((entry: { status: string }) => entry.status)).toEqual(['downloading', 'stuck']);
 
     // The season counts only in the tab of its aggregate status.
     const summary = (await api.get('/queue/summary')).body;
