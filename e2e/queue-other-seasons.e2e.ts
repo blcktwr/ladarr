@@ -49,4 +49,6 @@ test('lists every episode of the season under the tab that filters the rows', as
   await expect(episodes.locator('[data-row="entry:tv:1:1x1"]')).toBeVisible();
   await expect(episodes.locator('[data-row="entry:tv:1:1x2"]')).toBeVisible();
   await expect(episodes.locator('[data-row="entry:tv:1:1x3"]')).toContainText('Stuck');
+  // The row of an episode has no menu of actions.
+  await expect(episodes.getByRole('button', { name: /^Actions for/ })).toHaveCount(0);
 });

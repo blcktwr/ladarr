@@ -645,7 +645,7 @@ function MasterRow({ row }: { row: QueueRow }) {
 const seasonColumns = [{ label: 'Season', hideLabel: true }, { label: 'Actions', hideLabel: true, align: 'end' as const }];
 
 // The episodes of a season, a page of them at a time.
-function SeasonEpisodes({ season, entries, run, refresh, openLogs }: { season: number; entries: QueueEntryView[]; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void }) {
+function SeasonEpisodes({ season, entries, run, refresh }: { season: number; entries: QueueEntryView[]; run: Run; refresh: () => void }) {
   const [page, setPage] = useState(1);
   const pages = Math.max(1, Math.ceil(entries.length / EPISODES));
   const current = Math.min(page, pages);
@@ -667,12 +667,7 @@ function SeasonEpisodes({ season, entries, run, refresh, openLogs }: { season: n
                   {entry.reason?.action === 'attach' && <AttachDialog entry={entry} onDone={refresh} />}
                 </>
               }
-              actions={
-                <>
-                  {entry.reason?.action === 'match' && <MatchDialog entry={entry} onDone={refresh} />}
-                  <ActionMenu label={t('Actions for {name}', { name: entry.label })} items={entryMenu(entry, run, openLogs)} />
-                </>
-              }
+              actions={entry.reason?.action === 'match' ? <MatchDialog entry={entry} onDone={refresh} /> : undefined}
             />,
           ],
         }))}
@@ -716,7 +711,7 @@ function SeasonTable({ titleKey, entries, opened, onSeason, detail }: { titleKey
 }
 
 // The inspector of a series: the progress of the whole series, and the seasons. A season opens its episodes under its row.
-function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueGroupRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void }) {
+function GroupDetail({ group, filters, run, refresh }: { group: QueueGroupRow; filters: Filters; run: Run; refresh: () => void }) {
   const [season, setSeason] = useState<number | null>(null);
   const { data, error, refetch } = useGroupEntries(group, filters);
   const entries = data?.items;
@@ -816,7 +811,7 @@ function GroupDetail({ group, filters, run, refresh, openLogs }: { group: QueueG
         entries={entries}
         opened={season}
         onSeason={toggle}
-        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} run={run} refresh={refresh} openLogs={openLogs} />}
+        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} run={run} refresh={refresh} />}
       />
     </div>
   );
@@ -875,7 +870,7 @@ function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDele
         {items.length > 0 && <ActionMenu label={t('Actions for {name}', { name: nameOf(row) })} items={items} />}
       </div>
       {row.kind === 'group' ? (
-        <GroupDetail key={`${row.key}|${filters.stage}`} group={row} filters={filters} run={run} refresh={refresh} openLogs={openLogs} />
+        <GroupDetail key={`${row.key}|${filters.stage}`} group={row} filters={filters} run={run} refresh={refresh} />
       ) : row.kind === 'pending' ? (
         <PendingDetail />
       ) : (
