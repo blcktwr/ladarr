@@ -1,8 +1,8 @@
-import { type Db, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import { enqueue } from '../core/jobs.ts';
-import { movieEligibleAt, type Title } from '../library/library.ts';
+import { movieEligibleAt } from '../library/library.ts';
 import { refreshJob } from '../library/metadata.ts';
-import type { Handler } from '../core/worker.ts';
+import type { Db, Handler, Title } from '../types.ts';
 
 const ACTIVE_REFRESH_MS = 12 * 60 * 60_000;
 const IDLE_REFRESH_MS = 7 * 24 * 60 * 60_000;

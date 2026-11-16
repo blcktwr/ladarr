@@ -1,7 +1,7 @@
 import type { QueueTorrent } from '@ladarr/shared/types';
 import { downloaderOf } from '../library/grab/grab.ts';
 import { torrentInfo } from '../library/grab/torrent.ts';
-import type { IndexerService } from '../library/grab/torznab.ts';
+import type { IndexerService } from '../types.ts';
 
 // What the .torrent of a link holds. ladarr does not keep the file, so the indexer sends it again. The indexer sends a
 // magnet when it has no file to send, and a magnet carries no file list.

@@ -1,6 +1,6 @@
 import type { SeriesEpisodes } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Tmdb } from '../../../../../metadata/tmdb.ts';
+import type { Tmdb } from '../../../../../types.ts';
 
 // Every episode of every season of a series, for the page of a title that is not in the library.
 // A season with no episodes is not there.

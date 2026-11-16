@@ -1,22 +1,22 @@
-import { type Db, db, profilesFor } from '../../core/db.ts';
+import { db, profilesFor } from '../../core/db.ts';
 import { randomUUID } from 'node:crypto';
 import { languageOfRegion } from '../../core/languages.ts';
 import { episodeEligibleAt } from '../../core/dates.ts';
-import { absoluteNumber, bestOf, decide, explainDecision, REJECTION_TEXT, rejectionSummary, topRejections, type Context, type Decision, type Want } from './decide.ts';
-import { indexerName, indexersFor, notUsedReason, seedLimits, type Indexer, type IndexerApp } from './indexers.ts';
+import { absoluteNumber, bestOf, decide, explainDecision, REJECTION_TEXT, rejectionSummary, topRejections } from './decide.ts';
+import { indexerName, indexersFor, notUsedReason, seedLimits } from './indexers.ts';
 import { explainProfile } from './quality.ts';
-import { enqueue as enqueueJob, JobError, prioritize, type EnqueueInput, type Job } from '../../core/jobs.ts';
-import { isMonitored, movieEligibleAt, type Episode, type Title } from '../library.ts';
+import { enqueue as enqueueJob, JobError, prioritize } from '../../core/jobs.ts';
+import { isMonitored, movieEligibleAt } from '../library.ts';
 import { catalog, itemFields, titleFields } from '../../core/log.ts';
-import { entryId, isActive, phaseOfEntry, type Queue, type QueueEntry, type ReleaseRef, type SearchState } from '../downloads/queue.ts';
-import { createClients, type Clients } from '../downloads/client-api.ts';
+import { entryId, isActive, phaseOfEntry } from '../downloads/queue.ts';
+import { createClients } from '../downloads/client-api.ts';
 import { importLocal } from '../imports/local.ts';
-import type { Continuation } from '../parse.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
-import type { IndexerService, RawRelease, SearchQuery } from './torznab.ts';
 import { manualUpgradeTargets } from './upgrades.ts';
 import { requestIdFor } from '../../core/outbound.ts';
 import { needsOtherSeasons } from '@ladarr/shared/queue';
+import type { Continuation, Db, DecideContext, Decision, Episode, FinderDeps, Indexer, Job, QueueEntry, RawRelease, ReleaseRef, Scope, SearchPayload, SearchQuery, SearchResume, SearchState, Title, TitleName, Want } from '../../types.ts';
+import type { IndexerApp } from '@ladarr/shared/enums';
 
 // The reason of the attempt that the manual search of the other seasons of the releases starts. A target that a lost
 // job leaves behind continues in that mode, not in a normal search.
@@ -40,30 +40,11 @@ const SEARCH_BUDGET = 12;
 // so the next run continues from them without a new request.
 const SEARCH_CONTINUE_MS = 1_000;
 
-export type Scope = { kind: 'movie' } | { kind: 'season'; season: number } | { kind: 'episode'; season: number; number: number } | { kind: 'absolute'; number: number };
-type TitleName = { value: string; alias: boolean; languages: string[] };
-// The work that a search run left for the next run after it reached its budget. The phase and the target say where
-// the next run continues: the season queries run again from the cache, and the individual queries start at this target.
-export type SearchResume = { phase: 'episode' | 'absolute'; entryId: string };
-// `fresh` skips the cache of raw results. A search that the user asks for is fresh. `manual` marks a target that the
-// user selected, so its individual query runs whatever the age of the episode. `otherSeasons` marks the manual search
-// of the other seasons of the releases: it has its own jobs and it never merges with a normal search.
-export type SearchPayload = { titleKey: string; season: number | null; entryIds: string[]; fresh?: boolean; manual?: boolean; otherSeasons?: boolean; resume?: SearchResume };
-
-type Deps = {
-  queue: Queue;
-  indexers: IndexerService;
-  enqueue: (input: EnqueueInput) => Job;
-  // The download client, so a torrent that already holds the files of a folder stays with the target.
-  clients?: Clients;
-  now?: () => number;
-};
-
 const present = (fileId: string | null) => Boolean(fileId && db.data.files[fileId] && !db.data.files[fileId]!.missing);
 // Ties the log line of a search to the requests that answered it, in the app log and in the request log.
 const newRequestId = () => `req-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 
-export function createFinder({ queue, indexers, enqueue, clients = createClients(), now = Date.now }: Deps) {
+export function createFinder({ queue, indexers, enqueue, clients = createClients(), now = Date.now }: FinderDeps) {
   const cache = new Map<string, { at: number; releases: RawRelease[] }>();
   // Equal queries that run at the same time share one request.
   const inflight = new Map<string, { requestId: string; releases: Promise<RawRelease[]> }>();
@@ -86,7 +67,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     return title.manualRelease || (at !== null && at <= now());
   }
 
-  function decideContext(manual = false): Context {
+  function decideContext(manual = false): DecideContext {
     const hashes = new Set<string>();
     for (const entry of Object.values(db.data.queue)) if (entry.transferHash && isActive(entry) && phaseOfEntry(entry) !== 'queued') hashes.add(entry.transferHash);
     return {
@@ -1331,7 +1312,6 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     return [...bySeason.values()].flat();
   }
 
-
   // A release that the download confirmed bad ends the attempt. The entry goes back to Queued with a new attempt and a
   // new search. After a few attempts it asks for the user.
   function fallback(entries: QueueEntry[], cause: string, detail?: Record<string, unknown>) {
@@ -1356,5 +1336,3 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
 
   return { requestSearch, reserve, fallback, partial, refusePack, startOtherSeasons, enqueueSearch, interactive, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
 }
-
-export type Finder = ReturnType<typeof createFinder>;

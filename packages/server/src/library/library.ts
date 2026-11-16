@@ -1,50 +1,10 @@
-import type { Availability, MediaType, Override, Policy } from '@ladarr/shared/enums';
+import type { Availability, MediaType } from '@ladarr/shared/enums';
 import { episodeEligibleAt, releaseInstant } from '../core/dates.ts';
-import type { EpisodeMeta, TitleMeta } from '../metadata/tmdb.ts';
-
-export type { Availability, Override, Policy };
-
-// The TMDB part replaces on each refresh. `override` and `fileId` belong to ladarr, so a refresh keeps them.
-export type Episode = EpisodeMeta & { override: Override | null; fileId: string | null };
-
-// `meta` holds the TMDB facts. Every other field is a choice of the user or a fact of ladarr,
-// and a refresh never changes it. This keeps a refresh from changing a policy.
-export type Title = {
-  key: string;
-  mediaType: MediaType;
-  tmdbId: number;
-  meta: TitleMeta;
-  // Null while the refresh job fetches the TMDB facts of a title that entered the queue first.
-  // A record from before this field always has the facts, so it lacks the field.
-  metaLoadedAt?: number | null;
-  refreshedAt: number;
-  addedAt: number;
-  // Paused is a control state. It does not change the policy that applies after a resume.
-  paused: boolean;
-  policy: Policy;
-  // With the Future policy, an episode is monitored when it airs at this time or later.
-  futureFrom: number;
-  seriesType: 'standard' | 'anime';
-  // Null uses the default preset of the settings.
-  preset: string | null;
-  rootId: string;
-  // The folder of the title, relative to its root. Null until a folder is known.
-  folder: string | null;
-  // A movie with this flag can be searched before a known digital or physical release date.
-  manualRelease: boolean;
-  seasonOverrides: Record<string, Override>;
-  // Null until the first refresh has fetched the seasons.
-  episodesLoadedAt: number | null;
-  episodes: Episode[];
-  // The managed file of a movie.
-  fileId: string | null;
-};
+import type { Clock, Episode, EpisodeMeta, Title } from '../types.ts';
 
 export const titleKey = (mediaType: MediaType, tmdbId: number) => `${mediaType}:${tmdbId}`;
 const episodeKey = (episode: { season: number; number: number }) => `${episode.season}x${episode.number}`;
 
-// A file that is gone from the disk does not make an episode or a movie available.
-type Clock = { now: number; files: Record<string, { missing: boolean }> };
 const present = (clock: Clock, fileId: string | null) => Boolean(fileId && clock.files[fileId] && !clock.files[fileId]!.missing);
 
 export function isMonitored(title: Title, episode: Episode) {

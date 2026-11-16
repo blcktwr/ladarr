@@ -1,5 +1,5 @@
-import { isActive, type Queue, type QueueEntry, type ReleaseRef } from './queue.ts';
-import type { ClientHandle, Torrent } from './qbittorrent.ts';
+import { isActive } from './queue.ts';
+import type { ClientHandle, Queue, QueueEntry, ReleaseRef, Torrent } from '../../types.ts';
 
 // Records the torrent of a target: the release that it shows, the hash, and the client that has it. The caller moves
 // the phase, because an attached download and a file that is already in the library are different steps.

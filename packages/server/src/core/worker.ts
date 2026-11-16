@@ -1,22 +1,8 @@
-import { claim, complete, enqueue, fail, recoverExpired, release, renew, type EnqueueInput, type Job } from './jobs.ts';
+import { claim, complete, enqueue, fail, recoverExpired, release, renew } from './jobs.ts';
 import { db } from './db.ts';
 import { log } from './log.ts';
 import { withOutboundRequests } from './outbound.ts';
-
-export type Handler = {
-  run: (job: Job, ctx: { signal: AbortSignal }) => Promise<void>;
-  // Most jobs of this type that run at the same time.
-  concurrency?: number;
-  // Does not take a slot of the shared limit, so a slow job of this type never makes other work wait.
-  separate?: boolean;
-  // A job of this type waits while the handler says no. The worker asks again at each start of work.
-  canStart?: (job: Job) => boolean;
-  maxAttempts?: number;
-  // Run again this many ms after each final result. A job still waiting or running holds the next run back.
-  every?: number;
-};
-
-type Options = { tickMs?: number; leaseMs?: number; concurrency?: number; graceMs?: number };
+import type { EnqueueInput, Handler, Job, WorkerOptions } from '../types.ts';
 
 // The queue stops while the user pauses it. A backup, a scan or a metadata refresh still runs.
 // The first job of a title is not held, because it only adds the entries and the search jobs to the queue, with no request to an indexer. It gives the queue rows before the resume.
@@ -25,7 +11,7 @@ const queueWork = (type: string) => (type.startsWith('queue.') && type !== 'queu
 export function createWorker(
   save: () => Promise<void>,
   handlers: Record<string, Handler>,
-  { tickMs = 1_000, leaseMs = 60_000, concurrency = 4, graceMs = 10_000 }: Options = {},
+  { tickMs = 1_000, leaseMs = 60_000, concurrency = 4, graceMs = 10_000 }: WorkerOptions = {},
 ) {
   const inflight = new Map<string, { job: Job; token: string; controller: AbortController; done: Promise<void> }>();
   let stopping = false;

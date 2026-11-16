@@ -1,8 +1,7 @@
 import { db } from '../../../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Events } from '../../../../../core/events.ts';
-import type { Title } from '../../../../../library/library.ts';
 import { changed, detail, overrideOf } from '../../../../../helpers/library.ts';
+import type { Events, Title } from '../../../../../types.ts';
 
 export function librarySeasonUpdate({ events }: { events: Events }): RequestHandler<{ key: string; season: string }> {
   return async (req, res) => {

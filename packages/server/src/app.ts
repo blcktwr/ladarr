@@ -52,12 +52,12 @@ import { settingsGet } from './routes/settings/get.ts';
 import { settingsPatch } from './routes/settings/patch.ts';
 import { librarySearchStart } from './routes/library/search/post.ts';
 import { librarySearchPreview } from './routes/library/search/preview/post.ts';
-import { restoreGate, type Restorer } from './system/restore.ts';
+import { restoreGate } from './system/restore.ts';
 import { wrongPath } from './proxy/router.ts';
 import { seerrRouter, seerrWrongPath } from './proxy/seerr.ts';
 import { adapter } from './proxy/indexer.ts';
 import { onError } from './core/errors.ts';
-import { createEvents, type Events } from './core/events.ts';
+import { createEvents } from './core/events.ts';
 import { indexersGet } from './routes/indexers/get.ts';
 import { indexersCreate } from './routes/indexers/post.ts';
 import { indexersTest } from './routes/indexers/test/post.ts';
@@ -66,15 +66,14 @@ import { indexerTestSaved } from './routes/indexers/[id]/test/post.ts';
 import { indexersUpdate } from './routes/indexers/[id]/put.ts';
 import { indexersPatch } from './routes/indexers/[id]/patch.ts';
 import { indexersDelete } from './routes/indexers/[id]/delete.ts';
-import type { IndexerService } from './library/grab/torznab.ts';
-import { createClientCheck, type Clients } from './library/downloads/client-api.ts';
+import { createClientCheck } from './library/downloads/client-api.ts';
 import { clientsGet } from './routes/clients/get.ts';
 import { clientsCreate } from './routes/clients/post.ts';
 import { clientsTest } from './routes/clients/test/post.ts';
 import { clientsTestSaved } from './routes/clients/[id]/test/post.ts';
 import { clientsUpdate } from './routes/clients/[id]/put.ts';
 import { clientsDelete } from './routes/clients/[id]/delete.ts';
-import { createImportStatus, type ImportStatus } from './library/imports/status.ts';
+import { createImportStatus } from './library/imports/status.ts';
 import { importFolderPreview } from './routes/import/folder/preview/post.ts';
 import { importFolderStart } from './routes/import/folder/post.ts';
 import { importRunGet } from './routes/import/runs/[id]/get.ts';
@@ -89,8 +88,6 @@ import { mappingApply } from './routes/mapping/apply/post.ts';
 import { mappingPreview } from './routes/mapping/preview/post.ts';
 import { mappingProposal } from './routes/mapping/proposal/post.ts';
 import { ffprobeAvailable } from './library/probe.ts';
-import type { Finder } from './library/grab/finder.ts';
-import type { Poller } from './library/downloads/poller.ts';
 import { createRetry } from './library/downloads/queue-api.ts';
 import { createAttachCache } from './helpers/queue-attach.ts';
 import { queueEntryAttachPost } from './routes/queue/entries/[id]/attach/post.ts';
@@ -115,8 +112,7 @@ import { queueReleaseGrabPost } from './routes/queue/releases/grab/post.ts';
 import { queueReleasesGet } from './routes/queue/releases/get.ts';
 import { queueSearchPost } from './routes/queue/search/post.ts';
 import { queueSummaryGet } from './routes/queue/summary/get.ts';
-import type { Queue } from './library/downloads/queue.ts';
-import { enqueue as enqueueJob, type EnqueueInput } from './core/jobs.ts';
+import { enqueue as enqueueJob } from './core/jobs.ts';
 import { titleParam } from './helpers/library.ts';
 import { libraryGet } from './routes/library/get.ts';
 import { libraryAdd } from './routes/library/post.ts';
@@ -146,20 +142,15 @@ import { qualityProfileDelete } from './routes/quality/profiles/[id]/delete.ts';
 import { qualityProfileUpdate } from './routes/quality/profiles/[id]/put.ts';
 import { qualityProfileCreate } from './routes/quality/profiles/post.ts';
 import { qualitySizesPut } from './routes/quality/sizes/[media]/[quality]/put.ts';
-import type { Tmdb } from './metadata/tmdb.ts';
 import { webhookDelete } from './routes/webhook/[id]/delete.ts';
 import { webhookUpdate } from './routes/webhook/[id]/put.ts';
 import { webhookTestSaved } from './routes/webhook/[id]/test/post.ts';
 import { webhookGet } from './routes/webhook/get.ts';
 import { webhookCreate } from './routes/webhook/post.ts';
 import { webhookTest } from './routes/webhook/test/post.ts';
+import type { AppOptions, EnqueueInput } from './types.ts';
 
-export type Services = { queue: Queue; finder: Finder; poller: Poller; clients: Clients; importStatus?: ImportStatus };
-
-type Options = { services?: Services; urlBase?: string; events?: Events; webDir?: string; devOrigin?: string; heartbeat?: () => number; tmdb?: Tmdb; configDir?: string; backupDir?: string; enqueue?: (input: EnqueueInput) => ReturnType<typeof enqueueJob>; cancelJob?: (id: string) => void; persist?: () => void; restorer?: Restorer; indexers?: IndexerService; installUpdate?: () => Promise<{ version: string }>; pauseQueue?: () => Promise<void>; resumeQueue?: () => void; restart?: () => void };
-
-
-export function createApp({ services, urlBase = '', events = createEvents(), webDir, devOrigin, heartbeat, tmdb, configDir, backupDir, enqueue: enqueueInput, cancelJob, persist, restorer, indexers, installUpdate, pauseQueue, resumeQueue, restart }: Options = {}) {
+export function createApp({ services, urlBase = '', events = createEvents(), webDir, devOrigin, heartbeat, tmdb, configDir, backupDir, enqueue: enqueueInput, cancelJob, persist, restorer, indexers, installUpdate, pauseQueue, resumeQueue, restart }: AppOptions = {}) {
   const enqueue = enqueueInput ?? ((input: EnqueueInput) => enqueueJob(input));
   const api = express.Router();
   // A change of the indexers or of the clients can lift the block of a target. The target goes on, and the pages read the new state.

@@ -2,45 +2,7 @@
 // TMDB: one release can split a season in another way, or number a season that TMDB puts in another one. So the
 // numbers of the release are the last evidence, and the names of the segments come first.
 
-import type { ProbeResult } from './probe.ts';
-
-export type CatalogEpisode = {
-  season: number;
-  number: number;
-  name: string;
-  // "1998-02-18". The episodes of one airing share it.
-  airDate: string | null;
-  // The minutes of this segment. Null when TMDB does not give it.
-  runtime: number | null;
-};
-
-// What one file of a download says about itself.
-export type FileEvidence = {
-  // The file in the download, relative to its folder.
-  path: string;
-  // The tag `title`, for example "Aye, Aye, Eyes/Dee Dee and the Man".
-  title: string | null;
-  // The tags `SEASON_NUMBER` and `EPISODE_ID`. They hold the numbering of the release, not the one of TMDB.
-  season: number | null;
-  episode: number | null;
-  durationSeconds: number | null;
-};
-
-// The step of the cascade that gave the answer. A person reads it in the preview, so a weak step is visible.
-export type ContentStep = 'whole_title' | 'segments' | 'anchor' | 'global' | 'fuzzy' | 'release_number';
-
-export type ContentProposal = {
-  path: string;
-  episodes: { season: number; number: number }[];
-  step: ContentStep;
-  evidence: string;
-};
-
-// `conflict`: two steps gave different episodes. `ambiguous`: more than one airing stays possible.
-// `no_match`: no step found an airing.
-export type ContentRejection = { path: string; reason: 'ambiguous' | 'conflict' | 'no_match'; evidence: string };
-
-export type ContentMatch = { proposals: ContentProposal[]; rejections: ContentRejection[] };
+import type { Airing, CatalogEpisode, ContentContext, ContentMatch, ContentProposal, ContentRejection, ContentStep, FileEvidence, ProbeResult } from '../types.ts';
 
 // The evidence that the matcher reads from one file, from the probe of that file. A file that ffprobe could not read
 // gives no evidence, and the cascade then has only the name and the numbering of the release.
@@ -54,9 +16,6 @@ export function evidenceOf(path: string, probe: ProbeResult): FileEvidence {
     durationSeconds: probe.durationSeconds,
   };
 }
-
-// The episodes that aired as one broadcast, in the order of their numbers.
-type Airing = CatalogEpisode[];
 
 // Lowercase, no accents, `&` as `and`. The stops and the quotes inside a name go, so "G.I.R.L. Squad" and "girl
 // squad" are one name, and "Eww, That's Growth" and "Eww thats growth" are one name. Every other separator, as the
@@ -140,23 +99,9 @@ function describe(airing: Airing) {
   return airing.map((episode) => `S${String(episode.season).padStart(2, '0')}E${String(episode.number).padStart(2, '0')} ${episode.name}`).join(' | ');
 }
 
-type Context = {
-  episodes: CatalogEpisode[];
-  airings: Airing[];
-  // The airing of each episode, by its position in `airings`.
-  airingOf: Map<CatalogEpisode, number>;
-  // The episodes that answer to a normalised name. A name that answers twice can not identify one episode.
-  byName: Map<string, CatalogEpisode[]>;
-  // The airings that answer to a normalised whole title.
-  byWholeTitle: Map<string, Airing[]>;
-  // The episode of a season and a number in the catalog.
-  byPosition: Map<string, CatalogEpisode>;
-  normalized: Map<CatalogEpisode, string>;
-};
-
-function contextOf(episodes: CatalogEpisode[]): Context {
+function contextOf(episodes: CatalogEpisode[]): ContentContext {
   const airings = airingsOf(episodes);
-  const context: Context = { episodes, airings, airingOf: new Map(), byName: new Map(), byWholeTitle: new Map(), byPosition: new Map(), normalized: new Map() };
+  const context: ContentContext = { episodes, airings, airingOf: new Map(), byName: new Map(), byWholeTitle: new Map(), byPosition: new Map(), normalized: new Map() };
   for (const [index, airing] of airings.entries()) {
     const names = airing.map((episode) => normalizeTitle(episode.name));
     for (const episode of airing) {
@@ -172,7 +117,7 @@ function contextOf(episodes: CatalogEpisode[]): Context {
 }
 
 // The tag `title` is the names of the segments of one airing, in its order.
-function byWholeTitle(file: FileEvidence, context: Context) {
+function byWholeTitle(file: FileEvidence, context: ContentContext) {
   const segments = segmentsOf(file.title);
   if (!segments.length) return;
   const found = (context.byWholeTitle.get(normalizeTitle(file.title!)) ?? []).filter((airing) => airing.length === segments.length && fits(airing, file.durationSeconds));
@@ -180,7 +125,7 @@ function byWholeTitle(file: FileEvidence, context: Context) {
 }
 
 // Each segment is the exact name of one episode, and those episodes are one airing in that order.
-function bySegments(file: FileEvidence, context: Context) {
+function bySegments(file: FileEvidence, context: ContentContext) {
   const segments = segmentsOf(file.title);
   if (!segments.length) return;
   const matched: CatalogEpisode[] = [];
@@ -198,7 +143,7 @@ function bySegments(file: FileEvidence, context: Context) {
 
 // One or more segments name an episode without doubt. They put the file in one airing, and the other segments take
 // the places of that airing in order. A segment that names an episode of another airing contradicts this one.
-function byAnchor(file: FileEvidence, context: Context): { airing: Airing } | { conflict: true } | undefined {
+function byAnchor(file: FileEvidence, context: ContentContext): { airing: Airing } | { conflict: true } | undefined {
   const segments = segmentsOf(file.title);
   if (!segments.length) return;
   const anchors: { at: number; episode: CatalogEpisode }[] = [];
@@ -217,7 +162,7 @@ function byAnchor(file: FileEvidence, context: Context): { airing: Airing } | { 
 
 // Every segment takes its most similar name. It counts only with a high score and a clear lead, and when the names
 // belong to one airing of the same size in the same order.
-function byFuzzy(file: FileEvidence, context: Context) {
+function byFuzzy(file: FileEvidence, context: ContentContext) {
   const segments = segmentsOf(file.title);
   if (!segments.length) return;
   const best: CatalogEpisode[] = [];
@@ -242,7 +187,7 @@ function byFuzzy(file: FileEvidence, context: Context) {
 
 // The numbering of the release, only when nothing else identified the file. A file with several segments can not be
 // one episode, so this step needs a title of one segment or no title at all.
-function byReleaseNumber(file: FileEvidence, context: Context) {
+function byReleaseNumber(file: FileEvidence, context: ContentContext) {
   if (segmentsOf(file.title).length > 1) return;
   if (file.season === null || file.episode === null) return;
   return context.byPosition.get(`${file.season}x${file.episode}`);

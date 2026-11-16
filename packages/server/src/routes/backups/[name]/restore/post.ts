@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import { BackupError } from '../../../../system/backup.ts';
-import { RestoreError, type Restorer } from '../../../../system/restore.ts';
+import { RestoreError } from '../../../../system/restore.ts';
+import type { Restorer } from '../../../../types.ts';
 
 export function backupRestoreSaved(restorer: Restorer): RequestHandler<{ name: string }> {
   return async (req, res) => {

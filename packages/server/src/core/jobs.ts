@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { db } from './db.ts';
-
-export type ErrorKind = 'invalid_input' | 'outage' | 'uncertain';
+import type { EnqueueInput, ErrorKind, Job } from '../types.ts';
 
 // "invalid_input" never retries. "outage" retries later. "uncertain" retries too, and the
 // handler must check the outside system first, because the last try may have had an effect.
@@ -12,32 +11,6 @@ export class JobError extends Error {
     this.kind = kind;
   }
 }
-
-export type Job = {
-  id: string;
-  type: string;
-  payloadVersion: number;
-  payload: unknown;
-  dedupeKey: string | null;
-  state: 'waiting' | 'running' | 'failed';
-  seq: number;
-  runAt: number;
-  attempts: number;
-  // A new token for each claim, so a stale holder cannot finish a job that was recovered.
-  leaseOwner: string | null;
-  leaseExpiresAt: number | null;
-  lastError: { kind: ErrorKind; message: string } | null;
-  priority: number | null;
-};
-
-export type EnqueueInput = {
-  type: string;
-  payload?: unknown;
-  payloadVersion?: number;
-  dedupeKey?: string;
-  runAt?: number;
-  priority?: boolean;
-};
 
 const BACKOFF_BASE_MS = 5_000;
 const BACKOFF_MAX_MS = 15 * 60_000;

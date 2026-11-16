@@ -1,8 +1,8 @@
-import { type Db, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import { JobError } from '../core/jobs.ts';
 import { log } from '../core/log.ts';
-import { DELIVER, MAX_ATTEMPTS, send, type DeliveryPayload } from '../core/webhook.ts';
-import type { Handler } from '../core/worker.ts';
+import { DELIVER, MAX_ATTEMPTS, send } from '../core/webhook.ts';
+import type { Db, DeliveryPayload, Handler } from '../types.ts';
 
 // A receiver that is busy or down can recover. Another status means that the address or the receiver is wrong.
 const retryable = (status: number) => status >= 500 || status === 408 || status === 425 || status === 429;

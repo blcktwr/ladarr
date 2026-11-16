@@ -1,13 +1,12 @@
 import type { MediaType, RootProblem } from '@ladarr/shared/enums';
 import { basename, extname } from 'node:path';
-import { type Db, db } from '../../core/db.ts';
-import type { EpisodeMeta, TitleMeta, Tmdb } from '../../metadata/tmdb.ts';
-import type { Found } from './importer.ts';
+import { db } from '../../core/db.ts';
 import { PlanError, readableRoot } from './plan.ts';
-import { mergeEpisodes, titleKey, type Title } from '../library.ts';
+import { mergeEpisodes, titleKey } from '../library.ts';
 import { guessTitle } from '../tools/folders.ts';
 import { planFiles, readFolder } from './manual.ts';
 import { checkRoot } from '../roots.ts';
+import type { Db, EpisodeMeta, ImporterFound, Title, TitleMeta, Tmdb } from '../../types.ts';
 
 // The import of a folder anywhere on the disk, normally a download folder. The folder stays where it is: its files are
 // hard linked into the library, and a file that can not be linked is blocked instead of copied.
@@ -28,7 +27,7 @@ export function titleFromFile(rel: string): { title: string; year: number | null
   return text ? guessTitle(text) : undefined;
 }
 
-export const biggestFirst = (videos: Found[]) => [...videos].sort((a, b) => b.sizeBytes - a.sizeBytes || a.rel.localeCompare(b.rel));
+export const biggestFirst = (videos: ImporterFound[]) => [...videos].sort((a, b) => b.sizeBytes - a.sizeBytes || a.rel.localeCompare(b.rel));
 
 // The episodes of a series that TMDB lists, in the order of the seasons.
 async function episodesOf(tmdb: Tmdb, tmdbId: number, meta: TitleMeta): Promise<EpisodeMeta[]> {

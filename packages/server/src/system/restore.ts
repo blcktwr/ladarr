@@ -4,9 +4,9 @@ import type { RequestHandler, Response } from 'express';
 import { BackupError, createBackup, readBackup } from './backup.ts';
 import { db, withDefaults } from '../core/db.ts';
 import { unfinishedImports } from '../library/imports/importer.ts';
-import type { EnqueueInput } from '../core/jobs.ts';
 import { log } from '../core/log.ts';
 import { scanJob } from '../library/scan.ts';
+import type { Restorer, Worker } from '../types.ts';
 
 export class RestoreError extends Error {
   code: 'restore_in_progress' | 'worker_busy' | 'requests_busy' | 'not_found';
@@ -15,8 +15,6 @@ export class RestoreError extends Error {
     this.code = code;
   }
 }
-
-type Worker = { pause: () => Promise<boolean>; resume: () => void; enqueue: (input: EnqueueInput) => unknown };
 
 // Replaces the data of the running server with the data of a backup, without a restart.
 // shortcut: the restore runs in the process that serves the requests. A restart in a safe way needs the supervisor to start the process again.
@@ -86,8 +84,6 @@ export function createRestorer({ dir, worker, drainMs = 10_000 }: { dir: string;
     },
   };
 }
-
-export type Restorer = ReturnType<typeof createRestorer>;
 
 // Requests that change data get an error while a restore runs. A read goes through.
 // A request that starts before the restore is tracked, and the restore waits for it.

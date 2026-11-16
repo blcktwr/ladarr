@@ -1,6 +1,7 @@
 import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import { DELIVER, type DeliveryPayload } from '../../../core/webhook.ts';
+import { DELIVER } from '../../../core/webhook.ts';
+import type { DeliveryPayload } from '../../../types.ts';
 
 // The events that wait go with the webhook. Another webhook must not get them.
 export function webhookDelete(): RequestHandler<{ id: string }> {

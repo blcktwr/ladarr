@@ -1,7 +1,8 @@
 import type { RenameCheck } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import { exampleNames, templateProblem, type NamingTemplates } from '../../../library/naming.ts';
+import { exampleNames, templateProblem } from '../../../library/naming.ts';
 import { isObject } from '../../../helpers/rename.ts';
+import type { NamingTemplates } from '../../../types.ts';
 
 // The names of a sample movie and a sample episode, and the problem of each template.
 export function renameExamples(): RequestHandler {

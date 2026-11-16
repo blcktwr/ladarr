@@ -1,7 +1,6 @@
-import { move } from '../helpers/test-queue.ts';
+import { move, branchOf } from '../helpers/test-queue.ts';
 import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
 import { createRetry } from '../../src/library/downloads/queue-api.ts';
-import { branchOf } from '../helpers/test-queue.ts';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';

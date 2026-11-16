@@ -8,16 +8,13 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { APP_VERSION, isNewerVersion, RELEASE_HEADERS, RELEASE_URL } from './version.ts';
+import type { InstallOptions, ReleaseInfo, UpdateErrorCode } from '../types.ts';
 
 const run = promisify(execFile);
 const REQUEST_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 300_000;
 // The folder of the process: packages/server/src/system/update.ts is four levels down.
 const APP_DIR = fileURLToPath(new URL('../../../../', import.meta.url));
-
-export type ReleaseAsset = { name: string; url: string };
-export type ReleaseInfo = { version: string; url: string; assets: ReleaseAsset[] };
-export type UpdateErrorCode = 'no_update' | 'busy' | 'asset_missing' | 'download_failed' | 'checksum_mismatch' | 'extract_failed';
 
 export class UpdateError extends Error {
   code: UpdateErrorCode;
@@ -45,10 +42,6 @@ export async function latestRelease(fetchImpl: typeof fetch = fetch): Promise<Re
     : [];
   return { version: body.tag_name.replace(/^v/i, ''), url: body.html_url, assets };
 }
-
-// Downloads the bundle of the newest release into appDir and replaces the files of the process.
-// The caller restarts the process after this call returns.
-export type InstallOptions = { appDir?: string; fetchImpl?: typeof fetch; currentVersion?: string };
 
 export async function installUpdate({ appDir = APP_DIR, fetchImpl = fetch, currentVersion = APP_VERSION }: InstallOptions = {}): Promise<{ version: string }> {
   const release = await latestRelease(fetchImpl);

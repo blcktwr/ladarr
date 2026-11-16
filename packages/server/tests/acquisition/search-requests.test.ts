@@ -1,6 +1,5 @@
 import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
 import { branchOf } from '../helpers/test-queue.ts';
-import type { QueueEntry } from '../../src/library/downloads/queue.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
 import { episode, title } from '../helpers/test-fixtures.ts';
 import { MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
+import type { QueueEntry } from '../../src/types.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
 let api: Awaited<ReturnType<Awaited<ReturnType<typeof startPipeline>>['api']>> | undefined;

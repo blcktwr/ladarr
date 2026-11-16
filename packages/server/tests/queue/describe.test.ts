@@ -1,6 +1,5 @@
 import { describe as suite, expect, it } from 'vitest';
-import { aggregate, canRetry, describe, isActiveState, phaseOf } from '@ladarr/shared/queue';
-import type { Aggregate, Description, Problem, QueueState, Status } from '@ladarr/shared/queue';
+import { aggregate, canRetry, describe, isActiveState, phaseOf, type Aggregate, type Description, type Problem, type QueueState, type Status } from '@ladarr/shared/queue';
 
 const connectionLost: Problem = { code: 'client_error', detail: 'connection reset by peer' };
 const noFile: Problem = { code: 'file_not_found', detail: 'no such file or directory' };

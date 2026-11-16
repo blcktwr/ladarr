@@ -1,5 +1,6 @@
-import { type Db, db, profilesInOrder } from '../../../core/db.ts';
+import { db, profilesInOrder } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
+import type { Db } from '../../../types.ts';
 
 // The order of the chain, the best profile first.
 export function qualityOrderPut(): RequestHandler {

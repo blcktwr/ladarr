@@ -1,6 +1,7 @@
 import type { Request, RequestHandler, Response } from 'express';
 import { BackupError, isBackupName } from '../system/backup.ts';
-import { MAX_UPLOAD_BYTES, RestoreError, type Restorer } from '../system/restore.ts';
+import { MAX_UPLOAD_BYTES, RestoreError } from '../system/restore.ts';
+import type { Restorer } from '../types.ts';
 
 export const backupName: RequestHandler<{ name: string }> = (req, res, next) =>
   isBackupName(req.params.name) ? next() : void res.status(404).json({ error: 'not_found' });

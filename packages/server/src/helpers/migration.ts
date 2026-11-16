@@ -1,16 +1,14 @@
 import { isAbsolute } from 'node:path';
-import type { MigrationProgress } from '@ladarr/shared/types';
-import type { MigrationPreview } from '@ladarr/shared/types';
-import { type Db, db } from '../core/db.ts';
-import type { PathMapping, SourceData } from '../migration/migration-source.ts';
-import type { Plan } from '../migration/migration.ts';
+import type { MigrationProgress, MigrationPreview } from '@ladarr/shared/types';
+import { db } from '../core/db.ts';
+import type { Db, MigrationPlan, PathMapping, SourceData } from '../types.ts';
 
 export const MAX_PLANS = 3;
 export const MAX_UPLOADS = 3;
 const MAX_MAPPINGS = 50;
 
 // shortcut: plans stay in memory, so a restart drops them. The user starts the preview again.
-export const plans = new Map<string, Plan & { info: Pick<MigrationPreview, 'app' | 'version'> }>();
+export const plans = new Map<string, MigrationPlan & { info: Pick<MigrationPreview, 'app' | 'version'> }>();
 
 // shortcut: a backup that the user sent stays in memory, so a restart drops it. The user sends the file again.
 export const uploads = new Map<string, SourceData>();

@@ -1,6 +1,6 @@
 import type { QueueClientDetail } from '@ladarr/shared/types';
-import type { ClientHandle } from '../library/downloads/qbittorrent.ts';
-import { isActive, phaseOfEntry, type QueueEntry } from '../library/downloads/queue.ts';
+import { isActive, phaseOfEntry } from '../library/downloads/queue.ts';
+import type { AttachCache, ClientHandle, QueueEntry } from '../types.ts';
 
 export const HASH = /^[0-9a-f]{40}$/;
 export const MAX_TORRENTS = 100;
@@ -40,8 +40,6 @@ export async function readDetail(handle: ClientHandle, hash: string): Promise<Qu
     slots,
   };
 }
-
-export type AttachCache = Map<string, { at: number; value: Promise<QueueClientDetail | null> }>;
 
 export const createAttachCache = (): AttachCache => new Map();
 

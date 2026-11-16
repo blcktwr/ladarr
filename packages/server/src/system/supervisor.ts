@@ -1,8 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { UPDATE_EXIT_CODE } from './exit.ts';
-
-export type SupervisorOptions = { execPath?: string; stopTimeoutMs?: number };
+import type { SupervisorOptions } from '../types.ts';
 
 // The server of this build, next to the system folder.
 const serverEntry = fileURLToPath(new URL('../index.ts', import.meta.url));

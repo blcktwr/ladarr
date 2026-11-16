@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
-import { ClientError, clientUrl, createQbittorrent, type ClientConfig } from '../../src/library/downloads/qbittorrent.ts';
+import { ClientError, clientUrl, createQbittorrent } from '../../src/library/downloads/qbittorrent.ts';
 import { startFakeQbit } from '../helpers/test-qbit.ts';
+import type { ClientConfig } from '../../src/types.ts';
 
 let fake: Awaited<ReturnType<typeof startFakeQbit>>;
 const config = (overrides: Partial<ClientConfig> = {}): ClientConfig => ({ id: 'c1', name: 'qBittorrent', type: 'qbittorrent', host: '127.0.0.1', port: fake.port, auth: { type: 'password', username: 'admin', password: 'secret' }, enabled: true, maxDownloads: 0, ...overrides });

@@ -1,5 +1,5 @@
 import { isObject } from './rename.ts';
-import type { EpisodeRef, MappingEntry } from '../library/mapping.ts';
+import type { EpisodeRef, MappingEntry } from '../types.ts';
 
 // The most files that one request can hold. A title with more files needs more than one request.
 const MAX_ENTRIES = 5_000;

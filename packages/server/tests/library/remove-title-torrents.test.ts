@@ -3,11 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { PlanPreview } from '@ladarr/shared/types';
-import type { Services } from '../../src/app.ts';
-import type { QueueEntry } from '../../src/library/downloads/queue.ts';
 import { scanTitle } from '../../src/library/scan.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { movie } from '../helpers/test-fixtures.ts';
+import type { QueueEntry, Services } from '../../src/types.ts';
 
 let app: Awaited<ReturnType<typeof startTestApp>>;
 let dir: string;

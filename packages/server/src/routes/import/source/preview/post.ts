@@ -1,9 +1,9 @@
 import { db } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Tmdb } from '../../../../metadata/tmdb.ts';
 import { prepare } from '../../../../library/imports/source.ts';
 import { folderName } from '../../../../library/naming.ts';
 import { fail } from '../../../../helpers/import-source.ts';
+import type { Tmdb } from '../../../../types.ts';
 
 // Shows what an import would do. Nothing changes.
 export function importSourcePreview({ tmdb, configDir }: { tmdb?: Tmdb; configDir?: string } = {}): RequestHandler {

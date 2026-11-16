@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { detail } from '../../src/helpers/library.ts';
-import { emptyData, set, type Db, type MediaFile } from '../../src/core/db.ts';
+import { emptyData, set } from '../../src/core/db.ts';
 import { episode, movie, NOW, title } from '../helpers/test-fixtures.ts';
+import type { Db, MediaFile } from '../../src/types.ts';
 
 const file = (id: string, extra: Partial<MediaFile> = {}): MediaFile => ({
   id,

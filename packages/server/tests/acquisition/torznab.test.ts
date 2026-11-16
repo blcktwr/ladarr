@@ -4,11 +4,11 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { emptyData, open, type Db } from '../../src/core/db.ts';
-import type { Indexer, IndexerPush } from '../../src/library/grab/indexers.ts';
+import { emptyData, open } from '../../src/core/db.ts';
 import { createLimiter } from '../../src/core/limiter.ts';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
 import { createIndexerService, IndexerError, parseCaps, parseFeed } from '../../src/library/grab/torznab.ts';
+import type { Db, Indexer, IndexerPush } from '../../src/types.ts';
 
 const FEED = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">

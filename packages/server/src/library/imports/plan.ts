@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
-import { type Db, type Root, db } from '../../core/db.ts';
-import type { ImportStatus } from './status.ts';
-import type { EnqueueInput, Job } from '../../core/jobs.ts';
-import type { ImportJournal, JournalStep } from './importer.ts';
+import { db } from '../../core/db.ts';
+import type { Db, EnqueueInput, ImportJournal, ImportStatus, Job, JournalStep, Root } from '../../types.ts';
 
 // A request that can not start. The code is stable, and the web app has the text.
 export class PlanError extends Error {

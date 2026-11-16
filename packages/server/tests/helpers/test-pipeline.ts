@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { emptyData, open, type Db } from '../../src/core/db.ts';
+import { emptyData, open } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { createFinder } from '../../src/library/grab/finder.ts';
 import { createImportStatus } from '../../src/library/imports/status.ts';
@@ -14,21 +14,18 @@ import { importLocalHandler } from '../../src/jobs/import-local.ts';
 import { queueGrabHandler } from '../../src/jobs/queue-grab.ts';
 import { queueRetryHandler } from '../../src/jobs/queue-retry.ts';
 import { queueSearchHandler } from '../../src/jobs/queue-search.ts';
-import type { Indexer } from '../../src/library/grab/indexers.ts';
 import { createIndexerService } from '../../src/library/grab/torznab.ts';
 import { enqueue } from '../../src/core/jobs.ts';
 import { createLimiter } from '../../src/core/limiter.ts';
 import { createPoller } from '../../src/library/downloads/poller.ts';
 import { createClients } from '../../src/library/downloads/client-api.ts';
-import type { ClientConfig } from '../../src/library/downloads/qbittorrent.ts';
-import { createQueue, type StateHook } from '../../src/library/downloads/queue.ts';
+import { createQueue } from '../../src/library/downloads/queue.ts';
 import { startFakeQbit } from './test-qbit.ts';
 import { indexer as indexerFixture } from './test-fixtures.ts';
 import { infoHashOf } from '../../src/library/grab/torrent.ts';
 import { createWorker } from '../../src/core/worker.ts';
 import { startTestApp } from './test-app.ts';
-import type { ProbeResult } from '../../src/library/probe.ts';
-import type { Handler } from '../../src/core/worker.ts';
+import type { ClientConfig, Db, Handler, Indexer, ProbeResult, StateHook } from '../../src/types.ts';
 
 // A torrent with one file, or with the given files (paths inside the folder that has the name of the release).
 export const makeTorrent = (name: string, files?: string[], comment?: string) => {

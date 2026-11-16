@@ -3,11 +3,11 @@ import { branchOf } from '../helpers/test-queue.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { emptyData, withDefaults, type Data } from '../../src/core/db.ts';
-import type { ClientConfig } from '../../src/library/downloads/qbittorrent.ts';
+import { emptyData, withDefaults } from '../../src/core/db.ts';
 import { startFakeQbit } from '../helpers/test-qbit.ts';
 import { movie } from '../helpers/test-fixtures.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
+import type { ClientConfig, Data } from '../../src/types.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
 let extra: Awaited<ReturnType<typeof startFakeQbit>> | undefined;

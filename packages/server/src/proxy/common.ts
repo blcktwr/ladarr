@@ -1,27 +1,8 @@
 import type { MediaType } from '@ladarr/shared/enums';
 import type { RequestHandler, Response } from 'express';
-import type { Services } from '../app.ts';
-import { type Root, db, profilesInOrder } from '../core/db.ts';
-import type { Events } from '../core/events.ts';
-import type { EnqueueInput, Job } from '../core/jobs.ts';
-import type { Title } from '../library/library.ts';
-import { TmdbError, type TitleMeta, type Tmdb } from '../metadata/tmdb.ts';
-
-export type CompatDeps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job; services?: Services };
-
-// A command that a caller sent. A search command lists the entries that it started and the search jobs of those entries.
-// The search ends when its jobs end, so a command that a restart interrupted still ends, and a later search of the same entry does not change it.
-export type CompatCommand = {
-  id: number;
-  name: string;
-  body: Record<string, unknown>;
-  queuedAt: number;
-  endedAt: number | null;
-  status: 'queued' | 'started' | 'completed' | 'failed';
-  message: string | null;
-  entries: string[];
-  jobs: string[];
-};
+import { db, profilesInOrder } from '../core/db.ts';
+import { TmdbError } from '../metadata/tmdb.ts';
+import type { Placement, Title, TitleMeta } from '../types.ts';
 
 export const notFound = (res: Response, detail: string) => void res.status(404).json({ message: 'NotFound', detail });
 
@@ -101,8 +82,6 @@ export function candidate(meta: TitleMeta): Title {
     fileId: null,
   };
 }
-
-export type Placement = { preset: string; root: Root; monitored: boolean };
 
 // The fields that Seerr sends to place a title: profile, root folder, monitored, and tags.
 export function readPlacement(mediaType: MediaType, body: Record<string, unknown>): Placement | { errors: [string, string][] } {

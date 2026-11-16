@@ -1,6 +1,6 @@
-import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { db } from '../../core/db.ts';
-import { isActive, type Queue, type QueueEntry } from './queue.ts';
+import { isActive } from './queue.ts';
+import type { EnqueueInput, Job, Queue, QueueEntry } from '../../types.ts';
 
 // The active targets that point at the same torrent.
 export const sharingOf = (entry: QueueEntry) => (entry.transferHash ? Object.values(db.data.queue).filter((other) => other.transferHash === entry.transferHash && isActive(other)) : [entry]);

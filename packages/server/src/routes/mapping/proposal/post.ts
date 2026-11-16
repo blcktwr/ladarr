@@ -3,18 +3,14 @@ import type { RequestHandler } from 'express';
 import { db } from '../../../core/db.ts';
 import { titleOf } from '../../../helpers/mapping.ts';
 import { fail } from '../../../helpers/rename.ts';
-import { evidenceOf, matchContent, type ContentProposal, type ContentRejection, type FileEvidence } from '../../../library/content.ts';
+import { evidenceOf, matchContent } from '../../../library/content.ts';
 import { readableRoot } from '../../../library/imports/plan.ts';
-import type { MappingEntry } from '../../../library/mapping.ts';
 import { probeFile } from '../../../library/probe.ts';
-
-type Deps = { probe?: typeof probeFile };
-
-export type ProposalRow = ContentProposal & { fileId: string };
+import type { ContentRejection, FileEvidence, MappingEntry, ProposalDeps, ProposalRow } from '../../../types.ts';
 
 // Reads the files of the title and gives the episodes that the content matching finds for each one. The files of one
 // torrent are one pack, and the pack is solved as a whole. It changes nothing.
-export function mappingProposal({ probe = probeFile }: Deps = {}): RequestHandler {
+export function mappingProposal({ probe = probeFile }: ProposalDeps = {}): RequestHandler {
   return async (req, res) => {
     const titleKey = titleOf(req.body);
     if (!titleKey) return void res.status(400).json({ error: 'invalid_title' });

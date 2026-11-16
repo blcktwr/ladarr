@@ -1,25 +1,18 @@
-import type { QualityProfile, SizeLimits } from '@ladarr/shared/types';
+import type { SizeLimits } from '@ladarr/shared/types';
+import type { Evaluation, GrabQuality, Profile, Rejection, Release, ReleaseSource, Source } from '../../types.ts';
 
 // Version 4 of the quality table. Change the version when a number of the table or the list of qualities changes.
 // docs/quality-presets.md explains the rules.
 export const QUALITY_TABLE_VERSION = 4;
 
-export type Source = 'webdl' | 'webrip' | 'bluray' | 'remux' | 'rawhd' | 'hdtv' | 'sdtv' | 'dvd';
-export type ReleaseSource = Source | 'cam' | 'telesync' | 'unknown';
-
-export type { SizeLimits };
-
-// A quality is a source with a resolution. A DVD has no resolution.
-export type Quality = { id: string; label: string; source: Source; resolution: number | null };
-
 const SOURCE_LABEL: Record<Source, string> = { webdl: 'WEB-DL', webrip: 'WEBRip', bluray: 'BluRay', remux: 'BluRay Remux', rawhd: 'Raw-HD', hdtv: 'HDTV', sdtv: 'SDTV', dvd: 'DVD' };
 const RESOLUTIONS = [480, 720, 1080, 2160];
 
-const qualitiesOf = (source: Source, resolutions: number[]): Quality[] =>
+const qualitiesOf = (source: Source, resolutions: number[]): GrabQuality[] =>
   resolutions.map((resolution) => ({ id: `${source}-${resolution}`, label: `${SOURCE_LABEL[source]} ${resolution}p`, source, resolution }));
 
 // The lowest quality first. The list is the one of Sonarr, with DVD at the bottom.
-export const QUALITIES: Quality[] = [
+export const QUALITIES: GrabQuality[] = [
   { id: 'dvd', label: 'DVD', source: 'dvd', resolution: null },
   ...qualitiesOf('sdtv', [480]),
   ...qualitiesOf('hdtv', [720, 1080, 2160]),
@@ -63,10 +56,6 @@ export const defaultSizes = (): Record<string, SizeLimits> => Object.fromEntries
 
 // A movie has no size check until the user sets one.
 export const unlimitedSizes = (): Record<string, SizeLimits> => Object.fromEntries(QUALITIES.map(({ id }) => [id, { min: null, preferred: null, max: null }]));
-
-// A profile lists the qualities that ladarr takes, the best first. The qualities of one group have the same rank.
-// A quality that is in no group is not taken.
-export type Profile = QualityProfile;
 
 // The profiles of version 1 of the table.
 export function defaultProfiles(): Record<string, Profile> {
@@ -140,27 +129,6 @@ export function chainFileRank(profiles: Profile[], source: ReleaseSource, resolu
   }
   return { rank: profiles.length * RANK_STRIDE, profileIndex: null };
 }
-
-export type Release = {
-  source: ReleaseSource;
-  resolution: number | null;
-  sizeBytes: number;
-  // Null when the release does not say which audio it has.
-  audioLanguages: string[] | null;
-};
-
-export type Rejection = 'quality_rejected' | 'quality_not_in_profile' | 'size_below_min' | 'size_above_max' | 'audio_unverified' | 'audio_language_missing';
-
-export type Evaluation = {
-  accepted: boolean;
-  rejections: Rejection[];
-  // A check that could not run, so the user sees the constraint that is missing.
-  unchecked: 'size'[];
-  // Lower is better. Null when the profile does not take the release.
-  rank: number | null;
-  mibPerMinute: number | null;
-  limits: SizeLimits | null;
-};
 
 const MIB = 1024 * 1024;
 const NEVER_AUTOMATIC: ReleaseSource[] = ['cam', 'telesync', 'unknown'];

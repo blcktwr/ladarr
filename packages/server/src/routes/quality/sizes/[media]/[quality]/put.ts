@@ -1,8 +1,9 @@
 import type { MediaType } from '@ladarr/shared/enums';
 import type { RequestHandler } from 'express';
 import { db } from '../../../../../core/db.ts';
-import { isQualityId, type SizeLimits } from '../../../../../library/grab/quality.ts';
+import { isQualityId } from '../../../../../library/grab/quality.ts';
 import { isLimit, isObject } from '../../../../../helpers/quality.ts';
+import type { SizeLimits } from '@ladarr/shared/types';
 
 const isMedia = (value: string): value is MediaType => value === 'movie' || value === 'tv';
 

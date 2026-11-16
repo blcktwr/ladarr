@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
-import { IMPLEMENTATIONS, type IndexerApp } from '../../../../../library/grab/indexers.ts';
+import { IMPLEMENTATIONS } from '../../../../../library/grab/indexers.ts';
 import { schemaResource } from '../../../../../helpers/indexers-adapter.ts';
+import type { IndexerApp } from '@ladarr/shared/enums';
 
 export function indexerSchemaGet(app: IndexerApp): RequestHandler {
   return (_req, res) => {

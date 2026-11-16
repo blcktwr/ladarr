@@ -4,20 +4,15 @@ import { join, relative, sep } from 'node:path';
 import type { PlanAction, PlanSkip } from '@ladarr/shared/enums';
 import type { PlanFile, PlanPreview, PlanRequest, PlanResult, PlanTitle } from '@ladarr/shared/types';
 import { Router } from 'express';
-import { type Db, type MediaFile, db } from '../../core/db.ts';
-import type { Events } from '../../core/events.ts';
+import { db } from '../../core/db.ts';
 import { inside, listFiles } from '../imports/folder-files.ts';
-import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { filesByTitle } from './files.ts';
-import { dropSeason, dropTitle, forgetFile, retireFile, sameSeen, seeFile, pruneEmpty, torrentsForRemoval, type Seen } from './remove.ts';
+import { dropSeason, dropTitle, forgetFile, retireFile, sameSeen, seeFile, pruneEmpty, torrentsForRemoval } from './remove.ts';
 import { refreshJob } from '../metadata.ts';
 import { log } from '../../core/log.ts';
-import { isActive, type Queue } from '../downloads/queue.ts';
-import type { Clients } from '../downloads/client-api.ts';
+import { isActive } from '../downloads/queue.ts';
 import { checkRoot } from '../roots.ts';
-import type { Tmdb } from '../../metadata/tmdb.ts';
-
-type Deps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job; queue?: Queue; cancelJob?: (id: string) => void; clients?: Clients };
+import type { Db, Failure, MediaFile, PlansDeps, Stored } from '../../types.ts';
 
 const KEY = /^(movie|tv):[1-9]\d*$/;
 const ACTIONS: PlanAction[] = ['pause', 'resume', 'refresh', 'preset', 'remove', 'delete_files'];
@@ -33,7 +28,6 @@ const BLOCKING = ['not_found', 'not_directory', 'not_readable', 'not_writable', 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const posix = (path: string) => path.split(sep).join('/');
 
-type Failure = { status: number; body: Record<string, unknown> };
 const fail = (status: number, error: string, extra: Record<string, unknown> = {}): Failure => ({ status, body: { error, ...extra } });
 
 function parse(body: unknown): PlanRequest | Failure {
@@ -63,10 +57,7 @@ function parse(body: unknown): PlanRequest | Failure {
   return request;
 }
 
-// What the preview saw. The apply checks that the library and the disk are still the same.
-type Stored = { preview: PlanPreview; seen: Map<string, Seen>; ids: Map<string, string[]> };
-
-export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, clients }: Deps) {
+export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, clients }: PlansDeps) {
   const router = Router();
   // shortcut: plans stay in memory, so a restart drops them. The user starts the preview again.
   const plans = new Map<string, Stored>();

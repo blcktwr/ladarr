@@ -2,10 +2,10 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../src/app.ts';
 import { db, open } from '../../src/core/db.ts';
-import type { SearchResult } from '../../src/metadata/tmdb.ts';
 import { createTmdb } from '../../src/metadata/tmdb.ts';
 import { movie, title } from '../helpers/test-fixtures.ts';
 import { entryOf } from '../helpers/test-queue.ts';
+import type { SearchResult } from '@ladarr/shared/types';
 
 const KEY = 'secret-key-1234';
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>

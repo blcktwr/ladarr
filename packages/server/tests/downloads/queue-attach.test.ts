@@ -1,6 +1,5 @@
-import { move } from '../helpers/test-queue.ts';
+import { move, branchOf } from '../helpers/test-queue.ts';
 import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
-import { branchOf } from '../helpers/test-queue.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';

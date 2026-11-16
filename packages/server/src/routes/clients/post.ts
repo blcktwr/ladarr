@@ -1,8 +1,8 @@
 import { db } from '../../core/db.ts';
 import { randomUUID } from 'node:crypto';
 import type { RequestHandler } from 'express';
-import type { ClientConfig } from '../../library/downloads/qbittorrent.ts';
 import { parse, view } from '../../helpers/clients.ts';
+import type { ClientConfig } from '../../types.ts';
 
 export function clientsCreate({ onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler {
   return async (req, res) => {

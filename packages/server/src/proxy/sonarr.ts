@@ -1,13 +1,14 @@
 import { join } from 'node:path';
 import express, { Router } from 'express';
-import { type Db, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import { onError } from '../core/errors.ts';
-import { candidate, clock, firstProfileId, hasFiles, isObject, noTmdb, notFound, notFoundPath, notSupported, parseId, presentFile, profileId, readOptions, readPlacement, refuse, tmdbProblem, type CompatDeps } from './common.ts';
-import { adapter, type AdapterOptions } from './indexer.ts';
+import { candidate, clock, firstProfileId, hasFiles, isObject, noTmdb, notFound, notFoundPath, notSupported, parseId, presentFile, profileId, readOptions, readPlacement, refuse, tmdbProblem } from './common.ts';
+import { adapter } from './indexer.ts';
 import { AddError, addTitle } from '../library/tools/add.ts';
-import { isMonitored, seriesCounts, type Episode, type Title } from '../library/library.ts';
+import { isMonitored, seriesCounts } from '../library/library.ts';
 import { folderName } from '../library/naming.ts';
-import { TmdbError, type TitleMeta, type Tmdb } from '../metadata/tmdb.ts';
+import { TmdbError } from '../metadata/tmdb.ts';
+import type { AdapterOptions, CompatDeps, Db, Episode, SeasonChoice, SonarrFound, Title, TitleMeta, Tmdb } from '../types.ts';
 
 // A series needs a TVDB ID in the Sonarr shape. A title that TMDB does not link to TVDB has none, and ladarr does not invent one.
 const visible = (title: Title) => title.mediaType === 'tv' && title.meta.tvdbId !== null;
@@ -113,8 +114,6 @@ function episodeResource(title: Title, episode: Episode) {
   };
 }
 
-type SeasonChoice = { seasonNumber: number; monitored: boolean };
-
 function readSeasons(value: unknown, known: TitleMeta['seasons']): SeasonChoice[] | string {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > 200) return 'The seasons must be a list.';
@@ -132,10 +131,8 @@ function applySeasons(title: Title, seasons: SeasonChoice[]) {
   }
 }
 
-type Found = { title: Title } | { meta: TitleMeta } | { count: number };
-
 // The series of a TVDB ID: the library first, then TMDB. More than one TMDB series with the ID is not a match.
-async function findSeries(tmdb: Tmdb, tvdbId: number): Promise<Found> {
+async function findSeries(tmdb: Tmdb, tvdbId: number): Promise<SonarrFound> {
   const known = Object.values(db.data.titles).find((title) => title.mediaType === 'tv' && title.meta.tvdbId === tvdbId);
   if (known) return { title: known };
   const found = await tmdb.findSeriesByTvdb(tvdbId).catch((error: unknown) => {

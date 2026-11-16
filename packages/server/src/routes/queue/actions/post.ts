@@ -1,14 +1,12 @@
 import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Finder } from '../../../library/grab/finder.ts';
-import { deprioritize, prioritize, type EnqueueInput, type Job } from '../../../core/jobs.ts';
-import type { Clients } from '../../../library/downloads/client-api.ts';
-import type { Poller } from '../../../library/downloads/poller.ts';
-import { ClientError, type ClientHandle, type Torrent } from '../../../library/downloads/qbittorrent.ts';
-import { addedByApp, isActive, phaseOfEntry, type Queue, type QueueEntry } from '../../../library/downloads/queue.ts';
+import { deprioritize, prioritize } from '../../../core/jobs.ts';
+import { ClientError } from '../../../library/downloads/qbittorrent.ts';
+import { addedByApp, isActive, phaseOfEntry } from '../../../library/downloads/queue.ts';
 import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts';
 import { bySeasonNumber, label, lanePositions, otherSeasonsTargets, shown, statusOf } from '../../../helpers/queue.ts';
 import { canRetry, needsOtherSeasons } from '@ladarr/shared/queue';
+import type { ClientHandle, Clients, EnqueueInput, Finder, Job, Poller, Queue, QueueEntry, Torrent } from '../../../types.ts';
 
 export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
   type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'remove_torrent' | 'replace' | 'search_other_seasons';

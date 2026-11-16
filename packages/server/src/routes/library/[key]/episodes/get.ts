@@ -5,7 +5,8 @@ import { episodeEligibleAt } from '../../../../core/dates.ts';
 import { entryId } from '../../../../library/downloads/queue.ts';
 import { clock } from '../../../../library/tools/api.ts';
 import { statusOf } from '../../../../helpers/queue.ts';
-import { isMonitored, type Title } from '../../../../library/library.ts';
+import { isMonitored } from '../../../../library/library.ts';
+import type { Title } from '../../../../types.ts';
 
 export function libraryEpisodes(): RequestHandler<{ key: string }> {
   return (req, res) => {

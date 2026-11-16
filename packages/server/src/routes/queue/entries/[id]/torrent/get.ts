@@ -2,7 +2,8 @@ import type { RequestHandler } from 'express';
 import { db } from '../../../../../core/db.ts';
 import { shown } from '../../../../../helpers/queue.ts';
 import { readTorrent } from '../../../../../helpers/torrent.ts';
-import { IndexerError, type IndexerService } from '../../../../../library/grab/torznab.ts';
+import { IndexerError } from '../../../../../library/grab/torznab.ts';
+import type { IndexerService } from '../../../../../types.ts';
 
 // What the .torrent of the release holds. ladarr does not keep the file, so the indexer sends it again.
 export function queueEntryTorrentGet(indexers: IndexerService): RequestHandler<{ id: string }> {

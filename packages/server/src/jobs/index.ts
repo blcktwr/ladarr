@@ -1,13 +1,4 @@
 import { db } from '../core/db.ts';
-import type { Events } from '../core/events.ts';
-import type { EnqueueInput, Job } from '../core/jobs.ts';
-import type { Handler } from '../core/worker.ts';
-import type { Finder } from '../library/grab/finder.ts';
-import type { IndexerService } from '../library/grab/torznab.ts';
-import type { Clients } from '../library/downloads/client-api.ts';
-import type { Queue } from '../library/downloads/queue.ts';
-import type { ImportStatus } from '../library/imports/status.ts';
-import type { Tmdb } from '../metadata/tmdb.ts';
 import { backupAutoHandler } from './backup-auto.ts';
 import { importResumeHandler } from './import-resume.ts';
 import { importRunHandler } from './import-run.ts';
@@ -26,21 +17,9 @@ import { queueRssHandler } from './queue-rss.ts';
 import { queueSearchHandler } from './queue-search.ts';
 import { queueSweepHandler } from './queue-sweep.ts';
 import { webhookDeliverHandler } from './webhook-deliver.ts';
+import type { Handler, IndexDeps } from '../types.ts';
 
-type Deps = {
-  backupDir: string;
-  events: Events;
-  save: () => Promise<void>;
-  tmdb?: Tmdb;
-  enqueue: (input: EnqueueInput) => Job;
-  clients: Clients;
-  queue: Queue;
-  finder: Finder;
-  indexers: IndexerService;
-  importStatus: ImportStatus;
-};
-
-export function jobHandlers({ backupDir, events, save, tmdb, enqueue, clients, queue, finder, indexers, importStatus }: Deps): Record<string, Handler> {
+export function jobHandlers({ backupDir, events, save, tmdb, enqueue, clients, queue, finder, indexers, importStatus }: IndexDeps): Record<string, Handler> {
   return {
     'backup.auto': backupAutoHandler(backupDir),
     'library.scan': libraryScanHandler({ events }),

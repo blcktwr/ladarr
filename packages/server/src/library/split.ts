@@ -1,9 +1,8 @@
+import type { Split } from '../types.ts';
 // The releases do not always number the seasons as TMDB does. A release can put in its season 2 what TMDB puts in the
 // last episodes of its season 1, and a release season can hold a whole season of TMDB under another number. The files
 // of a pack are the evidence of the mapping: their numbers are the numbers of the release, and the pack ends where the
 // TMDB season ends.
-
-export type Split = { from: number };
 
 // The episode of TMDB that a release episode names. The release numbers its episodes from 1, so the TMDB episode of the
 // release number `number` is `from + number - 1`.

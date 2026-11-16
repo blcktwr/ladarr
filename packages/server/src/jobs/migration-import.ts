@@ -1,12 +1,10 @@
-import { type Db, db } from '../core/db.ts';
-import type { Events } from '../core/events.ts';
+import { db } from '../core/db.ts';
 import { JobError } from '../core/jobs.ts';
-import type { MigrateDeps } from '../migration/migration.ts';
 import { AddError, addTitle } from '../library/tools/add.ts';
 import { requestVerification } from '../library/verification.ts';
 import { TmdbError } from '../metadata/tmdb.ts';
 import { log } from '../core/log.ts';
-import type { Handler } from '../core/worker.ts';
+import type { Db, Events, Handler, MigrateDeps } from '../types.ts';
 
 const SAVE_EVERY = 25;
 

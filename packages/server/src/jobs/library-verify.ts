@@ -1,20 +1,13 @@
-import { type Db, db } from '../core/db.ts';
-import type { Events } from '../core/events.ts';
+import { db } from '../core/db.ts';
 import { JobError } from '../core/jobs.ts';
 import { withTitleLock } from '../core/title-lock.ts';
-import type { Handler } from '../core/worker.ts';
-import type { Finder } from '../library/grab/finder.ts';
-import type { Clients } from '../library/downloads/client-api.ts';
 import { attachTorrent } from '../library/downloads/attach.ts';
-import type { Torrent } from '../library/downloads/qbittorrent.ts';
 import { ClientError } from '../library/downloads/qbittorrent.ts';
-import { isActive, type Queue, type QueueEntry } from '../library/downloads/queue.ts';
-import { isMonitored, type Title } from '../library/library.ts';
+import { isActive } from '../library/downloads/queue.ts';
+import { isMonitored } from '../library/library.ts';
 import { scanTitle } from '../library/scan.ts';
-import { verificationOf, type VerificationState } from '../library/verification.ts';
-import type { SourceDownload } from '../migration/migration-source.ts';
-
-type Deps = { queue: Queue; clients: Clients; finder: Finder; events: Events };
+import { verificationOf } from '../library/verification.ts';
+import type { Db, Handler, LibraryVerifyDeps, QueueEntry, SourceDownload, Title, Torrent, VerificationState } from '../types.ts';
 
 const present = (fileId: string | null) => Boolean(fileId && db.data.files[fileId] && !db.data.files[fileId]!.missing);
 const episodeKey = (season: number, number: number) => `${season}x${number}`;
@@ -32,7 +25,7 @@ function applyEpisodes(title: Title, state: VerificationState) {
   }
 }
 
-export function libraryVerifyHandler({ queue, clients, finder, events }: Deps): Handler {
+export function libraryVerifyHandler({ queue, clients, finder, events }: LibraryVerifyDeps): Handler {
   async function verify(key: string, signal: AbortSignal) {
     const title = db.data.titles[key];
     const state = verificationOf(key);

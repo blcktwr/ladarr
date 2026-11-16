@@ -1,11 +1,9 @@
-import type { ClientState, RootProblem } from '@ladarr/shared/enums';
+import type { RootProblem } from '@ladarr/shared/enums';
 import type { Problem } from '@ladarr/shared/types';
 import { listBackups } from './backup.ts';
-import { type Db, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import { checkRoot } from '../library/roots.ts';
-import type { Tmdb } from '../metadata/tmdb.ts';
-
-type Sources = { tmdb?: Tmdb; heartbeat?: () => number; backupDir?: string; clientCheck?: () => Promise<ClientState>; ffprobe?: () => Promise<boolean> };
+import type { Db, Sources } from '../types.ts';
 
 const HEARTBEAT_MAX_AGE_MS = 30_000;
 const BACKUP_MAX_AGE_MS = 48 * 60 * 60_000;

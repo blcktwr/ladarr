@@ -1,8 +1,9 @@
-import { type Db, db, profilesInOrder } from '../../core/db.ts';
+import { db, profilesInOrder } from '../../core/db.ts';
 import type { SettingsResponse } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { QUALITY_TABLE_VERSION } from '../../library/grab/quality.ts';
 import { languageOfRegion } from '../../core/languages.ts';
+import type { Db } from '../../types.ts';
 
 // The languages that the aliases of the library use. The tag input of the indexer settings offers this list.
 function aliasLanguageOptions(): string[] {

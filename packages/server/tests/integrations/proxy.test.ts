@@ -2,13 +2,13 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Express } from 'express';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { EnqueueInput } from '../../src/core/jobs.ts';
 import { createClients } from '../../src/library/downloads/client-api.ts';
 import { radarr } from '../../src/proxy/radarr.ts';
 import { seerr } from '../../src/proxy/seerr.ts';
 import { sonarr } from '../../src/proxy/sonarr.ts';
 import { FakeRadarr, FakeSonarr } from '../helpers/test-seerr.ts';
 import { startPipeline } from '../helpers/test-pipeline.ts';
+import type { EnqueueInput } from '../../src/types.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
 const servers: Server[] = [];

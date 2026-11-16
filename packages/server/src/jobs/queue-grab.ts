@@ -1,10 +1,9 @@
-import { type Db, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import { JobError } from '../core/jobs.ts';
 import { catalog, itemFields } from '../core/log.ts';
-import { createGrabber, reasonOf, type GrabberDeps } from '../library/grab/grab.ts';
-import type { Clients } from '../library/downloads/client-api.ts';
-import { isActive, phaseOfEntry, type QueueEntry } from '../library/downloads/queue.ts';
-import type { Handler } from '../core/worker.ts';
+import { createGrabber, reasonOf } from '../library/grab/grab.ts';
+import { isActive, phaseOfEntry } from '../library/downloads/queue.ts';
+import type { Clients, Db, GrabberDeps, Handler, QueueEntry } from '../types.ts';
 
 const MAX_ATTEMPTS = 8;
 

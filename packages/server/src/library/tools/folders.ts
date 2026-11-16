@@ -2,18 +2,14 @@ import { readdir, realpath, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import type { UntitledFolder } from '@ladarr/shared/types';
 import { Router } from 'express';
-import { type Db, db } from '../../core/db.ts';
-import type { Events } from '../../core/events.ts';
+import { db } from '../../core/db.ts';
 import { inside, listFiles } from '../imports/folder-files.ts';
-import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { AddError, addTitle } from './add.ts';
 import { titleKey } from '../library.ts';
 import { isSample, isVideoFile } from '../parse.ts';
 import { checkRoot } from '../roots.ts';
 import { scanJob } from '../scan.ts';
-import type { Tmdb } from '../../metadata/tmdb.ts';
-
-type Deps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job };
+import type { Db, FoldersDeps } from '../../types.ts';
 
 // Folders that other tools make in a library folder. They are not titles.
 const IGNORED = new Set(['@eaDir', '#recycle', 'lost+found']);
@@ -38,7 +34,7 @@ export function guessTitle(folder: string): { title: string; year: number | null
   return { title: text.replace(/\s+/g, ' ').trim() || folder, year };
 }
 
-export function libraryFoldersRouter({ tmdb, events, enqueue }: Deps) {
+export function libraryFoldersRouter({ tmdb, events, enqueue }: FoldersDeps) {
   const router = Router();
   // A folder that an add is about to use. This keeps two requests from giving one folder to two titles.
   const adopting = new Set<string>();

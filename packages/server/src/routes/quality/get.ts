@@ -1,7 +1,8 @@
-import { type Db, db, profilesInOrder } from '../../core/db.ts';
+import { db, profilesInOrder } from '../../core/db.ts';
 import type { QualityResponse } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { QUALITIES } from '../../library/grab/quality.ts';
+import type { Db } from '../../types.ts';
 
 // The profiles and the sizes of the qualities. The default profile is a setting.
 export function qualityGet(): RequestHandler {

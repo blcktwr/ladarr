@@ -2,19 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { EpisodeRef } from '@ladarr/shared/types';
-import type { MediaFile } from '../../core/db.ts';
 import { db } from '../../core/db.ts';
 import { catalog, itemFields } from '../../core/log.ts';
 import { recordTorrent } from '../downloads/attach.ts';
-import { addedByApp, isActive, phaseOfEntry, type Queue, type QueueEntry } from '../downloads/queue.ts';
-import type { Clients } from '../downloads/client-api.ts';
-import type { ClientHandle, Torrent } from '../downloads/qbittorrent.ts';
-import type { Title } from '../library.ts';
-import { isVideoFile, type ParsedEpisodes } from '../parse.ts';
+import { addedByApp, isActive, phaseOfEntry } from '../downloads/queue.ts';
+import { isVideoFile } from '../parse.ts';
 import { inside } from '../roots.ts';
-import { readTitleFolder, type InventoryFile } from '../scan.ts';
-
-export type LocalResult = { imported: string[]; blocked: string[] };
+import { readTitleFolder } from '../scan.ts';
+import type { ClientHandle, Clients, InventoryFile, LocalResult, MediaFile, ParsedEpisodes, Queue, QueueEntry, Selection, Title, Torrent } from '../../types.ts';
 
 // A target that a local import can resolve: it is on its way to a file, and no download owns it.
 const eligible = (entry: QueueEntry) =>
@@ -31,8 +26,6 @@ function episodesOf(title: Title, parsed: ParsedEpisodes): EpisodeRef[] {
     return episode ? [{ season: episode.season, number: episode.number }] : [];
   });
 }
-
-type Selection = { file: InventoryFile; entries: QueueEntry[]; episodes: EpisodeRef[] };
 
 // Finds the torrent of the client that holds the files, by the identity of the data. An imported file is a hard link
 // of the file of its torrent, so the device and the inode of both are the same. Returns nothing when no torrent holds

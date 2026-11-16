@@ -1,60 +1,8 @@
-import { type Data, type Settings, profilesFor } from '../../core/db.ts';
-import { WANT_KIND } from '@ladarr/shared/enums';
-import type { Indexer } from './indexers.ts';
-import { type Episode, type Title } from '../library.ts';
-import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE, type Profile, type SizeLimits } from './quality.ts';
-import { normalizeTitle, parseRelease, type ParsedRelease } from './release.ts';
-import type { Covered } from '../downloads/queue.ts';
-import type { Continuation } from '../parse.ts';
-import type { RawRelease } from './torznab.ts';
+import { profilesFor } from '../../core/db.ts';
+import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE } from './quality.ts';
+import { normalizeTitle, parseRelease } from './release.ts';
 import { magnetHash } from './torrent.ts';
-
-// What a search looks for. A season want accepts a pack only.
-// `upgradeQuality` is the quality of a manual upgrade. The want then accepts a release of exactly that quality.
-// `continuation` is the numbering of a release that counts as two seasons what the title counts as one.
-export type Want =
-  | { kind: typeof WANT_KIND.movie; title: Title; upgradeQuality?: string }
-  | { kind: typeof WANT_KIND.episode; title: Title; season: number; number: number; upgradeQuality?: string; continuation?: Continuation }
-  | { kind: typeof WANT_KIND.season; title: Title; season: number; continuation?: Continuation };
-
-export type Context = {
-  settings: Settings;
-  // The quality profiles and the sizes of the qualities.
-  quality: Pick<Data, 'profiles' | 'profileOrder' | 'qualitySizes'>;
-  // The indexers by ID. A release from an indexer that is gone is rejected.
-  indexers: Record<string, Indexer>;
-  // True when an active queue entry has this hash already.
-  downloading: (hash: string) => boolean;
-  hasFile: (episode: Episode) => boolean;
-  hasMovieFile: (title: Title) => boolean;
-  // The episodes that the files of this release held, when ladarr read them before.
-  coverage: (release: RawRelease) => Data['releaseCoverage'][string] | null;
-  now: number;
-  // A manual choice accepts any release, including one that fails identity or policy checks.
-  manual?: boolean;
-};
-
-export type Decision = {
-  release: RawRelease;
-  parsed: ParsedRelease;
-  rejections: string[];
-  accepted: boolean;
-  kind: 'single' | 'multi' | 'pack';
-  covers: Covered[];
-  mibPerMinute: number | null;
-  // The rank of the release in the profile of the title. A lower rank is better.
-  rank: number;
-  indexerPriority: number;
-  // The distance from the preferred size. Null when the quality has no preferred size.
-  distance: number | null;
-  hash: string | null;
-  // The quality that a manual upgrade asks for, so its reason can name it.
-  upgradeQuality: string | null;
-  // The quality that the release has, or null when its name does not say.
-  quality: string | null;
-  // The size limits of that quality in the profile. Null when the profile does not take the quality.
-  limits: SizeLimits | null;
-};
+import type { Covered, DecideContext, Decision, Episode, ExplainedDecision, Profile, RawRelease, Title, Want } from '../../types.ts';
 
 // The text for each code. It is the key of the web i18n, and it names the affected title in the user interface, so it has no title in it.
 export const REJECTION_TEXT: Record<string, string> = {
@@ -103,8 +51,7 @@ export function titleMatches(parsedTitle: string, title: Title) {
   return wanted !== '' && alias(title).includes(wanted);
 }
 
-
-export function decide(release: RawRelease, want: Want, ctx: Context): Decision {
+export function decide(release: RawRelease, want: Want, ctx: DecideContext): Decision {
   const { title } = want;
   const parsed = parseRelease(release.title);
   const rejections: string[] = [];
@@ -281,17 +228,6 @@ export function rejectionSummary(decisions: Decision[]) {
 }
 
 const pad = (value: number | null | undefined) => (value === null || value === undefined ? '?' : String(value).padStart(2, '0'));
-
-export type ExplainedDecision = {
-  release: string;
-  indexer: string;
-  quality: string;
-  sizeBytes: number;
-  sizePerMinute: number | null;
-  seeders: number | null;
-  accepted: boolean;
-  reasons: { code: string; text: string; detail?: string }[];
-};
 
 // One decision as a person reads it: the release, its quality and size, and the reason of each rejection with the
 // numbers that made it. A log then says why a release did not match, not only a code.

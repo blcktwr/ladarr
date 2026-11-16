@@ -1,4 +1,5 @@
-import { isQualityId, type Profile } from '../library/grab/quality.ts';
+import { isQualityId } from '../library/grab/quality.ts';
+import type { Profile } from '../types.ts';
 
 export const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 export const isLimit = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100_000;

@@ -1,8 +1,7 @@
 import { db } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { REJECTION_TEXT } from '../../../../library/grab/decide.ts';
-import type { Finder } from '../../../../library/grab/finder.ts';
-import type { Queue } from '../../../../library/downloads/queue.ts';
+import type { Finder, Queue } from '../../../../types.ts';
 
 export function queueReleaseGrabPost(queue: Queue, finder: Finder): RequestHandler {
   return async (req, res) => {

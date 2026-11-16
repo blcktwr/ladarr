@@ -1,10 +1,11 @@
 import type { SeasonRow, TitleDetail } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import { type Db, db, profilesInOrder } from '../core/db.ts';
-import type { Events } from '../core/events.ts';
+import { db, profilesInOrder } from '../core/db.ts';
 import { clock, summarize } from '../library/tools/api.ts';
-import { seriesCounts, type Override, type Title } from '../library/library.ts';
+import { seriesCounts } from '../library/library.ts';
 import { qualityOfFile } from '../library/grab/upgrades.ts';
+import type { Db, Events, Title } from '../types.ts';
+import type { Override } from '@ladarr/shared/enums';
 
 const KEY = /^(movie|tv):[1-9]\d*$/;
 const SEASON = /^(0|[1-9]\d*)$/;

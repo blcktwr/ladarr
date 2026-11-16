@@ -1,10 +1,8 @@
 import { catalog, titleFields } from '../core/log.ts';
 import { JobError } from '../core/jobs.ts';
 import { withTitleLock } from '../core/title-lock.ts';
-import { type Db, db } from '../core/db.ts';
-import type { Queue } from '../library/downloads/queue.ts';
-import type { Finder } from '../library/grab/finder.ts';
-import type { Handler } from '../core/worker.ts';
+import { db } from '../core/db.ts';
+import type { Db, Finder, Handler, Queue } from '../types.ts';
 
 export function queueInitialHandler({ queue, finder }: { queue: Queue; finder: Finder }): Handler {
   return {

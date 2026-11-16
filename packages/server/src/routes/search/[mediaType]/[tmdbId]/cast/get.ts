@@ -1,5 +1,5 @@
 import type { RequestHandler } from 'express';
-import type { Tmdb } from '../../../../../metadata/tmdb.ts';
+import type { Tmdb } from '../../../../../types.ts';
 
 export function searchCast(tmdb: Tmdb | undefined): RequestHandler {
   return async (_req, res) => {

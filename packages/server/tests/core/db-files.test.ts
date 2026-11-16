@@ -2,9 +2,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { emptyData, open, SCHEMA_VERSION, type Data } from '../../src/core/db.ts';
-import type { Job } from '../../src/core/jobs.ts';
-import type { QueueEntry } from '../../src/library/downloads/queue.ts';
+import { emptyData, open, SCHEMA_VERSION } from '../../src/core/db.ts';
+import type { Data, Job, QueueEntry } from '../../src/types.ts';
 
 const queueKeys = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq'];
 

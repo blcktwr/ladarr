@@ -1,27 +1,4 @@
-import type { ReleaseSource } from './quality.ts';
-
-export type ParsedRelease = {
-  // The words before the first marker, as the release spells them.
-  title: string;
-  year: number | null;
-  season: number | null;
-  episodes: number[];
-  // True when the release is a whole season: it has a season and no episode.
-  pack: boolean;
-  // True when the season is split and the release holds one part of it.
-  part: boolean;
-  // More than one season in one release. ladarr does not take these in the MVP.
-  multiSeason: boolean;
-  // The absolute number of an anime release, which no season and episode give.
-  absolute: number | null;
-  // YYYY-MM-DD for a daily show.
-  airDate: string | null;
-  resolution: number | null;
-  source: ReleaseSource;
-  group: string | null;
-  // Null when the name does not say which audio the release has.
-  audioLanguages: string[] | null;
-};
+import type { ParsedRelease, ReleaseSource } from '../../types.ts';
 
 const LANGUAGES: Record<string, string> = {
   german: 'de',

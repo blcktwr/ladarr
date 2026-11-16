@@ -1,6 +1,5 @@
-import { move } from './helpers/test-queue.ts';
+import { move, branchOf } from './helpers/test-queue.ts';
 import { stageOf, reasonOfEntry } from '../src/library/downloads/queue.ts';
-import { branchOf } from './helpers/test-queue.ts';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

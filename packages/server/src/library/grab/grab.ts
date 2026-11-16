@@ -1,24 +1,13 @@
-import { type Db, db } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import { JobError } from '../../core/jobs.ts';
 import { catalog, itemFields } from '../../core/log.ts';
-import type { Finder } from './finder.ts';
-import type { Clients } from '../downloads/client-api.ts';
-import { ClientError, type Torrent } from '../downloads/qbittorrent.ts';
-import { addedByApp, type Queue, type QueueEntry } from '../downloads/queue.ts';
-import { isSample, isVideoFile, parseEpisodes, releaseEpisodes, type ParsedEpisodes } from '../parse.ts';
+import { ClientError } from '../downloads/qbittorrent.ts';
+import { addedByApp } from '../downloads/queue.ts';
+import { isSample, isVideoFile, parseEpisodes, releaseEpisodes } from '../parse.ts';
 import { splitOf } from '../split.ts';
 import { infoHashOf, magnetHash, torrentComment, torrentFiles } from './torrent.ts';
-import { IndexerError, type IndexerService } from './torznab.ts';
-
-export type GrabberDeps = {
-  queue: Queue;
-  finder: Finder;
-  indexers: IndexerService;
-  clients: Clients;
-  save: () => Promise<void>;
-  // The wait between two reads of the client after an add with an unknown result.
-  reconcileMs?: number;
-};
+import { IndexerError } from './torznab.ts';
+import type { Db, GrabberDeps, ParsedEpisodes, QueueEntry, Torrent } from '../../types.ts';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

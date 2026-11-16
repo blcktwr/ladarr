@@ -3,10 +3,9 @@ import { randomUUID } from 'node:crypto';
 import type { SearchPlan } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { upgradeQualities } from '../../../../library/grab/upgrades.ts';
-import type { Finder } from '../../../../library/grab/finder.ts';
 import { libraryFilter, libraryType, matchesType } from '../../../../library/tools/filters.ts';
-import type { Title } from '../../../../library/library.ts';
-import { isObject, MAX_KEYS, MAX_PLANS, plans, SAMPLE, startable, type Kind } from '../plans.ts';
+import { isObject, MAX_KEYS, MAX_PLANS, plans, SAMPLE, startable } from '../plans.ts';
+import type { Finder, Kind, Title } from '../../../../types.ts';
 
 export function librarySearchPreview(finder: Finder): RequestHandler {
   return (req, res) => {

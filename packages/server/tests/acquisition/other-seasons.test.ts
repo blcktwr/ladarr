@@ -2,13 +2,12 @@ import { needsOtherSeasons } from '@ladarr/shared/queue';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { MediaFile } from '../../src/core/db.ts';
-import type { Title } from '../../src/library/library.ts';
-import { reasonOfEntry, stageOf, type QueueEntry } from '../../src/library/downloads/queue.ts';
+import { reasonOfEntry, stageOf } from '../../src/library/downloads/queue.ts';
 import { splitOf } from '../../src/library/split.ts';
 import { episode, title } from '../helpers/test-fixtures.ts';
 import { move } from '../helpers/test-queue.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
+import type { MediaFile, QueueEntry, Title } from '../../src/types.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
 let api: Awaited<ReturnType<Awaited<ReturnType<typeof startPipeline>>['api']>> | undefined;

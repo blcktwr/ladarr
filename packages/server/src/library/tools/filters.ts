@@ -1,6 +1,7 @@
 import type { LibraryFilter, LibraryType } from '@ladarr/shared/enums';
-import { type Db, db } from '../../core/db.ts';
-import { availability, type Title } from '../library.ts';
+import { db } from '../../core/db.ts';
+import { availability } from '../library.ts';
+import type { Db, FilterResult, Title } from '../../types.ts';
 
 export const LIBRARY_FILTERS: readonly LibraryFilter[] = ['missing', 'waiting', 'attention', 'available'];
 
@@ -18,8 +19,6 @@ function attentionKeys() {
   }
   return keys;
 }
-
-export type FilterResult = { test: (title: Title) => boolean } | { error: 'invalid_filter' };
 
 // Turns the `filter` value of a request into a test for one title. No value passes every title.
 export function libraryFilter(value: unknown): FilterResult {

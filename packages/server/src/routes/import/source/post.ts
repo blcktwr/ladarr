@@ -1,18 +1,13 @@
 import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Events } from '../../../core/events.ts';
-import type { EnqueueInput, Job } from '../../../core/jobs.ts';
-import type { Tmdb } from '../../../metadata/tmdb.ts';
-import type { ImportStatus } from '../../../library/imports/status.ts';
 import { prepare } from '../../../library/imports/source.ts';
 import { openJournal, PlanError, titleBusy } from '../../../library/imports/plan.ts';
 import { AddError, addTitle } from '../../../library/tools/add.ts';
 import { fail } from '../../../helpers/import-source.ts';
-
-type Deps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job; status: ImportStatus; configDir?: string };
+import type { SourceDeps } from '../../../types.ts';
 
 // The plan is made again here. The server does not trust the preview that the browser holds.
-export function importSourceStart({ tmdb, events, enqueue, status, configDir }: Deps): RequestHandler {
+export function importSourceStart({ tmdb, events, enqueue, status, configDir }: SourceDeps): RequestHandler {
   return async (req, res) => {
     if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
     const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;

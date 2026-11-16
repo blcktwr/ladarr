@@ -1,13 +1,12 @@
 import { db } from '../../../../../core/db.ts';
 import type { AttachPreview } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Clients } from '../../../../../library/downloads/client-api.ts';
-import { ClientError, type ClientHandle, type Torrent } from '../../../../../library/downloads/qbittorrent.ts';
-import type { Queue } from '../../../../../library/downloads/queue.ts';
+import { ClientError } from '../../../../../library/downloads/qbittorrent.ts';
 import { isActive } from '../../../../../library/downloads/queue.ts';
 import { attachTorrent } from '../../../../../library/downloads/attach.ts';
 import { attachRefusal, HASH, MAX_TARGETS } from '../../../../../helpers/queue-attach.ts';
 import { label, shown } from '../../../../../helpers/queue.ts';
+import type { ClientHandle, Clients, Queue, Torrent } from '../../../../../types.ts';
 
 // Attaches a torrent that is in the client already. The user confirms the owner and the title before anything changes.
 export function queueEntryAttachPost(queue: Queue, clients: Clients): RequestHandler<{ id: string }> {

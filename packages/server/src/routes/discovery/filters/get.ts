@@ -1,7 +1,7 @@
 import type { DiscoveryFilters } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Tmdb } from '../../../metadata/tmdb.ts';
 import { discoveryGenres } from '../genres.ts';
+import type { Tmdb } from '../../../types.ts';
 
 // The lists of the filter panel: the genres of both media types and the countries of the watch providers.
 export function discoveryFiltersGet(tmdb: Tmdb | undefined): RequestHandler {

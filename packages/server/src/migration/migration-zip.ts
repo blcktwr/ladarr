@@ -3,20 +3,10 @@ import { open } from 'node:fs/promises';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { crc32, createInflateRaw } from 'node:zlib';
+import type { ZipEntry, ZipLimits } from '../types.ts';
 
 // A small reader for ZIP files that come from the user. It never writes a file under a name from the archive.
 // shortcut: no ZIP64, no encryption, no split archives. A backup of Sonarr or Radarr uses none of them, so add them only if a real backup does.
-
-export type ZipLimits = {
-  // The most entries that the central directory can list.
-  entries: number;
-  // The most bytes that one entry can have after it is unpacked.
-  entryBytes: number;
-  // The most that an entry can grow, as a ratio of its packed size.
-  ratio: number;
-};
-
-export type ZipEntry = { name: string; method: 0 | 8; crc: number; packedSize: number; size: number; offset: number; symlink: boolean };
 
 export class ZipError extends Error {
   code: 'invalid' | 'unsupported' | 'unsafe' | 'too_large';

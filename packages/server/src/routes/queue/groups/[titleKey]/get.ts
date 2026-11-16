@@ -1,9 +1,8 @@
 import { db } from '../../../../core/db.ts';
 import type { QueueGroupPage } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Poller } from '../../../../library/downloads/poller.ts';
-import type { ImportStatus } from '../../../../library/imports/status.ts';
 import { bySeasonNumber, filtersOf, groupAggregate, lanePositions, reachedOf, shown, view } from '../../../../helpers/queue.ts';
+import type { ImportStatus, Poller } from '../../../../types.ts';
 
 // The episodes of one season of a series, in the order of the season and the number. Without a season, it shows every
 // season of the series. `group` covers every member of the season before the tab filter, so the inspector header and

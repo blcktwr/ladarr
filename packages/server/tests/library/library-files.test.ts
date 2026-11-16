@@ -5,12 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import express from 'express';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { open, type Db } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { describeProbe, fileRow, libraryFilesRouter } from '../../src/library/tools/files.ts';
 import type { ffprobeRaw } from '../../src/library/probe.ts';
 import { scanTitle } from '../../src/library/scan.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { episode, title } from '../helpers/test-fixtures.ts';
+import type { Db } from '../../src/types.ts';
 
 let dir: string;
 let root: string;

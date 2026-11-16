@@ -4,8 +4,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { strFromU8, strToU8, unzip, zip } from 'fflate';
-import { type Data, type Db, SCHEMA_VERSION, db, emptyData } from '../core/db.ts';
+import { SCHEMA_VERSION, db, emptyData } from '../core/db.ts';
 import { APP_VERSION } from './version.ts';
+import type { Data, Db, Manifest } from '../types.ts';
 
 // A safety backup is the copy that a restore makes of the current data before it replaces the data.
 export class BackupError extends Error {
@@ -68,18 +69,6 @@ export async function readBackup(bytes: Uint8Array): Promise<{ manifest: Manifes
   return { manifest, data };
 }
 
-type Manifest = {
-  format: 1;
-  app: 'ladarr';
-  appVersion: string;
-  schemaVersion: number;
-  createdAt: string;
-  kind: BackupKind;
-  files: Record<string, { bytes: number; sha256: string }>;
-  // The backup holds no media files and no login sessions.
-  excludes: string[];
-};
-
 export async function listBackups(dir: string): Promise<BackupRow[]> {
   const names = (await readdir(dir).catch(() => [])).filter(isBackupName);
   const items = await Promise.all(
@@ -123,4 +112,3 @@ export async function createBackup(dir: string, kind: BackupKind, now = new Date
 export async function pruneBackups(dir: string, keep = KEEP) {
   for (const old of (await listBackups(dir)).slice(keep)) await rm(join(dir, old.name), { force: true });
 }
-

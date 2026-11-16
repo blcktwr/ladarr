@@ -1,8 +1,8 @@
 import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Poller } from '../../../library/downloads/poller.ts';
 import { describe } from '@ladarr/shared/queue';
 import { DAY_MS, itemJobs, jobLabel, queueTabCounts, shown } from '../../../helpers/queue.ts';
+import type { Poller } from '../../../types.ts';
 
 export function queueSummaryGet(poller: Poller): RequestHandler {
   return (_req, res) => {

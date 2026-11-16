@@ -1,18 +1,16 @@
 import { basename } from 'node:path';
 import type { UpgradeQuality } from '@ladarr/shared/types';
-import { type MediaFile, db, profilesFor } from '../../core/db.ts';
-import { isMonitored, type Title } from '../library.ts';
-import { chainFileRank, QUALITIES, RANK_STRIDE, type Profile, type ReleaseSource } from './quality.ts';
+import { db, profilesFor } from '../../core/db.ts';
+import { isMonitored } from '../library.ts';
+import { chainFileRank, QUALITIES, RANK_STRIDE } from './quality.ts';
 import { parseRelease } from './release.ts';
+import type { ChainQuality, MediaFile, Profile, ReleaseSource, Title, UpgradeFile } from '../../types.ts';
 
 // The release that gave a file, or else the words in its name, tell the source and the resolution of the file.
 export function qualityOfFile(file: MediaFile): { source: ReleaseSource; resolution: number | null } {
   const parsed = file.source ? null : parseRelease(basename(file.path));
   return { source: file.source ?? parsed!.source, resolution: file.source ? (file.resolution ?? null) : parsed!.resolution };
 }
-
-// A file of a title that an upgrade can replace. The file holds one episode and its quality is known.
-type UpgradeFile = { title: Title; season: number | null; number: number | null; file: MediaFile; source: ReleaseSource; resolution: number };
 
 // The files of a title, with the episode of each one. A paused title has none.
 function upgradeFiles(title: Title): UpgradeFile[] {
@@ -32,10 +30,6 @@ function upgradeFiles(title: Title): UpgradeFile[] {
   else for (const episode of title.episodes) if (isMonitored(title, episode)) add(episode.fileId, episode.season, episode.number);
   return files;
 }
-
-// The qualities that the chain defines, the best first. A quality that more than one profile defines keeps the rank of
-// the first one.
-type ChainQuality = UpgradeQuality & { rank: number; resolution: number | null };
 
 function chainQualities(profiles: Profile[]): ChainQuality[] {
   const qualities = new Map<string, ChainQuality>();

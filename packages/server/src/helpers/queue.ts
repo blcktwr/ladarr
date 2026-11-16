@@ -1,16 +1,14 @@
 import { qualityLabel } from '../library/grab/quality.ts';
 import { parseRelease } from '../library/grab/release.ts';
-import type { Finder } from '../library/grab/finder.ts';
 import { REJECTION_TEXT } from '../library/grab/decide.ts';
 import { aggregate, describe, needsOtherSeasons, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
 import type { QueueGroupRow, QueuePage, QueueRow } from '@ladarr/shared/types';
-import { type Db, db } from '../core/db.ts';
-import { seasonOf, type Job } from '../core/jobs.ts';
-import { reasonInfo, type ReasonInfo } from '../core/reasons.ts';
-import type { ImportStatus } from '../library/imports/status.ts';
-import { availability, type Title } from '../library/library.ts';
-import type { Poller, Transfer } from '../library/downloads/poller.ts';
-import { isActive, phaseOfEntry, reasonOfEntry, type QueueEntry } from '../library/downloads/queue.ts';
+import { db } from '../core/db.ts';
+import { seasonOf } from '../core/jobs.ts';
+import { reasonInfo } from '../core/reasons.ts';
+import { availability } from '../library/library.ts';
+import { isActive, phaseOfEntry, reasonOfEntry } from '../library/downloads/queue.ts';
+import type { Db, Filters, Finder, ImportStatus, Job, Poller, QueueEntry, ReasonInfo, RowGroup, Title, Transfer } from '../types.ts';
 
 export const DAY_MS = 24 * 60 * 60_000;
 export const MAX_PAGE = 200;
@@ -323,7 +321,6 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
 // A title whose release has not come, or whose episodes have not aired, is upcoming. Its bookmark shows a clock.
 export const isUpcoming = (title: Title) => availability(title, { now: Date.now(), files: db.data.files }) === 'waiting';
 
-export type Filters = { key?: string; type?: string; q?: string; priority: boolean; cleared: boolean };
 export const filtersOf = (query: Record<string, unknown>): Filters => ({
   key: typeof query.stage === 'string' ? query.stage : undefined,
   type: typeof query.type === 'string' ? query.type : undefined,
@@ -344,24 +341,6 @@ export function matches(entry: QueueEntry, f: Filters) {
 }
 
 export const bySeasonNumber = (a: QueueEntry, b: QueueEntry) => (a.season ?? 0) - (b.season ?? 0) || (a.number ?? 0) - (b.number ?? 0);
-
-// A row of the list before the page cuts it: one season of a series, one movie, or a series that waits for its episodes.
-type RowGroup = {
-  key: string;
-  title: Title;
-  season: number | null;
-  entries: QueueEntry[];
-  matching: number;
-  first: number;
-  progress: number;
-  part: number;
-  download: number;
-  ready: boolean;
-  searching: boolean;
-  upcoming: boolean;
-  notFound: boolean;
-  pending: boolean;
-};
 
 // The rows of the queue, before the page and after the filters. The counters read the same rows, so a badge and the
 // rows of its tab always agree.

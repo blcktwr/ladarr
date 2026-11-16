@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { BULK_SEARCH_JOB } from '../../src/library/calendar/calendar-search.ts';
 import { librarySearchHandler } from '../../src/jobs/library-search.ts';
-import { open, type Db } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { createFinder } from '../../src/library/grab/finder.ts';
-import { enqueue, type Job } from '../../src/core/jobs.ts';
+import { enqueue } from '../../src/core/jobs.ts';
 import { createQueue } from '../../src/library/downloads/queue.ts';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
 import { entryOf } from '../helpers/test-queue.ts';
 import { startPipeline } from '../helpers/test-pipeline.ts';
-import type { Title } from '../../src/library/library.ts';
+import type { Db, Job, Title } from '../../src/types.ts';
 
 const film = (id: number, extra: Partial<Title> = {}) => movie({ key: `movie:${id}`, tmdbId: id, manualRelease: true, meta: { ...movie().meta, tmdbId: id, title: `Film ${String(id).padStart(3, '0')}` }, ...extra });
 

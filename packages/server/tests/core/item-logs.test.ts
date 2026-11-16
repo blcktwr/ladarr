@@ -5,11 +5,12 @@ import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmS
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { open, type Db } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { catalog, closeLog, configureItemLogs, deleteItemLog, log, logToFile, recentLogs } from '../../src/core/log.ts';
-import { createQueue, type QueueEntry } from '../../src/library/downloads/queue.ts';
+import { createQueue } from '../../src/library/downloads/queue.ts';
 import { dropTitle } from '../../src/library/tools/remove.ts';
+import type { Db, QueueEntry } from '../../src/types.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'ladarr-item-logs-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));

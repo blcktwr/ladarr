@@ -1,32 +1,14 @@
 import { backoffMs, JobError } from '../../core/jobs.ts';
 import { db } from '../../core/db.ts';
 import { outboundFetch } from '../../core/http.ts';
-import { indexerName, type Caps, type Indexer } from './indexers.ts';
-import type { Limiter } from '../../core/limiter.ts';
+import { indexerName } from './indexers.ts';
 import { log } from '../../core/log.ts';
-
-// One result of a search or of the RSS feed, before any decision.
-export type RawRelease = {
-  indexerId: number;
-  guid: string;
-  title: string;
-  // The address of the .torrent file, usually through the indexer manager.
-  link: string | null;
-  magnet: string | null;
-  infoHash: string | null;
-  sizeBytes: number;
-  publishedAt: number | null;
-  seeders: number | null;
-  peers: number | null;
-  categories: number[];
-};
-
-type ErrorCode = 'rejected' | 'unavailable' | 'invalid_response';
+import type { Caps, Indexer, Limiter, RawRelease, SearchQuery, TorznabErrorCode, TorznabOptions } from '../../types.ts';
 
 // The message never holds the address, because the address holds the API key.
 export class IndexerError extends JobError {
-  code: ErrorCode;
-  constructor(code: ErrorCode, message: string, cause?: unknown) {
+  code: TorznabErrorCode;
+  constructor(code: TorznabErrorCode, message: string, cause?: unknown) {
     super('outage', message);
     this.code = code;
     this.cause = cause;
@@ -113,25 +95,10 @@ export function parseCaps(xml: string): Caps {
   return { search: mode('search'), tv: mode('tv-search'), movie: mode('movie-search'), categories };
 }
 
-export type SearchQuery = {
-  kind: 'search' | 'tv' | 'movie';
-  q?: string;
-  season?: number;
-  ep?: number;
-  year?: number;
-  imdbId?: string;
-  tmdbId?: number;
-  tvdbId?: number;
-  categories: number[];
-  limit?: number;
-};
-
 const FUNCTION = { search: 'search', tv: 'tvsearch', movie: 'movie' } as const;
 
-type Options = { fetch?: typeof fetch; timeoutMs?: number };
-
 // The native indexer service. The adapter endpoints for the indexer manager do not use it, and it does not use them.
-export function createIndexerService(limiter: Limiter, { fetch: fetchImpl = fetch, timeoutMs = 30_000 }: Options = {}, onChange: () => void = () => {}) {
+export function createIndexerService(limiter: Limiter, { fetch: fetchImpl = fetch, timeoutMs = 30_000 }: TorznabOptions = {}, onChange: () => void = () => {}) {
   const url = (indexer: Indexer, params: Record<string, string>) => {
     const target = new URL(`${indexer.baseUrl.replace(/\/+$/, '')}${indexer.apiPath}`);
     for (const [key, value] of Object.entries({ ...params, apikey: indexer.apiKey })) target.searchParams.set(key, value);
@@ -240,5 +207,3 @@ export function createIndexerService(limiter: Limiter, { fetch: fetchImpl = fetc
     usable: (indexer: Indexer) => Date.now() >= indexer.health.retryAt,
   };
 }
-
-export type IndexerService = ReturnType<typeof createIndexerService>;

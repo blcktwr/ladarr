@@ -1,6 +1,5 @@
-import type { SearchOutcome } from '@ladarr/shared/queue';
-import type { Phase } from '@ladarr/shared/queue';
-import type { Queue, QueueEntry } from '../../src/library/downloads/queue.ts';
+import type { SearchOutcome, Phase } from '@ladarr/shared/queue';
+import type { Queue, QueueEntry } from '../../src/types.ts';
 
 // Forces a state in a test. The shape is the one that the old move() took, so a test reads the state that it
 // arranges. The production code has no such operation: it asks for enter, wait, block, pause, cancel, or complete.

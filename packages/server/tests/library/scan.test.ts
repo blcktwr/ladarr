@@ -2,12 +2,13 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { open, type Db } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
-import { availability, seriesCounts, type Episode, type Title } from '../../src/library/library.ts';
+import { availability, seriesCounts } from '../../src/library/library.ts';
 import { scanTitle } from '../../src/library/scan.ts';
 import { libraryScanHandler } from '../../src/jobs/library-scan.ts';
 import { startTestApp } from '../helpers/test-app.ts';
+import type { Db, Episode, Title } from '../../src/types.ts';
 
 let dir: string;
 let tv: string;

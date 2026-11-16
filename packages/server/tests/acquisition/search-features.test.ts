@@ -4,13 +4,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Title } from '../../src/library/library.ts';
 import { episode, indexer as indexerFixture, movie, title } from '../helpers/test-fixtures.ts';
 import { BULK_SEARCH_JOB } from '../../src/library/calendar/calendar-search.ts';
 import { librarySearchHandler } from '../../src/jobs/library-search.ts';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
 import { enqueue } from '../../src/core/jobs.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
+import type { Title } from '../../src/types.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
 let api: Awaited<ReturnType<Awaited<ReturnType<typeof startPipeline>>['api']>> | undefined;

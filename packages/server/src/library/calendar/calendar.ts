@@ -1,8 +1,8 @@
 import type { CalendarEvent, CalendarUndated } from '@ladarr/shared/types';
-import type { MediaType } from '@ladarr/shared/enums';
-import { type Db, db } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import { episodeEligibleAt, isDateOnly, releaseInstant } from '../../core/dates.ts';
-import { availability, isMonitored, movieEligibleAt, type Title } from '../library.ts';
+import { availability, isMonitored, movieEligibleAt } from '../library.ts';
+import type { CalendarQuery, Db, Title } from '../../types.ts';
 
 export const MAX_EVENTS = 5_000;
 
@@ -15,9 +15,6 @@ export const isDay = (value: unknown): value is string => typeof value === 'stri
 export function dayOf(at: number) {
   return new Date(at).toISOString().slice(0, 10);
 }
-
-// `limit` cuts the list of events. The JSON answer has a limit. The feed has none, because a cut feed looks complete.
-export type CalendarQuery = { from: string; to: string; type?: MediaType; monitored: boolean; limit?: number };
 
 // The first digital or physical release in any region, as a day. The day has a time only when TMDB gave one.
 function movieRelease(title: Title) {

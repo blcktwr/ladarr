@@ -1,14 +1,6 @@
 import { traffic } from './log.ts';
 import { recordOutboundRequest, requestIdFor } from './outbound.ts';
-
-type Options = {
-  // Replaces the address in the log. A webhook address can hold a token.
-  path?: string;
-  // False leaves the query out of the log.
-  query?: boolean;
-  // Ties the entry to the log line that caused the request.
-  requestId?: string;
-};
+import type { HttpOptions } from '../types.ts';
 
 // What the caller sends, without a file or a stream, which has no text.
 async function bodyOf(body: BodyInit | null | undefined): Promise<unknown> {
@@ -42,7 +34,7 @@ async function bodyReceived(response: Response): Promise<unknown> {
 // The system that a caller logs is the name that the user set, not the host, because the host says little.
 // The entry holds the request and the answer as they are. redact() hides a key, a token, a password, a magnet link, or a download link.
 // Every request has an id, so the log of the work that sent it can link to the entry of the request.
-export function outboundFetch(system: string, fetchImpl: typeof fetch = fetch, { path, query = true, requestId }: Options = {}): typeof fetch {
+export function outboundFetch(system: string, fetchImpl: typeof fetch = fetch, { path, query = true, requestId }: HttpOptions = {}): typeof fetch {
   return async (input, init) => {
     const id = requestId ?? requestIdFor(system);
     recordOutboundRequest(system, id);

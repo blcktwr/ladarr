@@ -1,15 +1,12 @@
 import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { EnqueueInput, Job } from '../../../core/jobs.ts';
-import type { ImportStatus } from '../../../library/imports/status.ts';
 import { openJournal, PlanError, titleBusy } from '../../../library/imports/plan.ts';
 import { planRename } from '../../../library/rename.ts';
 import { fail, isObject } from '../../../helpers/rename.ts';
-
-type Deps = { enqueue: (input: EnqueueInput) => Job; status: ImportStatus };
+import type { RenameApplyDeps } from '../../../types.ts';
 
 // The plan is made again here, with the saved templates.
-export function renameApply({ enqueue, status }: Deps): RequestHandler {
+export function renameApply({ enqueue, status }: RenameApplyDeps): RequestHandler {
   return async (req, res) => {
     try {
       const plan = await planRename(String(isObject(req.body) ? req.body.titleKey : ''));

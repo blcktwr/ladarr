@@ -6,10 +6,11 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEvents } from '../../src/core/events.ts';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
-import { mapPath, mapProfile, readFromApi, SourceError, type SourceProfile } from '../../src/migration/migration-source.ts';
+import { mapPath, mapProfile, readFromApi, SourceError } from '../../src/migration/migration-source.ts';
 import { migrationImportHandler } from '../../src/jobs/migration-import.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { createTmdb } from '../../src/metadata/tmdb.ts';
+import type { SourceProfile } from '../../src/types.ts';
 
 // ---- profiles, modelled on the quality profiles that Sonarr and Radarr send ----
 

@@ -1,6 +1,5 @@
 import { db } from './db.ts';
-
-type Waiter = { urgent: boolean; resolve: () => void };
+import type { Waiter } from '../types.ts';
 
 // One limiter for all requests to an indexer: searches, RSS, .torrent downloads, and retries.
 // A request starts only after `delaySeconds` since the start of the request before it.
@@ -67,5 +66,3 @@ export function createLimiter(onChange: () => void = () => {}) {
     },
   };
 }
-
-export type Limiter = ReturnType<typeof createLimiter>;

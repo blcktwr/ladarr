@@ -1,5 +1,6 @@
 import type { ClientTestResult, ClientView } from '@ladarr/shared/types';
-import { ClientError, clientUrl, createQbittorrent, type ClientAuth, type ClientConfig } from '../library/downloads/qbittorrent.ts';
+import { ClientError, clientUrl, createQbittorrent } from '../library/downloads/qbittorrent.ts';
+import type { ClientAuth, ClientConfig } from '../types.ts';
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 

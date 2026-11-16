@@ -1,8 +1,9 @@
-import { type Db, type Settings, db } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import type { SettingsSaved } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { configureItemLogs } from '../../core/log.ts';
 import { templateProblem } from '../../library/naming.ts';
+import type { Db, Settings } from '../../types.ts';
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 

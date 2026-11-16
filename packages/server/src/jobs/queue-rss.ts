@@ -1,5 +1,4 @@
-import type { Finder } from '../library/grab/finder.ts';
-import type { Handler } from '../core/worker.ts';
+import type { Finder, Handler } from '../types.ts';
 
 const RSS_EVERY_MS = 15 * 60_000;
 

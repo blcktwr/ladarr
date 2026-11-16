@@ -1,9 +1,7 @@
 // A fake Wholphin for the Seerr API tests. It sends the calls that the Wholphin Seerr integration makes, in the
 // order of the app: status, public settings, the user, genres, discover, search, details, credits, requests.
 // The TMDB fixture holds the answers that the planned raw TMDB methods need.
-import type { Db, MediaFile } from '../../src/core/db.ts';
-import type { Episode, Title } from '../../src/library/library.ts';
-import type { TitleMeta } from '../../src/metadata/tmdb.ts';
+import type { Db, Episode, MediaFile, Title, TitleMeta } from '../../src/types.ts';
 
 export const MOVIE_ID = 603;
 export const SERIES_ID = 1396;

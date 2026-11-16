@@ -1,14 +1,13 @@
-import { move } from '../helpers/test-queue.ts';
+import { move, branchOf } from '../helpers/test-queue.ts';
 import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
-import { branchOf } from '../helpers/test-queue.ts';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { importResumeHandler } from '../../src/jobs/import-resume.ts';
-import type { Job } from '../../src/core/jobs.ts';
 import { episode, movie } from '../helpers/test-fixtures.ts';
 import { noLink, sleep, startImportTest } from '../helpers/test-import.ts';
 import { MIB, until } from '../helpers/test-pipeline.ts';
+import type { Job } from '../../src/types.ts';
 
 let t: Awaited<ReturnType<typeof startImportTest>> | undefined;
 afterEach(async () => {

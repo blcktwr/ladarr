@@ -1,5 +1,5 @@
 import type { WebhookEventType } from '@ladarr/shared/enums';
-import type { WebhookState } from '../core/webhook.ts';
+import type { WebhookState } from '../types.ts';
 
 // The statuses of the queue that start a webhook. The test is not one of them: it saves nothing.
 export const WEBHOOK_EVENT_TYPES = ['stuck', 'available'] as const satisfies readonly WebhookEventType[];

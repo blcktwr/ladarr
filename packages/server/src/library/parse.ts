@@ -1,8 +1,4 @@
-export type ParsedEpisodes = { season: number; numbers: number[] };
-
-// The facts of an episode that a file name can give. An `Episode` of the library has all of them, and more.
-type EpisodeFacts = { season: number; number: number; name?: string; airDate?: string | null };
-
+import type { Continuation, EpisodeFacts, ParsedEpisodes } from '../types.ts';
 const MAX_RANGE = 50;
 const VIDEO = /\.(mkv|mp4|m4v|avi|mov|wmv|ts|webm)$/i;
 const SAMPLE = /(^|[^a-z0-9])sample([^a-z0-9]|$)/i;
@@ -104,10 +100,6 @@ export function titleNumbers(parsed: ParsedEpisodes, episodes: { season: number;
     return at === undefined ? [] : [at];
   });
 }
-
-// The numbering of a release that counts as two seasons what the title counts as one. `releaseSeason` is the season of
-// the release, `season` the season of the title, and `from` the episode of the title that the release numbers as 1.
-export type Continuation = { releaseSeason: number; season: number; from: number };
 
 // The season and the episodes of the title that a file of a release names. A release of the rest of a season numbers its
 // own season from 1, so its numbers are the places in that rest.

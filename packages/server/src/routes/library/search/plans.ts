@@ -1,20 +1,13 @@
 import { db } from '../../../core/db.ts';
-import type { Finder } from '../../../library/grab/finder.ts';
 import { isActive } from '../../../library/downloads/queue.ts';
-import type { Title } from '../../../library/library.ts';
+import type { Finder, SearchPlan, Title } from '../../../types.ts';
 
 export const MAX_KEYS = 5_000;
 export const MAX_PLANS = 20;
 export const SAMPLE = 10;
 
-// A plan of the kind `upgrades` comes from the Upgrade button of a title page. It searches the files below a quality
-// for a release of exactly that quality. Other plans look for the missing files.
-export type Kind = 'search' | 'upgrades';
-
-export type Plan = { keys: string[]; targets: number; kind: Kind; quality: string; jobId: string | null };
-
 // shortcut: plans stay in memory, so a restart drops them. The user starts the preview again.
-export const plans = new Map<string, Plan>();
+export const plans = new Map<string, SearchPlan>();
 
 export const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 

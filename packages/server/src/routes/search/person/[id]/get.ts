@@ -1,8 +1,8 @@
 import { db } from '../../../../core/db.ts';
 import type { PersonCredits } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Tmdb } from '../../../../metadata/tmdb.ts';
 import { inLibrary } from '../../../../helpers/search.ts';
+import type { Tmdb } from '../../../../types.ts';
 
 export function searchPerson(tmdb: Tmdb | undefined): RequestHandler<{ id: string }> {
   return async (req, res) => {

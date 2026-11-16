@@ -1,30 +1,9 @@
 import { db } from '../core/db.ts';
 import { PlanError } from './imports/plan.ts';
-import type { Episode } from './library.ts';
+import type { Correction, CorrectionRow, Episode, EpisodeRef, MappingEntry, PointerRow } from '../types.ts';
 
 // A file of the library gets the episodes that it holds, from a mapping that a person reviewed. The correction writes
 // the two directions of the record: the coverage of each file, and the file of each episode.
-
-export type EpisodeRef = { season: number; number: number };
-
-// One file of the title with the episodes that it holds. An empty list means that its content is unknown.
-export type MappingEntry = { path: string; episodes: EpisodeRef[] };
-
-export type CorrectionRow = {
-  fileId: string;
-  path: string;
-  from: EpisodeRef[];
-  to: EpisodeRef[];
-  // `change` and `same` are valid. `review` needs a person: the content is unknown, or the file is gone.
-  // `blocked` is a request that can not be written.
-  status: 'change' | 'same' | 'review' | 'blocked';
-  reason: 'path_unknown' | 'file_missing' | 'episode_unknown' | 'mixed_season' | 'duplicate' | 'episode_missing' | 'shared_episode' | null;
-};
-
-// One episode whose file changes. The paths, or null when the episode has no file.
-export type PointerRow = { season: number; number: number; from: string | null; to: string | null };
-
-export type Correction = { titleKey: string; rows: CorrectionRow[]; pointers: PointerRow[] };
 
 const keyOf = (episode: EpisodeRef) => `${episode.season}x${episode.number}`;
 const sorted = (episodes: EpisodeRef[]) => [...episodes].sort((a, b) => a.season - b.season || a.number - b.number);

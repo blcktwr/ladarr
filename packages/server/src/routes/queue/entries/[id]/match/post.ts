@@ -1,15 +1,13 @@
 import { db } from '../../../../../core/db.ts';
 import type { QueueMatchPreview } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Finder } from '../../../../../library/grab/finder.ts';
-import type { EnqueueInput, Job } from '../../../../../core/jobs.ts';
-import type { Clients } from '../../../../../library/downloads/client-api.ts';
 import { ClientError } from '../../../../../library/downloads/qbittorrent.ts';
-import { isActive, type Covered, type Queue, type QueueEntry } from '../../../../../library/downloads/queue.ts';
+import { isActive } from '../../../../../library/downloads/queue.ts';
 import { createRetry, sharingOf } from '../../../../../library/downloads/queue-api.ts';
 import { listDownloadFiles } from '../../../../../library/imports/importer.ts';
 import { titleFiles } from '../../../../../library/imports/local.ts';
 import { label, shown } from '../../../../../helpers/queue.ts';
+import type { Clients, Covered, EnqueueInput, Finder, Job, Queue, QueueEntry } from '../../../../../types.ts';
 
 // Matches a file of the download to the target, or to several episodes. The match stays through every retry.
 // A target that has no torrent takes a file of the folder of its title, and the local import runs again.

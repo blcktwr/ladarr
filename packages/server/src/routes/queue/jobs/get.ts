@@ -1,8 +1,8 @@
 import { db } from '../../../core/db.ts';
 import type { QueueJob } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Finder } from '../../../library/grab/finder.ts';
 import { itemJobs, jobEta, jobLabel, jobTitle } from '../../../helpers/queue.ts';
+import type { Finder } from '../../../types.ts';
 
 export function queueJobsGet(finder: Finder): RequestHandler {
   return (_req, res) => {

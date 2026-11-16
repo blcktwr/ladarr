@@ -5,8 +5,8 @@ import type { MigrationStatus } from '@ladarr/shared/enums';
 import type { RequestHandler } from 'express';
 import { buildPlan } from '../../../migration/migration.ts';
 import { mapProfile, readFromApi } from '../../../migration/migration-source.ts';
-import type { Tmdb } from '../../../metadata/tmdb.ts';
 import { MAX_PLANS, parseConnection, parseMappings, plans, uploads } from '../../../helpers/migration.ts';
+import type { Tmdb } from '../../../types.ts';
 
 export function migrationPreview(tmdb: Tmdb | undefined): RequestHandler {
   return async (req, res) => {

@@ -1,7 +1,7 @@
-import { type Db, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import { log } from '../core/log.ts';
-import type { Handler } from '../core/worker.ts';
 import { createBackup, listBackups, pruneBackups } from '../system/backup.ts';
+import type { Db, Handler } from '../types.ts';
 
 const AUTO_EVERY_MS = 24 * 60 * 60_000;
 

@@ -1,37 +1,11 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { FormatTags, ProbeRaw, ProbeResult } from '../types.ts';
 
 const run = promisify(execFile);
 
-// The tags of a release that name the content of a file. `season` and `episode` hold the numbering of the release,
-// which is not always the numbering of TMDB.
-export type FormatTags = { title: string | null; season: number | null; episode: number | null };
-
-export type ProbeResult =
-  | { ok: true; durationSeconds: number; container: string; videoCodec: string; audioLanguages: string[]; tags?: FormatTags }
-  // `unreadable`: ffprobe cannot read the file. `no_video`: it has no video stream. `too_short`: it is shorter than a second.
-  | { ok: false; reason: 'unreadable' | 'no_video' | 'too_short' }
-  // ffprobe is not installed. The check is skipped, and the caller says so.
-  | { ok: 'skipped' };
-
-export type SideData = { side_data_type?: string };
-export type Stream = {
-  codec_type?: string;
-  codec_name?: string;
-  codec_tag_string?: string;
-  width?: number;
-  height?: number;
-  display_aspect_ratio?: string;
-  avg_frame_rate?: string;
-  channels?: number;
-  disposition?: { attached_pic?: number };
-  side_data_list?: SideData[];
-  tags?: { language?: string };
-};
-export type Raw = { format?: { duration?: string; format_name?: string; bit_rate?: string; tags?: Record<string, string> }; streams?: Stream[] };
-
 // Runs ffprobe and returns what it printed. `skipped`: ffprobe is not installed. `unreadable`: ffprobe cannot read the file.
-export async function ffprobeRaw(path: string): Promise<{ data: Raw } | { error: 'skipped' | 'unreadable' }> {
+export async function ffprobeRaw(path: string): Promise<{ data: ProbeRaw } | { error: 'skipped' | 'unreadable' }> {
   let stdout: string;
   try {
     ({ stdout } = await run('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', path], { timeout: 60_000, maxBuffer: 5 * 1024 * 1024 }));
@@ -46,7 +20,7 @@ export async function ffprobeRaw(path: string): Promise<{ data: Raw } | { error:
 }
 
 // The tag keys of a file do not have one letter case, so the reader compares them in upper case.
-export function formatTags(raw: Raw['format']): FormatTags {
+export function formatTags(raw: ProbeRaw['format']): FormatTags {
   const tags = new Map(Object.entries(raw?.tags ?? {}).map(([key, value]) => [key.trim().toUpperCase(), value.trim()]));
   const text = (key: string) => tags.get(key) || null;
   const number = (key: string) => {

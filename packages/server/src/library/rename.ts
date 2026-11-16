@@ -1,10 +1,11 @@
 import type { RenameRow } from '@ladarr/shared/types';
 import { lstat, realpath } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { type Db, db } from '../core/db.ts';
-import { inside, type JournalStep } from './imports/importer.ts';
+import { db } from '../core/db.ts';
+import { inside } from './imports/importer.ts';
 import { keyOf, PlanError, readableRoot } from './imports/plan.ts';
-import { episodePath, folderName, moviePath, type NamingTemplates } from './naming.ts';
+import { episodePath, folderName, moviePath } from './naming.ts';
+import type { Db, JournalStep, NamingTemplates } from '../types.ts';
 
 export type { RenameRow };
 

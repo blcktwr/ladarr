@@ -1,5 +1,6 @@
 import type { RequestHandler } from 'express';
-import { parsePush, type IndexerApp } from '../../../../../library/grab/indexers.ts';
+import { parsePush } from '../../../../../library/grab/indexers.ts';
+import type { IndexerApp } from '@ladarr/shared/enums';
 
 // The test only checks the body. The address is the address of the indexer manager, so ladarr does not call it here.
 export function indexerTest(app: IndexerApp): RequestHandler {

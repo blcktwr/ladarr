@@ -2,19 +2,12 @@ import type { ImportCheckId, ImportCheckState } from '@ladarr/shared/enums';
 import type { ImportCheck, RunStatus } from '@ladarr/shared/types';
 import { stat } from 'node:fs/promises';
 import { db } from '../../core/db.ts';
-import type { Events } from '../../core/events.ts';
 import { describe } from '@ladarr/shared/queue';
+import type { CheckResult, CheckRun, CopyProgress, Events } from '../../types.ts';
 
 // What the importer is doing now, in memory. The journal and the library hold the facts. This holds the numbers
 // that the client reads again after a restart: the bytes of a running copy, the result of a manual import or a rename,
 // and the checks of a download import.
-
-export type CopyProgress = { journalId: string; dest: string; entryIds: string[]; copiedBytes: number; totalBytes: number; observedAt: number };
-
-// A check run of an import. One list belongs to the whole group, so every target of a pack shows the same checks.
-type CheckRun = { entryIds: string[]; checks: ImportCheck[] };
-
-type CheckResult = { code: string; detail?: string };
 
 const MAX_RUNS = 50;
 const PUBLISH_MS = 1_000;
@@ -118,5 +111,3 @@ export function createImportStatus(events: Events, { pollMs = 500, now = Date.no
     run: (id: string) => runs.get(id),
   };
 }
-
-export type ImportStatus = ReturnType<typeof createImportStatus>;

@@ -1,20 +1,10 @@
 import type { IndexerTestResult } from '@ladarr/shared/types';
 import type { Response } from 'express';
-import {
-  DEFAULT_DELAY_SECONDS,
-  MAX_DELAY_SECONDS,
-  identity,
-  isCategoryList,
-  isLanguageList,
-  isObject,
-  newHealth,
-  parsePush,
-  type Indexer,
-  type IndexerApp,
-  type Parsed,
-} from '../library/grab/indexers.ts';
-import { IndexerError, type IndexerService } from '../library/grab/torznab.ts';
-import { type Db, db } from '../core/db.ts';
+import { DEFAULT_DELAY_SECONDS, MAX_DELAY_SECONDS, identity, isCategoryList, isLanguageList, isObject, newHealth, parsePush } from '../library/grab/indexers.ts';
+import { IndexerError } from '../library/grab/torznab.ts';
+import { db } from '../core/db.ts';
+import type { IndexerApp } from '@ladarr/shared/enums';
+import type { Db, Indexer, IndexerService, Parsed } from '../types.ts';
 
 export const invalidSetting = (res: Response, field: string) => void res.status(400).json({ error: 'invalid_setting', field });
 export const exists = (parsed: Parsed, id?: number) =>

@@ -1,55 +1,9 @@
-import type { IndexerApp, IndexerNotUsed as NotUsed, MediaType } from '@ladarr/shared/enums';
+import type { IndexerApp, MediaType, IndexerNotUsed as NotUsed } from '@ladarr/shared/enums';
 import type { IndexerHealth, IndexerRow } from '@ladarr/shared/types';
-import { type Db, db } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
+import type { Db, Field, Indexer, Parsed, Protocol, Rejected, SeedLimits } from '../../types.ts';
 
-export type { IndexerApp, NotUsed };
 export const APP_MEDIA: Record<IndexerApp, MediaType> = { sonarr: 'tv', radarr: 'movie' };
-
-// What the indexer manager pushed for one app. The indexer manager owns these values. ladarr only reads them.
-export type IndexerPush = {
-  name: string;
-  enableRss: boolean;
-  enableAutomaticSearch: boolean;
-  enableInteractiveSearch: boolean;
-  priority: number;
-  categories: number[];
-  animeCategories: number[];
-  minimumSeeders: number;
-  tags: number[];
-  // The ID of a download client of the app. Null or 0 means the default client. Old records lack it.
-  downloadClientId?: number | null;
-  // The other schema fields, as the indexer manager sent them. ladarr sends them back unchanged, so the indexer manager sees no difference.
-  fields: Record<string, unknown>;
-};
-
-export type Protocol = 'torrent' | 'usenet';
-
-// The search modes of the indexer. Each mode lists the query parameters that it accepts, or is null when it is not available.
-export type Caps = { search: string[] | null; tv: string[] | null; movie: string[] | null; categories: number[] };
-
-export type Indexer = {
-  id: number;
-  baseUrl: string;
-  apiPath: string;
-  apiKey: string;
-  // The delay and the preferred languages are the fields that ladarr owns.
-  // The least time, in seconds, between two requests that start.
-  delaySeconds: number;
-  // The languages of the names that the indexer should receive. No languages means every language.
-  preferredLanguages?: string[];
-  // Reject a release that the indexer reports with no seeders, so the target does not wait on a torrent that cannot download.
-  rejectZeroSeeders?: boolean;
-  // The limiter keeps this time in the database, so a restart does not shorten the delay.
-  nextRequestAt: number;
-  push: Partial<Record<IndexerApp, IndexerPush>>;
-  // Old records lack it. They are torrent indexers.
-  protocol?: Protocol;
-  // The user added the indexer in Settings. The indexer manager did not push it, so the user can change all of its fields.
-  manual?: true;
-  caps: Caps | null;
-  capsAt: number;
-  health: IndexerHealth;
-};
 
 export const DEFAULT_DELAY_SECONDS = 6;
 export const MAX_DELAY_SECONDS = 3600;
@@ -57,7 +11,6 @@ export const MASK = '********';
 
 export const indexerName = (indexer: Indexer) => (indexer.push.sonarr ?? indexer.push.radarr)?.name ?? `Indexer ${indexer.id}`;
 
-type Field = { order: number; name: string; label: string; type: string; advanced: boolean; privacy: string; default: unknown };
 const field = (order: number, name: string, type: string, def: unknown, extra: Partial<Field> = {}): Field => ({
   order,
   name,
@@ -105,9 +58,6 @@ export function notUsedReason(indexer: Indexer, app: IndexerApp): NotUsed | null
   return null;
 }
 
-// The share limits that the indexer asks for. The indexer manager sends the time in minutes, like qBittorrent.
-export type SeedLimits = { ratio: number | null; minutes: number | null };
-
 export function seedLimits(indexer: Indexer, app: IndexerApp, pack: boolean): SeedLimits | null {
   const fields = indexer.push[app]?.fields ?? {};
   const positive = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null);
@@ -116,7 +66,6 @@ export function seedLimits(indexer: Indexer, app: IndexerApp, pack: boolean): Se
   return ratio === null && minutes === null ? null : { ratio, minutes };
 }
 
-type Rejected = { propertyName: string; errorMessage: string; severity: 'error' }[];
 export const invalid = (propertyName: string, errorMessage: string): { errors: Rejected } => ({ errors: [{ propertyName, errorMessage, severity: 'error' }] });
 
 export const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -124,8 +73,6 @@ export const isCategoryList = (value: unknown): value is number[] =>
   Array.isArray(value) && value.length <= 500 && value.every((item) => Number.isInteger(item) && item >= 0 && item <= 999_999);
 export const isLanguageList = (value: unknown): value is string[] =>
   Array.isArray(value) && value.length <= 20 && value.every((code) => typeof code === 'string' && /^[a-z]{2,3}$/.test(code));
-
-export type Parsed = { baseUrl: string; apiPath: string; apiKey: string | null; protocol: Protocol; push: IndexerPush };
 
 // Reads the body of a push. The body comes from outside, so every value is checked.
 export function parsePush(app: IndexerApp, body: unknown): Parsed | { errors: Rejected } {
@@ -277,4 +224,3 @@ export function summarize(indexer: Indexer): IndexerRow {
     }),
   };
 }
-

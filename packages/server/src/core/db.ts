@@ -1,23 +1,13 @@
-import type { Language, MediaType } from '@ladarr/shared/enums';
 import { loadConfig } from '@ladarr/shared/config';
 import { Low, Memory, type Adapter } from 'lowdb';
 import { TextFile } from 'lowdb/node';
 import { dirname, join } from 'node:path';
-import type { CompatCommand } from '../proxy/common.ts';
-import type { SeerrRequest } from '../proxy/seerr.ts';
-import type { Job } from './jobs.ts';
-import type { Override, Title } from '../library/library.ts';
-import type { Indexer } from '../library/grab/indexers.ts';
 import { randomUUID } from 'node:crypto';
-import type { ClientConfig } from '../library/downloads/qbittorrent.ts';
-import type { QueueEntry } from '../library/downloads/queue.ts';
 import { migrateQueue } from '../library/downloads/queue-migrate.ts';
-import type { ImportJournal } from '../library/imports/importer.ts';
-import type { VerificationState } from '../library/verification.ts';
-import type { SourceDownload, SourceEpisode } from '../migration/migration-source.ts';
-import { DEFAULT_NAMING, type NamingTemplates } from '../library/naming.ts';
-import { defaultProfiles, defaultSizes, QUALITY_TABLE_VERSION, unlimitedSizes, type Profile, type ReleaseSource, type SizeLimits } from '../library/grab/quality.ts';
-import type { WebhookState } from './webhook.ts';
+import { DEFAULT_NAMING } from '../library/naming.ts';
+import { defaultProfiles, defaultSizes, QUALITY_TABLE_VERSION, unlimitedSizes } from '../library/grab/quality.ts';
+import type { Data, Db, OneClient, Profile, QueueData, Settings } from '../types.ts';
+import type { SizeLimits } from '@ladarr/shared/types';
 
 // Change this number when a new version cannot read the file of an old one, or the other way round.
 // Version 2 keeps the queue work in queue.json, so an older version must not open the new db.json.
@@ -25,133 +15,6 @@ import type { WebhookState } from './webhook.ts';
 // Version 6 splits the size limits of the qualities into one table for movies and one for series.
 // Version 7 keeps one state for each queue target, in place of the stage, the branch, and the reason.
 export const SCHEMA_VERSION = 7;
-
-export type Settings = {
-  setupCompleted: boolean;
-  // The language of the interface. The server sends no text in it.
-  language: Language;
-  // The colors of the interface.
-  theme: 'dark' | 'light';
-  // Root IDs.
-  defaultRoots: { movie: string | null; tv: string | null };
-  audio: { language: string; strict: boolean } | null;
-  // Keep the whole log of a target while it is in the queue. The log goes when the target is available.
-  keepQueueLogs: boolean;
-  // The name of a file in the library. See naming.ts.
-  naming: NamingTemplates;
-};
-
-// One title from a Sonarr or Radarr import. The ledger keeps the result, so a second import skips what is done.
-export type LedgerEntry = {
-  status: 'pending' | 'imported' | 'matched' | 'failed';
-  // The import that wrote the entry. The status counts only the entries of the current import.
-  batch?: string;
-  app: 'sonarr' | 'radarr';
-  sourceId: number;
-  title: string;
-  year: number | null;
-  // The key of the title in the library, when there is one.
-  key: string | null;
-  error: string | null;
-  // What the job needs to add the title.
-  request: {
-    mediaType: MediaType;
-    tmdbId: number;
-    rootId: string;
-    folder: string | null;
-    preset: string | null;
-    paused: boolean;
-    seriesType: 'standard' | 'anime';
-    seasonOverrides: Record<string, Override>;
-    // The download hashes and the episode monitoring of the source. The verification reads them after the add.
-    downloads?: SourceDownload[];
-    sourceEpisodes?: SourceEpisode[];
-    manualRelease?: boolean;
-  };
-  updatedAt: number;
-};
-
-// A media file that ladarr knows. The path is relative to the root of its title.
-// A file that is gone from the disk stays here with `missing` set. Only the user removes it.
-export type MediaFile = {
-  id: string;
-  titleKey: string;
-  path: string;
-  sizeBytes: number;
-  mtimeMs: number;
-  // The episodes that the file covers. A movie file covers none.
-  episodes: { season: number; number: number }[];
-  missing: boolean;
-  addedAt: number;
-  // The source of the release that gave the file. Old records and scanned files lack it, and then the file name tells.
-  source?: ReleaseSource | null;
-  // The resolution of the release that gave the file. Null when the release does not say.
-  resolution?: number | null;
-  // The torrent that gave the file. Scanned files and manual imports have none. An external torrent belongs to the user.
-  download?: { clientId: string; hash: string; external: boolean } | null;
-};
-
-// A library folder. `dev` is the device number at the time the user accepted the folder.
-// A different number later means that another disk is mounted there, or that the mount is gone.
-export type Root = { id: string; path: string; mediaType: MediaType; dev: number };
-
-export type Data = {
-  schemaVersion: number;
-  owner: { passwordHash: string; createdAt: number } | null;
-  sessions: Record<string, { csrfToken: string; createdAt: number; expiresAt: number }>;
-  // shortcut: stored as plain text so Settings can show it again, like Sonarr. Hash it if the file is shared.
-  apiKey: string | null;
-  jobs: Record<string, Job>;
-  jobSeq: number;
-  prioritySeq: number;
-  settings: Settings;
-  // The quality profiles, keyed by ID. The sizes are keyed by the media type and the ID of a quality. See quality.ts.
-  profiles: Record<string, Profile>;
-  // The IDs of the profiles, the best first. A search tries them in this order.
-  profileOrder: string[];
-  qualitySizes: Record<MediaType, Record<string, SizeLimits>>;
-  // The version of the table that set the sizes. A new version replaces them, so an update takes priority.
-  qualitySizesVersion: number;
-  roots: Record<string, Root>;
-  // Keyed by media type and TMDB ID, for example "tv:1396".
-  titles: Record<string, Title>;
-  // Keyed by the namespace of the source and the ID in the source, for example "sonarr:1a2b3c4d:57".
-  ledger: Record<string, LedgerEntry>;
-  // The ID of the import whose titles are going into the library now. The status counts only its entries.
-  migrationBatch: string | null;
-  // The verification of each imported title, keyed by the title key. See library/verification.ts.
-  verifications: Record<string, VerificationState>;
-  files: Record<string, MediaFile>;
-  // Keyed by the numeric ID that ladarr gave to the indexer, as text.
-  indexers: Record<string, Indexer>;
-  indexerSeq: number;
-  // The download clients, in the order of the list. A new download goes to the first one that is on.
-  downloadClients: ClientConfig[];
-  // Keyed by the ID of the target. See queue.ts.
-  queue: Record<string, QueueEntry>;
-  // Rises with each change of an entry. SSE messages and snapshots carry it.
-  queueRev: number;
-  // The user paused the queue: no new queue work starts, and the running work ends.
-  queuePaused: boolean;
-  // The steps of the imports that are not done. See importer.ts.
-  imports: Record<string, ImportJournal>;
-  // The episodes that the files of a release held, keyed by `<indexer ID>:<GUID>`. A pack can hold fewer episodes than
-  // TMDB gives its season, so a later search reads this record instead of the count of the season.
-  releaseCoverage: Record<string, { titleKey: string; season: number; numbers: number[] }>;
-  // The torrents that ladarr sent to a client, keyed by info hash. A torrent in this record belongs to the app, also
-  // when its target searches again or the target that sent it is gone. A torrent that the user added is not here.
-  sentTorrents: Record<string, number>;
-  // The secret in the URL of the iCal feed. Null means that the feed is off.
-  calendarFeedToken: string | null;
-  // The destinations for events, one for each event type. See webhook.ts.
-  webhooks: WebhookState[];
-  // The commands that callers of the Sonarr and Radarr adapters sent. The ID is the same after a restart.
-  compat: { commandSeq: number; commands: Record<string, CompatCommand> };
-  // The requests that callers of the Seerr adapter sent. The ID is the same after a restart.
-  seerr: { requestSeq: number; requests: Record<string, SeerrRequest> };
-};
-
-export type Db = Low<Data>;
 
 export const emptyData = (): Data => ({
   schemaVersion: SCHEMA_VERSION,
@@ -217,8 +80,6 @@ export const profilesFor = (data: Pick<Data, 'profiles' | 'profileOrder'>, title
   const index = list.findIndex((profile) => profile.id === title.preset);
   return index > 0 ? list.slice(index) : list;
 };
-
-type OneClient = { url: string; username: string; password: string; downloadPath: string };
 
 // A file from an older version can lack a collection that a newer version added.
 export function withDefaults(data: Data): Data {
@@ -309,8 +170,7 @@ export function withDefaults(data: Data): Data {
 }
 
 // The fields that hold the work of the queue. They live in a file of their own, separate from the app data.
-const QUEUE_KEYS = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq'] as const satisfies readonly (keyof Data)[];
-type QueueData = Pick<Data, (typeof QUEUE_KEYS)[number]>;
+export const QUEUE_KEYS = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq'] as const satisfies readonly (keyof Data)[];
 
 export const QUEUE_FILE = 'queue.json';
 

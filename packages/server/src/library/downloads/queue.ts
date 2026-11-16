@@ -1,125 +1,7 @@
 import { describe, isActiveState, phaseOf, type Phase, type Problem, type QueueState, type SearchOutcome, type WorkPhase } from '@ladarr/shared/queue';
-import type { EpisodeRef } from '@ladarr/shared/types';
-import type { Continuation } from '../parse.ts';
-import { type Db, db } from '../../core/db.ts';
-import type { Events } from '../../core/events.ts';
+import { db } from '../../core/db.ts';
 import { catalog, deleteItemLog, itemFields } from '../../core/log.ts';
-
-// The journey of a target, kept as one state. A caller never writes a stage, a branch, or a reason by itself: it asks
-// for an operation, and the operation checks the change and leaves a record.
-export type Stage = Phase;
-
-export type Covered = EpisodeRef;
-
-// The release that an entry has. A pack gives the same release to several entries.
-export type ReleaseRef = {
-  guid: string;
-  indexerId: number;
-  indexerName: string;
-  title: string;
-  sizeBytes: number;
-  infoHash: string | null;
-  link: string | null;
-  magnet: string | null;
-  kind: 'single' | 'multi' | 'pack';
-  seeders: number | null;
-  manual: boolean;
-  // The comment of the torrent file, when the indexer sent one. A magnet has none.
-  comment?: string;
-  // The share limits that the indexer asked for when ladarr chose the release. Old entries lack it.
-  seed?: { ratio: number | null; minutes: number | null } | null;
-  // Set when the user attached a download that was in the client already. ladarr did not add it, and never removes it.
-  external?: boolean;
-};
-
-export type Attempt = {
-  n: number;
-  startedAt: number;
-  endedAt: number | null;
-  // Why the attempt started: the first request, a retry, or the fallback after a bad release.
-  reason: string;
-  release: string | null;
-  outcome: 'running' | 'imported' | 'failed' | 'cancelled';
-  detail?: string;
-};
-
-// One change of the state. `stage` repeats the phase, so a reader of an old record and the item log keep the same line.
-export type HistoryEvent = { at: number; state: QueueState; stage: Phase; attempt: number; cause: string; detail?: string };
-
-// A release of the last search that was rejected. A person can take it by hand. The link stays on the server: it
-// carries the API key.
-export type RejectedRelease = {
-  indexerId: number;
-  guid: string;
-  title: string;
-  link: string | null;
-  magnet: string | null;
-  infoHash: string | null;
-  sizeBytes: number;
-  seeders: number | null;
-  resolution: number | null;
-  source: string;
-  kind: 'single' | 'multi' | 'pack';
-  reasons: string[];
-  // The size check that stopped the release, with the numbers. Null when the size did not stop it.
-  sizeRejection: { code: 'size_below_min' | 'size_above_max'; value: number; limit: number } | null;
-};
-
-export type SearchState = {
-  at: number;
-  indexers: { id: number; name: string; state: 'waiting' | 'done' | 'failed' | 'skipped'; count: number | null; error?: string }[];
-  candidates: number;
-  accepted: number;
-  result: 'grabbed' | 'deferred' | 'no_results' | 'all_rejected' | 'indexers_failed' | null;
-  // The rejection codes that stopped the most releases, most frequent first.
-  topRejections: string[];
-  nextAt: number | null;
-  // The releases that only the preferences rejected, so a person can pick one for a manual download.
-  rejected: RejectedRelease[];
-};
-
-export type ImportResult = { at: number; ok: boolean; method: 'hardlink' | 'copy' | null; path: string | null; validation: 'ffprobe' | 'basic'; detail?: string };
-
-export type QueueEntry = {
-  // "movie:603" or "tv:1396:1x2". The same target always has the same ID.
-  id: string;
-  titleKey: string;
-  season: number | null;
-  number: number | null;
-  // The one state of the target. Every status and every tab comes from it.
-  state: QueueState;
-  // Rises with each change. A message with an older number is stale.
-  revision: number;
-  createdAt: number;
-  // When the target entered its current state, including a block.
-  stateSince: number;
-  // When the target entered its current phase, so the poller keeps its grace period after a block clears.
-  phaseSince: number;
-  completedAt: number | null;
-  // Set by Clear. The entry leaves the main view and stays in the history.
-  clearedAt: number | null;
-  // Position in the priority lane, or null for the normal lane.
-  priority: number | null;
-  attempt: number;
-  attempts: Attempt[];
-  history: HistoryEvent[];
-  search: SearchState | null;
-  release: ReleaseRef | null;
-  transferHash: string | null;
-  // The download client that has the torrent. Set with the hash.
-  clientId: string | null;
-  // Set when the user chose the file by hand. The import and the retries keep it.
-  manualMatch: { file: string; covers: Covered[] } | null;
-  // Set when the user chose to replace the file that holds the destination name. The importer clears it.
-  replaceDestination?: boolean;
-  importResult: ImportResult | null;
-  // Set when the releases count as two seasons what the title counts as one. The targets of the rest of the season then
-  // search the next season of the release. Null or absent for the numbering of the title.
-  continuation?: Continuation | null;
-  // The files of the pack that left this target without one: the season of the release and the numbers of the episodes
-  // that it holds. The manual search of the other seasons reads the candidate seasons from it.
-  partialPack?: { releaseSeason: number | null; numbers: number[] } | null;
-};
+import type { Attempt, Db, Events, QueueEntry, StateHook } from '../../types.ts';
 
 const MAX_HISTORY = 100;
 const MAX_ATTEMPTS_KEPT = 20;
@@ -153,9 +35,6 @@ export function addedByApp(hash: string) {
   if (entries.some((entry) => entry.release?.external)) return false;
   return entries.some((entry) => !EARLY.includes(phaseOf(entry.state)) || sentThisRelease(entry));
 }
-
-// `onState` runs after each change of the state, with the state from before the change.
-export type StateHook = (entry: QueueEntry, before: QueueState) => void;
 
 const clone = (state: QueueState): QueueState => (state.kind === 'blocked' ? { ...state, problem: { ...state.problem } } : state.kind === 'paused' ? { ...state, problem: state.problem ? { ...state.problem } : null } : { ...state });
 
@@ -408,5 +287,3 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     get: (id: string) => db.data.queue[id],
   };
 }
-
-export type Queue = ReturnType<typeof createQueue>;

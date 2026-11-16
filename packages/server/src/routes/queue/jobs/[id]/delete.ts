@@ -1,8 +1,8 @@
-import { type Db, db } from '../../../../core/db.ts';
+import { db } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Job } from '../../../../core/jobs.ts';
-import { isActive, type Queue, type QueueEntry } from '../../../../library/downloads/queue.ts';
+import { isActive } from '../../../../library/downloads/queue.ts';
 import { isItemJob } from '../../../../helpers/queue.ts';
+import type { Db, Job, Queue, QueueEntry } from '../../../../types.ts';
 
 // The targets of a job, so a job that the user removes does not leave a target that waits for work that is gone.
 function targetsOf(job: Job): QueueEntry[] {

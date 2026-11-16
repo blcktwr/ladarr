@@ -1,10 +1,9 @@
-import { type Db, db } from '../core/db.ts';
-import type { Events } from '../core/events.ts';
+import { db } from '../core/db.ts';
 import { JobError } from '../core/jobs.ts';
 import { log } from '../core/log.ts';
 import { withTitleLock } from '../core/title-lock.ts';
-import type { Handler } from '../core/worker.ts';
 import { scanTitle } from '../library/scan.ts';
+import type { Db, Events, Handler } from '../types.ts';
 
 export function libraryScanHandler({ events }: { events: Events }): Handler {
   return {

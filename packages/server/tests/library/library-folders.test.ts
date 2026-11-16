@@ -5,7 +5,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { guessTitle } from '../../src/library/tools/folders.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { movie, title } from '../helpers/test-fixtures.ts';
-import type { MediaType, Tmdb } from '../../src/metadata/tmdb.ts';
+import type { MediaType } from '@ladarr/shared/enums';
+import type { Tmdb } from '../../src/types.ts';
 
 let app: Awaited<ReturnType<typeof startTestApp>>;
 let dir: string;

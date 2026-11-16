@@ -1,6 +1,6 @@
 import type { WatchProvider } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Tmdb } from '../../../metadata/tmdb.ts';
+import type { Tmdb } from '../../../types.ts';
 
 // The code of a country in ISO 3166-1.
 const REGION = /^[A-Z]{2}$/;

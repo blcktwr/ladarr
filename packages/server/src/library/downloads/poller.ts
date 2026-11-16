@@ -1,47 +1,10 @@
-import type { ClientState } from '@ladarr/shared/enums';
 import { db } from '../../core/db.ts';
-import type { Events } from '../../core/events.ts';
-import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { catalog, itemFields, log } from '../../core/log.ts';
 import { withOutboundRequests } from '../../core/outbound.ts';
 import { releaseEpisodes } from '../parse.ts';
-import type { Clients } from './client-api.ts';
-import { ClientError, type ClientHandle, type Torrent, type TorrentStatus } from './qbittorrent.ts';
-import { addedByApp, isActive, phaseOfEntry, type Queue, type QueueEntry } from './queue.ts';
-
-// What the client reported about one torrent at the last good poll. One torrent is one transfer,
-// even when it covers many entries, so its bytes and rate count once.
-export type Transfer = {
-  hash: string;
-  name: string;
-  observedAt: number;
-  sizeBytes: number;
-  progress: number;
-  downloadRate: number;
-  etaSeconds: number | null;
-  status: TorrentStatus;
-  complete: boolean;
-  seeds: number;
-  peers: number;
-  entryIds: string[];
-  // The part of the torrent that each target has, from the file of that target. A pack downloads one file before
-  // another, so the part of the torrent is not the part of each episode. Null when there is no part of a file.
-  entryProgress: Record<string, number> | null;
-  // The file of each target in the torrent: its name and its size.
-  entryFiles: Record<string, { name: string; sizeBytes: number }> | null;
-  // True when the last poll failed. The numbers are the last known ones.
-  stale: boolean;
-};
-
-export type ClientStatus = { state: ClientState; lastOkAt: number | null };
-
-type Deps = {
-  queue: Queue;
-  events: Events;
-  clients: Clients;
-  enqueue: (input: EnqueueInput) => Job;
-  intervalMs?: number;
-};
+import { ClientError } from './qbittorrent.ts';
+import { addedByApp, isActive, phaseOfEntry } from './queue.ts';
+import type { ClientHandle, ClientStatus, PollerDeps, QueueEntry, Torrent, Transfer } from '../../types.ts';
 
 const PUBLISH_MS = 1_000;
 // A torrent that the client does not list yet, soon after the add, is not a missing torrent.
@@ -50,7 +13,7 @@ const GRACE_MS = 60_000;
 // One poll for each client that has a download, whatever the number of rows or browser tabs. The progress stays in memory:
 // it is replaceable, and the client reports it again after a restart. The client is read to see the part of each file, and
 // a download that finishes, appears, or fails, so one check each 10 seconds keeps the rows close to the client.
-export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_000 }: Deps) {
+export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_000 }: PollerDeps) {
   const transfers = new Map<string, Transfer>();
   const seen = new Set<string>();
   const status: ClientStatus = { state: 'unconfigured', lastOkAt: null };
@@ -269,5 +232,3 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
     transfers: () => [...transfers.values()],
   };
 }
-
-export type Poller = ReturnType<typeof createPoller>;

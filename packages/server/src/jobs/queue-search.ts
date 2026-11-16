@@ -1,6 +1,5 @@
-import type { Finder, SearchPayload } from '../library/grab/finder.ts';
 import { withTitleLock } from '../core/title-lock.ts';
-import type { Handler } from '../core/worker.ts';
+import type { Finder, Handler, SearchPayload } from '../types.ts';
 
 export function queueSearchHandler(finder: Finder): Handler {
   return {

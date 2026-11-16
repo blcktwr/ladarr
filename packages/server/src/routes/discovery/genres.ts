@@ -1,4 +1,5 @@
 import type { DiscoveryGenre } from '@ladarr/shared/types';
+import type { Genre } from '../../types.ts';
 
 // TMDB names some genres of series differently from the genres of movies. The filter has one list, so a name maps to
 // the genre of each media type.
@@ -9,8 +10,6 @@ const SERIES_NAMES: Record<string, string> = {
   'Science Fiction': 'Sci-Fi & Fantasy',
   War: 'War & Politics',
 };
-
-type Genre = { id: number; name: string };
 
 // The genres of the filter. The list starts with the genres of movies, each one with the genre of series of the same
 // name or of its equivalent, and then holds the genres that only series have.

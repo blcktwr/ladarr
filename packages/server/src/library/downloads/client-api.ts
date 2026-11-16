@@ -1,14 +1,6 @@
-import type { ClientState } from '@ladarr/shared/enums';
 import { db } from '../../core/db.ts';
-import { ClientError, createQbittorrent, type ClientConfig, type ClientHandle } from './qbittorrent.ts';
-
-// The clients that are on. A change of the settings makes the connection of that client again.
-export type Clients = {
-  all: () => ClientHandle[];
-  get: (id: string | null | undefined) => ClientHandle | undefined;
-  // The client that gets the next download: the first one of the list.
-  next: () => ClientHandle | undefined;
-};
+import { ClientError, createQbittorrent } from './qbittorrent.ts';
+import type { ClientCheck, ClientConfig, ClientHandle, Clients } from '../../types.ts';
 
 export function createClients(fetchImpl?: typeof fetch): Clients {
   const handles = new Map<string, { key: string; handle: ClientHandle }>();
@@ -26,8 +18,6 @@ export function createClients(fetchImpl?: typeof fetch): Clients {
   };
   return { all, get: (id) => (id ? all().find((handle) => handle.id === id) : undefined), next: () => all()[0] };
 }
-
-export type ClientCheck = ClientState;
 
 // A check of the clients that are on, for the health list. The state is the worst one. The answer is kept for a minute, so a page that reloads does not sign in each time.
 export function createClientCheck(clients: Clients, ttlMs = 60_000) {

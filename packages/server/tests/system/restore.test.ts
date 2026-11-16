@@ -13,13 +13,13 @@ import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createBackup, listBackups, readBackup } from '../../src/system/backup.ts';
-import { emptyData, open, SCHEMA_VERSION, set, type Data } from '../../src/core/db.ts';
-import type { EnqueueInput } from '../../src/core/jobs.ts';
+import { emptyData, open, SCHEMA_VERSION, set } from '../../src/core/db.ts';
 import { createRestorer, MAX_UPLOAD_BYTES, restoreGate } from '../../src/system/restore.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { movie, title } from '../helpers/test-fixtures.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 import { createWorker } from '../../src/core/worker.ts';
+import type { Data, EnqueueInput } from '../../src/types.ts';
 
 let dir: string;
 beforeAll(() => {

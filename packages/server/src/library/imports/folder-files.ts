@@ -1,5 +1,6 @@
 import { lstat, readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
+import type { Listed } from '../../types.ts';
 
 export const inside = (parent: string, child: string) => {
   const rel = relative(parent, child);
@@ -7,8 +8,6 @@ export const inside = (parent: string, child: string) => {
 };
 
 const MAX_DEPTH = 6;
-
-export type Listed = { path: string; sizeBytes: number };
 
 // Lists the files under a folder, with paths relative to the folder and sorted. It follows no link to a folder.
 // `truncated` is true when the limit or the depth cut the list short. A missing folder throws.

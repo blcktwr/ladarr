@@ -3,47 +3,17 @@ import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { copyFile as fsCopyFile, link as fsLink, lstat, mkdir, readdir, realpath, rename as fsRename, rm, stat, statfs, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
-import { type Db, type MediaFile, db } from '../../core/db.ts';
-import type { Events } from '../../core/events.ts';
+import { db } from '../../core/db.ts';
 import { enqueue as enqueueJob, JobError } from '../../core/jobs.ts';
-import type { Episode, Title } from '../library.ts';
 import { catalog, itemFields, log } from '../../core/log.ts';
-import type { ImportStatus } from './status.ts';
 import { episodePath, folderName, moviePath, versionedPath } from '../naming.ts';
 import { isSample, isVideoFile, releaseEpisodes } from '../parse.ts';
 import { parseRelease } from '../grab/release.ts';
-import { probeFile, type ProbeResult } from '../probe.ts';
-import type { Clients } from '../downloads/client-api.ts';
-import type { ClientHandle, Torrent } from '../downloads/qbittorrent.ts';
+import { probeFile } from '../probe.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
-import { entryId, isActive, phaseOfEntry, type Queue, type QueueEntry } from '../downloads/queue.ts';
+import { entryId, isActive, phaseOfEntry } from '../downloads/queue.ts';
 import { checkRoot } from '../roots.ts';
-
-// One file of an import. The steps of a file go in this order, and each step is saved before the next one starts:
-// planned -> staged (a hard link or a copy next to the destination) -> published (the final name)
-// -> committed (the library record) -> retired (the file that it replaced is gone).
-export type JournalStep = {
-  entryIds: string[];
-  // The file in the download folder, relative to the download folder.
-  source: string;
-  // The new file, relative to the root of the title.
-  dest: string;
-  // The file that this one replaces, relative to the root of the title.
-  replaces: string | null;
-  state: 'planned' | 'staged' | 'published' | 'committed' | 'retired';
-  method: 'hardlink' | 'copy' | null;
-  sizeBytes: number;
-  episodes: { season: number; number: number }[];
-  validation: 'ffprobe' | 'basic';
-};
-
-// A journal of a download has the hash of the torrent, the client that has it, and the folder of the download (`downloadBase`). It has no `sourceBase`. The other journals have a folder as source:
-// a manual import reads a folder that the user named, and a rename reads the root of the title (`kind: 'rename'`).
-// An import from a download folder is link only: it never copies. It asks for a search when its files are in, so the
-// episodes that it did not bring still get a release.
-export type ImportJournal = { id: string; hash: string; titleKey: string; steps: JournalStep[]; createdAt: number; kind?: 'rename'; sourceBase?: string; clientId?: string; downloadBase?: string; linkOnly?: true; searchOnFinish?: true };
-
-type Fs = { link: typeof fsLink; copyFile: typeof fsCopyFile; rename: typeof fsRename };
+import type { ClientHandle, Db, Episode, Fs, ImporterDeps, ImporterFound, ImportJournal, JournalStep, MediaFile, QueueEntry, Title, Torrent } from '../../types.ts';
 
 // The log line of each step of a file. The event is stable, and the message says what the step did.
 const STEP_LOG: Record<JournalStep['state'], { event: string; message: string }> = {
@@ -53,24 +23,6 @@ const STEP_LOG: Record<JournalStep['state'], { event: string; message: string }>
   committed: { event: 'import_committed', message: 'Library record updated' },
   retired: { event: 'import_retired', message: 'Replaced file removed' },
 };
-
-type Deps = {
-  queue: Queue;
-  events: Events;
-  clients: Clients;
-  save: () => Promise<void>;
-  probe?: (path: string) => Promise<ProbeResult>;
-  status?: ImportStatus;
-  // The targets of a pack whose files it does not hold go back to the search. The pack stays good for its other targets.
-  partial?: (entries: QueueEntry[], missing: QueueEntry[], detail: { files: number }) => void;
-  // How long a check stays in `running` before its work starts. Slow work keeps it there until it ends.
-  checkDelayMs?: number;
-  // For tests: replace a file operation, or stop after a step to test a restart.
-  fs?: Partial<Fs>;
-  afterStep?: (state: JournalStep['state'], step: JournalStep) => void | Promise<void>;
-  now?: () => number;
-};
-export type ImportDeps = Deps;
 
 // A problem that stops one import. It becomes the reason of the entry, and the other imports go on.
 export class ImportProblem extends Error {
@@ -102,14 +54,12 @@ function problemOf(error: unknown): ImportProblem {
   return new ImportProblem('import_failed', code || 'unknown');
 }
 
-export type Found = { abs: string; rel: string; sizeBytes: number };
-
 // Lists the video files in a download. It follows no link, and it skips samples.
 // A folder that the user names can hold a staged file, so a manual import skips hidden names.
-export async function listVideos(base: string, { skipHidden = false }: { skipHidden?: boolean } = {}): Promise<Found[]> {
+export async function listVideos(base: string, { skipHidden = false }: { skipHidden?: boolean } = {}): Promise<ImporterFound[]> {
   const info = await lstat(base);
   if (info.isFile()) return isVideoFile(base) ? [{ abs: base, rel: basename(base), sizeBytes: info.size }] : [];
-  const found: Found[] = [];
+  const found: ImporterFound[] = [];
   async function walk(dir: string, depth: number) {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       if (found.length >= MAX_FILES) return;
@@ -128,11 +78,11 @@ export async function listVideos(base: string, { skipHidden = false }: { skipHid
 
 // The video files of a torrent, from the file list of the client. The folder of the content can be the folder of every
 // download, so the disk is not walked.
-export async function torrentVideos(handle: ClientHandle, torrent: Torrent): Promise<Found[] | undefined> {
+export async function torrentVideos(handle: ClientHandle, torrent: Torrent): Promise<ImporterFound[] | undefined> {
   const save = await realpath(torrent.savePath).catch(() => undefined);
   const content = await realpath(torrent.contentPath).catch(() => undefined);
   if (!save || !content || !inside(save, content)) return;
-  const found: Found[] = [];
+  const found: ImporterFound[] = [];
   for (const file of await handle.api.files(torrent.hash)) {
     const abs = join(save, file.name);
     if (!inside(save, abs) || !inside(content, abs)) continue;
@@ -148,7 +98,7 @@ export async function torrentVideos(handle: ClientHandle, torrent: Torrent): Pro
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const checkKey = (hash: string, titleKey: string) => `${hash}:${titleKey}`;
 
-export function createImporter({ queue, events, clients, save, probe = probeFile, status, partial, checkDelayMs = 100, fs = {}, afterStep, now = Date.now }: Deps) {
+export function createImporter({ queue, events, clients, save, probe = probeFile, status, partial, checkDelayMs = 100, fs = {}, afterStep, now = Date.now }: ImporterDeps) {
   const ops: Fs = { link: fs.link ?? fsLink, copyFile: fs.copyFile ?? fsCopyFile, rename: fs.rename ?? fsRename };
   const wait = async () => {
     if (checkDelayMs > 0) await sleep(checkDelayMs);
@@ -173,9 +123,9 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
 
   // --- Plan -------------------------------------------------------------------------------
 
-  type Pick = { file: Found; entries: QueueEntry[]; episodes: Episode[] };
+  type Pick = { file: ImporterFound; entries: QueueEntry[]; episodes: Episode[] };
 
-  function pick(title: Title, group: QueueEntry[], files: Found[], content: string): { picks: Pick[]; missing: QueueEntry[] } {
+  function pick(title: Title, group: QueueEntry[], files: ImporterFound[], content: string): { picks: Pick[]; missing: QueueEntry[] } {
     const picks: Pick[] = [];
     const taken = new Set<string>();
     const episodeOf = (entry: QueueEntry) => title.episodes.find((e) => e.season === entry.season && e.number === entry.number);

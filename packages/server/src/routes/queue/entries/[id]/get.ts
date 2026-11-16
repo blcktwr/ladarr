@@ -1,8 +1,7 @@
 import { db } from '../../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Poller } from '../../../../library/downloads/poller.ts';
-import type { ImportStatus } from '../../../../library/imports/status.ts';
 import { lanePositions, shown, view } from '../../../../helpers/queue.ts';
+import type { ImportStatus, Poller } from '../../../../types.ts';
 
 export function queueEntryGet(poller: Poller, importStatus: ImportStatus | undefined): RequestHandler<{ id: string }> {
   return (req, res) => {

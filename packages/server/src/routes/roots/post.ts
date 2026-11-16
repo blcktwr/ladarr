@@ -1,8 +1,9 @@
-import { type Db, type Root, db } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import { randomUUID } from 'node:crypto';
 import type { MediaType } from '@ladarr/shared/enums';
 import type { RequestHandler } from 'express';
 import { inside, refusal, validateNewRoot } from '../../library/roots.ts';
+import type { Db, Root } from '../../types.ts';
 
 export function rootsCreate({ configDir }: { configDir?: string } = {}): RequestHandler {
   return async (req, res) => {

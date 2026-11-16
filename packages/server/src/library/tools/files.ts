@@ -1,12 +1,12 @@
 import { realpath, stat } from 'node:fs/promises';
 import type { FileDetails, FileRow } from '@ladarr/shared/types';
 import { Router } from 'express';
-import { type Db, type MediaFile, db } from '../../core/db.ts';
+import { db } from '../../core/db.ts';
 import { inside } from '../imports/folder-files.ts';
 import { seeFile } from './remove.ts';
-import type { Title } from '../library.ts';
-import { ffprobeRaw, type Raw, type Stream } from '../probe.ts';
+import { ffprobeRaw } from '../probe.ts';
 import { qualityOfFile } from '../grab/upgrades.ts';
+import type { Db, FilesDeps, MediaFile, ProbeRaw, Stream, Title } from '../../types.ts';
 
 const KEY = /^(movie|tv):[1-9]\d*$/;
 // ffprobe can read a big file for a while. A few at the same time are enough for one person.
@@ -52,7 +52,7 @@ const DOLBY_VISION_TAGS = ['dvh1', 'dvhe', 'dav1'];
 const dolbyVision = (stream: Stream) =>
   DOLBY_VISION_TAGS.includes((stream.codec_tag_string ?? '').toLowerCase()) || Boolean(stream.side_data_list?.some((item) => item.side_data_type?.startsWith('DOVI')));
 
-export function describeProbe(data: Raw): FileDetails {
+export function describeProbe(data: ProbeRaw): FileDetails {
   const streams = data.streams ?? [];
   const video = streams.find((stream) => stream.codec_type === 'video' && !stream.disposition?.attached_pic);
   if (!video) return { state: 'no_video' };
@@ -67,9 +67,7 @@ export function describeProbe(data: Raw): FileDetails {
   };
 }
 
-type Deps = { probe?: typeof ffprobeRaw };
-
-export function libraryFilesRouter({ probe = ffprobeRaw }: Deps = {}) {
+export function libraryFilesRouter({ probe = ffprobeRaw }: FilesDeps = {}) {
   const router = Router();
   let running = 0;
 

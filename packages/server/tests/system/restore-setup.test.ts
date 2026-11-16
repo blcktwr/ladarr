@@ -5,9 +5,10 @@ import { join } from 'node:path';
 import { strToU8 } from 'fflate';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
-import { open, type Db } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { createBackup, listBackups, readBackup } from '../../src/system/backup.ts';
 import { createRestorer } from '../../src/system/restore.ts';
+import type { Db } from '../../src/types.ts';
 
 let dir: string;
 beforeAll(() => {

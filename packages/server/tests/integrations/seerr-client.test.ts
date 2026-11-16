@@ -10,17 +10,7 @@ import { metadataRefreshHandler } from '../../src/jobs/metadata-refresh.ts';
 import { queueInitialHandler } from '../../src/jobs/queue-initial.ts';
 import { createTmdb } from '../../src/metadata/tmdb.ts';
 import { MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
-import {
-  createTmdbFixture,
-  FakeWholphin,
-  MOVIE_ID,
-  OTHER_MOVIE_ID,
-  OTHER_SERIES_ID,
-  PERSON_ID,
-  seedMovie,
-  seedSeries,
-  SERIES_ID,
-} from '../helpers/test-wholphin.ts';
+import { createTmdbFixture, FakeWholphin, MOVIE_ID, OTHER_MOVIE_ID, OTHER_SERIES_ID, PERSON_ID, seedMovie, seedSeries, SERIES_ID } from '../helpers/test-wholphin.ts';
 
 const RELEASE = 'Movie.Name.2019.1080p.BluRay.x264-GRP';
 const PACK = 'Show.Name.S01.1080p.WEB-DL.DDP5.1-GRP';

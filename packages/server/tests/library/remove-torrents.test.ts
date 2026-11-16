@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { torrentsForRemoval } from '../../src/library/tools/remove.ts';
-import type { QueueEntry } from '../../src/library/downloads/queue.ts';
+import type { QueueEntry } from '../../src/types.ts';
 
 const release = { guid: 'release', indexerId: 1, indexerName: 'Indexer', title: 'Release', sizeBytes: 1, infoHash: 'hash', link: null, magnet: null, kind: 'single' as const, seeders: 1, manual: false };
 

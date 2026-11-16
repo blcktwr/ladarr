@@ -2,29 +2,17 @@ import type { FolderFileStatus } from '@ladarr/shared/enums';
 import type { FolderFile, FolderPlan } from '@ladarr/shared/types';
 import { lstat, realpath, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, parse, sep } from 'node:path';
-import { type Db, db } from '../../core/db.ts';
-import { inside, listVideos, type Found, type JournalStep } from './importer.ts';
+import { db } from '../../core/db.ts';
+import { inside, listVideos } from './importer.ts';
 import { keyOf, PlanError, presentFile, readableRoot } from './plan.ts';
-import type { Episode, Title } from '../library.ts';
 import { episodePath, folderName, moviePath } from '../naming.ts';
 import { parseEpisodes } from '../parse.ts';
-
-export type { FolderFile, FolderFileStatus, FolderPlan };
+import type { Db, Episode, ImporterFound, JournalStep, PlanInput } from '../../types.ts';
 
 const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
-export type PlanInput = {
-  title: Title;
-  rootReal: string;
-  real: string;
-  videos: Found[];
-  replace: boolean;
-  // An import from a download folder never copies: a file on another disk can not be linked, so it is blocked.
-  linkOnly?: boolean;
-};
-
 // Reads the video files of a folder that the user names. It changes nothing.
-export async function readFolder(input: { path: unknown; configDir?: string }): Promise<{ real: string; videos: Found[] }> {
+export async function readFolder(input: { path: unknown; configDir?: string }): Promise<{ real: string; videos: ImporterFound[] }> {
   if (typeof input.path !== 'string' || !isAbsolute(input.path)) throw new PlanError('path_not_absolute');
   const real = await realpath(input.path).catch(() => undefined);
   if (!real) throw new PlanError('folder_not_found');
@@ -162,4 +150,3 @@ export async function planFolder(input: { titleKey: string; path: unknown; repla
   const plan = await planFiles({ title, rootReal, real, videos, replace: input.replace });
   return { ...plan, real };
 }
-

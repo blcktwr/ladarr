@@ -8,13 +8,14 @@ import { Readable } from 'node:stream';
 import { zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEvents } from '../../src/core/events.ts';
-import { BACKUP_LIMITS, readBackup, SUPPORTED_SCHEMAS, type BackupLimits } from '../../src/migration/migration-backup.ts';
-import { mapProfile, readFromApi, SourceError, type SourceData } from '../../src/migration/migration-source.ts';
+import { BACKUP_LIMITS, readBackup, SUPPORTED_SCHEMAS } from '../../src/migration/migration-backup.ts';
+import { mapProfile, readFromApi, SourceError } from '../../src/migration/migration-source.ts';
 import { buildPlan } from '../../src/migration/migration.ts';
 import { migrationImportHandler } from '../../src/jobs/migration-import.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { backupZip, CONFIG_XML, RADARR_MOVIES, radarrDatabase, SECRETS, SONARR_SERIES, sonarrDatabase } from '../helpers/test-backup.ts';
 import { createTmdb } from '../../src/metadata/tmdb.ts';
+import type { BackupLimits, SourceData } from '../../src/types.ts';
 
 // Every database in these tests is synthetic. See test-backup.ts. No test here reads a real backup of Sonarr or Radarr.
 

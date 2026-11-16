@@ -1,6 +1,7 @@
 import type { AddressInfo } from 'node:net';
 import { createApp } from '../../src/app.ts';
-import { open, set, type Db } from '../../src/core/db.ts';
+import { open, set } from '../../src/core/db.ts';
+import type { Db } from '../../src/types.ts';
 
 // Starts the app on a free port with a signed-in owner. For tests only.
 export async function startTestApp(options: Parameters<typeof createApp>[0] = {}, existing?: Db) {

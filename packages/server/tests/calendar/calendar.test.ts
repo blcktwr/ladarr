@@ -4,12 +4,11 @@ import { createApp } from '../../src/app.ts';
 import { libraryFilter } from '../../src/library/tools/filters.ts';
 import { buildIcal } from '../../src/library/calendar/calendar-feed.ts';
 import { addDays, calendarEvents, dayOf, isDay, MAX_EVENTS } from '../../src/library/calendar/calendar.ts';
-import { open, type Db } from '../../src/core/db.ts';
-import type { Title } from '../../src/library/library.ts';
+import { open } from '../../src/core/db.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
 import { entryOf } from '../helpers/test-queue.ts';
-import type { ReleaseDate } from '../../src/metadata/tmdb.ts';
+import type { Db, ReleaseDate, Title } from '../../src/types.ts';
 
 const NOW = Date.UTC(2024, 5, 15, 12);
 const all = { from: '2024-01-01', to: '2024-12-31', monitored: true };

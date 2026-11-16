@@ -1,15 +1,8 @@
 import type { RequestHandler } from 'express';
-import {
-  IMPLEMENTATIONS,
-  MASK,
-  SCHEMA_FIELDS,
-  invalid,
-  parsePush,
-  savePush,
-  type Indexer,
-  type IndexerApp,
-} from '../library/grab/indexers.ts';
-import { type Db, db } from '../core/db.ts';
+import { IMPLEMENTATIONS, MASK, SCHEMA_FIELDS, invalid, parsePush, savePush } from '../library/grab/indexers.ts';
+import { db } from '../core/db.ts';
+import type { IndexerApp } from '@ladarr/shared/enums';
+import type { Db, Indexer, Resource } from '../types.ts';
 
 // The version that ladarr reports to the indexer manager. The indexer manager needs 3.0.5.0 or later.
 export const VERSION: Record<IndexerApp, string> = { sonarr: '4.0.0.0', radarr: '5.0.0.0' };
@@ -20,8 +13,6 @@ export function adapterHeaders(app: IndexerApp): RequestHandler {
     next();
   };
 }
-
-type Resource = Record<string, unknown>;
 
 // The values of the indexer for one app, in the shape of a Sonarr or Radarr indexer.
 export function resource(app: IndexerApp, indexer: Indexer): Resource {

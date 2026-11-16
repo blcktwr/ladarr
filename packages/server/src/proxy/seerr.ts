@@ -1,23 +1,14 @@
 import type { MediaType } from '@ladarr/shared/enums';
 import express, { Router, type RequestHandler, type Response } from 'express';
 import { safeEqual } from '../core/auth.ts';
-import { type Db, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import { onError } from '../core/errors.ts';
-import { isMonitored, seriesCounts, type Title } from '../library/library.ts';
+import { isMonitored, seriesCounts } from '../library/library.ts';
 import { AddError, addTitle } from '../library/tools/add.ts';
 import { TmdbError } from '../metadata/tmdb.ts';
-import { restoreGate, type Restorer } from '../system/restore.ts';
-import { clock, firstProfileId, isObject, presentFile, type CompatDeps } from './common.ts';
-
-// The request that a caller of the Seerr API sent. The ID stays the same after a restart.
-export type SeerrRequest = {
-  id: number;
-  mediaType: MediaType;
-  tmdbId: number;
-  seasons: number[];
-  createdAt: number;
-  updatedAt: number;
-};
+import { restoreGate } from '../system/restore.ts';
+import { clock, firstProfileId, isObject, presentFile } from './common.ts';
+import type { CompatDeps, Db, SeerrOptions, SeerrRequest, Title } from '../types.ts';
 
 const UNKNOWN = 1;
 const PROCESSING = 3;
@@ -807,8 +798,6 @@ export function seerrRouter(deps: CompatDeps) {
   router.use(seerrNotFound);
   return router;
 }
-
-export type SeerrOptions = CompatDeps & { restorer?: Restorer };
 
 // The Seerr API on port 5055. A caller adds /api/v1, as with Seerr.
 export function seerr(options: SeerrOptions) {

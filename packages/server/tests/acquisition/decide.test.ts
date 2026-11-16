@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { bestOf, decide, explainDecision, topRejections, type Context, type Want } from '../../src/library/grab/decide.ts';
-import { defaultProfiles, defaultSizes, unlimitedSizes, type Profile } from '../../src/library/grab/quality.ts';
+import { bestOf, decide, explainDecision, topRejections } from '../../src/library/grab/decide.ts';
+import { defaultProfiles, defaultSizes, unlimitedSizes } from '../../src/library/grab/quality.ts';
 import { episode, indexer, movie, NOW, release, title } from '../helpers/test-fixtures.ts';
 import { emptyData } from '../../src/core/db.ts';
+import type { DecideContext, Profile, Want } from '../../src/types.ts';
 
 const settings = { ...emptyData().settings };
-const ctx = (extra: Partial<Context> = {}): Context => ({
+const ctx = (extra: Partial<DecideContext> = {}): DecideContext => ({
   settings,
   quality: emptyData(),
   indexers: { 1: indexer() },
@@ -23,7 +24,7 @@ const season1: Want = { kind: 'season', title: show, season: 1 };
 const film: Want = { kind: 'movie', title: movie() };
 const filmSize = 100 * 1024 * 1024 * 60;
 
-const codes = (name: string, want: Want, extra: Partial<Context> = {}, release2 = {}) => decide(release(name, release2), want, ctx(extra)).rejections;
+const codes = (name: string, want: Want, extra: Partial<DecideContext> = {}, release2 = {}) => decide(release(name, release2), want, ctx(extra)).rejections;
 
 describe('identity', () => {
   it('accepts the right episode', () => {
@@ -297,7 +298,7 @@ describe('seeders', () => {
 
 describe('ranking', () => {
   const MIB = 1024 * 1024;
-  const pick = (releases: ReturnType<typeof release>[], extra: Partial<Context> = {}) => {
+  const pick = (releases: ReturnType<typeof release>[], extra: Partial<DecideContext> = {}) => {
     const list = releases.map((r) => decide(r, ep2, ctx(extra)));
     return bestOf(list)?.release.guid;
   };

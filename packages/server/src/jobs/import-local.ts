@@ -1,8 +1,6 @@
 import { withTitleLock } from '../core/title-lock.ts';
-import type { Handler } from '../core/worker.ts';
-import type { Clients } from '../library/downloads/client-api.ts';
-import type { Queue } from '../library/downloads/queue.ts';
 import { importLocal } from '../library/imports/local.ts';
+import type { Clients, Handler, Queue } from '../types.ts';
 
 // Reads the folder of a title again and takes the files that are there. It runs after a match by the user and after a
 // restart, so a target that stopped on its folder resolves without a search.

@@ -1,16 +1,5 @@
 import { phaseOf, type Phase, type QueueState, type SearchOutcome } from '@ladarr/shared/queue';
-import type { HistoryEvent, QueueEntry } from './queue.ts';
-
-// The fields of an older entry. Version 6 and earlier kept the stage, the branch, and the reason as separate fields.
-export type LegacyEntry = QueueEntry & {
-  stage?: string;
-  branch?: string | null;
-  reason?: { code: string; detail?: string } | null;
-  stageSince?: number;
-  history?: (HistoryEvent & { branch?: string | null })[];
-};
-
-type StoredEvent = HistoryEvent & { branch?: string | null };
+import type { LegacyEntry, QueueEntry, StoredEvent } from '../../types.ts';
 
 const WORK: readonly Phase[] = ['queued', 'searching', 'fetching', 'sending', 'downloading', 'validating', 'importing'];
 

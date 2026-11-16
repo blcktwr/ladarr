@@ -1,10 +1,9 @@
 import { db } from '../../../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Clients } from '../../../../../library/downloads/client-api.ts';
 import { ClientError } from '../../../../../library/downloads/qbittorrent.ts';
-import type { AttachCache } from '../../../../../helpers/queue-attach.ts';
 import { pruneCache, readDetail } from '../../../../../helpers/queue-attach.ts';
 import { shown } from '../../../../../helpers/queue.ts';
+import type { AttachCache, Clients } from '../../../../../types.ts';
 
 export function queueEntryClientGet(clients: Clients, cache: AttachCache): RequestHandler<{ id: string }> {
   return async (req, res) => {

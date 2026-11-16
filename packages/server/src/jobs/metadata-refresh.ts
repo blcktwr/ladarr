@@ -1,12 +1,10 @@
-import { type Db, db } from '../core/db.ts';
-import type { Events } from '../core/events.ts';
+import { db } from '../core/db.ts';
 import { enqueue } from '../core/jobs.ts';
 import { catalog, titleFields } from '../core/log.ts';
 import { mergeEpisodes } from '../library/library.ts';
 import { scanJob } from '../library/scan.ts';
 import { verifyJob } from '../library/verification.ts';
-import type { EpisodeMeta, Tmdb } from '../metadata/tmdb.ts';
-import type { Handler } from '../core/worker.ts';
+import type { Db, EpisodeMeta, Events, Handler, Tmdb } from '../types.ts';
 
 export function metadataRefreshHandler({ tmdb, events }: { tmdb: Tmdb; events: Events }): Handler {
   // The first search of a title waits for the episodes. It starts at once when they arrive, so its row does not wait

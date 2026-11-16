@@ -1,32 +1,9 @@
-import type { AddMode, MediaType } from '@ladarr/shared/enums';
-import { type Db, db } from '../../core/db.ts';
-import type { EnqueueInput, Job } from '../../core/jobs.ts';
+import { db } from '../../core/db.ts';
 import { deleteItemLog } from '../../core/log.ts';
-import { titleKey, type Override, type Title } from '../library.ts';
+import { titleKey } from '../library.ts';
 import { refreshJob } from '../metadata.ts';
 import { scanJob } from '../scan.ts';
-import type { EpisodeMeta, TitleMeta, Tmdb } from '../../metadata/tmdb.ts';
-
-export type AddInput = {
-  mediaType: MediaType;
-  tmdbId: number;
-  mode: AddMode;
-  seriesType: 'standard' | 'anime';
-  preset: string | null;
-  rootId: string;
-  folder?: string | null;
-  seasonOverrides?: Record<string, Override>;
-  // The episodes of a series that the caller already holds. They save the wait for the refresh job.
-  episodes?: EpisodeMeta[];
-  // The facts that the caller already holds. With them, the add waits for no request.
-  meta?: TitleMeta;
-  // The page has these facts from the search or the preview, so the row looks right before the refresh.
-  summary?: { title: string; year: number | null; posterPath: string | null };
-  // A movie that the source searched before its release. The import keeps the choice.
-  manualRelease?: boolean;
-  // The add returns before the TMDB facts arrive. A queue job fetches them, and the summary shows meanwhile.
-  deferMetadata?: boolean;
-};
+import type { AddInput, Db, EnqueueInput, Job, Title, TitleMeta, Tmdb } from '../../types.ts';
 
 export class AddError extends Error {
   code: 'already_in_library';

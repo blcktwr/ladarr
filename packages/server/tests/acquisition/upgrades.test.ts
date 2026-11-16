@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { decide, type Context, type Want } from '../../src/library/grab/decide.ts';
-import { emptyData, set, type Db, type MediaFile } from '../../src/core/db.ts';
+import { decide } from '../../src/library/grab/decide.ts';
+import { emptyData, set } from '../../src/core/db.ts';
 import { episode, indexer, movie, NOW, release, title } from '../helpers/test-fixtures.ts';
 import { manualUpgradeTargets, upgradeQualities } from '../../src/library/grab/upgrades.ts';
-import type { Profile } from '../../src/library/grab/quality.ts';
+import type { Db, DecideContext, MediaFile, Profile, Want } from '../../src/types.ts';
 
 const MIB = 1024 * 1024;
 
@@ -197,7 +197,7 @@ describe('a release for a manual upgrade', () => {
     quality.profileOrder = ['p'];
     return quality;
   };
-  const ctx = (quality = data()): Context => ({
+  const ctx = (quality = data()): DecideContext => ({
     settings: quality.settings,
     quality,
     indexers: { 1: indexer() },

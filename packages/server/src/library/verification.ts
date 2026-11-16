@@ -1,17 +1,5 @@
-import { type Db, db } from '../core/db.ts';
-import type { EnqueueInput, Job } from '../core/jobs.ts';
-import type { SourceDownload, SourceEpisode } from '../migration/migration-source.ts';
-
-// What the verification of one title must check: the hashes that the source recorded, and the episodes that the
-// source monitors. The state stays in the database, so a restart, a client outage, or a second import does not lose it.
-export type VerificationState = {
-  key: string;
-  downloads: SourceDownload[];
-  episodes: SourceEpisode[];
-  // True until a run of the verification ends with no outage. A periodic job starts the pending ones again.
-  pending: boolean;
-  updatedAt: number;
-};
+import { db } from '../core/db.ts';
+import type { Db, EnqueueInput, Job, SourceDownload, SourceEpisode } from '../types.ts';
 
 export const verifyJob = (key: string) => ({ type: 'library.verify', payload: { key }, dedupeKey: `verify:${key}` });
 

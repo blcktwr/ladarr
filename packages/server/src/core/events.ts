@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { RequestHandler, Response } from 'express';
-
-type Entry = { seq: number; type: string; data: unknown };
+import type { Entry } from '../types.ts';
 
 const HEARTBEAT_MS = 25_000;
 const MAX_PENDING_BYTES = 1_000_000;
@@ -58,5 +57,3 @@ export function createEvents(replayLimit = 1_000) {
     },
   };
 }
-
-export type Events = ReturnType<typeof createEvents>;

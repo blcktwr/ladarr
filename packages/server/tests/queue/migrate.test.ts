@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { describe as describeState } from '@ladarr/shared/queue';
-import { migrateQueue, type LegacyEntry } from '../../src/library/downloads/queue-migrate.ts';
+import { migrateQueue } from '../../src/library/downloads/queue-migrate.ts';
+import type { LegacyEntry } from '../../src/types.ts';
 
 const base = { id: 'movie:1', titleKey: 'movie:1', season: null, number: null, revision: 0, createdAt: 1, completedAt: null, clearedAt: null, priority: null, attempt: 1, attempts: [], history: [], search: null, release: null, transferHash: null, clientId: null, manualMatch: null, importResult: null };
 

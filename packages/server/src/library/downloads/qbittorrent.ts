@@ -1,27 +1,7 @@
 import type { TorrentStatus, TrackerStatus } from '@ladarr/shared/enums';
 import { outboundFetch } from '../../core/http.ts';
 import { JobError } from '../../core/jobs.ts';
-
-// How ladarr signs in to the client. An API key needs qBittorrent 5.2 or later. The secrets stay on the server.
-export type ClientAuth = { type: 'apiKey'; apiKey: string } | { type: 'password'; username: string; password: string };
-
-// The kind of download client. qBittorrent is the only one.
-export type ClientType = 'qbittorrent';
-
-// The settings of one download client. The client has its own folders and categories, so ladarr does not set them.
-export type ClientConfig = {
-  id: string;
-  name: string;
-  type: ClientType;
-  // A host name or an address, with or without http:// or https://. Without it, the address is http. A path stays: it is the base of a proxy.
-  host: string;
-  port: number;
-  auth: ClientAuth;
-  // A client that is off gets no new download, and ladarr does not read it.
-  enabled: boolean;
-  // The most downloads that run at the same time in this client. Zero means no limit.
-  maxDownloads: number;
-};
+import type { ClientConfig, ClientSlots, QbittorrentErrorCode, QbittorrentOptions, Torrent, Tracker } from '../../types.ts';
 
 // The address of the client. Returns null when host or port is not valid.
 export function clientUrl({ host, port }: Pick<ClientConfig, 'host' | 'port'>): string | null {
@@ -35,59 +15,16 @@ export function clientUrl({ host, port }: Pick<ClientConfig, 'host' | 'port'>): 
   }
 }
 
-type ErrorCode = 'rejected' | 'unreachable' | 'unexpected';
-
 // The message never holds the password or the address.
 export class ClientError extends JobError {
-  code: ErrorCode;
-  constructor(code: ErrorCode, message: string) {
+  code: QbittorrentErrorCode;
+  constructor(code: QbittorrentErrorCode, message: string) {
     super('outage', message);
     this.code = code;
   }
 }
 
 // What the user can see about the wait or the work of a torrent. The client reports it. ladarr does not infer it.
-export type { TorrentStatus, TrackerStatus };
-
-export type Torrent = {
-  hash: string;
-  name: string;
-  sizeBytes: number;
-  progress: number;
-  amountLeft: number;
-  downloadRate: number;
-  uploadRate: number;
-  // Seconds, or null when the client cannot estimate it.
-  etaSeconds: number | null;
-  state: string;
-  status: TorrentStatus;
-  complete: boolean;
-  savePath: string;
-  contentPath: string;
-  category: string;
-  tags: string;
-  seeds: number;
-  peers: number;
-  addedAt: number;
-  // The share ratio, and the seconds that the torrent has been complete, as the client reports them.
-  ratio: number;
-  seedingSeconds: number;
-  // The first tracker that works, as the client reports it. Empty when none works.
-  tracker: string;
-  // The place in the queue of the client. Null when queueing is off or the torrent is in seed mode.
-  queuePosition: number | null;
-  // The seeds and leechers of the swarm that the trackers report. Null when unknown.
-  swarmSeeds: number | null;
-  swarmPeers: number | null;
-  // Null when the client does not report it.
-  availability: number | null;
-};
-
-// One tracker of a torrent. The address is reduced to its host, because many addresses hold a private key.
-export type Tracker = { host: string | null; status: TrackerStatus; tier: number; message: string; seeds: number | null; peers: number | null; downloaded: number | null };
-
-// The limits of the queue of the client. A field is null when the client does not send it.
-export type ClientSlots = { queueing: boolean | null; maxActiveDownloads: number | null; maxActiveTorrents: number | null; maxActiveUploads: number | null };
 
 const TRACKER_STATUS: TrackerStatus[] = ['disabled', 'not_contacted', 'working', 'updating', 'not_working'];
 
@@ -158,9 +95,7 @@ function toTorrent(raw: Record<string, unknown>): Torrent | undefined {
   };
 }
 
-type Options = { fetch?: typeof fetch; timeoutMs?: number };
-
-export function createQbittorrent(config: ClientConfig, { fetch: fetchImpl = fetch, timeoutMs = 15_000 }: Options = {}) {
+export function createQbittorrent(config: ClientConfig, { fetch: fetchImpl = fetch, timeoutMs = 15_000 }: QbittorrentOptions = {}) {
   const url = clientUrl(config);
   if (!url) throw new ClientError('unexpected', 'The address of the download client is not valid.');
   const sendRequest = outboundFetch(`Download client ${config.name}`, fetchImpl);
@@ -335,8 +270,3 @@ export function createQbittorrent(config: ClientConfig, { fetch: fetchImpl = fet
     },
   };
 }
-
-export type Qbittorrent = ReturnType<typeof createQbittorrent>;
-
-// What the rest of the server needs from a client: its ID, the connection, and its settings.
-export type ClientHandle = { id: string; api: Qbittorrent; config: ClientConfig };

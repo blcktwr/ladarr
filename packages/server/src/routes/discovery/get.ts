@@ -1,8 +1,9 @@
 import type { DiscoveryGenre, DiscoveryPage, DiscoveryRow, DiscoverySort } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { inLibrary } from '../../helpers/search.ts';
-import type { MediaType, Tmdb } from '../../metadata/tmdb.ts';
 import { discoveryGenres } from './genres.ts';
+import type { MediaType } from '@ladarr/shared/enums';
+import type { Tmdb } from '../../types.ts';
 
 // The field of TMDB that orders each list. A movie and a series name their release date in different fields.
 const SORTS: Record<DiscoverySort, { movie: string; tv: string }> = {

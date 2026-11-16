@@ -1,6 +1,5 @@
-import { move } from '../helpers/test-queue.ts';
-import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
-import { branchOf } from '../helpers/test-queue.ts';
+import { move, branchOf } from '../helpers/test-queue.ts';
+import { stageOf, reasonOfEntry, createQueue } from '../../src/library/downloads/queue.ts';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,12 +8,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createEvents } from '../../src/core/events.ts';
 import { enqueue } from '../../src/core/jobs.ts';
 import { seriesCounts } from '../../src/library/library.ts';
-import { dropTitle, forgetFile, retireFile, seeFile, type Seen } from '../../src/library/tools/remove.ts';
-import { createQueue } from '../../src/library/downloads/queue.ts';
+import { dropTitle, forgetFile, retireFile, seeFile } from '../../src/library/tools/remove.ts';
 import { scanTitle } from '../../src/library/scan.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
-import type { Tmdb } from '../../src/metadata/tmdb.ts';
+import type { Seen, Tmdb } from '../../src/types.ts';
 
 let app: Awaited<ReturnType<typeof startTestApp>>;
 let dir: string;

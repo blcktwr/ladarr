@@ -2,35 +2,14 @@ import type { WebhookTestResult } from '@ladarr/shared/types';
 import { randomUUID } from 'node:crypto';
 import type { MediaType, WebhookEventType } from '@ladarr/shared/enums';
 import { db } from './db.ts';
-import type { EnqueueInput } from './jobs.ts';
 import { outboundFetch } from './http.ts';
 import { log } from './log.ts';
 import type { QueueState } from '@ladarr/shared/queue';
-import type { StateHook } from '../library/downloads/queue.ts';
 import { reasonInfo } from './reasons.ts';
+import type { DeliveryPayload, EventType, StateHook, WebhookDeps, WebhookEvent } from '../types.ts';
 
 // Raise this number when a receiver must change to read the body of an event.
 export const EVENT_SCHEMA_VERSION = 1;
-
-// The destination of one event type. The address is a secret, because it can hold a token.
-// It never goes to a log or to an API answer.
-export type WebhookState = { id: string; type: WebhookEventType; url: string };
-
-export type EventType = WebhookEventType | 'test';
-
-export type WebhookEvent = {
-  schemaVersion: typeof EVENT_SCHEMA_VERSION;
-  id: string;
-  type: EventType;
-  timestamp: string;
-  title: { key: string; mediaType: MediaType; name: string | null; year: number | null; ids: { tmdb: number; tvdb: number | null; imdb: string | null } } | null;
-  episode: { season: number; number: number; name: string | null } | null;
-  reason: { code: string; message: string } | null;
-  problem: { id: string; message: string } | null;
-};
-
-// The delivery job of one webhook. The event is the same for each webhook of its type.
-export type DeliveryPayload = { webhookId: string; event: WebhookEvent };
 
 export const DELIVER = 'webhook.deliver';
 const TIMEOUT_MS = 10_000;
@@ -69,14 +48,9 @@ export async function send(url: string, event: WebhookEvent, { signal, timeoutMs
   }
 }
 
-type Deps = {
-  enqueue: (input: EnqueueInput) => unknown;
-  now?: () => number;
-};
-
 // Makes the events and puts each one in a durable delivery job for each webhook of its type.
 // Nothing here waits for the network.
-export function createWebhooks({ enqueue, now = Date.now }: Deps) {
+export function createWebhooks({ enqueue, now = Date.now }: WebhookDeps) {
   function emit(type: WebhookEventType, fields: Parameters<typeof newEvent>[2]) {
     const targets = db.data.webhooks.filter((webhook) => webhook.type === type);
     if (!targets.length) return;
@@ -116,4 +90,3 @@ export function createWebhooks({ enqueue, now = Date.now }: Deps) {
 
   return { onState };
 }
-

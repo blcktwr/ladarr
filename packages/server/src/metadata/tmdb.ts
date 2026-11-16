@@ -2,87 +2,31 @@ import type { MediaType } from '@ladarr/shared/enums';
 import type { CastMember, PersonCredits, SearchResult, WatchProvider, WatchRegion } from '@ladarr/shared/types';
 import { outboundFetch } from '../core/http.ts';
 import { JobError } from '../core/jobs.ts';
-
-export type { CastMember, MediaType, PersonCredits, SearchResult };
-export type ReleaseKind = 'premiere' | 'theatrical_limited' | 'theatrical' | 'digital' | 'physical' | 'tv';
-
-
-export type ReleaseDate = { region: string; kind: ReleaseKind; date: string };
-export type SeasonSummary = { seasonNumber: number; episodeCount: number; airDate: string | null };
-
-// One page of a discover list, with the number of pages that TMDB has.
-export type DiscoverPage = { results: SearchResult[]; totalPages: number };
-
-// The TMDB facts about a title. A refresh replaces all of it, so it never holds a choice of the user.
-export type TitleMeta = SearchResult & {
-  originalTitle: string;
-  aliases: string[];
-  // The ISO 3166-1 regions that returned each alias. A title from an older version has no map.
-  aliasRegions?: Record<string, string[]>;
-  date: string | null;
-  status: string;
-  rating: number | null;
-  votes: number;
-  backdropPath: string | null;
-  runtime: number | null;
-  imdbId: string | null;
-  tvdbId: number | null;
-  // The names of the genres of TMDB, and the certification of the country of origin. A title from an older version has
-  // neither.
-  genres?: string[];
-  certification?: string | null;
-  releaseDates: ReleaseDate[];
-  seasons: SeasonSummary[];
-};
-
-// A date-only air date stays a date. The caller uses UTC.
-// shortcut: no episode overview, to keep the database file small. Fetch it on demand if the UI needs it.
-export type EpisodeMeta = {
-  tmdbId: number;
-  season: number;
-  number: number;
-  name: string;
-  airDate: string | null;
-  runtime: number | null;
-};
+import type { DiscoverPage, EpisodeMeta, ReleaseKind, TitleMeta, TmdbErrorCode, TmdbOptions, TmdbRaw } from '../types.ts';
 
 // TMDB numbers its release types from 1.
 const RELEASE_KINDS: ReleaseKind[] = ['premiere', 'theatrical_limited', 'theatrical', 'digital', 'physical', 'tv'];
 
-type ErrorCode = 'not_found' | 'invalid_key' | 'rate_limited' | 'unavailable';
-
 // The message never holds the URL, because the URL holds the API key.
 export class TmdbError extends JobError {
-  code: ErrorCode;
-  constructor(code: ErrorCode, message: string) {
+  code: TmdbErrorCode;
+  constructor(code: TmdbErrorCode, message: string) {
     super(code === 'not_found' ? 'invalid_input' : 'outage', message);
     this.code = code;
   }
 }
 
-type Options = {
-  apiKey: string;
-  fetch?: typeof fetch;
-  baseUrl?: string;
-  timeoutMs?: number;
-  // Least time between the starts of two requests. TMDB limits at about 40 requests a second.
-  spacingMs?: number;
-  ttlMs?: number;
-};
-
 const MAX_CACHED = 500;
 const MAX_CAST = 12;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// The answers of TMDB are outside data, so these helpers read them without trusting their shape.
-type Raw = any;
 const text = (value: unknown) => (typeof value === 'string' ? value : '');
 const textOrNull = (value: unknown) => text(value) || null;
 const numberOrNull = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
 const yearOf = (date: string | null) => (date && /^\d{4}-/.test(date) ? Number(date.slice(0, 4)) : null);
-const list = (value: unknown): Raw[] => (Array.isArray(value) ? value : []);
+const list = (value: unknown): TmdbRaw[] => (Array.isArray(value) ? value : []);
 
-function searchResult(raw: Raw, mediaType: MediaType): SearchResult {
+function searchResult(raw: TmdbRaw, mediaType: MediaType): SearchResult {
   const id = numberOrNull(raw?.id);
   if (id === null) throw new TmdbError('unavailable', 'TMDB sent an answer without an ID');
   const date = textOrNull(mediaType === 'movie' ? raw.release_date : raw.first_air_date);
@@ -99,7 +43,7 @@ function searchResult(raw: Raw, mediaType: MediaType): SearchResult {
 
 // The certification belongs to a country, and TMDB has one for each. The title shows the one of its country of origin.
 // A movie keeps it with the release dates of each country, and a series in its content ratings.
-function certificationOf(raw: Raw, mediaType: MediaType): string | null {
+function certificationOf(raw: TmdbRaw, mediaType: MediaType): string | null {
   const country = list(raw.origin_country)[0];
   if (typeof country !== 'string') return null;
   const entries =
@@ -109,7 +53,7 @@ function certificationOf(raw: Raw, mediaType: MediaType): string | null {
   return entries.map((entry) => text(mediaType === 'movie' ? entry?.certification : entry?.rating)).find((value) => value) ?? null;
 }
 
-function titleMeta(raw: Raw, mediaType: MediaType): TitleMeta {
+function titleMeta(raw: TmdbRaw, mediaType: MediaType): TitleMeta {
   const base = searchResult(raw, mediaType);
   const date = textOrNull(mediaType === 'movie' ? raw.release_date : raw.first_air_date);
   const originalTitle = text(mediaType === 'movie' ? raw.original_title : raw.original_name);
@@ -170,7 +114,7 @@ export function createTmdb({
   timeoutMs = 10_000,
   spacingMs = 40,
   ttlMs = 5 * 60_000,
-}: Options) {
+}: TmdbOptions) {
   const send = outboundFetch('TMDB', fetchImpl);
   const cache = new Map<string, { at: number; value: unknown }>();
   const pending = new Map<string, Promise<unknown>>();
@@ -256,7 +200,7 @@ export function createTmdb({
 
     // shortcut: only the first page of results, 20 at most. Add paging if people need more.
     async search(query: string): Promise<SearchResult[]> {
-      const raw = (await get('/search/multi', { query, include_adult: 'false' }, 10 * 60_000)) as Raw;
+      const raw = (await get('/search/multi', { query, include_adult: 'false' }, 10 * 60_000)) as TmdbRaw;
       return list(raw?.results).flatMap((item) =>
         item?.media_type === 'movie' || item?.media_type === 'tv' ? [searchResult(item, item.media_type)] : [],
       );
@@ -264,13 +208,13 @@ export function createTmdb({
 
     // The titles of a discover list, in the order of TMDB.
     async discoverResults(mediaType: MediaType, params: Record<string, string> = {}): Promise<DiscoverPage> {
-      const raw = (await get(`/discover/${mediaType}`, params)) as Raw;
+      const raw = (await get(`/discover/${mediaType}`, params)) as TmdbRaw;
       return { results: list(raw?.results).map((item) => searchResult(item, mediaType)), totalPages: numberOrNull(raw?.total_pages) ?? 1 };
     },
 
     // The genres of a media type, in the order of TMDB.
     async genreList(mediaType: MediaType): Promise<{ id: number; name: string }[]> {
-      const raw = (await get(`/genre/${mediaType}/list`, {}, LIST_TTL)) as Raw;
+      const raw = (await get(`/genre/${mediaType}/list`, {}, LIST_TTL)) as TmdbRaw;
       return list(raw?.genres).flatMap((genre) => {
         const id = numberOrNull(genre?.id);
         const name = text(genre?.name);
@@ -280,7 +224,7 @@ export function createTmdb({
 
     // The countries that have watch providers, in alphabetical order.
     async watchRegions(): Promise<WatchRegion[]> {
-      const raw = (await get('/watch/providers/regions', {}, LIST_TTL)) as Raw;
+      const raw = (await get('/watch/providers/regions', {}, LIST_TTL)) as TmdbRaw;
       return list(raw?.results)
         .flatMap((region) => {
           const code = text(region?.iso_3166_1);
@@ -292,7 +236,7 @@ export function createTmdb({
 
     // The watch providers of a country for one media type, in the order of priority of TMDB.
     async watchProviders(mediaType: MediaType, region: string): Promise<(WatchProvider & { priority: number })[]> {
-      const raw = (await get(`/watch/providers/${mediaType}`, { watch_region: region }, LIST_TTL)) as Raw;
+      const raw = (await get(`/watch/providers/${mediaType}`, { watch_region: region }, LIST_TTL)) as TmdbRaw;
       return list(raw?.results)
         .flatMap((provider) => {
           const id = numberOrNull(provider?.provider_id);
@@ -338,7 +282,7 @@ export function createTmdb({
 
     // Every series that has this TVDB ID. The caller must ask for a match unless exactly one comes back.
     async findSeriesByTvdb(tvdbId: number): Promise<SearchResult[]> {
-      const raw = (await get(`/find/${tvdbId}`, { external_source: 'tvdb_id' })) as Raw;
+      const raw = (await get(`/find/${tvdbId}`, { external_source: 'tvdb_id' })) as TmdbRaw;
       return list(raw?.tv_results).map((item) => searchResult(item, 'tv'));
     },
 
@@ -346,7 +290,7 @@ export function createTmdb({
 
     // The first actors of the credits, in the order of TMDB. The caller does not store them.
     async cast(mediaType: MediaType, id: number): Promise<CastMember[]> {
-      const raw = (await get(`/${mediaType}/${id}/credits`)) as Raw;
+      const raw = (await get(`/${mediaType}/${id}/credits`)) as TmdbRaw;
       return list(raw?.cast)
         .flatMap((person) => {
           const personId = numberOrNull(person?.id);
@@ -357,7 +301,7 @@ export function createTmdb({
 
     // An actor with every movie and series in the credits. A title with more than one credit shows once. The newest title is first, and a title with no date is last.
     async person(id: number): Promise<PersonCredits> {
-      const raw = (await get(`/person/${id}`, { append_to_response: 'combined_credits' })) as Raw;
+      const raw = (await get(`/person/${id}`, { append_to_response: 'combined_credits' })) as TmdbRaw;
       const personId = numberOrNull(raw?.id);
       if (personId === null) throw new TmdbError('unavailable', 'TMDB sent an answer without an ID');
       const dated = list(raw.combined_credits?.cast)
@@ -376,12 +320,12 @@ export function createTmdb({
 
     // shortcut: only the first page of results, 20 at most. Add paging if people need more.
     async recommendations(mediaType: MediaType, id: number): Promise<SearchResult[]> {
-      const raw = (await get(`/${mediaType}/${id}/recommendations`)) as Raw;
+      const raw = (await get(`/${mediaType}/${id}/recommendations`)) as TmdbRaw;
       return list(raw?.results).map((item) => searchResult(item, mediaType));
     },
 
     async season(seriesId: number, seasonNumber: number, ttl = ttlMs): Promise<EpisodeMeta[]> {
-      const raw = (await get(`/tv/${seriesId}/season/${seasonNumber}`, {}, ttl)) as Raw;
+      const raw = (await get(`/tv/${seriesId}/season/${seasonNumber}`, {}, ttl)) as TmdbRaw;
       return list(raw?.episodes).flatMap((episode) => {
         const id = numberOrNull(episode?.id);
         const number = numberOrNull(episode?.episode_number);
@@ -400,5 +344,3 @@ export function createTmdb({
     },
   };
 }
-
-export type Tmdb = ReturnType<typeof createTmdb>;

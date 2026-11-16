@@ -1,6 +1,5 @@
-import { move } from '../helpers/test-queue.ts';
+import { move, branchOf } from '../helpers/test-queue.ts';
 import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
-import { branchOf } from '../helpers/test-queue.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { episode, indexer, movie, title } from '../helpers/test-fixtures.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';

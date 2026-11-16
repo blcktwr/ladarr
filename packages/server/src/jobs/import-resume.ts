@@ -1,7 +1,7 @@
-import { type Db, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import { enqueue as enqueueJob } from '../core/jobs.ts';
 import { unfinishedImports } from '../library/imports/importer.ts';
-import type { Handler } from '../core/worker.ts';
+import type { Db, Handler } from '../types.ts';
 
 const RESUME_EVERY_MS = 10 * 60_000;
 

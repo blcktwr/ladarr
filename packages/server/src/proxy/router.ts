@@ -1,13 +1,13 @@
 import { statfs } from 'node:fs/promises';
 import { Router, type RequestHandler } from 'express';
 import { safeEqual } from '../core/auth.ts';
-import { isObject, notFound, notSupported, parseId, profiles, refuse, rootNumber, rootsOf, timespan, type CompatCommand, type CompatDeps } from './common.ts';
+import { isObject, notFound, notSupported, parseId, profiles, refuse, rootNumber, rootsOf, timespan } from './common.ts';
 import { radarrRoutes } from './radarr.ts';
 import { sonarrRoutes } from './sonarr.ts';
-import { type Db, db } from '../core/db.ts';
-import { APP_MEDIA, type IndexerApp } from '../library/grab/indexers.ts';
-import type { SearchPayload } from '../library/grab/finder.ts';
-import type { QueueEntry } from '../library/downloads/queue.ts';
+import { db } from '../core/db.ts';
+import { APP_MEDIA } from '../library/grab/indexers.ts';
+import type { CompatCommand, CompatDeps, Db, QueueEntry, SearchPayload } from '../types.ts';
+import type { IndexerApp } from '@ladarr/shared/enums';
 
 const KEPT_COMMANDS = 100;
 const REFRESH = 'RefreshMonitoredDownloads';

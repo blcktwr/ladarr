@@ -4,8 +4,8 @@ import { access, realpath, stat, statfs, unlink, writeFile } from 'node:fs/promi
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { RootProblem } from '@ladarr/shared/enums';
 import type { RootCheck } from '@ladarr/shared/types';
-import { type Db, type Root, db } from '../core/db.ts';
-
+import { db } from '../core/db.ts';
+import type { Db, Refusal, Root } from '../types.ts';
 
 // shortcut: one fixed limit for every root. Make it a setting if people ask.
 const LOW_SPACE_BYTES = 5 * 1024 ** 3;
@@ -37,8 +37,6 @@ export const inside = (parent: string, child: string) => {
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path));
 };
 
-type Refusal = { error: string; problems?: RootProblem[] };
-
 // Decides if a folder can become a root. Returns the resolved path, or the reason it cannot.
 // A saved root leaves itself out of the overlap check when its path changes.
 export async function validateNewRoot(input: string, configDir?: string, exceptId?: string): Promise<{ path: string; dev: number; check: RootCheck } | Refusal> {
@@ -58,4 +56,3 @@ export async function validateNewRoot(input: string, configDir?: string, exceptI
 }
 
 export const refusal = (result: object): result is Refusal => 'error' in result;
-

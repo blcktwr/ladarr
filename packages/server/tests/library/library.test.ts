@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { availability, isMonitored, mergeEpisodes, seriesCounts, titleKey, type Episode, type Title } from '../../src/library/library.ts';
+import { availability, isMonitored, mergeEpisodes, seriesCounts, titleKey } from '../../src/library/library.ts';
 import { metadataRefreshHandler } from '../../src/jobs/metadata-refresh.ts';
 import { createQueue } from '../../src/library/downloads/queue.ts';
 import { createEvents } from '../../src/core/events.ts';
@@ -12,6 +12,7 @@ import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
 import { withOutboundRequests } from '../../src/core/outbound.ts';
 import { createTmdb } from '../../src/metadata/tmdb.ts';
 import { startTestApp } from '../helpers/test-app.ts';
+import type { Episode, Title } from '../../src/types.ts';
 
 const NOW = Date.UTC(2024, 5, 1);
 const clock = { now: NOW, files: { f: { missing: false }, both: { missing: false } } };

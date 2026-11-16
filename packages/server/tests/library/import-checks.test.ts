@@ -1,8 +1,7 @@
 import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
 import { branchOf } from '../helpers/test-queue.ts';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { QueueEntryView } from '@ladarr/shared/types';
-import type { ImportCheck } from '@ladarr/shared/types';
+import type { QueueEntryView, ImportCheck } from '@ladarr/shared/types';
 import { IMPORT_CHECK_IDS as CHECK_IDS } from '@ladarr/shared/enums';
 import { unfinishedImports } from '../../src/library/imports/importer.ts';
 import { view } from '../../src/helpers/queue.ts';

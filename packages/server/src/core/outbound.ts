@@ -1,10 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-
-// One request that the server sent. The id ties the line of the request to the log of the work that sent it.
-export type OutboundRequest = { requestId: string; system: string };
-
-type Work = { requests: OutboundRequest[]; ids: Map<string, string> };
+import type { OutboundRequest, Work } from '../types.ts';
 
 // The requests of one piece of work: a job, a call of the API, or a poll. The work and its logs share the context.
 const storage = new AsyncLocalStorage<Work>();

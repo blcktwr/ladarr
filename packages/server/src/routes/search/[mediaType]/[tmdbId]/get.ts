@@ -1,8 +1,8 @@
 import { db } from '../../../../core/db.ts';
 import type { TitlePreview } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { Tmdb } from '../../../../metadata/tmdb.ts';
 import { inLibrary } from '../../../../helpers/search.ts';
+import type { Tmdb } from '../../../../types.ts';
 
 export function searchTitle(tmdb: Tmdb | undefined): RequestHandler {
   return async (_req, res) => {

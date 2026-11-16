@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { emptyData, withDefaults, type Data } from '../../src/core/db.ts';
-import { QUALITIES, QUALITY_TABLE_VERSION, type SizeLimits } from '../../src/library/grab/quality.ts';
+import { emptyData, withDefaults } from '../../src/core/db.ts';
+import { QUALITIES, QUALITY_TABLE_VERSION } from '../../src/library/grab/quality.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { title } from '../helpers/test-fixtures.ts';
+import type { Data } from '../../src/types.ts';
+import type { SizeLimits } from '@ladarr/shared/types';
 
 let app: Awaited<ReturnType<typeof startTestApp>>;
 beforeAll(async () => {

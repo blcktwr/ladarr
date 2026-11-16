@@ -1,8 +1,6 @@
-import { type Db, db } from '../core/db.ts';
-import type { EnqueueInput, Job } from '../core/jobs.ts';
-import type { Finder } from '../library/grab/finder.ts';
-import { BULK_SEARCH_JOB, type BulkSearchPayload } from '../library/calendar/calendar-search.ts';
-import type { Handler } from '../core/worker.ts';
+import { db } from '../core/db.ts';
+import { BULK_SEARCH_JOB } from '../library/calendar/calendar-search.ts';
+import type { BulkSearchPayload, Db, Handler, LibrarySearchDeps } from '../types.ts';
 
 // One batch ends at 25 titles or 300 started targets, whichever comes first.
 const BATCH_TITLES = 25;
@@ -14,9 +12,7 @@ const UPGRADE_BATCH_TARGETS = 10;
 const MAX_BACKLOG = 50;
 const BACKLOG_WAIT_MS = 30_000;
 
-type Deps = { finder: Finder; enqueue: (input: EnqueueInput) => Job };
-
-export function librarySearchHandler({ finder, enqueue }: Deps): Handler {
+export function librarySearchHandler({ finder, enqueue }: LibrarySearchDeps): Handler {
   return {
     concurrency: 1,
     run: async (job, { signal }) => {

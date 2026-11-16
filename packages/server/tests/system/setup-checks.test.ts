@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { open, type Db } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { setupChecks } from '../../src/system/setup-checks.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 import { indexer } from '../helpers/test-fixtures.ts';
+import type { Db } from '../../src/types.ts';
 
 let db: Db;
 

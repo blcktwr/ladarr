@@ -1,8 +1,4 @@
-// What the user reads when a target waits or stops, and the action that helps.
-// The code is stable. The message is the key of the web i18n. The webhook sends the English text.
-export type ReasonAction = 'retry' | 'match' | 'attach' | 'settings' | 'none';
-export type ReasonInfo = { message: string; action: ReasonAction; settings?: 'client' | 'indexers' | 'library' };
-
+import type { ReasonInfo } from '../types.ts';
 export const REASONS: Record<string, ReasonInfo> = {
   // The search found nothing to take.
   no_results: { message: 'Not found in any indexers, we will search again.', action: 'retry' },

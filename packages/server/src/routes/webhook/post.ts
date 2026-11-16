@@ -1,8 +1,8 @@
 import { db } from '../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { randomUUID } from 'node:crypto';
-import type { WebhookState } from '../../core/webhook.ts';
 import { parse, view } from '../../helpers/webhook.ts';
+import type { WebhookState } from '../../types.ts';
 
 export function webhookCreate(): RequestHandler {
   return async (req, res) => {

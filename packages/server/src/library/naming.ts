@@ -1,6 +1,6 @@
 import { extname } from 'node:path';
-import type { Title } from './library.ts';
 import { parseEpisodes } from './parse.ts';
+import type { NamedEpisode, NamingTemplates, TemplateProblem, Title } from '../types.ts';
 
 // Removes what a file system does not allow, and the dots and spaces at the ends of a name.
 export function sanitize(name: string) {
@@ -14,17 +14,12 @@ export function sanitize(name: string) {
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
-// The name of a file, without its folders and its extension. The folders stay fixed, so a template can not leave the title folder.
-export type NamingTemplates = { movie: string; episode: string };
-
 export const DEFAULT_NAMING: NamingTemplates = { movie: '{title} ({year})', episode: '{title} - S{season}E{episode} - {episodeTitle}' };
 
 const TOKENS = { movie: ['title', 'year'], episode: ['title', 'year', 'season', 'episode', 'episodeTitle'] } as const;
 // An episode name must be different for each episode, so these tokens are necessary.
 const NECESSARY = { movie: ['title'], episode: ['title', 'season', 'episode'] } as const;
 const MAX_TEMPLATE = 150;
-
-export type TemplateProblem = 'template_invalid' | 'template_separator' | 'template_token' | 'template_missing_token' | 'template_unreadable';
 
 // Returns the problem of a template, or null when it is valid.
 export function templateProblem(kind: 'movie' | 'episode', template: unknown): TemplateProblem | null {
@@ -51,8 +46,6 @@ function reads(name: string, season: number, numbers: number[]) {
   const found = parseEpisodes(name);
   return found?.season === season && found.numbers.join() === numbers.join();
 }
-
-type NamedEpisode = { season: number; number: number; name: string };
 
 function episodeValues(title: Title, episodes: NamedEpisode[]) {
   const first = episodes[0]!;

@@ -1,10 +1,11 @@
 import type { SearchResult } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import { type Db, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import { availability, titleKey } from '../library/library.ts';
 import { clock } from '../library/tools/api.ts';
 import { queueStatusOf } from '../library/tools/queue-status.ts';
-import { TmdbError, type Tmdb } from '../metadata/tmdb.ts';
+import { TmdbError } from '../metadata/tmdb.ts';
+import type { Db, Tmdb } from '../types.ts';
 
 // The newest title comes first. A title with no year is not known to be new, so it goes last.
 export const newestFirst = (results: SearchResult[]) =>

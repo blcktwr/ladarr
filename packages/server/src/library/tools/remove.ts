@@ -1,11 +1,10 @@
 import { lstat, readdir, realpath, rmdir, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { type Db, type MediaFile, db } from '../../core/db.ts';
-import type { Job } from '../../core/jobs.ts';
+import { db } from '../../core/db.ts';
 import { deleteItemLog } from '../../core/log.ts';
 import { inside } from '../imports/folder-files.ts';
-import type { Title } from '../library.ts';
-import { isActive, type Queue, type QueueEntry } from '../downloads/queue.ts';
+import { isActive } from '../downloads/queue.ts';
+import type { Db, Job, MediaFile, Queue, QueueEntry, Retired, Seen, Title } from '../../types.ts';
 
 // The torrents that ladarr added for the removed targets and files, and that no target outside the removal still uses.
 // A shared pack goes once. A torrent that the user attached stays.
@@ -116,11 +115,6 @@ export function forgetFile(title: Title, fileId: string) {
     episode.fileId = file?.id ?? null;
   }
 }
-
-// What the preview saw on the disk. Null: the file was not there.
-export type Seen = { sizeBytes: number; mtimeMs: number } | null;
-
-export type Retired = { ok: true; how: 'deleted' | 'gone' } | { ok: false; reason: string };
 
 const errno = (error: unknown) => (error as NodeJS.ErrnoException).code;
 

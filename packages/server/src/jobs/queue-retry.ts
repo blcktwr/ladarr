@@ -1,17 +1,10 @@
 import { db } from '../core/db.ts';
-import type { Events } from '../core/events.ts';
-import type { EnqueueInput, Job } from '../core/jobs.ts';
 import { catalog, itemFields } from '../core/log.ts';
 import { withTitleLock } from '../core/title-lock.ts';
-import type { Handler } from '../core/worker.ts';
-import type { Clients } from '../library/downloads/client-api.ts';
 import { ClientError } from '../library/downloads/qbittorrent.ts';
-import { isActive, type Queue, type QueueEntry } from '../library/downloads/queue.ts';
-import type { Finder } from '../library/grab/finder.ts';
-import type { Title } from '../library/library.ts';
+import { isActive } from '../library/downloads/queue.ts';
 import { scanTitle } from '../library/scan.ts';
-
-type Deps = { queue: Queue; finder: Finder; clients: Clients; enqueue: (input: EnqueueInput) => Job; events: Events };
+import type { Handler, QueueEntry, QueueRetryDeps, Title } from '../types.ts';
 
 const present = (fileId: string | null) => Boolean(fileId && db.data.files[fileId] && !db.data.files[fileId]!.missing);
 
@@ -23,7 +16,7 @@ const fileOf = (title: Title, entry: QueueEntry) =>
 // before the target moves: the file in the library, the torrent in the client, the release that the target kept, and
 // the search. The target stops at the first phase that resolves it, so a file that is on the disk, or a torrent that
 // the client has, is never downloaded again.
-export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Deps): Handler {
+export function queueRetryHandler({ queue, finder, clients, enqueue, events }: QueueRetryDeps): Handler {
   // The file that the library holds for the target. The folder of the title is read from the disk, so a file that is
   // there counts also when no scan recorded it yet. A retry that replaces a file is not a retry of the library.
   async function fromLibrary(entry: QueueEntry, title: Title, scan: boolean) {

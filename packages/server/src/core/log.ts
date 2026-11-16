@@ -4,8 +4,9 @@ import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import pino from 'pino';
 import { createStream, type RotatingFileStream } from 'rotating-file-stream';
-import { type Db, db } from './db.ts';
+import { db } from './db.ts';
 import { outboundRequests } from './outbound.ts';
+import type { Db, ItemFields, Level, LogFilter, QueueItem } from '../types.ts';
 
 const SECRET_KEY = /pass|secret|token|api[-_]?key|authorization|cookie/i;
 // Fields that can hold a credential in a body: a magnet link, a tracker, or a download link.
@@ -222,8 +223,6 @@ export function closeLog(): Promise<void> {
   return Promise.all(open.map((stream) => new Promise<void>((resolve) => stream.end(resolve)))).then(() => undefined);
 }
 
-type Level = 'info' | 'warn' | 'error';
-
 // A line of a piece of work links the requests that the work sent. A line that already holds its own requests keeps
 // only them, so it does not grow with the requests of the earlier lines of the same work.
 function linkedRequests(fields: Record<string, unknown>) {
@@ -245,29 +244,7 @@ export const log = {
   error: (message: string, fields?: Record<string, unknown>) => write('error', message, fields),
 };
 
-// A catalog log follows a title or one of its targets. A system log is about the server. The two kinds share a file,
-// and the type tells them apart.
-export type LogType = 'system' | 'catalog';
-
-export type ItemFields = {
-  itemId: string;
-  itemType: string;
-  titleKey: string;
-  title: string;
-  // The part of the title that the log follows: "Movie", "Series", or "S01E02".
-  target: string;
-  episode?: string;
-  // The attempt of the target, when it has one.
-  attempt?: number;
-  // Milliseconds since the target was created, so a reader sees the order and the wait of each step.
-  sinceCreatedMs?: number;
-  // The stage or the branch of the item, when the log is an update of it.
-  status?: string;
-};
-
 const pad = (value: number) => String(value).padStart(2, '0');
-
-type QueueItem = { id: string; titleKey: string; season: number | null; number: number | null; attempt: number; createdAt: number };
 
 // The fields that name the title or the target of a catalog log.
 export function itemFields(entry: QueueItem): ItemFields {
@@ -309,8 +286,6 @@ export const traffic = {
   info: (message: string, fields?: Record<string, unknown>) => write('info', message, fields, 'requests'),
   warn: (message: string, fields?: Record<string, unknown>) => write('warn', message, fields, 'requests'),
 };
-
-export type LogFilter = { itemId?: string; itemType?: string; titleKey?: string; kind?: 'logs' | 'requests'; type?: LogType; requestId?: string };
 
 const matches = (entry: LogEntry, filter: LogFilter) =>
   (!filter.type || (entry.type ?? 'system') === filter.type) &&

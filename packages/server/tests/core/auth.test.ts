@@ -1,7 +1,8 @@
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
-import { open, type Db } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
+import type { Db } from '../../src/types.ts';
 
 let db: Db;
 let base = '';

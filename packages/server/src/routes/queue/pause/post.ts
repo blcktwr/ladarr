@@ -1,5 +1,5 @@
 import type { RequestHandler } from 'express';
-import type { Queue } from '../../../library/downloads/queue.ts';
+import type { Queue } from '../../../types.ts';
 
 // The user pauses the queue, or starts it again. Running work ends, and no new work starts.
 export function queuePausePost(queue: Queue): RequestHandler {

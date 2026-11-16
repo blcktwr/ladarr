@@ -1,33 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
-import { type Db, type MediaFile, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import { filesVersion } from './tools/remove.ts';
-import type { Title } from './library.ts';
 import { folderName } from './naming.ts';
-import { isSample, isVideoFile, parseEpisodes, type ParsedEpisodes } from './parse.ts';
+import { isSample, isVideoFile, parseEpisodes } from './parse.ts';
 import { checkRoot } from './roots.ts';
-
-export type ScanResult = {
-  status: 'ok' | 'no_folder' | 'root_unavailable' | 'folder_missing' | 'changed';
-  added: number;
-  updated: number;
-  // Files that were on the disk before and are gone now. They stay in the library, marked as missing.
-  missing: number;
-  // Video files of a series whose name gives no episode.
-  unmatched: string[];
-  // Files for an episode that has another file already.
-  duplicates: string[];
-  // Files for an episode that TMDB does not list.
-  unknownEpisodes: string[];
-  // The other video files of a movie. A movie has one managed file.
-  extraFiles: string[];
-};
-
-// A video file of the folder of a title, and what its name says. The scan, the local import, and the choice of a file
-// for a target all read the folder through it.
-export type InventoryFile = { path: string; sizeBytes: number; mtimeMs: number; parsed: ParsedEpisodes | undefined };
-export type FolderInventory = { status: 'ok' | 'no_folder' | 'root_unavailable' | 'folder_missing'; rootReal: string | null; files: InventoryFile[] };
+import type { Db, FolderInventory, InventoryFile, MediaFile, ScanFound, ScanResult, Title } from '../types.ts';
 
 export const scanJob = (key: string) => ({ type: 'library.scan', payload: { key }, dedupeKey: `scan:${key}` });
 
@@ -44,11 +23,9 @@ const inside = (parent: string, child: string) => {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !rel.startsWith(sep));
 };
 
-type Found = { path: string; sizeBytes: number; mtimeMs: number };
-
 // Lists the video files under a folder. It does not follow a link to a folder, and it ignores a file that links outside the root.
-async function findVideos(folder: string, rootReal: string): Promise<Found[]> {
-  const found: Found[] = [];
+async function findVideos(folder: string, rootReal: string): Promise<ScanFound[]> {
+  const found: ScanFound[] = [];
   async function walk(dir: string, depth: number) {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       if (found.length >= MAX_FILES) return;

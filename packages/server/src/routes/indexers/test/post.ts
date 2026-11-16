@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
-import type { IndexerService } from '../../../library/grab/torznab.ts';
 import { draft, invalidSetting, parseManual, probe } from '../../../helpers/indexers.ts';
+import type { IndexerService } from '../../../types.ts';
 
 // A check of the settings of the form, before the user saves them.
 export function indexersTest(service: IndexerService): RequestHandler {

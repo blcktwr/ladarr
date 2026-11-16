@@ -1,17 +1,13 @@
-import { type Db, db, profilesFor } from '../../core/db.ts';
+import { db, profilesFor } from '../../core/db.ts';
 import type { AddMode } from '@ladarr/shared/enums';
 import type { RequestHandler } from 'express';
 import { explainProfile } from '../../library/grab/quality.ts';
-import type { Events } from '../../core/events.ts';
-import type { EnqueueInput, Job } from '../../core/jobs.ts';
 import { catalog, titleFields } from '../../core/log.ts';
 import { AddError, addTitle } from '../../library/tools/add.ts';
-import type { Tmdb } from '../../metadata/tmdb.ts';
 import { changed, detail, isObject, seasonOverridesOf, summaryOf } from '../../helpers/library.ts';
+import type { Db, LibraryDeps } from '../../types.ts';
 
-type Deps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job };
-
-export function libraryAdd({ tmdb, events, enqueue }: Deps): RequestHandler {
+export function libraryAdd({ tmdb, events, enqueue }: LibraryDeps): RequestHandler {
   return async (req, res) => {
     if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
     const body = isObject(req.body) ? req.body : {};

@@ -1,7 +1,8 @@
 import { db } from '../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { MediaType, Tmdb } from '../../metadata/tmdb.ts';
 import { inLibrary, notFoundAsEmpty, newestFirst } from '../../helpers/search.ts';
+import type { MediaType } from '@ladarr/shared/enums';
+import type { Tmdb } from '../../types.ts';
 
 const MAX_QUERY = 200;
 

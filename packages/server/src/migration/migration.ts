@@ -1,31 +1,13 @@
 import { stat } from 'node:fs/promises';
 import { isAbsolute, relative, sep } from 'node:path';
-import type { ImportNote, MigrationStatus } from '@ladarr/shared/enums';
+import type { ImportNote, MigrationStatus, Override } from '@ladarr/shared/enums';
 import type { MigrationRow } from '@ladarr/shared/types';
-import { type Db, type LedgerEntry, db } from '../core/db.ts';
-import type { Events } from '../core/events.ts';
-import type { EnqueueInput, Job } from '../core/jobs.ts';
-import { titleKey, type Override, type Title } from '../library/library.ts';
-import { mapPath, mapProfile, type PathMapping, type SourceData, type SourceDownload, type SourceEpisode, type SourceTitle } from './migration-source.ts';
-import type { Tmdb } from '../metadata/tmdb.ts';
+import { db } from '../core/db.ts';
+import { titleKey } from '../library/library.ts';
+import { mapPath, mapProfile } from './migration-source.ts';
+import type { Db, Existing, LedgerEntry, MigrationPlan, PathMapping, SourceData, SourceTitle, Title, Tmdb } from '../types.ts';
 
 const LOOKUPS_AT_ONCE = 4;
-
-export type MigrateDeps = { tmdb: Tmdb; events: Events; save: () => Promise<void>; enqueue: (input: EnqueueInput) => Job };
-
-// What a re-import gives to a title that is in the library already. The job adds no title; it synchronizes the
-// source facts and verifies the files, the hashes, and the queue.
-type Existing = {
-  key: string;
-  monitored: boolean;
-  folder: string | null;
-  seasonOverrides: Record<string, Override>;
-  manualRelease: boolean;
-  downloads: SourceDownload[];
-  episodes: SourceEpisode[];
-};
-
-export type Plan = { rows: MigrationRow[]; requests: Map<string, LedgerEntry['request']>; existing: Map<string, Existing> };
 
 async function mapLimit<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -55,7 +37,7 @@ function titleNotes(source: SourceTitle): ImportNote[] {
 }
 
 // Looks at the source and the library and says what an import would do. It changes nothing.
-export async function buildPlan(tmdb: Tmdb, source: SourceData, mappings: PathMapping[]): Promise<Plan> {
+export async function buildPlan(tmdb: Tmdb, source: SourceData, mappings: PathMapping[]): Promise<MigrationPlan> {
   const profiles = new Map(source.profiles.map((profile) => [profile.id, { profile, ...mapProfile(profile) }]));
 
   const resolved = await mapLimit(source.titles, LOOKUPS_AT_ONCE, async (item) => {
@@ -181,4 +163,3 @@ export function applyExisting(source: Existing) {
   if (!hasFiles(title) && source.folder) title.folder = source.folder;
   if (title.mediaType === 'movie') title.manualRelease = source.manualRelease;
 }
-

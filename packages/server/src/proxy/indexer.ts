@@ -1,9 +1,4 @@
 import express, { Router } from 'express';
-import type { Services } from '../app.ts';
-import type { Events } from '../core/events.ts';
-import type { EnqueueInput, Job } from '../core/jobs.ts';
-import type { Tmdb } from '../metadata/tmdb.ts';
-import type { IndexerApp } from '../library/grab/indexers.ts';
 import { adapterHeaders } from '../helpers/indexers-adapter.ts';
 import { indexerSystemStatus } from '../routes/indexers/adapter/system/status/get.ts';
 import { indexerSchemaGet } from '../routes/indexers/adapter/indexer/schema/get.ts';
@@ -13,18 +8,10 @@ import { indexerTest } from '../routes/indexers/adapter/indexer/test/post.ts';
 import { indexerCreate } from '../routes/indexers/adapter/indexer/post.ts';
 import { indexerUpdate } from '../routes/indexers/adapter/indexer/[id]/put.ts';
 import { indexerDelete } from '../routes/indexers/adapter/indexer/[id]/delete.ts';
-import { restoreGate, type Restorer } from '../system/restore.ts';
+import { restoreGate } from '../system/restore.ts';
 import { adapterAuth, compatRouter, unsupported } from './router.ts';
-
-export type AdapterOptions = {
-  urlBase?: string;
-  restorer?: Restorer;
-  onChange?: () => void;
-  tmdb?: Tmdb;
-  events: Events;
-  enqueue: (input: EnqueueInput) => Job;
-  services?: Services;
-};
+import type { AdapterOptions } from '../types.ts';
+import type { IndexerApp } from '@ladarr/shared/enums';
 
 // The Sonarr and Radarr API. The indexer manager pushes indexers here, and Seerr reads and adds titles.
 export function adapter(app: IndexerApp, options: AdapterOptions) {

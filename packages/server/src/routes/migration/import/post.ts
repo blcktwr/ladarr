@@ -1,10 +1,10 @@
 import { db } from '../../../core/db.ts';
 import { randomUUID } from 'node:crypto';
 import type { RequestHandler } from 'express';
-import type { EnqueueInput, Job } from '../../../core/jobs.ts';
 import { applyExisting } from '../../../migration/migration.ts';
 import { requestVerification } from '../../../library/verification.ts';
 import { plans, progress } from '../../../helpers/migration.ts';
+import type { EnqueueInput, Job } from '../../../types.ts';
 
 // Writes the ledger, and a job adds the titles. A restart keeps the rest of the work.
 export function migrationImport(enqueue: (input: EnqueueInput) => Job): RequestHandler {

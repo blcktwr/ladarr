@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { chainFileRank, defaultProfiles, defaultSizes, evaluate, evaluateChain, fileRank, qualityOf, RANK_STRIDE, QUALITY_TABLE_VERSION, QUALITIES, type Profile, type Rejection, type Release } from '../../src/library/grab/quality.ts';
+import { chainFileRank, defaultProfiles, defaultSizes, evaluate, evaluateChain, fileRank, qualityOf, RANK_STRIDE, QUALITY_TABLE_VERSION, QUALITIES } from '../../src/library/grab/quality.ts';
+import type { Profile, Rejection, Release } from '../../src/types.ts';
 
 const GIB = 1024 ** 3;
 // The sample runtimes in docs/quality-presets.md.

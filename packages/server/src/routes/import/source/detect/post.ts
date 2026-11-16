@@ -3,13 +3,13 @@ import type { MediaType } from '@ladarr/shared/enums';
 import type { SourceFolder } from '@ladarr/shared/types';
 import { basename } from 'node:path';
 import type { RequestHandler } from 'express';
-import type { Tmdb } from '../../../../metadata/tmdb.ts';
 import { biggestFirst, MAX_FILES, titleFromFile } from '../../../../library/imports/source.ts';
 import { guessTitle } from '../../../../library/tools/folders.ts';
 import { PlanError } from '../../../../library/imports/plan.ts';
 import { readFolder } from '../../../../library/imports/manual.ts';
 import { parseEpisodes } from '../../../../library/parse.ts';
 import { fail } from '../../../../helpers/import-source.ts';
+import type { Tmdb } from '../../../../types.ts';
 
 // The folder, the title that its name suggests, and the TMDB results of that name.
 export function importSourceDetect({ tmdb, configDir }: { tmdb?: Tmdb; configDir?: string } = {}): RequestHandler {

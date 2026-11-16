@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { matchContent, normalizeTitle } from '../../src/library/content.ts';
-import type { CatalogEpisode, ContentMatch, FileEvidence } from '../../src/library/content.ts';
+import type { CatalogEpisode, ContentMatch, FileEvidence } from '../../src/types.ts';
 
 const ep = (season: number, number: number) => ({ season, number });
 

@@ -1,6 +1,6 @@
 import type { SetupChecks } from '@ladarr/shared/types';
-import type { ClientCheck } from '../library/downloads/client-api.ts';
-import { type Db, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
+import type { ClientCheck, Db } from '../types.ts';
 
 // What the setup shows about the two connections that a download needs.
 // The client check keeps its answer for a minute, so a page that checks again does not sign in each time.

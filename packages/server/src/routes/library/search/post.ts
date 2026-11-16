@@ -1,7 +1,7 @@
 import type { RequestHandler } from 'express';
-import { BULK_SEARCH_JOB, type BulkSearchPayload } from '../../../library/calendar/calendar-search.ts';
-import type { EnqueueInput, Job } from '../../../core/jobs.ts';
+import { BULK_SEARCH_JOB } from '../../../library/calendar/calendar-search.ts';
 import { isObject, plans } from './plans.ts';
+import type { BulkSearchPayload, EnqueueInput, Job } from '../../../types.ts';
 
 // The job runs the plan in batches. A second request for the same plan returns the same job.
 export function librarySearchStart(enqueue: (input: EnqueueInput) => Job): RequestHandler {

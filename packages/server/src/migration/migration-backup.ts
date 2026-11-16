@@ -6,15 +6,14 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { extractEntry, listZip, ZipError, type ZipLimits } from './migration-zip.ts';
-import { arr, int, SourceError, str, SUPPORTED_MAJORS, type SourceApp, type SourceData, type SourceDownload, type SourceEpisode, type SourceProfile, type SourceTitle } from './migration-source.ts';
+import { extractEntry, listZip, ZipError } from './migration-zip.ts';
+import { arr, int, SourceError, str, SUPPORTED_MAJORS } from './migration-source.ts';
+import type { BackupLimits, DownloadHistory, MigrationBackupProfileItem, MigrationBackupQuality, Row, SourceApp, SourceData, SourceDownload, SourceEpisode, SourceProfile, SourceTitle } from '../types.ts';
 
 // The backup ZIP is the second source. It gives the same SourceData as a running instance, so the preview,
 // the path rules, the ledger, and the import job are the same for both.
 
 const MiB = 1024 * 1024;
-
-export type BackupLimits = ZipLimits & { zipBytes: number };
 
 export const BACKUP_LIMITS: BackupLimits = { zipBytes: 256 * MiB, entryBytes: 1024 * MiB, entries: 32, ratio: 200 };
 
@@ -30,11 +29,9 @@ const HASH = /^[0-9a-f]{40}$/;
 
 const ZIP_ERRORS = { invalid: 'backup_invalid', unsupported: 'backup_unsupported', unsafe: 'backup_unsafe', too_large: 'backup_too_large' } as const;
 
-// ---- quality IDs, from Quality.cs of each program. The IDs of Sonarr and Radarr differ. ----
+// ---- quality IDs, from MigrationBackupQuality.cs of each program. The IDs of Sonarr and Radarr differ. ----
 
-type Quality = readonly [name: string, source: string, resolution: number];
-
-const SONARR_QUALITIES: Record<number, Quality> = {
+const SONARR_QUALITIES: Record<number, MigrationBackupQuality> = {
   0: ['Unknown', 'unknown', 0],
   1: ['SDTV', 'television', 480],
   2: ['DVD', 'dvd', 480],
@@ -59,7 +56,7 @@ const SONARR_QUALITIES: Record<number, Quality> = {
   22: ['Bluray-576p', 'bluray', 576],
 };
 
-const RADARR_QUALITIES: Record<number, Quality> = {
+const RADARR_QUALITIES: Record<number, MigrationBackupQuality> = {
   0: ['Unknown', 'unknown', 0],
   1: ['SDTV', 'tv', 480],
   2: ['DVD', 'dvd', 0],
@@ -95,18 +92,15 @@ const RADARR_QUALITIES: Record<number, Quality> = {
 // The database stores a quality as its ID. The API sends an object, and the profile mapping reads that object.
 function quality(app: SourceApp, id: number) {
   const known = (app === 'sonarr' ? SONARR_QUALITIES : RADARR_QUALITIES)[id];
-  return known ? { id, name: known[0], source: known[1], resolution: known[2] } : { id, name: `Quality ${id}`, source: 'unknown', resolution: 0 };
+  return known ? { id, name: known[0], source: known[1], resolution: known[2] } : { id, name: `MigrationBackupQuality ${id}`, source: 'unknown', resolution: 0 };
 }
 
 // ---- reading the database ----
 
-type Row = Record<string, unknown>;
-type ProfileItem = SourceProfile['items'][number];
-
 // The program writes the keys of a stored document in camel case. The code accepts any case.
 const lower = (value: unknown): Row => Object.fromEntries(Object.entries(value && typeof value === 'object' ? value : {}).map(([key, item]) => [key.toLowerCase(), item]));
 
-function profileItems(app: SourceApp, list: unknown[], depth = 0): ProfileItem[] {
+function profileItems(app: SourceApp, list: unknown[], depth = 0): MigrationBackupProfileItem[] {
   // A profile has groups of qualities, and a group has no groups.
   if (depth > 2) throw new SourceError('backup_database_invalid');
   return list.map((raw) => {
@@ -229,8 +223,6 @@ function readEpisodes(db: DatabaseSync): Map<number, SourceEpisode[]> {
   }
   return bySeries;
 }
-
-type DownloadHistory = { id: number; date: number; failed: boolean };
 
 // Groups the history rows by the title and the hash. A pack writes one row for each episode. The newest row of a hash
 // tells if the last event failed.

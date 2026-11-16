@@ -1,8 +1,7 @@
 import { db } from '../../core/db.ts';
 import type { RequestHandler } from 'express';
-import type { Poller } from '../../library/downloads/poller.ts';
-import type { ImportStatus } from '../../library/imports/status.ts';
 import { filtersOf, lanePositions, matches, MAX_PAGE, queuePage, view } from '../../helpers/queue.ts';
+import type { ImportStatus, Poller } from '../../types.ts';
 
 // One page of rows: one row for each season of a series, and one row for each movie. Rows with the most advanced
 // progress come first, and ties keep the order of creation. A row leaves the list when its targets are all available.

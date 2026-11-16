@@ -1,7 +1,6 @@
-import { type Db, db } from '../core/db.ts';
-import type { EnqueueInput, Job } from '../core/jobs.ts';
-import type { Handler } from '../core/worker.ts';
+import { db } from '../core/db.ts';
 import { verifyJob } from '../library/verification.ts';
+import type { Db, EnqueueInput, Handler, Job } from '../types.ts';
 
 const VERIFY_EVERY_MS = 10 * 60_000;
 

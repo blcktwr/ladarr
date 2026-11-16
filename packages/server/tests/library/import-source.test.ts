@@ -2,10 +2,11 @@ import { existsSync, mkdirSync, realpathSync, statSync, symlinkSync, writeFileSy
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SearchResult } from '@ladarr/shared/types';
-import type { MediaType, Tmdb } from '../../src/metadata/tmdb.ts';
 import { episode, title } from '../helpers/test-fixtures.ts';
 import { noLink } from '../helpers/test-import.ts';
 import { startPipeline, until } from '../helpers/test-pipeline.ts';
+import type { MediaType } from '@ladarr/shared/enums';
+import type { Tmdb } from '../../src/types.ts';
 
 const E01 = 'Show.Name.S01E01.1080p.WEB-DL.mkv';
 const E02 = 'Show.Name.S01E02.1080p.WEB-DL.mkv';

@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto';
-import type { ImportNote, MediaType } from '@ladarr/shared/enums';
 import { outboundFetch } from '../core/http.ts';
-
-export type SourceApp = 'sonarr' | 'radarr';
+import type { Leaf, MigrationSourceOptions, MigrationSourceProfileItem, PathMapping, ProfileNote, SourceApp, SourceData, SourceProfile, SourceTitle } from '../types.ts';
 
 // The majors of Sonarr and Radarr that the import reads. Their API contract is the one in the official OpenAPI files.
 export const SUPPORTED_MAJORS: Record<SourceApp, number[]> = { sonarr: [4], radarr: [5, 6] };
@@ -29,54 +27,7 @@ export class SourceError extends Error {
   }
 }
 
-type SourceQuality = { id?: number; name?: string; source?: string; resolution?: number };
-type ProfileItem = { id?: number; name?: string; quality?: SourceQuality; items?: ProfileItem[]; allowed?: boolean };
-
-export type SourceProfile = {
-  id: number;
-  name: string;
-  cutoff: number;
-  items: ProfileItem[];
-  minFormatScore: number;
-  formatItems: { score?: number }[];
-  language: string | null;
-};
-
-export type SourceEpisode = { season: number; number: number; monitored: boolean; airDateUtc: string | null };
-
-// One download hash and the episodes or the movie that it covers. The backup records it; the torrent is optional.
-export type SourceDownload = { hash: string; episodes: { season: number; number: number }[]; at: number; id: number; failed: boolean };
-
-export type SourceTitle = {
-  sourceId: number;
-  mediaType: MediaType;
-  title: string;
-  year: number | null;
-  tmdbId: number | null;
-  tvdbId: number | null;
-  path: string | null;
-  monitored: boolean;
-  qualityProfileId: number;
-  seriesType: 'standard' | 'daily' | 'anime';
-  seasons: { seasonNumber: number; monitored: boolean }[];
-  minimumAvailability: string | null;
-  // The episodes of the series, and the hashes that the source recorded for it.
-  episodes?: SourceEpisode[];
-  downloads?: SourceDownload[];
-};
-
-export type SourceData = {
-  app: SourceApp;
-  version: string;
-  // Source IDs are only unique inside one source, so each ledger key starts with this.
-  namespace: string;
-  titles: SourceTitle[];
-  profiles: SourceProfile[];
-};
-
 // ---- reading a running instance ----
-
-type Options = { url: string; apiKey: string; fetch?: typeof fetch; timeoutMs?: number };
 
 export const int = (value: unknown) => (typeof value === 'number' && Number.isInteger(value) ? value : null);
 export const str = (value: unknown) => (typeof value === 'string' ? value : null);
@@ -95,7 +46,7 @@ export function parseBaseUrl(input: string): URL {
   return url;
 }
 
-async function connect({ url, apiKey, fetch: fetchImpl = fetch, timeoutMs = 20_000 }: Options) {
+async function connect({ url, apiKey, fetch: fetchImpl = fetch, timeoutMs = 20_000 }: MigrationSourceOptions) {
   const base = parseBaseUrl(url);
   const send = outboundFetch('Migration source', fetchImpl);
 
@@ -126,12 +77,12 @@ async function connect({ url, apiKey, fetch: fetchImpl = fetch, timeoutMs = 20_0
 }
 
 // Shows that the address and the key work, and that the version is one that the import reads.
-export async function testConnection(options: Options) {
+export async function testConnection(options: MigrationSourceOptions) {
   const { app, version } = await connect(options);
   return { app, version };
 }
 
-export async function readFromApi(options: Options): Promise<SourceData> {
+export async function readFromApi(options: MigrationSourceOptions): Promise<SourceData> {
   const { get, base, app, version } = await connect(options);
 
   const [list, profiles] = await Promise.all([get(app === 'sonarr' ? 'api/v3/series' : 'api/v3/movie'), get('api/v3/qualityprofile')]);
@@ -186,8 +137,6 @@ export async function readFromApi(options: Options): Promise<SourceData> {
 
 // ---- quality profiles ----
 
-export type ProfileNote = Extract<ImportNote, 'resolution_not_supported' | 'several_resolutions' | 'sources_not_supported' | 'custom_formats' | 'language_preference'>;
-
 // Sonarr and Radarr name the sources in other words.
 const SOURCE: Record<string, 'webdl' | 'webrip' | 'bluray'> = {
   web: 'webdl',
@@ -197,9 +146,7 @@ const SOURCE: Record<string, 'webdl' | 'webrip' | 'bluray'> = {
   blurayraw: 'bluray',
 };
 
-type Leaf = { quality: SourceQuality; allowed: boolean; id: number | undefined };
-
-function leaves(items: ProfileItem[], inherited = false): Leaf[] {
+function leaves(items: MigrationSourceProfileItem[], inherited = false): Leaf[] {
   return items.flatMap((item) => {
     const allowed = inherited || item.allowed === true;
     if (item.items?.length) return leaves(item.items, allowed);
@@ -239,8 +186,6 @@ export function mapProfile(profile: SourceProfile): { preset: string | null; not
 }
 
 // ---- paths ----
-
-export type PathMapping = { from: string; to: string };
 
 // A Windows path becomes a path with slashes, so one mapping rule covers both.
 const toSlashes = (path: string) => (/^[A-Za-z]:[\\/]/.test(path) || path.includes('\\') ? path.replace(/\\/g, '/') : path);

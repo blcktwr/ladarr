@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { open, type Db, type MediaFile } from '../../src/core/db.ts';
+import { open } from '../../src/core/db.ts';
 import { PlanError } from '../../src/library/imports/plan.ts';
-import { seriesCounts, type Episode, type Title } from '../../src/library/library.ts';
-import { applyCorrection, correctionOf, type EpisodeRef } from '../../src/library/mapping.ts';
+import { seriesCounts } from '../../src/library/library.ts';
+import { applyCorrection, correctionOf } from '../../src/library/mapping.ts';
+import type { Db, Episode, EpisodeRef, MediaFile, Title } from '../../src/types.ts';
 
 let db: Db;
 

@@ -1,7 +1,7 @@
 import { db } from '../../../../core/db.ts';
 import type { RunView } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import type { ImportStatus } from '../../../../library/imports/status.ts';
+import type { ImportStatus } from '../../../../types.ts';
 
 export function importRunGet(status: ImportStatus): RequestHandler<{ id: string }> {
   return (req, res) => {

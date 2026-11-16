@@ -2,7 +2,8 @@ import type { RequestHandler } from 'express';
 import { db } from '../../../../../../core/db.ts';
 import { shown } from '../../../../../../helpers/queue.ts';
 import { readTorrent } from '../../../../../../helpers/torrent.ts';
-import { IndexerError, type IndexerService } from '../../../../../../library/grab/torznab.ts';
+import { IndexerError } from '../../../../../../library/grab/torznab.ts';
+import type { IndexerService } from '../../../../../../types.ts';
 
 // What the .torrent of a rejected release holds, so a person reads its files before a manual grab. The link stays on
 // the server, so the client names the release by its indexer and its guid.

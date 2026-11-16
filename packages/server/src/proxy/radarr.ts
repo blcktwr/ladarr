@@ -1,13 +1,14 @@
 import { join, posix } from 'node:path';
 import express, { Router } from 'express';
-import { type Db, db } from '../core/db.ts';
+import { db } from '../core/db.ts';
 import { onError } from '../core/errors.ts';
-import { candidate, clock, firstProfileId, hasFiles, isObject, noTmdb, notFound, notFoundPath, notSupported, parseId, presentFile, profileId, readOptions, readPlacement, refuse, tmdbProblem, type CompatDeps } from './common.ts';
-import { adapter, type AdapterOptions } from './indexer.ts';
+import { candidate, clock, firstProfileId, hasFiles, isObject, noTmdb, notFound, notFoundPath, notSupported, parseId, presentFile, profileId, readOptions, readPlacement, refuse, tmdbProblem } from './common.ts';
+import { adapter } from './indexer.ts';
 import { AddError, addTitle } from '../library/tools/add.ts';
-import { availability, type Title } from '../library/library.ts';
+import { availability } from '../library/library.ts';
 import { folderName } from '../library/naming.ts';
 import { TmdbError } from '../metadata/tmdb.ts';
+import type { AdapterOptions, CompatDeps, Db, Title } from '../types.ts';
 
 // A movie in the shape of Radarr. The ID is the TMDB ID, and a movie that is not in the library has ID 0.
 // Radarr and Sonarr have separate paths, so the two ID sets do not meet.
