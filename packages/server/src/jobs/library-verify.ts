@@ -25,7 +25,7 @@ function applyEpisodes(title: Title, state: VerificationState) {
   }
 }
 
-export function libraryVerifyHandler({ queue, clients, finder, events }: LibraryVerifyDeps): Handler {
+export function libraryVerifyHandler({ queue, clients, finder, events, enqueue }: LibraryVerifyDeps): Handler {
   async function verify(key: string, signal: AbortSignal) {
     const title = db.data.titles[key];
     const state = verificationOf(key);
@@ -69,7 +69,7 @@ export function libraryVerifyHandler({ queue, clients, finder, events }: Library
       for (const handle of handles) {
         let list: Torrent[];
         try {
-          list = await handle.api.byHashes(hashes);
+          list = await clients.byHashes(handle, hashes);
         } catch (error) {
           // An unknown association is not a missing one. The search waits for the client.
           if (error instanceof ClientError) throw new JobError('outage', 'The download client did not answer.');
@@ -106,6 +106,7 @@ export function libraryVerifyHandler({ queue, clients, finder, events }: Library
         const item = found.get(hash);
         if (!item || db.data.titles[key] !== title) continue;
         await attachTorrent({ queue }, { handle: item.handle, torrent: item.torrent, targets, cause: 'download found in the backup' });
+        if (item.torrent.complete) enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}`, priority: targets.some((target) => target.priority !== null) });
       }
     }
 

@@ -2,12 +2,13 @@ import { db } from '../../core/db.ts';
 import { JobError } from '../../core/jobs.ts';
 import { catalog, itemFields } from '../../core/log.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
-import { addedByApp } from '../downloads/queue.ts';
+import { addedByApp, isActive } from '../downloads/queue.ts';
+import { hasFreeSlot } from '../downloads/slots.ts';
 import { isSample, isVideoFile, parseEpisodes, releaseEpisodes } from '../parse.ts';
 import { splitOf } from '../split.ts';
 import { infoHashOf, magnetHash, torrentComment, torrentFiles } from './torrent.ts';
 import { IndexerError } from './torznab.ts';
-import type { Db, GrabberDeps, ParsedEpisodes, QueueEntry, Torrent } from '../../types.ts';
+import type { ClientHandle, GrabberDeps, ParsedEpisodes, QueueEntry, Torrent } from '../../types.ts';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -25,8 +26,16 @@ export function reasonOf(error: unknown) {
   return { code: 'grab_failed' };
 }
 
-// Sends the chosen release to the client. Each step can be repeated: a restart or a retry reads the client first.
-export function createGrabber({ queue, finder, indexers, clients, save, reconcileMs = 1_000 }: GrabberDeps): (entries: QueueEntry[], signal: AbortSignal) => Promise<void> {
+type Source = { torrent: Buffer } | { magnet: string };
+
+// The torrent is one file, and the data file keeps text. The target keeps the source while it waits for a slot.
+const encode = (source: Source) => ('magnet' in source ? { magnet: source.magnet } : { torrent: source.torrent.toString('base64') });
+const decode = (entry: QueueEntry): Source | null =>
+  !entry.source ? null : 'magnet' in entry.source ? { magnet: entry.source.magnet } : { torrent: Buffer.from(entry.source.torrent, 'base64') };
+
+// The chosen release is fetched first, and it waits for a slot of the client after that. The fetch and the send are two
+// steps: a full client must not stop the fetch, and the fetched torrent must not come from the indexer a second time.
+export function createGrabber({ queue, finder, indexers, clients, save, enqueue, reconcileMs = 1_000 }: GrabberDeps) {
   // The entries of a pack that its files do not cover, and the number of files that name an episode. The check is the
   // same as the check of the import. The names come from the torrent file, before the client has the release, or from
   // the client, when it has the release already.
@@ -79,7 +88,50 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
     }
   }
 
-  async function grab(entries: QueueEntry[], signal: AbortSignal) {
+  function block(entries: QueueEntry[], code: string, cause: string) {
+    for (const entry of entries) queue.block(entry, { code }, cause);
+  }
+
+  // The client has the torrent. The target waits for it, or goes to its import when the data is there. The torrent of
+  // the user stays the user's, so a removal never deletes it.
+  function adopt(entries: QueueEntry[], connection: ClientHandle, found: Torrent, external: boolean) {
+    for (const entry of entries) {
+      // The user cancelled while the fetch ran. The torrent stays in the client, and the entry stays cancelled.
+      if (entry.state.kind === 'cancelled') {
+        queue.observe(entry, 'torrent added before the cancel', 'The torrent stays in the client.');
+        continue;
+      }
+      entry.transferHash = found.hash;
+      entry.clientId = connection.id;
+      entry.source = null;
+      if (entry.release) {
+        entry.release.infoHash = found.hash;
+        // A torrent that ladarr did not send stays the user's, so a removal never deletes it.
+        if (external) entry.release.external = true;
+      }
+      if (external) catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
+      else catalog.info('download_added', `${connection.config.name} added "${found.name}"`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
+      queue.enter(entry, found.complete ? 'importing' : 'downloading', external ? 'torrent is in the client already' : 'client accepted', found.name);
+    }
+    // The download is in the client already, so the import checks it now.
+    if (found.complete && entries.some((entry) => entry.state.kind === 'importing')) {
+      enqueue({ type: 'import.run', payload: { hash: found.hash }, dedupeKey: `import:${found.hash}`, priority: entries.some((entry) => entry.priority !== null) });
+    }
+  }
+
+  // A torrent in the client with the hash of the release is the release. A finished torrent is used as it is, also when
+  // ladarr did not send it, because the user added it by hand or an older version did. A torrent that still downloads
+  // is the user's, and ladarr does not take it over: the target stops with the reason that offers the attach.
+  function take(entries: QueueEntry[], connection: ClientHandle, found: Torrent) {
+    if (addedByApp(found.hash) || found.complete) return adopt(entries, connection, found, !addedByApp(found.hash));
+    for (const entry of entries) {
+      catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
+      queue.block(entry, { code: 'torrent_exists' }, 'torrent is in the client already');
+    }
+  }
+
+  // Fetches the torrent of the release. The fetch ends when the source is saved, and the target then waits for a slot.
+  async function fetch(entries: QueueEntry[], signal: AbortSignal) {
     const leader = entries[0]!;
     const ref = leader.release!;
     // A retry goes to the client that got the first try, because the add may have worked there.
@@ -93,94 +145,65 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
       return;
     }
     const { api } = connection;
-    // The client is known before the first request, so the limit of its downloads counts this target from now.
+    // The client is known before the first request, so a send goes to the same client.
     for (const entry of entries) entry.clientId = connection.id;
-
-    const adopt = (found: Torrent, external: boolean) => {
-      for (const entry of entries) {
-        // The user cancelled while the add was running. The torrent stays in the client, and the entry stays cancelled.
-        if (entry.state.kind === 'cancelled') {
-          queue.observe(entry, 'torrent added before the cancel', 'The torrent stays in the client.');
-          continue;
-        }
-        entry.transferHash = found.hash;
-        entry.clientId = connection.id;
-        if (entry.release) {
-          entry.release.infoHash = found.hash;
-          // A torrent that ladarr did not send stays the user's, so a removal never deletes it.
-          if (external) entry.release.external = true;
-        }
-        if (external) catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
-        else catalog.info('download_added', `${connection.config.name} added "${found.name}"`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
-        queue.enter(entry, 'downloading', external ? 'torrent is in the client already' : 'client accepted', found.name);
-      }
-    };
-    // A torrent in the client with the hash of the release is the release. A finished torrent is used as it is, also
-    // when ladarr did not send it, because the user added it by hand or an older version did. The torrent stays the
-    // user's then, so a removal never deletes it. A torrent that still downloads is the user's, and ladarr does not
-    // take it over: the target stops with the reason that offers the attach.
-    const unowned = (found: Torrent) => {
-      for (const entry of entries) {
-        catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
-        queue.block(entry, { code: 'torrent_exists' }, 'torrent is in the client already');
-      }
-    };
-    const take = (found: Torrent) =>
-      addedByApp(found.hash) || found.complete ? adopt(found, !addedByApp(found.hash)) : unowned(found);
 
     // A hash from an earlier try: if the client has the torrent, the work is done.
     let hash = ref.infoHash;
     if (hash) {
-      const found = await api.find(hash);
-      if (found) return take(found);
+      const found = await clients.find(connection, hash);
+      if (found) return take(entries, connection, found);
     }
 
-    let source: { torrent: Buffer } | { magnet: string };
-    if (ref.link) {
-      const indexer = db.data.indexers[ref.indexerId] ?? downloaderOf(ref.link);
-      if (!indexer) {
-        for (const entry of entries) queue.block(entry, { code: 'no_indexers' }, 'no indexer for the release');
-        return;
-      }
-      // An earlier try of this season took the release, so the client has the torrent. ladarr reads its files from the
-      // client and never downloads the release from the indexer again: that download costs the ratio of the indexer and
-      // brings nothing, because the data is in the client already.
-      const seen = Object.values(db.data.queue).find(
-        (entry) => entry.titleKey === leader.titleKey && entry.season === leader.season && entry.release?.indexerId === ref.indexerId && entry.release.guid === ref.guid && entry.transferHash,
-      )?.transferHash;
-      const held = seen ? await api.find(seen) : undefined;
-      if (held) {
-        const files = ref.kind === 'pack' ? (await api.files(held.hash)).map((file) => file.name) : [];
-        if (ref.kind === 'pack' && !applyMapping(entries, files)) return finder.refusePack(entries, 'pack_mapping_unknown');
-        const pack = missingFrom(files, entries);
-        if (pack.missing.length) entries = finder.partial(entries, pack.missing, { files: files.length, releaseSeason: pack.releaseSeason, numbers: pack.numbers });
-        if (entries.length) take(held);
-        return;
-      }
-      const got = await indexers.download(indexer, ref.link, { signal });
-      if ('magnet' in got) source = got;
-      else {
-        try {
-          hash = infoHashOf(got.torrent);
-        } catch {
-          // The indexer sent a file that is not a torrent. The release is bad, not the indexer.
-          return finder.fallback(entries, 'invalid_torrent');
+    let source = decode(leader);
+    if (!source) {
+      if (ref.link) {
+        const indexer = db.data.indexers[ref.indexerId] ?? downloaderOf(ref.link);
+        if (!indexer) {
+          block(entries, 'no_indexers', 'no indexer for the release');
+          return;
         }
-        source = got;
-        // A pack must hold the episodes that it covers. The torrent file lists its files before the client has any data.
-        if (ref.kind === 'pack') {
-          const files = packFiles(got.torrent);
-          // A list that ladarr cannot read gives no mapping. The import still blocks a missing episode.
-          if (files) {
-            if (!applyMapping(entries, files)) return finder.refusePack(entries, 'pack_mapping_unknown');
-            const pack = missingFrom(files, entries);
-            if (pack.missing.length) entries = finder.partial(entries, pack.missing, { files: files.length, releaseSeason: pack.releaseSeason, numbers: pack.numbers });
-            if (!entries.length) return;
+        // An earlier try of this season took the release, so the client has the torrent. ladarr reads its files from the
+        // client and never downloads the release from the indexer again: that download costs the ratio of the indexer
+        // and brings nothing, because the data is in the client already.
+        const seen = Object.values(db.data.queue).find(
+          (entry) => entry.titleKey === leader.titleKey && entry.season === leader.season && entry.release?.indexerId === ref.indexerId && entry.release.guid === ref.guid && entry.transferHash,
+        )?.transferHash;
+        const held = seen ? await clients.find(connection, seen) : undefined;
+        if (held) {
+          const files = ref.kind === 'pack' ? (await api.files(held.hash)).map((file) => file.name) : [];
+          if (ref.kind === 'pack' && !applyMapping(entries, files)) return finder.refusePack(entries, 'pack_mapping_unknown');
+          const pack = missingFrom(files, entries);
+          if (pack.missing.length) entries = finder.partial(entries, pack.missing, { files: files.length, releaseSeason: pack.releaseSeason, numbers: pack.numbers });
+          if (entries.length) take(entries, connection, held);
+          return;
+        }
+        const got = await indexers.download(indexer, ref.link, { signal });
+        if ('magnet' in got) source = got;
+        else {
+          try {
+            hash = infoHashOf(got.torrent);
+          } catch {
+            // The indexer sent a file that is not a torrent. The release is bad, not the indexer.
+            return finder.fallback(entries, 'invalid_torrent');
+          }
+          source = got;
+          // A pack must hold the episodes that it covers. The torrent file lists its files before the client has any data.
+          if (ref.kind === 'pack') {
+            const files = packFiles(got.torrent);
+            // A list that ladarr cannot read gives no mapping. The import still blocks a missing episode.
+            if (files) {
+              if (!applyMapping(entries, files)) return finder.refusePack(entries, 'pack_mapping_unknown');
+              const pack = missingFrom(files, entries);
+              if (pack.missing.length) entries = finder.partial(entries, pack.missing, { files: files.length, releaseSeason: pack.releaseSeason, numbers: pack.numbers });
+              if (!entries.length) return;
+            }
           }
         }
-      }
-    } else if (ref.magnet) source = { magnet: ref.magnet };
-    else return finder.fallback(entries, 'no_download_link');
+      } else if (ref.magnet) source = { magnet: ref.magnet };
+      else return finder.fallback(entries, 'no_download_link');
+    }
+
     if ('magnet' in source) {
       hash = magnetHash(source.magnet) ?? null;
       if (!hash) return finder.fallback(entries, 'invalid_magnet');
@@ -190,51 +213,111 @@ export function createGrabber({ queue, finder, indexers, clients, save, reconcil
       for (const entry of entries) if (entry.release) entry.release.comment = comment;
     }
 
-    // The hash is saved before the add. After a crash, the entry still knows which torrent to look for.
+    // The hash and the source are saved before the wait. After a crash, the target still knows which torrent to send,
+    // and the indexer is not asked again for it.
+    const saved = encode(source);
     for (const entry of entries) {
       entry.transferHash = hash;
       entry.clientId = connection.id;
+      entry.source = saved;
       if (entry.release) entry.release.infoHash = hash;
     }
     await save();
 
-    const existing = await api.find(hash!);
-    if (existing) return take(existing);
+    // The torrent can appear in the client while the fetch runs, for example when another target of the pack sends it.
+    clients.invalidate(connection);
+    const existing = await clients.find(connection, hash!);
+    if (existing) return take(entries, connection, existing);
 
-    // The client did not have this torrent, so ladarr sends it now, and it belongs to the app from here on.
-    db.data.sentTorrents[hash!] = Date.now();
-    // The request to the client is the sending step. The fetch of the release ended before this line.
-    for (const entry of entries) queue.enter(entry, 'sending', 'sending to the client', ref.title);
+    for (const entry of entries) queue.enter(entry, 'waiting_slot', 'torrent fetched', ref.title);
+    enqueue({
+      type: 'queue.send',
+      payload: { entryIds: entries.map((entry) => entry.id) },
+      dedupeKey: `send:${leader.id}`,
+      // The oldest target of the list takes the next free slot.
+      runAt: Math.min(...entries.map((entry) => entry.createdAt)),
+      priority: entries.some((entry) => entry.priority !== null),
+    });
+  }
+
+  // Sends the fetched torrent to the client, when the client has a free slot. The source stays with the targets until
+  // the client accepts it, so a wait or a restart sends the saved source and never asks the indexer again.
+  async function send(entries: QueueEntry[], signal: AbortSignal) {
+    const leader = entries[0]!;
+    const ref = leader.release;
+    const connection = leader.clientId ? clients.get(leader.clientId) : clients.next();
+    if (!connection) {
+      block(entries, 'client_missing', 'no download client');
+      return;
+    }
+    for (const entry of entries) entry.clientId = connection.id;
+    const hash = leader.transferHash ?? ref?.infoHash ?? null;
+    if (!hash) {
+      // Nothing to send. The release is fetched again from its link or magnet.
+      for (const entry of entries) queue.enter(entry, 'fetching', 'the torrent source is gone');
+      enqueue({ type: 'queue.grab', payload: { entryIds: entries.map((entry) => entry.id) }, dedupeKey: `grab:${leader.id}`, priority: entries.some((entry) => entry.priority !== null) });
+      return;
+    }
+
+    // The torrent can be in the client already, for example after a manual add. No slot is used by a torrent that is
+    // there already.
+    clients.invalidate(connection);
+    const existing = await clients.find(connection, hash);
+    if (existing) return take(entries, connection, existing);
+    const source = decode(leader);
+    if (!source) {
+      for (const entry of entries) queue.enter(entry, 'fetching', 'the torrent source is gone');
+      enqueue({ type: 'queue.grab', payload: { entryIds: entries.map((entry) => entry.id) }, dedupeKey: `grab:${leader.id}`, priority: entries.some((entry) => entry.priority !== null) });
+      return;
+    }
+
+    // The check and the change are one step: two sends cannot take the same free slot.
+    const own = new Set(entries.map((entry) => entry.id));
+    if (!hasFreeSlot(clients, connection.id, own)) {
+      // A slot that another send took. The target keeps its source, and a new job asks again for a slot.
+      enqueue({
+        type: 'queue.send',
+        payload: { entryIds: entries.map((entry) => entry.id) },
+        dedupeKey: `send-wait:${leader.id}`,
+        runAt: Date.now() + 2_000,
+        priority: entries.some((entry) => entry.priority !== null),
+      });
+      return;
+    }
+
+    db.data.sentTorrents[hash] = Date.now();
+    for (const entry of entries) queue.enter(entry, 'sending', 'sending to the client', ref?.title ?? hash);
     try {
       for (const entry of entries) {
-        catalog.info('download_started', `Sending "${ref.title}" to ${connection.config.name}`, itemFields(entry), {
+        catalog.info('download_started', `Sending "${ref?.title ?? hash}" to ${connection.config.name}`, itemFields(entry), {
           client: connection.config.name,
           hash,
-          release: ref.title,
-          kind: ref.kind,
-          sizeBytes: ref.sizeBytes,
+          release: ref?.title ?? hash,
+          kind: ref?.kind ?? 'single',
+          sizeBytes: ref?.sizeBytes ?? 0,
         });
       }
-      await api.add(source, ref.seed);
+      await connection.api.add(source, ref?.seed);
     } catch (error) {
       if (!(error instanceof ClientError)) throw error;
       // The add may have worked even if the answer did not come. Read the client before any other try.
       for (let i = 0; i < 3; i++) {
         await sleep(reconcileMs);
-        const found = await api.find(hash!).catch(() => undefined);
-        if (found) return take(found);
-        if (found === null) break;
+        clients.invalidate(connection);
+        const found = await clients.find(connection, hash).catch(() => null);
+        if (found) return take(entries, connection, found);
       }
       throw new JobError(error.code === 'unreachable' ? 'uncertain' : 'outage', error.message);
     }
     // The client answers the add before it lists the torrent, so the reader waits for the list.
     for (let i = 0; i < 3; i++) {
       if (i) await sleep(reconcileMs);
-      const added = await api.find(hash!);
-      if (added) return take(added);
+      clients.invalidate(connection);
+      const added = await clients.find(connection, hash);
+      if (added) return take(entries, connection, added);
     }
     throw new JobError('uncertain', 'The client accepted the torrent but does not list it.');
   }
 
-  return grab;
+  return { fetch, send };
 }

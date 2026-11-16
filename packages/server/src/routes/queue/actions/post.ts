@@ -24,8 +24,8 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
   // Says if the action fits the state of the entry. A refusal is clear and changes nothing.
   function supports(action: Action, entry: QueueEntry, removal?: { torrents: Map<string, Torrent>; attached: Set<string> }): string | null {
     const phase = phaseOfEntry(entry);
-    const early = ['queued', 'searching', 'fetching', 'sending'].includes(phase);
-    const work = ['queued', 'searching', 'fetching', 'sending', 'downloading'].includes(entry.state.kind);
+    const early = ['queued', 'searching', 'fetching', 'waiting_slot', 'sending'].includes(phase);
+    const work = ['queued', 'searching', 'fetching', 'waiting_slot', 'sending', 'downloading'].includes(entry.state.kind);
     switch (action) {
       case 'pause':
         return work && (early || entry.state.kind === 'downloading') ? null : 'The state of this target does not allow a pause.';
@@ -89,9 +89,11 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
             if (!api) throw new ClientError('unreachable', 'No download client.');
             await api.setPaused(entry.transferHash!, false);
             queue.resume(entry, 'resumed by the user');
-          } else if ((was === 'fetching' || was === 'sending') && entry.release) {
+          } else if ((was === 'fetching' || was === 'waiting_slot' || was === 'sending') && entry.release) {
             queue.resume(entry, 'resumed by the user');
-            enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, dedupeKey: `grab:${entry.id}`, runAt: entry.createdAt });
+            // A fetched torrent goes to the send. A release without its source is fetched first.
+            if (entry.source) enqueue({ type: 'queue.send', payload: { entryIds: [entry.id] }, dedupeKey: `send:${entry.id}`, runAt: entry.createdAt });
+            else enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, dedupeKey: `grab:${entry.id}`, runAt: entry.createdAt });
           } else {
             queue.resume(entry, 'resumed by the user');
             finder.enqueueSearch({ titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id] });

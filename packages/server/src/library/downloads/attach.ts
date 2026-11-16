@@ -25,6 +25,9 @@ export function recordTorrent(
   if (attempt) attempt.release = torrent.name;
   entry.transferHash = torrent.hash;
   entry.clientId = handle.id;
+  // The torrent is in the client, so a source that waited for a slot is no longer needed.
+  entry.source = null;
+  entry.importTries = 0;
 }
 
 // Attaches a torrent that is in the client already to one or more targets. The HTTP route and the import verification
@@ -45,7 +48,7 @@ export async function attachTorrent(
     target.search = null;
     target.importResult = null;
     target.manualMatch = null;
-    queue.enter(target, torrent.complete ? 'validating' : 'downloading', cause, torrent.name);
+    queue.enter(target, torrent.complete ? 'importing' : 'downloading', cause, torrent.name);
   }
   // A partial torrent that the client keeps stopped never moves. The verification resumes it, so a restart of the
   // client or of ladarr does not leave the download dead.

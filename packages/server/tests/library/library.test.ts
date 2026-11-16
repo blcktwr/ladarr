@@ -475,7 +475,7 @@ describe('library API', () => {
       ]);
 
       // A target that a reason blocks has its own key.
-      entry('tv:1396:1x1', { season: 1, number: 1, stage: 'validating', branch: null, reason: { code: 'client_error' } });
+      entry('tv:1396:1x1', { season: 1, number: 1, stage: 'importing', branch: null, reason: { code: 'client_error' } });
       const blocked = (await app.get('/library/tv:1396/episodes?season=1')).body;
       expect(blocked.episodes.map((e: { number: number; queue: string | null }) => [e.number, e.queue])).toEqual([
         [1, 'stuck'],
@@ -483,8 +483,8 @@ describe('library API', () => {
         [3, null],
         [4, null],
       ]);
-      entry('tv:1396', { stage: 'validating', branch: null, reason: { code: 'client_error' } });
-      entry('tv:1396:1x2', { season: 1, number: 2, stage: 'validating', branch: null, reason: { code: 'client_error' } });
+      entry('tv:1396', { stage: 'importing', branch: null, reason: { code: 'client_error' } });
+      entry('tv:1396:1x2', { season: 1, number: 2, stage: 'importing', branch: null, reason: { code: 'client_error' } });
       expect((await app.get('/library/tv:1396')).body.title.queueStatus).toBe('stuck');
 
       for (const id of ids) delete app.db.data.queue[id];

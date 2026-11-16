@@ -34,7 +34,7 @@ async function startMovie(options: Parameters<typeof startPipeline>[0] = {}) {
 }
 
 describe('import checks', () => {
-  it('runs the 15 checks in order, while the target moves from validating to importing', async () => {
+  it('runs the 15 checks in order, in the importing stage', async () => {
     const entry = await startMovie({ checkDelayMs: CHECK_DELAY_MS });
 
     // The entry view exposes the list while the import runs.
@@ -80,7 +80,7 @@ describe('import checks', () => {
     }
     expect(order).toEqual([...CHECK_IDS]);
     for (const id of CHECK_IDS) expect(transitions.get(id)!.filter((state) => state !== 'pending')).toEqual(['running', 'ok']);
-    expect(stageAt.get('download_complete')).toBe('validating');
+    expect(stageAt.get('download_complete')).toBe('importing');
     for (const id of CHECK_IDS.slice(1)) expect(stageAt.get(id)).toBe('importing');
 
     // A check stays running for at least the configured delay, also between one check and the next.

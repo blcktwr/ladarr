@@ -18,7 +18,7 @@ const AVAILABLE = 5;
 // REQUEST | REQUEST_MOVIE | REQUEST_TV. Wholphin reads this value to show the request buttons.
 const PERMISSIONS = 32 | 262_144 | 524_288;
 
-const ACTIVE_STAGES = new Set(['fetching', 'sending', 'downloading', 'validating', 'importing']);
+const ACTIVE_STAGES = new Set(['fetching', 'waiting_slot', 'sending', 'downloading', 'importing']);
 
 const fail = (res: Response, status: number, message: string) => void res.status(status).json({ status, message });
 const unsupported = (message: string): RequestHandler => (_req, res) => fail(res, 501, message);

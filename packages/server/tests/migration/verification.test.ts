@@ -71,7 +71,22 @@ function fakeClients(list: Torrent[]): Fake {
     },
   } as unknown as ClientHandle;
   state.handle = handle;
-  state.clients = { all: () => [handle], get: (id) => (id === 'client-1' ? handle : undefined), next: () => handle };
+  state.clients = {
+    all: () => [handle],
+    get: (id) => (id === 'client-1' ? handle : undefined),
+    next: () => handle,
+    list: async () => {
+      if (state.fail) throw new ClientError('unreachable', 'no');
+      return list;
+    },
+    find: async (_handle, hash) => ((state.fail ? [] : list).find((item) => item.hash === hash) ?? null),
+    byHashes: async (_handle, hashes) => {
+      state.calls.push(...hashes);
+      if (state.fail) throw new ClientError('unreachable', 'no');
+      return list.filter((item) => hashes.includes(item.hash));
+    },
+    invalidate: () => {},
+  };
   return state;
 }
 
@@ -93,7 +108,7 @@ async function setup({ mediaType = 'tv' as 'tv' | 'movie', episodes = [episode(1
   const item = title(key, mediaType, episodes);
   if (mediaType === 'movie') item.rootId = 'movie';
   db.data.titles[key] = item;
-  const handler = libraryVerifyHandler({ queue, clients: fake.clients, finder, events });
+  const handler = libraryVerifyHandler({ queue, clients: fake.clients, finder, events, enqueue: (input) => enqueue(input) });
   const run = () => handler.run({ payload: { key } } as Job, { signal: new AbortController().signal });
   return { dir, db, queue, finder, fake, key, run, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
@@ -107,7 +122,7 @@ describe('library verification', () => {
     cleanups.push(test.cleanup);
     requestVerification((input) => enqueue(input), test.key, { downloads: [{ hash: HASH, episodes: [{ season: 1, number: 1 }], at: 1, id: 5, failed: false }] });
     await test.run();
-    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'validating' }, transferHash: HASH, clientId: 'client-1' });
+    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'importing' }, transferHash: HASH, clientId: 'client-1' });
     expect(test.db.data.queue[`${test.key}:1x1`]!.release).toMatchObject({ external: true, manual: true });
     expect(test.db.data.queue[`${test.key}:1x2`]).toMatchObject({ state: { kind: 'queued' }, transferHash: null });
     expect(test.db.data.verifications[test.key]!.pending).toBe(false);
@@ -172,7 +187,7 @@ describe('library verification', () => {
     cleanups.push(attached.cleanup);
     requestVerification((input) => enqueue(input), attached.key, { downloads: [{ hash: HASH, episodes: [], at: 1, id: 5, failed: false }] });
     await attached.run();
-    expect(attached.db.data.queue[attached.key]).toMatchObject({ state: { kind: 'validating' }, transferHash: HASH });
+    expect(attached.db.data.queue[attached.key]).toMatchObject({ state: { kind: 'importing' }, transferHash: HASH });
 
     const missing = await setup({ mediaType: 'movie', episodes: [] });
     cleanups.push(missing.cleanup);
@@ -199,11 +214,11 @@ describe('library verification', () => {
     requestVerification((input) => enqueue(input), test.key, { downloads: [] });
     const entry = test.queue.ensure(test.key, 1, 1);
     test.queue.startAttempt(entry, 'attached download');
-    move(test.queue, entry, { stage: 'validating', reason: { code: 'torrent_missing' } }, 'torrent gone');
+    move(test.queue, entry, { stage: 'importing', reason: { code: 'torrent_missing' } }, 'torrent gone');
     entry.stateSince = Date.now() - 31 * 60_000;
     await test.run();
     // The import stopped, so the target waits for the user, and the verification starts no search for it.
-    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'blocked', at: 'validating', problem: { code: 'torrent_missing' } } });
+    expect(test.db.data.queue[`${test.key}:1x1`]).toMatchObject({ state: { kind: 'blocked', at: 'importing', problem: { code: 'torrent_missing' } } });
     const jobs = Object.values(test.db.data.jobs).filter((job) => job.type === 'queue.search' && job.state === 'waiting');
     expect(jobs.some((job) => (job.payload as { entryIds: string[] }).entryIds.includes(entry.id))).toBe(false);
   });

@@ -347,7 +347,7 @@ describe('the repair of a blocked import', () => {
     pipe!.db.data.titles[m.key] = m;
     const entry = pipe!.queue.ensure(m.key, null, null);
     pipe!.queue.request(entry, 'attached download');
-    move(pipe!.queue, entry, { stage: 'validating', reason: { code: 'file_not_found' } }, 'import blocked');
+    move(pipe!.queue, entry, { stage: 'importing', reason: { code: 'file_not_found' } }, 'import blocked');
     return { m, entry };
   };
 
@@ -369,7 +369,7 @@ describe('the repair of a blocked import', () => {
     }
 
     // The import stopped, so the target waits for the user and keeps its first attempt.
-    expect(entry.state).toMatchObject({ kind: 'blocked', at: 'validating' });
+    expect(entry.state).toMatchObject({ kind: 'blocked', at: 'importing' });
     expect(entry.attempt).toBe(1);
     expect(searchJobs()).toHaveLength(0);
   });

@@ -14,7 +14,7 @@ export const DAY_MS = 24 * 60 * 60_000;
 export const MAX_PAGE = 200;
 
 // The place of a phase in the journey, from the least to the most advanced.
-export const STAGE_ORDER = ['queued', 'searching', 'fetching', 'sending', 'downloading', 'validating', 'importing', 'available'] as const;
+export const STAGE_ORDER = ['queued', 'searching', 'fetching', 'waiting_slot', 'sending', 'downloading', 'importing', 'available'] as const;
 export const STAGE_RANK = new Map(STAGE_ORDER.map((stage, index) => [stage, index]));
 // A target that waits for its next search or fetches its release ranks with the search. One that found nothing ranks
 // where it waits, because only a new release moves it.
@@ -27,7 +27,7 @@ export const progressOf = (entry: QueueEntry) => {
 export const pad = (n: number) => String(n).padStart(2, '0');
 
 // The jobs that move a target through the download flow. The jobs page shows only these.
-const ITEM_JOB_TYPES = new Set(['queue.initial', 'queue.search', 'queue.grab', 'import.run']);
+const ITEM_JOB_TYPES = new Set(['queue.initial', 'queue.search', 'queue.grab', 'queue.send', 'import.run']);
 export const isItemJob = (job: Job) => job.type.startsWith('item.') || ITEM_JOB_TYPES.has(job.type);
 
 // The targets of a group that finished each stage, for the line under its status.
@@ -36,8 +36,10 @@ export function reachedOf(entries: QueueEntry[]) {
   for (const entry of entries) {
     const phase = phaseOfEntry(entry);
     if (entry.release) reached.found++;
-    if (phase === 'validating' || phase === 'importing' || phase === 'available') reached.completed++;
-    if (phase === 'importing' || phase === 'available') reached.validated++;
+    if (phase === 'importing' || phase === 'available') {
+      reached.completed++;
+      reached.validated++;
+    }
     if (phase === 'available') reached.imported++;
   }
   return reached;
@@ -306,8 +308,8 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
       : null,
     importResult: entry.importResult ?? null,
     import: importOf(importStatus, entry),
-    // The checks belong to the import of the target. A target outside Validating and Importing has none.
-    checks: description.phase === 'validating' || description.phase === 'importing' ? (importStatus?.checksOf(entry.id) ?? null) : null,
+    // The checks belong to the import of the target. A target outside Importing has none.
+    checks: description.phase === 'importing' ? (importStatus?.checksOf(entry.id) ?? null) : null,
   };
   if (!detail) return base;
   return {
@@ -384,7 +386,7 @@ function groupsOf(f: Filters, poller?: Poller): RowGroup[] {
     }
     // A target that has its release waits for a free slot of its client. Its row goes above the rows that only
     // search, because it is the target that takes the next slot.
-    if (entry.state.kind === 'fetching') group.ready = true;
+    if (entry.state.kind === 'fetching' || entry.state.kind === 'waiting_slot') group.ready = true;
     // The search of a title runs now, so its row stays above the rows that wait for their next search.
     if (entry.state.kind === 'searching') group.searching = true;
     groups.set(key, group);

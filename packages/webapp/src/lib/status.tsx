@@ -1,6 +1,6 @@
-import { Check, FileDown, SearchX, Send, TicketX, TriangleAlert, X } from 'lucide-react';
+import { Check, FileDown, Hourglass, SearchX, Send, TicketX, TriangleAlert, X } from 'lucide-react';
 import type { ComponentType } from 'react';
-import { DownloadIcon, Hint, ImportingIcon, PausedIcon, SearchingIcon, Text, ValidatingIcon, WaitingIcon } from 'nebula';
+import { DownloadIcon, Hint, ImportingIcon, PausedIcon, SearchingIcon, Text, WaitingIcon } from 'nebula';
 import { t } from '../i18n/index.ts';
 import { statusHelpText } from './format.ts';
 
@@ -14,9 +14,9 @@ const statusIcons: Record<string, ComponentType<{ className?: string }>> = {
   no_match: TicketX,
   stuck: TriangleAlert,
   fetching: FileDown,
+  waiting_slot: Hourglass,
   sending: Send,
   downloading: DownloadIcon,
-  validating: ValidatingIcon,
   importing: ImportingIcon,
   available: Check,
   paused: PausedIcon,
@@ -30,9 +30,9 @@ const statusTones: Record<string, string> = {
   no_match: 'text-warning',
   stuck: 'text-error',
   fetching: 'text-accent',
+  waiting_slot: 'text-accent',
   sending: 'text-accent',
   downloading: 'text-accent',
-  validating: 'text-accent',
   importing: 'text-accent',
   available: 'text-accent',
   paused: 'text-warning',

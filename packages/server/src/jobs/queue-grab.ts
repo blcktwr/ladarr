@@ -3,60 +3,26 @@ import { JobError } from '../core/jobs.ts';
 import { catalog, itemFields } from '../core/log.ts';
 import { createGrabber, reasonOf } from '../library/grab/grab.ts';
 import { isActive, phaseOfEntry } from '../library/downloads/queue.ts';
-import type { Clients, Db, GrabberDeps, Handler, QueueEntry } from '../types.ts';
+import type { GrabberDeps, Handler, QueueEntry } from '../types.ts';
 
 const MAX_ATTEMPTS = 8;
 
-// A grab can still work on a target that a try blocked: the entry keeps the phase of the fetch or of the send.
-const grabbable = (entry: QueueEntry) => isActive(entry) && Boolean(entry.release) && ['fetching', 'sending'].includes(phaseOfEntry(entry));
-const busy = (entry: QueueEntry) => isActive(entry) && ['sending', 'downloading'].includes(phaseOfEntry(entry));
-
-// The downloads of a client that run now: one for each torrent in Sending or Downloading, and one for each grab
-// that still fetches its torrent. The targets of the same torrent count once.
-function runningDownloads(clients: Clients, clientId: string, own: ReadonlySet<string>) {
-  const hashes = new Set<string>();
-  for (const entry of Object.values(db.data.queue)) {
-    if (entry.clientId !== clientId || entry.state.kind === 'cancelled' || own.has(entry.id)) continue;
-    if (busy(entry) && entry.transferHash) hashes.add(entry.transferHash);
-  }
-  let count = hashes.size;
-  for (const job of Object.values(db.data.jobs)) {
-    if (job.type !== 'queue.grab' || job.state !== 'running') continue;
-    const ids = (job.payload as { entryIds?: unknown }).entryIds;
-    if (!Array.isArray(ids)) continue;
-    const entries = ids.filter((id): id is string => typeof id === 'string' && !own.has(id)).map((id) => db.data.queue[id]).filter((entry): entry is QueueEntry => Boolean(entry));
-    if (!entries.length) continue;
-    const leader = entries[0]!;
-    if ((leader.clientId ?? clients.next()?.id) !== clientId) continue;
-    // A grab that moved its targets to Sending is in the torrents above.
-    if (entries.some(busy)) continue;
-    count++;
-  }
-  return count;
-}
+// A grab can still work on a target that a try blocked: the entry keeps the phase of the fetch.
+const grabbable = (entry: QueueEntry) => isActive(entry) && entry.state.kind !== 'paused' && Boolean(entry.release) && phaseOfEntry(entry) === 'fetching';
 
 export function queueGrabHandler(deps: GrabberDeps): Handler {
-  const { queue, clients } = deps;
-  const grab = createGrabber(deps);
+  const { queue } = deps;
+  const { fetch } = createGrabber(deps);
   return {
     concurrency: 2,
     maxAttempts: MAX_ATTEMPTS,
-    // A target waits in Fetching while its client runs the downloads that it allows.
-    canStart: (job) => {
-      const { entryIds } = job.payload as { entryIds: string[] };
-      const own = new Set(entryIds);
-      const leader = entryIds.map((id) => db.data.queue[id]).find((entry) => entry && grabbable(entry));
-      if (!leader) return true;
-      const client = leader.clientId ? clients.get(leader.clientId) : clients.next();
-      if (!client || client.config.maxDownloads === 0) return true;
-      return runningDownloads(clients, client.id, own) < client.config.maxDownloads;
-    },
+    // The fetch does not wait for a slot of the client. A full client stops the send, not the fetch.
     run: async (job, { signal }) => {
       const { entryIds } = job.payload as { entryIds: string[] };
-      const entries = entryIds.map((id) => queue.get(id)).filter((entry): entry is QueueEntry => Boolean(entry) && grabbable(entry!));
+      const entries = entryIds.map((id) => db.data.queue[id]).filter((entry): entry is QueueEntry => Boolean(entry) && grabbable(entry!));
       if (!entries.length) return;
       try {
-        await grab(entries, signal);
+        await fetch(entries, signal);
       } catch (error) {
         if (signal.aborted) throw error;
         const reason = reasonOf(error);

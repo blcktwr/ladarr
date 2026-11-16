@@ -391,11 +391,11 @@ describe('requests and summary', () => {
     const detail = async () => (await api!.get(`/queue/entries/${entry.id}`)).body.entry;
     const total = async (stage: string) => (await api!.get(`/queue?stage=${stage}`)).body.total;
 
-    move(pipe!.queue, entry, { stage: 'validating', reason: { code: 'client_error' } }, 'test');
-    expect(await detail()).toMatchObject({ status: 'stuck', phase: 'validating' });
+    move(pipe!.queue, entry, { stage: 'importing', reason: { code: 'client_error' } }, 'test');
+    expect(await detail()).toMatchObject({ status: 'stuck', phase: 'importing' });
     expect((await api!.get('/queue/summary')).body.counts).toEqual({ stuck: 1 });
     expect(await total('stuck')).toBe(1);
-    expect(await total('validating')).toBe(0);
+    expect(await total('importing')).toBe(0);
     expect((await api!.get('/queue')).body.items[0].status).toBe('stuck');
 
     // A target that waits for its next search keeps the key of the search.
@@ -403,11 +403,11 @@ describe('requests and summary', () => {
     expect((await detail()).status).toBe('not_found');
 
     // Without a reason, the stage is the key.
-    move(pipe!.queue, entry, { stage: 'validating', branch: null, reason: null }, 'test');
-    expect((await detail()).status).toBe('validating');
-    // Validating belongs to the import tab, so the filter of that tab returns the target.
+    move(pipe!.queue, entry, { stage: 'importing', branch: null, reason: null }, 'test');
+    expect((await detail()).status).toBe('importing');
+    // Importing belongs to the import tab, so the filter of that tab returns the target.
     expect(await total('importing')).toBe(1);
-    expect(await total('validating')).toBe(0);
+    expect(await total('stuck')).toBe(0);
   });
 
   it('sends the cause of the failure with the reason of a target that used its attempts', async () => {
@@ -489,13 +489,13 @@ describe('order', () => {
     api = await pipe.api();
     for (const id of [11, 12, 13]) addFilm(id);
     // The rows enter the queue from the least advanced to the most advanced.
-    const downloading = target('movie:11', 1_000);
-    const validating = target('movie:12', 2_000);
+    const waiting = target('movie:11', 1_000);
+    const downloading = target('movie:12', 2_000);
     move(pipe.queue, target('movie:13', 3_000), { stage: 'importing' }, 'test');
-    move(pipe.queue, downloading, { stage: 'downloading', branch: 'paused' }, 'test');
-    move(pipe.queue, validating, { stage: 'validating', reason: { code: 'client_error' } }, 'test');
+    move(pipe.queue, waiting, { stage: 'searching', branch: 'paused' }, 'test');
+    move(pipe.queue, downloading, { stage: 'downloading', reason: { code: 'client_error' } }, 'test');
 
-    // The pause and the reason change no rank: validating is above downloading and below importing.
+    // The pause and the reason change no rank: the import is above the download, and the download is above the search.
     expect(await rows()).toEqual(['movie:13', 'movie:12', 'movie:11']);
   });
 
@@ -510,7 +510,7 @@ describe('order', () => {
     move(pipe.queue, target('tv:1', 1_000, 1, 1), { stage: 'available' }, 'test');
     move(pipe.queue, target('tv:1', 1_001, 1, 2), { stage: 'downloading' }, 'test');
     move(pipe.queue, target('movie:11', 2_000), { stage: 'searching' }, 'test');
-    move(pipe.queue, target('movie:12', 3_000), { stage: 'validating' }, 'test');
+    move(pipe.queue, target('movie:12', 3_000), { stage: 'importing' }, 'test');
 
     // The group is at Downloading: above the search and below the validation.
     expect(await rows()).toEqual(['movie:12', 'group:tv:1:1', 'movie:11']);
@@ -735,12 +735,14 @@ describe('actions', () => {
     await api!.post('/queue/search', { titleKey: film.key });
     const entry = pipe!.queue.get('movie:2')!;
     await until(() => stageOf(entry) === 'downloading');
-    move(pipe!.queue, entry, { stage: 'validating', reason: { code: 'file_not_found' } }, 'test');
+    move(pipe!.queue, entry, { stage: 'importing', reason: { code: 'file_not_found' } }, 'test');
 
-    // The reason offers a match, and the retry still runs the phases of the target again.
+    // The reason offers a match, and the retry runs the import checks again, with no limit.
     expect((await api!.get('/queue/entries/movie:2')).body.entry.reason).toMatchObject({ action: 'match' });
+    // The worker stays away, so the retry keeps the stage that it sets.
+    await pipe!.worker.pause();
     expect((await api!.post('/queue/actions', { action: 'retry', ids: ['movie:2'] })).status).toBe(200);
-    await until(() => stageOf(entry) === 'downloading');
+    expect(entry.state.kind).toBe('importing');
   });
 
   it('refuses a retry of a target that does not wait', async () => {
@@ -767,7 +769,7 @@ describe('actions', () => {
     await until(() => reasonOfEntry(entry)?.code === 'destination_exists');
     expect(reasonOfEntry(entry)?.detail).toBe('Movie Name (2019)/Movie Name (2019).mkv');
     // A target that stopped before the check was kept still offers the fix.
-    move(pipe!.queue, entry, { stage: 'validating', reason: { code: 'destination_exists' } }, 'test');
+    move(pipe!.queue, entry, { stage: 'importing', reason: { code: 'destination_exists' } }, 'test');
 
     expect((await api!.post('/queue/actions', { action: 'replace', ids: ['movie:2'] })).status).toBe(200);
     await until(() => stageOf(entry) === 'available');

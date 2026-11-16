@@ -299,7 +299,7 @@ describe('import', () => {
     move(queue, loading!, { stage: 'downloading' }, 'client has it');
     loading!.transferHash = 'a'.repeat(40);
     move(queue, paused!, { branch: 'paused' }, 'paused');
-    move(queue, attention!, { stage: 'validating', reason: { code: 'file_not_found' } }, 'no file');
+    move(queue, attention!, { stage: 'importing', reason: { code: 'file_not_found' } }, 'no file');
     // A download import that met a full disk leaves the target in Importing with a block.
     move(queue, blocked!, { stage: 'importing', reason: { code: 'disk_full' } }, 'import blocked');
     t.write(t.inbox, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two', 'Show.Name.S01E03.mkv': 'three', 'Show.Name.S01E04.mkv': 'four', 'Show.Name.S01E05.mkv': 'five' });
@@ -342,8 +342,8 @@ describe('import', () => {
     t.pipe.db.data.imports.busy = { id: 'busy', hash: 'rename:busy', titleKey: film.key, steps: [], createdAt: 0, kind: 'rename', sourceBase: t.pipe.folders.movies };
     t.pipe.complete(name, { [`${name}.mkv`]: 'video-data' });
     await sleep(300);
-    // The target is not blocked. It waits.
-    expect(entry).toMatchObject({ state: { kind: 'validating' } });
+    // The target is not blocked. It waits in the import for the open journal.
+    expect(entry).toMatchObject({ state: { kind: 'importing' } });
     delete t.pipe.db.data.imports.busy;
     await until(() => stageOf(entry!) === 'available');
   });

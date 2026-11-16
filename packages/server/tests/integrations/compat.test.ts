@@ -209,7 +209,7 @@ describe('Seerr request for a movie', () => {
     expect(done).toMatchObject({ id: 1, name: 'MoviesSearch', result: 'successful' });
     // The command ended because the search ended: the search found the release.
     expect(pipe.db.data.queue['movie:603']!.search).toMatchObject({ result: 'grabbed' });
-    expect(['fetching', 'sending', 'downloading']).toContain(stageOf(pipe.db.data.queue['movie:603']!));
+    expect(['fetching', 'waiting_slot', 'sending', 'downloading']).toContain(stageOf(pipe.db.data.queue['movie:603']!));
 
     // The movie is monitored and in the queue. A search command has nothing to do, and it says so.
     expect(await radarr.searchMovie(603)).toMatchObject({ id: 2, status: 'completed', result: 'successful', message: expect.stringContaining('Nothing to search') });

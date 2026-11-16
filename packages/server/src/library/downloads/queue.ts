@@ -221,7 +221,7 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     // An entry that was made but never requested has no attempt yet.
     if (entry.attempt > 0 && isActive(entry)) return false;
     rememberDownload(entry);
-    Object.assign(entry, { search: null, release: null, transferHash: null, clientId: null, importResult: null, clearedAt: null, completedAt: null, manualMatch: entry.manualMatch });
+    Object.assign(entry, { search: null, release: null, transferHash: null, clientId: null, source: null, importTries: 0, importResult: null, clearedAt: null, completedAt: null, manualMatch: entry.manualMatch });
     startAttempt(entry, reason);
     // A target that is already queued keeps its state. The record says why the attempt started.
     if (entry.state.kind === 'queued') observe(entry, reason);
@@ -232,7 +232,7 @@ export function createQueue(events: Events, persist: () => void, onState?: State
   // A confirmed bad download or a target that its pack does not cover starts again from the top of the journey. The
   // caller ends the attempt first. It keeps the new attempt in the history of the target.
   function fallback(entry: QueueEntry, cause: string, detail?: string, attemptReason = `fallback: ${cause}`) {
-    Object.assign(entry, { search: null, release: null, transferHash: null, clientId: null, importResult: null, replaceDestination: undefined });
+    Object.assign(entry, { search: null, release: null, transferHash: null, clientId: null, source: null, importTries: 0, importResult: null, replaceDestination: undefined });
     startAttempt(entry, attemptReason);
     transition(entry, { kind: 'queued' }, 'fallback', detail ?? cause);
   }

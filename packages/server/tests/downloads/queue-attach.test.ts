@@ -212,7 +212,7 @@ describe('attach a download', () => {
     const hash = addExternal(NAME);
     pipe!.complete(NAME, { 'Movie.mkv': 'the-film' });
     expect((await api!.post('/queue/entries/movie:2/attach', { hash, confirmOwner: true, confirmTitle: true })).status).toBe(200);
-    expect(entry.history.at(-1)).toMatchObject({ stage: 'validating', cause: 'download attached by the user' });
+    expect(entry.history.at(-1)).toMatchObject({ stage: 'importing', cause: 'download attached by the user' });
     await until(() => stageOf(entry) === 'available');
   });
 
@@ -267,13 +267,14 @@ describe('attach a download', () => {
     const film = movie({ rootId: 'movie', manualRelease: true });
     pipe.db.data.titles[film.key] = film;
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
-    // The user added the torrent by hand while it downloaded, so the grab stopped.
+    // The user added the torrent by hand while it downloaded. The search keeps it as the download of the target.
     addExternal(NAME, { category: 'manual' });
     await api.post('/queue/search', { titleKey: film.key });
     const entry = pipe.queue.get('movie:2')!;
-    await until(() => reasonOfEntry(entry)?.code === 'torrent_exists');
-    // The client finishes it, and the user retries the target.
+    await until(() => stageOf(entry) === 'downloading' && entry.transferHash === hashOf(NAME));
+    // A problem stops the target at its download. The user retries it when the client has finished.
     pipe.complete(NAME, { 'Movie.mkv': 'the-film' });
+    move(pipe.queue, entry, { stage: 'downloading', reason: { code: 'client_error' } }, 'test');
     expect((await api.post('/queue/actions', { action: 'retry', ids: ['movie:2'] })).status).toBe(200);
     await until(() => stageOf(entry) === 'available');
     // The torrent of the client is the one that the import used. The client holds no other.
@@ -291,7 +292,12 @@ describe('attach a download', () => {
     addExternal(NAME, { category: 'manual' });
     await api.post('/queue/search', { titleKey: film.key });
     const entry = pipe.queue.get('movie:2')!;
-    await until(() => reasonOfEntry(entry)?.code === 'torrent_exists');
+    await until(() => stageOf(entry) === 'downloading');
+    // A grab that stopped before it took the torrent keeps the offer to attach it.
+    entry.transferHash = null;
+    entry.clientId = null;
+    entry.source = null;
+    move(pipe.queue, entry, { stage: 'fetching', reason: { code: 'torrent_exists' } }, 'test');
     expect(reasonOfEntry(entry)?.code).toBe('torrent_exists');
     expect((await api.get('/queue/entries/movie:2')).body.entry.reason).toMatchObject({ action: 'attach' });
     expect((await api.post('/queue/entries/movie:2/attach', { hash: hashOf(NAME), confirmOwner: true, confirmTitle: true })).status).toBe(200);
@@ -340,10 +346,18 @@ describe('attach a download', () => {
     const series = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
     pipe.db.data.titles[series.key] = series;
     pipe.tracker.state.items = [{ title: PACK, size: 2 * 60 * 45 * MIB }];
-    // The user added the pack by hand in another category, so the grab stops for both episodes.
+    // The user added the pack by hand in another category. The search finds it, and both episodes point at it.
     const hash = addExternal(PACK);
     pipe.finder.requestSearch(series.key);
-    await until(() => ['1x1', '1x2'].every((n) => reasonOfEntry(pipe!.queue.get(`tv:1:${n}`)!)?.code === 'torrent_exists'));
+    const [one, two] = ['tv:1:1x1', 'tv:1:1x2'].map((id) => pipe!.queue.get(id)!);
+    await until(() => stageOf(one!) === 'downloading' && stageOf(two!) === 'downloading');
+    // A grab that stopped before it took the torrent. The user attaches one episode only.
+    for (const entry of [one!, two!]) {
+      entry.transferHash = null;
+      entry.clientId = null;
+      entry.source = null;
+      move(pipe!.queue, entry, { stage: 'fetching', reason: { code: 'torrent_exists' } }, 'test');
+    }
     expect((await api.post('/queue/entries/tv:1:1x1/attach', { hash, confirmOwner: true, confirmTitle: true })).status).toBe(200);
     await until(() => pipe!.poller.transfer(hash)?.entryIds.length === 1);
     await new Promise((resolve) => setTimeout(resolve, 200));

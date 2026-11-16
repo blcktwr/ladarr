@@ -174,16 +174,16 @@ describe('database files', () => {
 
       vi.stubEnv('NODE_ENV', 'production');
       const db = await open(file);
-      expect(db.data.queue[legacy.id]!.state).toEqual({ kind: 'blocked', at: 'validating', problem: { code: 'file_not_found' } });
+      expect(db.data.queue[legacy.id]!.state).toEqual({ kind: 'blocked', at: 'importing', problem: { code: 'file_not_found' } });
       expect(db.data.queue[legacy.id]!.stateSince).toBe(4);
-      expect(db.data.queue[legacy.id]!.history[0]).toMatchObject({ state: { kind: 'validating' }, stage: 'validating' });
+      expect(db.data.queue[legacy.id]!.history[0]).toMatchObject({ state: { kind: 'importing' }, stage: 'importing' });
 
       await db.write();
       const saved = readJson(join(dir, 'queue.json')).queue[legacy.id];
       expect(saved).not.toHaveProperty('stage');
       expect(saved).not.toHaveProperty('branch');
       expect(saved).not.toHaveProperty('reason');
-      expect(saved.state).toEqual({ kind: 'blocked', at: 'validating', problem: { code: 'file_not_found' } });
+      expect(saved.state).toEqual({ kind: 'blocked', at: 'importing', problem: { code: 'file_not_found' } });
     } finally {
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });

@@ -45,7 +45,7 @@ export function queueEntryMatchPost(queue: Queue, finder: Finder, clients: Clien
         file,
         affected: covered.map((other) => ({ id: other.id, label: label(other), current: other.manualMatch?.file ?? null })),
         replaces: taken.map((other) => ({ id: other.id, label: label(other) })),
-        retries: covered.filter((other) => other.state.kind === 'blocked' && (other.state.at === 'validating' || other.state.at === 'importing')).map((other) => ({ id: other.id, label: label(other) })),
+        retries: covered.filter((other) => other.state.kind === 'blocked' && other.state.at === 'importing').map((other) => ({ id: other.id, label: label(other) })),
       };
       if (preview) return void res.json(preview_);
 
@@ -83,7 +83,7 @@ export function queueEntryMatchPost(queue: Queue, finder: Finder, clients: Clien
       affected: covered.map((other) => ({ id: other.id, label: label(other), current: other.manualMatch?.file ?? null })),
       replaces: taken.map((other) => ({ id: other.id, label: label(other) })),
       // A target that waits for a repair starts its import again.
-      retries: covered.filter((other) => other.state.kind === 'blocked' && (other.state.at === 'validating' || other.state.at === 'importing')).map((other) => ({ id: other.id, label: label(other) })),
+      retries: covered.filter((other) => other.state.kind === 'blocked' && other.state.at === 'importing').map((other) => ({ id: other.id, label: label(other) })),
     };
     if (preview) return void res.json(preview_);
 
@@ -91,7 +91,7 @@ export function queueEntryMatchPost(queue: Queue, finder: Finder, clients: Clien
     const matchCovers = covered.map((other) => ({ season: other.season!, number: other.number! }));
     for (const other of covered) {
       other.manualMatch = { file, covers: other.season === null ? [] : matchCovers };
-      if (other.state.kind === 'blocked' && (other.state.at === 'validating' || other.state.at === 'importing')) retry(other);
+      if (other.state.kind === 'blocked' && other.state.at === 'importing') retry(other);
     }
     res.json({ ...preview_, done: true });
   };

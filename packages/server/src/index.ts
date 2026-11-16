@@ -73,6 +73,12 @@ for (const hash of unfinishedImports()) worker.enqueue({ type: 'import.run', pay
 // A local import has no journal. A target that stopped in one has no torrent to resume, so the folder is read again.
 const local = new Set(Object.values(db.data.queue).filter((entry) => !entry.transferHash && isActive(entry) && phaseOfEntry(entry) === 'importing').map((entry) => entry.titleKey));
 for (const titleKey of local) worker.enqueue({ type: 'import.local', payload: { titleKey }, dedupeKey: `local:${titleKey}` });
+// A target that fetched its torrent waits for a slot. The source stays in the data, so the send does not ask the
+// indexer for the release again.
+for (const entry of Object.values(db.data.queue)) {
+  if (!isActive(entry) || phaseOfEntry(entry) !== 'waiting_slot' || !entry.source) continue;
+  worker.enqueue({ type: 'queue.send', payload: { entryIds: [entry.id] }, dedupeKey: `send:${entry.id}`, runAt: entry.createdAt });
+}
 
 const restorer = createRestorer({ dir: config.backupDir, worker });
 const services = { queue, finder, poller, clients, importStatus };

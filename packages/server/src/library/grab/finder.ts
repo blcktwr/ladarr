@@ -128,9 +128,10 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       const fresh = Boolean(current.fresh || payload.fresh || duplicates.some((job) => (job.payload as SearchPayload).fresh));
       const manual = Boolean(current.manual || payload.manual || duplicates.some((job) => (job.payload as SearchPayload).manual));
       const otherSeasons = Boolean(current.otherSeasons || payload.otherSeasons || duplicates.some((job) => (job.payload as SearchPayload).otherSeasons));
-      // A continuation is valid only for the same targets. A new target starts the search from the first phase.
+      // A continuation is valid only for the same targets. A new target starts the search from the first phase. A fresh
+      // search starts from the first phase too, because the user asked for the search from the top.
       const sameTargets = current.entryIds.length === ids.size && current.entryIds.every((id) => ids.has(id));
-      const resume = sameTargets ? (payload.resume ?? current.resume) : undefined;
+      const resume = sameTargets && !payload.fresh ? (payload.resume ?? current.resume) : undefined;
       const merged: SearchPayload = { ...payload, entryIds, ...(resume ? { resume } : {}), ...(manual ? { manual: true } : {}) };
       if (!resume) delete merged.resume;
       if (!manual) delete merged.manual;
@@ -520,6 +521,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     for (const entry of entries) {
       entry.release = ref;
       entry.transferHash = decision.hash;
+      entry.source = null;
+      entry.importTries = 0;
       entry.search && Object.assign(entry.search, { result: 'grabbed', accepted: 1 });
       const attempt = entry.attempts.at(-1);
       if (attempt) attempt.release = release.title;
@@ -1076,7 +1079,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
 
   // A target that stopped before its import, on a file of its pack or on a torrent that left the client, goes back to
   // the search after a delay. A mount or a path that ladarr cannot see is not one of these: a new download blocks again.
-  // A target that stopped in Validating or Importing stays stuck, so the person resolves the problem there.
+  // A target that stopped in Importing stays stuck, so the person resolves the problem there.
   const REPAIR = new Set(['file_not_found', 'torrent_missing']);
   const REPAIR_MS = 30 * 60_000;
 
@@ -1089,7 +1092,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       if (entry.state.kind !== 'blocked') continue;
       const problem = entry.state.problem;
       const at = entry.state.at;
-      if (!REPAIR.has(problem.code) || at === 'validating' || at === 'importing') continue;
+      if (!REPAIR.has(problem.code) || at === 'importing') continue;
       if (t - entry.stateSince < REPAIR_MS) continue;
       catalog.info('repair', `The import stopped on ${problem.code}. The search starts again.`, itemFields(entry), { code: problem.code });
       queue.endAttempt(entry, 'failed', 'verification repair');

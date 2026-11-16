@@ -34,9 +34,9 @@ const cases: Case[] = [
     expected: { status: 'downloading', tab: 'downloading', phase: 'downloading', active: true, working: true, problem: null },
   },
   {
-    name: 'validating',
-    state: { kind: 'validating' },
-    expected: { status: 'validating', tab: 'importing', phase: 'validating', active: true, working: true, problem: null },
+    name: 'waiting_slot',
+    state: { kind: 'waiting_slot' },
+    expected: { status: 'waiting_slot', tab: 'downloading', phase: 'waiting_slot', active: true, working: true, problem: null },
   },
   {
     name: 'importing',
@@ -64,9 +64,9 @@ const cases: Case[] = [
     expected: { status: 'paused', tab: null, phase: 'downloading', active: true, working: false, problem: null },
   },
   {
-    name: 'paused while validating',
-    state: { kind: 'paused', resume: 'validating', problem: noFile },
-    expected: { status: 'paused', tab: null, phase: 'validating', active: true, working: false, problem: noFile },
+    name: 'paused while waiting for a slot',
+    state: { kind: 'paused', resume: 'waiting_slot', problem: noFile },
+    expected: { status: 'paused', tab: null, phase: 'waiting_slot', active: true, working: false, problem: noFile },
   },
   {
     name: 'cancelled while searching',
@@ -95,7 +95,7 @@ const stateForStatus: Record<Status, QueueState> = {
   fetching: { kind: 'fetching' },
   sending: { kind: 'sending' },
   downloading: { kind: 'downloading' },
-  validating: { kind: 'validating' },
+  waiting_slot: { kind: 'waiting_slot' },
   importing: { kind: 'importing' },
   available: { kind: 'available' },
   not_found: { kind: 'waiting', outcome: 'no_results' },
@@ -109,9 +109,9 @@ const precedence: Exclude<Status, 'available'>[] = [
   'stuck',
   'searching',
   'fetching',
+  'waiting_slot',
   'sending',
   'downloading',
-  'validating',
   'importing',
   'not_found',
   'no_match',
@@ -181,7 +181,7 @@ suite('aggregate', () => {
   it('uses only the tab of the aggregate status', () => {
     const states: QueueState[] = [
       { kind: 'blocked', at: 'downloading', problem: timeout },
-      { kind: 'validating' },
+      { kind: 'waiting_slot' },
       { kind: 'queued' },
       { kind: 'downloading' },
       { kind: 'sending' },
@@ -224,7 +224,7 @@ suite('aggregate', () => {
 
   it('returns null for the problem when nothing is blocked', () => {
     const states: QueueState[] = [
-      { kind: 'paused', resume: 'validating', problem: noFile },
+      { kind: 'paused', resume: 'waiting_slot', problem: noFile },
       { kind: 'downloading' },
       { kind: 'waiting', outcome: 'indexers_failed' },
     ];
@@ -243,7 +243,7 @@ suite('aggregate', () => {
   it('breaks a tie between codes alphabetically', () => {
     const states: QueueState[] = [
       { kind: 'blocked', at: 'downloading', problem: timeout },
-      { kind: 'blocked', at: 'validating', problem: noFile },
+      { kind: 'blocked', at: 'waiting_slot', problem: noFile },
     ];
     expect(aggregate(states).problem).toEqual(noFile);
     expect(aggregate([...states].reverse()).problem).toEqual(noFile);
@@ -254,7 +254,7 @@ suite('aggregate', () => {
       { kind: 'downloading' },
       { kind: 'queued' },
       { kind: 'waiting', outcome: 'all_rejected' },
-      { kind: 'blocked', at: 'validating', problem: noFile },
+      { kind: 'blocked', at: 'waiting_slot', problem: noFile },
       { kind: 'blocked', at: 'importing', problem: timeout },
       { kind: 'cancelled', at: 'downloading' },
     ];

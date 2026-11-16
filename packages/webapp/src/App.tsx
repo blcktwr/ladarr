@@ -33,7 +33,7 @@ const titlePage = /^\/catalog\/(movie|tv)\/\d+\/?$/;
 // The stages that mean work for the queue. The active stages come first, so a long download does not hide
 // the work that changes. The search comes before the fetch of its release, because the fetch belongs to it.
 // Downloading is last: the line shows it only when no other stage runs.
-const WORKING = ['importing', 'validating', 'sending', 'searching', 'fetching', 'queued', 'downloading'];
+const WORKING = ['importing', 'waiting_slot', 'sending', 'searching', 'fetching', 'queued', 'downloading'];
 
 // The name of the task as the Activity page shows it: a season of a series, a movie, or a series that loads its episodes.
 const taskName = (row: QueueRow) => (row.kind === 'entry' ? row.label : groupName(row));
@@ -45,8 +45,8 @@ function QueueStatus({ href, onOpen }: { href: string; onOpen: () => void }) {
   const summary = useQuery<QueueSummary>({ queryKey: ['/queue/summary'], refetchInterval: (query) => (query.state.data?.currentJob ? 2_000 : false) });
   const job = summary.data?.currentJob;
   const stage = WORKING.find((key) => summary.data?.working[key]);
-  // Fetching shows in the Searching view, so its row comes from the same list.
-  const listKey = stage === 'fetching' ? 'searching' : stage;
+  // Fetching shows in the Searching view, and the wait for a slot in the Downloading view, so the row comes from that list.
+  const listKey = stage === 'fetching' ? 'searching' : stage === 'waiting_slot' ? 'downloading' : stage;
   const current = useQuery<{ items: QueueRow[] }>({ queryKey: [`/queue?stage=${listKey}&limit=1`], enabled: Boolean(stage) && !job });
   useLive('queue.changed', () => {
     void summary.refetch();

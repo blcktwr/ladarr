@@ -30,7 +30,7 @@ describe('queue migration', () => {
 
   it('maps a problem to a block at its phase', () => {
     const entry = migrate({ stage: 'validating', branch: null, reason: { code: 'file_not_found', detail: 'x' } });
-    expect(entry.state).toEqual({ kind: 'blocked', at: 'validating', problem: { code: 'file_not_found', detail: 'x' } });
+    expect(entry.state).toEqual({ kind: 'blocked', at: 'importing', problem: { code: 'file_not_found', detail: 'x' } });
   });
 
   it('keeps a pause with its phase and its problem', () => {
@@ -45,6 +45,22 @@ describe('queue migration', () => {
   it('maps a cancel and a completion', () => {
     expect(migrate({ stage: 'searching', branch: 'cancelled', reason: null }).state).toEqual({ kind: 'cancelled', at: 'searching' });
     expect(migrate({ stage: 'available', branch: null, reason: null }).state).toEqual({ kind: 'available' });
+  });
+
+  it('maps the removed validation stage to the import, in a state and in its history', () => {
+    const entry = migrate({
+      state: { kind: 'blocked', at: 'validating', problem: { code: 'file_not_found' } },
+      history: [{ at: 2, state: { kind: 'validating' }, stage: 'validating', attempt: 1, cause: 'download complete' }],
+    });
+    expect(entry.state).toEqual({ kind: 'blocked', at: 'importing', problem: { code: 'file_not_found' } });
+    expect(entry.history![0]).toMatchObject({ state: { kind: 'importing' }, stage: 'importing' });
+  });
+
+  it('keeps the wait for a slot when it runs again', () => {
+    const queue = { 'movie:1': { ...base, state: { kind: 'waiting_slot' }, stateSince: 3, phaseSince: 2 } } as never;
+    migrateQueue(queue);
+    migrateQueue(queue);
+    expect((queue as Record<string, LegacyEntry>)['movie:1']!.state).toEqual({ kind: 'waiting_slot' });
   });
 
   it('gives a history event its state without inventing a problem', () => {

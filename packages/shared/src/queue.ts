@@ -1,9 +1,9 @@
 // One state for each target of the queue, and one derivation of the status, the tab, and the group aggregate.
 // The server, the counters, the tabs, and the web app use this module. It reads no database, clock, locale, or network.
 
-// The journey of a target: Queued, Searching, Fetching the release, Sending to the client, Downloading, Validating,
-// Importing, Available. A stage can be skipped when its work is not needed.
-export type Stage = 'queued' | 'searching' | 'fetching' | 'sending' | 'downloading' | 'validating' | 'importing' | 'available';
+// The journey of a target: Queued, Searching, Fetching the release, Waiting for a slot of the client, Sending to the
+// client, Downloading, Importing, Available. A stage can be skipped when its work is not needed.
+export type Stage = 'queued' | 'searching' | 'fetching' | 'waiting_slot' | 'sending' | 'downloading' | 'importing' | 'available';
 export type Phase = Stage;
 export type WorkPhase = Exclude<Stage, 'available'>;
 
@@ -22,7 +22,7 @@ export type QueueState =
   | { kind: 'available' };
 
 // What the page shows for one target. The status names a result of the work, such as a search that found nothing.
-export type Status = 'queued' | 'searching' | 'fetching' | 'sending' | 'downloading' | 'validating' | 'importing' | 'available' | 'not_found' | 'no_match' | 'stuck' | 'paused' | 'cancelled';
+export type Status = 'queued' | 'searching' | 'fetching' | 'waiting_slot' | 'sending' | 'downloading' | 'importing' | 'available' | 'not_found' | 'no_match' | 'stuck' | 'paused' | 'cancelled';
 
 // The tabs of the page. A target that has no tab shows in All.
 export type Tab = 'queued' | 'searching' | 'downloading' | 'importing' | 'stuck';
@@ -53,9 +53,9 @@ export const TAB_ORDER: readonly Tab[] = ['queued', 'searching', 'downloading', 
 
 // The status that a group shows, from the most urgent to the least. Stuck wins over a download, so a mixed season
 // shows the problem in its row and in its inspector.
-const STATUS_PRECEDENCE: readonly Status[] = ['stuck', 'searching', 'fetching', 'sending', 'downloading', 'validating', 'importing', 'not_found', 'no_match', 'queued', 'paused', 'cancelled'];
+const STATUS_PRECEDENCE: readonly Status[] = ['stuck', 'searching', 'fetching', 'waiting_slot', 'sending', 'downloading', 'importing', 'not_found', 'no_match', 'queued', 'paused', 'cancelled'];
 
-const WORKING = new Set<string>(['queued', 'searching', 'fetching', 'sending', 'downloading', 'validating', 'importing']);
+const WORKING = new Set<string>(['queued', 'searching', 'fetching', 'waiting_slot', 'sending', 'downloading', 'importing']);
 
 export function phaseOf(state: QueueState): Phase {
   switch (state.kind) {
@@ -108,8 +108,8 @@ export function describe(state: QueueState): Description {
 function tabOfPhase(phase: WorkPhase): Tab {
   if (phase === 'queued') return 'queued';
   if (phase === 'searching' || phase === 'fetching') return 'searching';
-  if (phase === 'downloading') return 'downloading';
-  if (phase === 'validating' || phase === 'importing') return 'importing';
+  if (phase === 'waiting_slot' || phase === 'downloading') return 'downloading';
+  if (phase === 'importing') return 'importing';
   return 'searching';
 }
 

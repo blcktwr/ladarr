@@ -13,6 +13,7 @@ import { probeFile } from '../probe.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
 import { entryId, isActive, phaseOfEntry } from '../downloads/queue.ts';
 import { checkRoot } from '../roots.ts';
+import { MAX_IMPORT_ATTEMPTS } from './limits.ts';
 import type { ClientHandle, Db, Episode, Fs, ImporterDeps, ImporterFound, ImportJournal, JournalStep, MediaFile, QueueEntry, Title, Torrent } from '../../types.ts';
 
 // The log line of each step of a file. The event is stable, and the message says what the step did.
@@ -210,9 +211,11 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       }
     };
 
-    // The download is complete while the target is still in Validating. Only then does it move to Importing.
+    // The download is complete before the import checks. The poll moves a finished download to Importing.
     status?.setCheck(key, 'download_complete', 'running');
     await wait();
+    // The import confirms the download now, so an older read of the client cannot answer.
+    clients.invalidate(handle);
     const torrent = await handle.api.find(hash);
     if (!torrent) {
       status?.setCheck(key, 'download_complete', 'failed', { code: 'torrent_missing' });
@@ -220,7 +223,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       return;
     }
     if (!torrent.complete) {
-      // The client has not finished. The target waits in Validating, and the next poll starts a new run.
+      // The client has not finished. The target waits in Importing, and the next poll starts a new run.
       status?.setCheck(key, 'download_complete', 'pending');
       return;
     }
@@ -517,9 +520,9 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     const ids = title.mediaType === 'movie' ? [title.key] : step.episodes.map((c) => entryId(title.key, c.season, c.number));
     for (const entry of ids.map((id) => queue.get(id))) {
       if (!entry || entry.attempt === 0 || !isActive(entry) || entry.state.kind === 'paused') continue;
-      // A download import that stopped on a problem leaves its target in Validating or in Importing with a block. Its journal has ended.
+      // A download import that stopped on a problem leaves its target in Importing with a block. Its journal has ended.
       const phase = phaseOfEntry(entry);
-      if (!(phase === 'queued' || phase === 'searching' || ((phase === 'validating' || phase === 'importing') && entry.state.kind === 'blocked'))) continue;
+      if (!(phase === 'queued' || phase === 'searching' || (phase === 'importing' && entry.state.kind === 'blocked'))) continue;
       queue.endAttempt(entry, 'imported', 'imported by hand');
       entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };
       catalog.info('import_completed', `Import completed by hand: ${step.dest}`, itemFields(entry), { path: step.dest, method: step.method, validation: step.validation, manual: true });
@@ -814,7 +817,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     for (const journal of Object.values(db.data.imports).filter((item) => item.hash === hash)) await execute(journal);
 
     const inJournal = new Set(Object.values(db.data.imports).flatMap((journal) => journal.steps.flatMap((step) => step.entryIds)));
-    const ready = Object.values(db.data.queue).filter((entry) => entry.transferHash === hash && ['validating', 'importing'].includes(entry.state.kind) && !inJournal.has(entry.id));
+    const ready = Object.values(db.data.queue).filter((entry) => entry.transferHash === hash && entry.state.kind === 'importing' && !inJournal.has(entry.id));
     // The targets of one torrent have the same client.
     const handle = clients.get(ready[0]?.clientId);
     if (!handle) return;
@@ -840,13 +843,14 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
 }
 
 // The IDs of the downloads that have an unfinished import, so a start of the server can finish them. A target in
-// Validating or Importing with a torrent is unfinished too, also when no journal was written.
+// Importing with a torrent is unfinished too, also when no journal was written. A target that used its automatic
+// attempts stays stuck until the user retries.
 export const unfinishedImports = () => {
   const hashes = new Set(Object.values(db.data.imports).map((journal) => journal.hash));
   for (const entry of Object.values(db.data.queue)) {
     if (!entry.transferHash || entry.state.kind === 'cancelled') continue;
-    const phase = phaseOfEntry(entry);
-    if (phase === 'validating' || phase === 'importing') hashes.add(entry.transferHash);
+    if ((entry.importTries ?? 0) >= MAX_IMPORT_ATTEMPTS) continue;
+    if (phaseOfEntry(entry) === 'importing') hashes.add(entry.transferHash);
   }
   return [...hashes];
 };

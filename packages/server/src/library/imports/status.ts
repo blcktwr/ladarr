@@ -36,7 +36,7 @@ export function createImportStatus(events: Events, { pollMs = 500, now = Date.no
     const at = now();
     const entries = Object.values(db.data.queue).flatMap((entry) => {
       const description = describe(entry.state);
-      if (description.phase !== 'validating' && description.phase !== 'importing') return [];
+      if (description.phase !== 'importing') return [];
       const checks = listOf(entry.id);
       return checks ? [{ id: entry.id, status: description.status, phase: description.phase, checks }] : [];
     });

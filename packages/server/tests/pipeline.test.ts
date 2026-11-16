@@ -51,7 +51,7 @@ describe('movie journey', () => {
     expect(pipe.db.data.titles[film.key]!.fileId).toBe(file.id);
     expect(pipe.db.data.titles[film.key]!.folder).toBe('Movie Name (2019)');
     expect(pipe.db.data.imports).toEqual({});
-    expect(stagesOf(entry!)).toEqual(['queued', 'searching', 'fetching', 'sending', 'downloading', 'validating', 'importing', 'available']);
+    expect(stagesOf(entry!)).toEqual(['queued', 'searching', 'fetching', 'waiting_slot', 'sending', 'downloading', 'importing', 'available']);
     expect(pipe.qbit.torrents.has(hashOf(name))).toBe(true);
   });
 
@@ -188,8 +188,10 @@ describe('series journey', () => {
       const lines = (await recentLogs(500)).filter((line) => line.itemType === 'tv' && String(line.itemId ?? '').startsWith('tv:1'));
       const requests = lines.flatMap((line) => (Array.isArray(line.requests) ? (line.requests as { indexer?: string; system?: string; requestId?: string }[]) : []));
       expect(requests.length).toBeGreaterThan(1);
-      // A log line shows one button per indexer, not one for each query of the same indexer.
-      expect(new Set(requests.map((item) => item.requestId)).size).toBe(1);
+      // A log line shows one button per indexer, not one for each query of the same indexer. The client inventory of
+      // the preflight has an id of its own, and its system name keeps it apart.
+      const indexers = requests.filter((item) => item.indexer);
+      expect(new Set(indexers.map((item) => item.requestId)).size).toBe(1);
     } finally {
       await closeLog();
       rmSync(dir, { recursive: true, force: true });
@@ -630,7 +632,7 @@ describe('import safety', () => {
     });
     pipe!.poller.stop();
     pipe!.complete(name, { [`${name}.mkv`]: 'video-data' });
-    move(pipe!.queue, entry, { stage: 'validating', reason: null }, 'download complete');
+    move(pipe!.queue, entry, { stage: 'importing', reason: null }, 'download complete');
     pipe!.worker.enqueue({ type: 'import.run', payload: { hash: hashOf(name) }, dedupeKey: `import:${hashOf(name)}` });
 
     // The next run of the import finishes the record. The file is not left without one.

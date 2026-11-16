@@ -1,9 +1,16 @@
 import { db } from '../../core/db.ts';
 import { ClientError, createQbittorrent } from './qbittorrent.ts';
-import type { ClientCheck, ClientConfig, ClientHandle, Clients } from '../../types.ts';
+import type { ClientCheck, ClientConfig, ClientHandle, Clients, Torrent } from '../../types.ts';
+
+// One inventory for each client. A read that runs now serves every caller that follows it, so a search, a retry, the
+// poll, and the send do not ask the client for the same list. The time is short: the queue needs a current answer, and
+// a caller that must see its own change asks again with `invalidate`.
+const INVENTORY_MS = 2_000;
 
 export function createClients(fetchImpl?: typeof fetch): Clients {
   const handles = new Map<string, { key: string; handle: ClientHandle }>();
+  const cache = new Map<string, { at: number; list: Torrent[] }>();
+  const inflight = new Map<string, Promise<Torrent[]>>();
   const all = () => {
     const list = db.data.downloadClients
       .filter((config) => config.enabled)
@@ -16,7 +23,39 @@ export function createClients(fetchImpl?: typeof fetch): Clients {
     for (const id of handles.keys()) if (!list.some((handle) => handle.id === id)) handles.delete(id);
     return list;
   };
-  return { all, get: (id) => (id ? all().find((handle) => handle.id === id) : undefined), next: () => all()[0] };
+
+  async function list(handle: ClientHandle, { fresh = false }: { fresh?: boolean } = {}) {
+    const hit = fresh ? undefined : cache.get(handle.id);
+    if (hit && Date.now() - hit.at < INVENTORY_MS) return hit.list;
+    const pending = fresh ? undefined : inflight.get(handle.id);
+    if (pending) return pending;
+    const request = handle.api
+      .list()
+      .then((torrents) => {
+        cache.set(handle.id, { at: Date.now(), list: torrents });
+        return torrents;
+      })
+      .finally(() => {
+        if (inflight.get(handle.id) === request) inflight.delete(handle.id);
+      });
+    inflight.set(handle.id, request);
+    return request;
+  }
+
+  return {
+    all,
+    get: (id) => (id ? all().find((handle) => handle.id === id) : undefined),
+    next: () => all()[0],
+    list,
+    find: async (handle, hash) => (await list(handle)).find((torrent) => torrent.hash === hash) ?? null,
+    byHashes: async (handle, hashes) => {
+      const wanted = new Set(hashes);
+      return (await list(handle)).filter((torrent) => wanted.has(torrent.hash));
+    },
+    invalidate: (handle) => {
+      cache.delete(handle.id);
+    },
+  };
 }
 
 // A check of the clients that are on, for the health list. The state is the worst one. The answer is kept for a minute, so a page that reloads does not sign in each time.

@@ -2,7 +2,7 @@ import { db } from '../core/db.ts';
 import { catalog, itemFields } from '../core/log.ts';
 import { withTitleLock } from '../core/title-lock.ts';
 import { ClientError } from '../library/downloads/qbittorrent.ts';
-import { isActive } from '../library/downloads/queue.ts';
+import { isActive, phaseOfEntry } from '../library/downloads/queue.ts';
 import { scanTitle } from '../library/scan.ts';
 import type { Handler, QueueEntry, QueueRetryDeps, Title } from '../types.ts';
 
@@ -67,14 +67,14 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
       if (target.release) target.release.infoHash = hash;
       if (torrent.complete) {
         catalog.info('download_found', `The download client has "${torrent.name}". The import runs again.`, itemFields(target), fields);
-        queue.enter(target, 'validating', 'retry: the client has the torrent', torrent.name);
+        queue.enter(target, 'importing', 'retry: the client has the torrent', torrent.name);
       } else {
         catalog.info('download_found', `The download client has "${torrent.name}" and it is not complete. The target waits for it.`, itemFields(target), fields);
         queue.enter(target, 'downloading', 'retry: the client has the torrent', torrent.name);
       }
     }
     if (targets.length && torrent.complete) {
-      enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}`, priority: entry.priority !== null });
+      enqueue({ type: 'import.run', payload: { hash, manual: true }, dedupeKey: `import:${hash}`, priority: entry.priority !== null });
     } else if (targets.length && torrent.status === 'paused') {
       // A torrent that the client stopped does not download. The retry resumes it, as the attach does.
       await handle.api.setPaused(hash, false).catch(() => {});
@@ -82,10 +82,17 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
     return true;
   }
 
-  // The release that the target kept. The grab reads the client first, so a torrent that it has is used as it is.
+  // The release that the target kept. The grab reads the client first, so a torrent that it has is used as it is. A
+  // fetched torrent stays in the target, so it goes to the wait for a slot without a second request to the indexer.
   function fromRelease(entry: QueueEntry) {
     const release = entry.release;
     if (!release || (!release.link && !release.magnet)) return false;
+    if (entry.source) {
+      catalog.info('release_kept', `The fetched torrent of "${release.title}" stays with the target. It waits for a slot.`, itemFields(entry), { release: release.title, indexer: release.indexerName, kind: release.kind });
+      queue.enter(entry, 'waiting_slot', 'retry: the target has its torrent', release.title);
+      enqueue({ type: 'queue.send', payload: { entryIds: [entry.id] }, dedupeKey: `send:${entry.id}`, runAt: entry.createdAt, priority: entry.priority !== null });
+      return true;
+    }
     catalog.info('release_kept', `The release "${release.title}" stays with the target. It goes to the client again.`, itemFields(entry), { release: release.title, indexer: release.indexerName, kind: release.kind });
     queue.enter(entry, 'fetching', 'retry: the target has its release', release.title);
     enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, dedupeKey: `grab:${entry.id}`, runAt: entry.createdAt, priority: entry.priority !== null });
@@ -98,6 +105,8 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
     entry.release = null;
     entry.transferHash = null;
     entry.clientId = null;
+    entry.source = null;
+    entry.importTries = 0;
     entry.search = null;
     queue.enter(entry, 'queued', 'retry');
     finder.enqueueSearch({ titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id], fresh: true, ...(entry.season === null ? {} : { manual: true }) });
@@ -127,6 +136,8 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
             signal.throwIfAborted();
             // The user can pause or cancel the target while the retry waits for its title.
             if (!isActive(entry) || entry.state.kind === 'paused') continue;
+            // A target of an import runs its import checks. Its own job does that, with no limit.
+            if (phaseOfEntry(entry) === 'importing') continue;
             if (await fromLibrary(entry, title, fresh)) continue;
             if (await fromClient(entry)) continue;
             if (fromRelease(entry)) continue;

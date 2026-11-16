@@ -274,7 +274,7 @@ export type IndexDeps = {
   importStatus: ImportStatus;
 };
 export type LibrarySearchDeps = { finder: Finder; enqueue: (input: EnqueueInput) => Job };
-export type LibraryVerifyDeps = { queue: Queue; clients: Clients; finder: Finder; events: Events };
+export type LibraryVerifyDeps = { queue: Queue; clients: Clients; finder: Finder; events: Events; enqueue: (input: EnqueueInput) => Job };
 export type QueueRetryDeps = { queue: Queue; finder: Finder; clients: Clients; enqueue: (input: EnqueueInput) => Job; events: Events };
 // A plan of the kind `upgrades` comes from the Upgrade button of a title page. It searches the files below a quality
 // for a release of exactly that quality. Other plans look for the missing files.
@@ -329,11 +329,21 @@ export type ContentContext = {
   normalized: Map<CatalogEpisode, string>;
 };
 // The clients that are on. A change of the settings makes the connection of that client again.
+// The torrent inventory is one read of the client that every caller shares. A read that runs now serves the callers
+// that follow it, so a search, a retry, and a poll do not ask the client for the same list.
 export type Clients = {
   all: () => ClientHandle[];
   get: (id: string | null | undefined) => ClientHandle | undefined;
   // The client that gets the next download: the first one of the list.
   next: () => ClientHandle | undefined;
+  // Every torrent of the client, complete or not. `fresh` asks the client again, also when a read is recent.
+  list: (handle: ClientHandle, options?: { fresh?: boolean }) => Promise<Torrent[]>;
+  // One torrent by hash, from the shared inventory.
+  find: (handle: ClientHandle, hash: string) => Promise<Torrent | null>;
+  // The torrents with these hashes, from the shared inventory.
+  byHashes: (handle: ClientHandle, hashes: string[]) => Promise<Torrent[]>;
+  // The next read asks the client again. A caller uses it when a change of the client must be visible at once.
+  invalidate: (handle: ClientHandle) => void;
 };
 export type ClientCheck = ClientState;
 // What the client reported about one torrent at the last good poll. One torrent is one transfer,
@@ -532,6 +542,12 @@ export type QueueEntry = {
   transferHash: string | null;
   // The download client that has the torrent. Set with the hash.
   clientId: string | null;
+  // The torrent source that the fetch got. The target keeps it while it waits for a slot of the client, so a wait,
+  // a retry, or a restart does not download the release from the indexer again. A torrent is a base64 file.
+  source?: { torrent: string } | { magnet: string } | null;
+  // The automatic import attempts that failed. It is separate from the attempts of the search. A manual retry does
+  // not change it.
+  importTries?: number;
   // Set when the user chose the file by hand. The import and the retries keep it.
   manualMatch: { file: string; covers: Covered[] } | null;
   // Set when the user chose to replace the file that holds the destination name. The importer clears it.
@@ -625,6 +641,7 @@ export type GrabberDeps = {
   indexers: IndexerService;
   clients: Clients;
   save: () => Promise<void>;
+  enqueue: (input: EnqueueInput) => Job;
   // The wait between two reads of the client after an add with an unknown result.
   reconcileMs?: number;
 };

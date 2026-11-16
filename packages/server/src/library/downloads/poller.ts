@@ -1,6 +1,7 @@
 import { db } from '../../core/db.ts';
 import { catalog, itemFields, log } from '../../core/log.ts';
 import { withOutboundRequests } from '../../core/outbound.ts';
+import { MAX_IMPORT_ATTEMPTS } from '../imports/limits.ts';
 import { releaseEpisodes } from '../parse.ts';
 import { ClientError } from './qbittorrent.ts';
 import { addedByApp, isActive, phaseOfEntry } from './queue.ts';
@@ -23,8 +24,9 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
   let dirty = new Set<string>();
 
   // A target that is blocked at its download keeps its torrent in the client, so the poll still reads it and clears
-  // the problem when the torrent or the client comes back.
-  const tracked = () => Object.values(db.data.queue).filter((entry) => isActive(entry) && entry.transferHash && ['sending', 'downloading', 'validating'].includes(phaseOfEntry(entry)));
+  // the problem when the torrent or the client comes back. A target that imports keeps its torrent too: the poll sees
+  // a complete download that has no import job, such as one that the user attached.
+  const tracked = () => Object.values(db.data.queue).filter((entry) => isActive(entry) && entry.transferHash && ['sending', 'downloading', 'importing'].includes(phaseOfEntry(entry)));
 
   function publish(force = false) {
     const now = Date.now();
@@ -110,7 +112,7 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
   async function poll(handle: ClientHandle, entries: QueueEntry[], keep: Set<string>): Promise<ClientStatus['state']> {
     let list: Torrent[];
     try {
-      list = await handle.api.list();
+      list = await clients.list(handle, { fresh: true });
     } catch (error) {
       // The numbers of this client stay, and they are marked as old.
       for (const entry of entries) {
@@ -159,12 +161,17 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
           queue.unblock(entry, 'client error cleared');
         }
         if (torrent.complete && entry.state.kind === 'downloading') {
-          // The client has all the data. The files are not in the library yet, so the next step is the check.
+          // The client has all the data. The files are not in the library yet, so the next step is the import and
+          // its checks.
           catalog.info('download_completed', `Download completed: "${torrent.name}"`, itemFields(entry), { hash, name: torrent.name, sizeBytes: torrent.sizeBytes, seeds: torrent.seeds, peers: torrent.peers });
-          queue.enter(entry, 'validating', 'download complete');
+          queue.enter(entry, 'importing', 'download complete');
         }
       }
-      if (torrent.complete && group.some((entry) => entry.state.kind === 'validating')) {
+      // A complete torrent with a target that imports runs the import. The budget stops the automatic attempts, and a
+      // target that is blocked is not in Importing any more. An open journal keeps its own recovery: the job retries
+      // with its backoff, and the start of the server finishes it.
+      const journal = Object.values(db.data.imports).some((item) => item.hash === hash);
+      if (!journal && torrent.complete && group.some((entry) => entry.state.kind === 'importing' && (entry.importTries ?? 0) < MAX_IMPORT_ATTEMPTS)) {
         enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}`, priority: group.some((entry) => entry.priority !== null) });
       }
     }

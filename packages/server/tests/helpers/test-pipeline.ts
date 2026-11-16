@@ -14,6 +14,7 @@ import { importLocalHandler } from '../../src/jobs/import-local.ts';
 import { queueGrabHandler } from '../../src/jobs/queue-grab.ts';
 import { queueRetryHandler } from '../../src/jobs/queue-retry.ts';
 import { queueSearchHandler } from '../../src/jobs/queue-search.ts';
+import { queueSendHandler } from '../../src/jobs/queue-send.ts';
 import { createIndexerService } from '../../src/library/grab/torznab.ts';
 import { enqueue } from '../../src/core/jobs.ts';
 import { createLimiter } from '../../src/core/limiter.ts';
@@ -140,10 +141,11 @@ export async function startPipeline(options: Options = {}) {
   const clients = createClients();
   const importStatus = createImportStatus(events, { pollMs: options.copyPollMs ?? 20 });
   let real!: ReturnType<typeof createWorker>;
-  const finder = createFinder({ queue, indexers, enqueue: (input) => real.enqueue(input) });
+  const finder = createFinder({ queue, indexers, enqueue: (input) => real.enqueue(input), clients });
   const handlers = {
     'queue.search': queueSearchHandler(finder),
-    'queue.grab': queueGrabHandler({ queue, finder, indexers, clients, save, reconcileMs: 20 }),
+    'queue.grab': queueGrabHandler({ queue, finder, indexers, clients, save, enqueue: (input) => real.enqueue(input), reconcileMs: 20 }),
+    'queue.send': queueSendHandler({ queue, finder, indexers, clients, save, enqueue: (input) => real.enqueue(input), reconcileMs: 20 }),
     'queue.retry': queueRetryHandler({ queue, finder, clients, enqueue: (input) => real.enqueue(input), events }),
     'import.run': importRunHandler({
       queue,

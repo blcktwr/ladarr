@@ -99,11 +99,13 @@ describe('download slots', () => {
 
     const one = pipe!.finder.requestSearch(first.key)[0]!;
     const two = pipe!.finder.requestSearch(next.key)[0]!;
-    await until(() => [one, two].filter((entry) => stageOf(entry) === 'downloading').length === 1 && [one, two].some((entry) => stageOf(entry) === 'fetching' && entry.release !== null));
+    await until(() => [one, two].filter((entry) => stageOf(entry) === 'downloading').length === 1 && [one, two].some((entry) => stageOf(entry) === 'waiting_slot' && entry.release !== null));
     const running = [one, two].find((entry) => stageOf(entry) === 'downloading')!;
     const waiting = [one, two].find((entry) => entry !== running)!;
-    expect(stageOf(waiting)).toBe('fetching');
+    expect(stageOf(waiting)).toBe('waiting_slot');
     expect(waiting.release).not.toBeNull();
+    // The fetch of the waiting target is done, so the indexer is not asked for it again.
+    expect(waiting.source).not.toBeNull();
     expect(pipe!.qbit.torrents.size).toBe(1);
 
     // The waiting release stays held.
@@ -145,18 +147,18 @@ describe('download slots', () => {
     pipe!.finder.requestSearch(next.key);
     await until(() => stageOf(two) === 'downloading');
     pipe!.finder.requestSearch(third.key);
-    await until(() => stageOf(three) === 'fetching' && three.release !== null);
+    await until(() => stageOf(three) === 'waiting_slot' && three.release !== null);
     pipe!.finder.requestSearch(first.key);
-    await until(() => stageOf(one) === 'fetching' && one.release !== null);
+    await until(() => stageOf(one) === 'waiting_slot' && one.release !== null);
 
-    // The list shows the oldest target first among the targets that fetch.
-    const list = (await api!.get('/queue?stage=searching')).body.items;
+    // The list shows the oldest target first among the targets that wait for a slot.
+    const list = (await api!.get('/queue?stage=downloading')).body.items.filter((item: { status: string }) => item.status === 'waiting_slot');
     expect(list.map((item: { label: string }) => item.label)).toEqual(['Movie Name (2019)', 'Third Movie (2019)']);
 
     // When the slot frees, the first target of the list takes it.
     pipe!.qbit.progress(two.transferHash!, 1);
     await until(() => stageOf(one) === 'downloading' || stageOf(three) === 'downloading');
     expect(stageOf(one)).toBe('downloading');
-    expect(stageOf(three)).toBe('fetching');
+    expect(stageOf(three)).toBe('waiting_slot');
   }, 15_000);
 });

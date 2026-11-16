@@ -5,7 +5,8 @@ import { t } from '../i18n/index.ts';
 // A type that the page does not know shows as it is.
 export const jobAction = (type: string, running = false) => {
   if (type === 'queue.search' || type === 'queue.initial') return running ? t('Searching') : t('Search');
-  if (type === 'queue.grab') return t('Send');
+  if (type === 'queue.grab') return running ? t('Fetching') : t('Fetch');
+  if (type === 'queue.send') return t('Send');
   if (type === 'import.run') return t('Import');
   return type;
 };
