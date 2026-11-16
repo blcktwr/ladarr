@@ -17,7 +17,7 @@ const APP_DIR = fileURLToPath(new URL('../../../../', import.meta.url));
 
 export type ReleaseAsset = { name: string; url: string };
 export type ReleaseInfo = { version: string; url: string; assets: ReleaseAsset[] };
-export type UpdateErrorCode = 'no_update' | 'asset_missing' | 'download_failed' | 'checksum_mismatch' | 'extract_failed';
+export type UpdateErrorCode = 'no_update' | 'busy' | 'asset_missing' | 'download_failed' | 'checksum_mismatch' | 'extract_failed';
 
 export class UpdateError extends Error {
   code: UpdateErrorCode;

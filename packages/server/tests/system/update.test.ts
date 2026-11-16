@@ -372,6 +372,41 @@ describe('update route', () => {
     expect(pauseQueue).not.toHaveBeenCalled();
   });
 
+  it('answers 503 when the queue does not stop, and a later try installs', async () => {
+    const restart = vi.fn();
+    const resumeQueue = vi.fn();
+    const installUpdate = vi.fn(async () => ({ version: VERSION }));
+    let stopped = false;
+    await start({
+      restart,
+      resumeQueue,
+      pauseQueue: async () => {
+        if (!stopped) throw new UpdateError('busy', 'The queue is still busy.');
+      },
+      installUpdate,
+    });
+
+    expect(await app.post('/system/update')).toMatchObject({ status: 503, body: { error: 'queue_busy' } });
+    expect(installUpdate).not.toHaveBeenCalled();
+    expect(resumeQueue).toHaveBeenCalledTimes(1);
+
+    // A try that stops the queue goes on. The try that gave up must not hold the next one back.
+    stopped = true;
+    expect(await app.post('/system/update')).toMatchObject({ status: 202, body: { version: VERSION } });
+    expect(installUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not hold the next try back after an install that fails', async () => {
+    const installUpdate = vi.fn(async () => {
+      throw new Error('disk full');
+    });
+    await start({ restart: vi.fn(), pauseQueue: async () => {}, resumeQueue: () => {}, installUpdate });
+
+    expect(await app.post('/system/update')).toMatchObject({ status: 502, body: { error: 'update_failed' } });
+    expect(await app.post('/system/update')).toMatchObject({ status: 502, body: { error: 'update_failed' } });
+    expect(installUpdate).toHaveBeenCalledTimes(2);
+  });
+
   it('answers a GET with the update check', async () => {
     await start();
     const real = globalThis.fetch;

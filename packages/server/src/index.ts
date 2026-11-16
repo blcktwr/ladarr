@@ -11,6 +11,7 @@ import { createPoller } from './library/downloads/poller.ts';
 import { createQueue, isActive, phaseOfEntry } from './library/downloads/queue.ts';
 import { createRetry } from './library/downloads/queue-api.ts';
 import { createIndexerService } from './library/grab/torznab.ts';
+import { UpdateError } from './system/update.ts';
 import { SCHEMA_VERSION, createSaver, db, open } from './core/db.ts';
 import { createEvents } from './core/events.ts';
 import { sonarr } from './proxy/sonarr.ts';
@@ -113,9 +114,16 @@ listen(
     services,
     indexers,
     installUpdate: () => installUpdate(),
-    // The jobs stop before the files change. The ones that run finish first, so no import is cut in the middle.
-    pauseQueue: () => worker.drain(),
-    resumeQueue: () => worker.resume(),
+    // The queue pauses before the files change, and the update replaces the app and restarts it. A job that still
+    // runs is stopped and starts again after the restart. A queue that does not stop in the grace time gives up.
+    pauseQueue: async () => {
+      queue.setPaused(true);
+      if (!(await worker.pause())) throw new UpdateError('busy', 'The queue is still busy.');
+    },
+    resumeQueue: () => {
+      queue.setPaused(false);
+      worker.resume();
+    },
     // The files of the new version are in place. A clean stop saves the data, and the supervisor starts the server again.
     restart: () => void shutdown('update', UPDATE_EXIT_CODE),
   }),
