@@ -741,8 +741,7 @@ describe('actions', () => {
     // The reason offers a match, and the retry still runs the phases of the target again.
     expect((await api!.get('/queue/entries/movie:2')).body.entry.reason).toMatchObject({ action: 'match' });
     expect((await api!.post('/queue/actions', { action: 'retry', ids: ['movie:2'] })).status).toBe(200);
-    await until(() => reasonOfEntry(entry) === null);
-    expect(stageOf(entry)).toBe('downloading');
+    await until(() => stageOf(entry) === 'downloading');
   });
 
   it('refuses a retry of a target that does not wait', async () => {

@@ -1,5 +1,6 @@
 import { move } from '../helpers/test-queue.ts';
 import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { createRetry } from '../../src/library/downloads/queue-api.ts';
 import { branchOf } from '../helpers/test-queue.ts';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,6 +17,45 @@ afterEach(async () => {
 });
 
 const NAME = 'Movie.Name.2019.1080p.BluRay-GRP';
+
+// A retry moves the target at once, so the page shows the new work before the job that resolves it starts.
+describe('retry at once', () => {
+  it('moves a stopped target out of its problem before the job runs', async () => {
+    pipe = await startPipeline();
+    const film = movie({ rootId: 'movie', manualRelease: true });
+    pipe.db.data.titles[film.key] = film;
+    const entry = pipe.queue.ensure(film.key, null, null);
+    pipe.queue.request(entry, 'test');
+    move(pipe.queue, entry, { stage: 'searching', reason: { code: 'too_many_attempts' } }, 'test');
+    expect(entry.state.kind).toBe('blocked');
+
+    const jobs: { type: string; payload: unknown }[] = [];
+    const { retry } = createRetry({ queue: pipe.queue, enqueue: (input) => (jobs.push(input as never), {} as never) });
+    retry(entry);
+
+    // The target leaves the problem now, not when the worker picks the job.
+    expect(entry.state.kind).toBe('queued');
+    expect(reasonOfEntry(entry)).toBeNull();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ type: 'queue.retry', payload: { entryIds: [film.key] } });
+  });
+
+  it('moves a target that waits for its next search', async () => {
+    pipe = await startPipeline();
+    const film = movie({ rootId: 'movie', manualRelease: true });
+    pipe.db.data.titles[film.key] = film;
+    const entry = pipe.queue.ensure(film.key, null, null);
+    pipe.queue.request(entry, 'test');
+    move(pipe.queue, entry, { stage: 'searching', branch: 'waiting', reason: { code: 'no_results' } }, 'test');
+    expect(entry.state.kind).toBe('waiting');
+
+    const { retry } = createRetry({ queue: pipe.queue, enqueue: () => ({}) as never });
+    retry(entry);
+
+    expect(entry.state.kind).toBe('queued');
+  });
+});
+
 
 // The retry walks the phases of a target in order, and stops at the first one that resolves it: the library folder,
 // the download client, the release, and the search.
@@ -101,8 +141,7 @@ describe('retry', () => {
     expect((await api.post('/queue/actions', { action: 'retry', ids: ['tv:1:1x1'] })).status).toBe(200);
 
     // The torrent is in the client and it has not finished, so the target downloads it again with no new search.
-    await until(() => reasonOfEntry(entry) === null);
-    expect(stageOf(entry)).toBe('downloading');
+    await until(() => stageOf(entry) === 'downloading');
     expect(pipe.tracker.state.searches.length).toBe(searches);
     expect(pipe.tracker.state.downloads.length).toBe(downloads);
   });

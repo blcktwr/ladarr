@@ -11,6 +11,9 @@ export const sharingOf = (entry: QueueEntry) => (entry.transferHash ? Object.val
 export function createRetry({ queue, enqueue }: { queue: Queue; enqueue: (input: EnqueueInput) => Job }) {
   function retry(entry: QueueEntry) {
     queue.retryAttempt(entry, 'retry');
+    // The target leaves its problem now, so the page shows the new work at the click. The job then reads the files
+    // and the client again, and stops at the first phase that resolves it.
+    queue.enter(entry, 'queued', 'retry');
     enqueue({ type: 'queue.retry', payload: { entryIds: [entry.id] }, dedupeKey: `retry:${entry.id}`, priority: entry.priority !== null });
   }
 
