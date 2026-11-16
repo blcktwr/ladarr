@@ -21,3 +21,15 @@ The UI uses only the components of the package `nebula`, in `packages/nebula`. T
 
 - Put plan markdown files in `.plans/` at the root of the repository. Git ignores this folder.
 
+## Tags
+
+- The git tags give the version number. The version in `package.json` does not.
+- When the user asks to publish a new tag, calculate the number from the commits between the highest tag and `HEAD`. Do not ask for it.
+- Find the highest tag with `git tag --sort=-v:refname | head -1`. Read the commits of the range with `git log <tag>..HEAD --oneline`.
+- Use Semantic Versioning, from the type of each commit:
+  - A breaking change (a `!` before the colon, or a `BREAKING CHANGE` footer) increases the major number, and sets the minor and the patch to zero.
+  - A `feat` commit increases the minor number, and sets the patch to zero.
+  - Every other type increases the patch number.
+- Make an annotated tag at `HEAD`. Use the subject of the `HEAD` commit as the message.
+- Push the tag only. Push the branch only when the user asks for it.
+
