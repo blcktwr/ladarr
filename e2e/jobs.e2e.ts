@@ -21,7 +21,7 @@ test.afterAll(() => stack.stop());
 test('shows an item job with its time, its payload, and its actions', async ({ page, context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
   await page.goto(`${URL_BASE}/activity`);
-  await page.getByRole('button', { name: 'Jobs in the queue' }).click();
+  await page.getByRole('button', { name: 'Queue', exact: true }).click();
   const panel = page.getByRole('dialog', { name: 'Jobs in the queue' });
   const table = panel.getByRole('table', { name: 'Jobs in the queue' });
   const row = table.locator('tr[data-row]').filter({ hasText: 'Search Movie Name (2019)' });

@@ -73,8 +73,9 @@ export function JobsPanel() {
       title={t('Jobs in the queue')}
       size="lg"
       trigger={
-        <Button iconOnly aria-label={t('Jobs in the queue')}>
+        <Button variant="ghost">
           <ListClock />
+          {t('Queue')}
         </Button>
       }
     >

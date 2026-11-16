@@ -10,6 +10,7 @@ import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal
 import { Alert } from '../../components/alert.tsx';
 import { Confirm } from '../../components/confirm.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
+import { FinishedPanel } from './activity-finished.tsx';
 import { MatchDialog } from './activity-match.tsx';
 import { AttachDialog } from './activity-client.tsx';
 import { ReleasePicker } from './activity-releases.tsx';
@@ -1183,6 +1184,7 @@ function QueueView() {
       <div className="flex items-center gap-3 w-full">
         <Text variant="title">{t('Queue')}</Text>
         <div className="ml-auto flex items-center gap-3">
+          <FinishedPanel />
           <JobsPanel />
           <Button iconOnly disabled={blocked} aria-label={paused ? t('Resume the queue') : t('Pause the queue')} onClick={() => void setPaused(!paused)}>
             {paused ? <Play /> : <Pause />}
