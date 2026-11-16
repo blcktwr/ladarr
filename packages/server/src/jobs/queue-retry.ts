@@ -111,7 +111,11 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: D
   }
 
   return {
-    concurrency: 2,
+    // A retry answers a click: it reads the folder and the client, and it ends at the first phase that resolves the
+    // target. It runs beside the long work of another title, and it takes no slot of the shared limit, so the retry
+    // of one series never waits for the search of another.
+    concurrency: 8,
+    separate: true,
     maxAttempts: 3,
     run: async (job, { signal }) => {
       const { entryIds } = job.payload as { entryIds: string[] };

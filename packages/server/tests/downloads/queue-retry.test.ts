@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
+import { withTitleLock } from '../../src/core/title-lock.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
 let api: Awaited<ReturnType<Awaited<ReturnType<typeof startPipeline>>['api']>> | undefined;
@@ -53,6 +54,42 @@ describe('retry at once', () => {
     retry(entry);
 
     expect(entry.state.kind).toBe('queued');
+  });
+
+  it('does not wait behind the long work of another title', async () => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    // Two retries wait for the lock of their title, as a retry does while a long search of that title runs. They
+    // must not hold the retry of another title back.
+    const release: (() => void)[] = [];
+    try {
+      for (const [index, key] of ['tv:2', 'tv:3'].entries()) {
+        const series = title({ key, tmdbId: index + 2, rootId: 'tv', folder: `Other Show ${index + 2}`, episodes: [episode(1, 1)] });
+        pipe.db.data.titles[key] = series;
+        const entry = pipe.queue.ensure(key, 1, 1);
+        pipe.queue.request(entry, 'test');
+        move(pipe.queue, entry, { stage: 'searching', reason: { code: 'too_many_attempts' } }, 'test');
+        void withTitleLock(key, () => new Promise<void>((resolve) => release.push(resolve)));
+        expect((await api.post('/queue/actions', { action: 'retry', ids: [entry.id] })).status).toBe(200);
+      }
+      await until(() => Object.values(pipe!.db.data.jobs).filter((job) => job.type === 'queue.retry' && job.state === 'running').length === 2);
+
+      const series = title({ rootId: 'tv', folder: 'Show Name (2020)', episodes: [episode(1, 1)] });
+      pipe.db.data.titles[series.key] = series;
+      const folder = join(pipe.folders.tv, 'Show Name (2020)', 'Season 01');
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, 'Show Name - S01E01.mkv'), 'episode-one');
+      const entry = pipe.queue.ensure('tv:1', 1, 1);
+      pipe.queue.request(entry, 'test');
+      move(pipe.queue, entry, { stage: 'searching', reason: { code: 'too_many_attempts' } }, 'test');
+
+      expect((await api.post('/queue/actions', { action: 'retry', ids: ['tv:1:1x1'] })).status).toBe(200);
+      // The file is in its folder, so the retry ends there, beside the two that wait.
+      await until(() => stageOf(entry) === 'available', 5_000);
+    } finally {
+      // The locks of the test must not outlive it, because the next one reads the same titles.
+      for (const resolve of release) resolve();
+    }
   });
 });
 
