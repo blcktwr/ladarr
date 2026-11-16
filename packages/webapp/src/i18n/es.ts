@@ -878,6 +878,7 @@ export const es: Record<string, string> = {
   'The last release had a damaged magnet link.': 'La última versión tenía un enlace magnet dañado.',
   'The last pack did not hold every episode of the season.': 'El último pack no contenía todos los episodios de la temporada.',
   'The download has no file for this target.': 'La descarga no tiene ningún archivo para este objetivo.',
+  'The title folder has a file that names no episode.': 'La carpeta del título tiene un archivo que no indica ningún episodio.',
   'The pack did not hold every episode of the season.': 'El pack no contenía todos los episodios de la temporada.',
   'Search individually': 'Buscar individualmente',
   'This target does not need a search of other seasons.': 'Este objetivo no necesita una búsqueda en otras temporadas.',

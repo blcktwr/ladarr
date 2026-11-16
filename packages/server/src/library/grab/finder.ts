@@ -9,6 +9,8 @@ import { enqueue as enqueueJob, JobError, prioritize, type EnqueueInput, type Jo
 import { isMonitored, movieEligibleAt, type Episode, type Title } from '../library.ts';
 import { catalog, itemFields, titleFields } from '../../core/log.ts';
 import { entryId, isActive, phaseOfEntry, type Queue, type QueueEntry, type ReleaseRef, type SearchState } from '../downloads/queue.ts';
+import { createClients, type Clients } from '../downloads/client-api.ts';
+import { importLocal } from '../imports/local.ts';
 import type { Continuation } from '../parse.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import type { IndexerService, RawRelease, SearchQuery } from './torznab.ts';
@@ -52,6 +54,8 @@ type Deps = {
   queue: Queue;
   indexers: IndexerService;
   enqueue: (input: EnqueueInput) => Job;
+  // The download client, so a torrent that already holds the files of a folder stays with the target.
+  clients?: Clients;
   now?: () => number;
 };
 
@@ -59,7 +63,7 @@ const present = (fileId: string | null) => Boolean(fileId && db.data.files[fileI
 // Ties the log line of a search to the requests that answered it, in the app log and in the request log.
 const newRequestId = () => `req-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 
-export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps) {
+export function createFinder({ queue, indexers, enqueue, clients = createClients(), now = Date.now }: Deps) {
   const cache = new Map<string, { at: number; releases: RawRelease[] }>();
   // Equal queries that run at the same time share one request.
   const inflight = new Map<string, { requestId: string; releases: Promise<RawRelease[]> }>();
@@ -832,6 +836,15 @@ export function createFinder({ queue, indexers, enqueue, now = Date.now }: Deps)
       // The targets that found no file stay where they were. The run queues no search of another season after it ends.
       noResult(open, title, (entry) => all.get(entry.id) ?? [], asked, answered, foundReleases.size, profiles, { partial: true });
       noteSeriesFinished();
+    }
+
+    // The folder of the title is read before any indexer is asked. A series that is on the disk never downloads again.
+    // A root that cannot be read stops its targets here, so they wait instead of downloading a second copy.
+    const local = await importLocal({ queue, clients }, { titleKey: title.key, entryIds: entries.map((entry) => entry.id) });
+    open = open.filter((entry) => entry.state.kind === 'searching' && !local.blocked.includes(entry.id));
+    if (!open.length) {
+      noteSeriesFinished();
+      return;
     }
 
     if (title.mediaType === 'movie') {

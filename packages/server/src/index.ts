@@ -8,7 +8,7 @@ import { createFinder } from './library/grab/finder.ts';
 import { unfinishedImports } from './library/imports/importer.ts';
 import { createLimiter } from './core/limiter.ts';
 import { createPoller } from './library/downloads/poller.ts';
-import { createQueue } from './library/downloads/queue.ts';
+import { createQueue, isActive, phaseOfEntry } from './library/downloads/queue.ts';
 import { createRetry } from './library/downloads/queue-api.ts';
 import { createIndexerService } from './library/grab/torznab.ts';
 import { SCHEMA_VERSION, createSaver, db, open } from './core/db.ts';
@@ -59,7 +59,7 @@ const webhooks = createWebhooks({
 const queue = createQueue(events, persist, webhooks.onState);
 const limiter = createLimiter(persist);
 const indexers = createIndexerService(limiter, {}, persist);
-const finder = createFinder({ queue, indexers, enqueue: (input) => worker.enqueue(input) });
+const finder = createFinder({ queue, indexers, enqueue: (input) => worker.enqueue(input), clients });
 const poller = createPoller({ queue, events, clients, enqueue: (input) => worker.enqueue(input) });
 const importStatus = createImportStatus(events);
 const worker = createWorker(
@@ -70,6 +70,9 @@ worker.start();
 poller.start();
 // An import that stopped in the middle runs again. Its journal says where to go on.
 for (const hash of unfinishedImports()) worker.enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
+// A local import has no journal. A target that stopped in one has no torrent to resume, so the folder is read again.
+const local = new Set(Object.values(db.data.queue).filter((entry) => !entry.transferHash && isActive(entry) && phaseOfEntry(entry) === 'importing').map((entry) => entry.titleKey));
+for (const titleKey of local) worker.enqueue({ type: 'import.local', payload: { titleKey }, dedupeKey: `local:${titleKey}` });
 
 const restorer = createRestorer({ dir: config.backupDir, worker });
 const services = { queue, finder, poller, clients, importStatus };

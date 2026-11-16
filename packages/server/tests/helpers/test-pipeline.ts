@@ -10,6 +10,7 @@ import { createImportStatus } from '../../src/library/imports/status.ts';
 import { createImporter } from '../../src/library/imports/importer.ts';
 import { importRunHandler } from '../../src/jobs/import-run.ts';
 import { importResumeHandler } from '../../src/jobs/import-resume.ts';
+import { importLocalHandler } from '../../src/jobs/import-local.ts';
 import { queueGrabHandler } from '../../src/jobs/queue-grab.ts';
 import { queueRetryHandler } from '../../src/jobs/queue-retry.ts';
 import { queueSearchHandler } from '../../src/jobs/queue-search.ts';
@@ -160,6 +161,7 @@ export async function startPipeline(options: Options = {}) {
       checkDelayMs: options.checkDelayMs ?? 0,
     }),
     'import.resume': importResumeHandler(),
+    'import.local': importLocalHandler({ queue, clients }),
     ...options.handlers?.({ db, events, queue, finder }),
   };
   real = createWorker(save, handlers, { tickMs: 15 });

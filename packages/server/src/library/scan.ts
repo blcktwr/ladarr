@@ -3,7 +3,9 @@ import { readdir, realpath, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { type Db, type MediaFile, db } from '../core/db.ts';
 import { filesVersion } from './tools/remove.ts';
-import { isSample, isVideoFile, parseEpisodes } from './parse.ts';
+import type { Title } from './library.ts';
+import { folderName } from './naming.ts';
+import { isSample, isVideoFile, parseEpisodes, type ParsedEpisodes } from './parse.ts';
 import { checkRoot } from './roots.ts';
 
 export type ScanResult = {
@@ -22,6 +24,11 @@ export type ScanResult = {
   extraFiles: string[];
 };
 
+// A video file of the folder of a title, and what its name says. The scan, the local import, and the choice of a file
+// for a target all read the folder through it.
+export type InventoryFile = { path: string; sizeBytes: number; mtimeMs: number; parsed: ParsedEpisodes | undefined };
+export type FolderInventory = { status: 'ok' | 'no_folder' | 'root_unavailable' | 'folder_missing'; rootReal: string | null; files: InventoryFile[] };
+
 export const scanJob = (key: string) => ({ type: 'library.scan', payload: { key }, dedupeKey: `scan:${key}` });
 
 const MAX_DEPTH = 6;
@@ -31,6 +38,7 @@ const MAX_FILES = 5_000;
 const UNTRUSTED = ['not_found', 'not_directory', 'not_readable', 'mount_changed'];
 
 const empty = (status: ScanResult['status']): ScanResult => ({ status, added: 0, updated: 0, missing: 0, unmatched: [], duplicates: [], unknownEpisodes: [], extraFiles: [] });
+const inventory = (status: FolderInventory['status']): FolderInventory => ({ status, rootReal: null, files: [] });
 const inside = (parent: string, child: string) => {
   const rel = relative(parent, child);
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !rel.startsWith(sep));
@@ -62,6 +70,31 @@ async function findVideos(folder: string, rootReal: string): Promise<Found[]> {
   return found;
 }
 
+// Reads the folder of a title and parses the names of its files. It writes nothing, so a search can read the folder
+// before it asks the indexers. `guessedFolder` uses the name that a new folder of the title would have, for a title
+// that has none yet.
+export async function readTitleFolder(title: Title, { guessedFolder = false }: { guessedFolder?: boolean } = {}): Promise<FolderInventory> {
+  const root = db.data.roots[title.rootId];
+  const folder = title.folder ?? (guessedFolder ? folderName(title) : null);
+  if (!root || !folder) return inventory('no_folder');
+
+  // A root that cannot be trusted says nothing about the files of the title, so nothing reads as missing.
+  const health = await checkRoot(root.path, root.dev);
+  if (health.problems.some((problem) => UNTRUSTED.includes(problem))) return inventory('root_unavailable');
+
+  const rootReal = await realpath(root.path).catch(() => undefined);
+  if (!rootReal) return inventory('root_unavailable');
+  const path = join(rootReal, folder);
+  const real = await realpath(path).catch(() => undefined);
+  // The folder name is data from outside. It must stay inside the root.
+  if (!inside(rootReal, path) || (real && !inside(rootReal, real))) return inventory('no_folder');
+
+  const isDirectory = real ? (await stat(real).catch(() => undefined))?.isDirectory() : false;
+  if (!isDirectory) return { ...inventory('folder_missing'), rootReal };
+  const files = await findVideos(real!, rootReal);
+  return { status: 'ok', rootReal, files: files.map((file) => ({ ...file, parsed: parseEpisodes(file.path) })) };
+}
+
 // Looks at the folder of a title and updates the file records. It only reads the disk.
 // It never deletes a file, a title or an episode. A file that is gone is marked missing, and only when the root is healthy.
 export async function scanTitle(key: string): Promise<ScanResult> {
@@ -70,17 +103,9 @@ export async function scanTitle(key: string): Promise<ScanResult> {
   if (!title || !root || !title.folder) return empty('no_folder');
   const version = filesVersion(key);
 
-  const health = await checkRoot(root.path, root.dev);
-  if (health.problems.some((problem) => UNTRUSTED.includes(problem))) return empty('root_unavailable');
-
-  const rootReal = await realpath(root.path);
-  const folder = join(rootReal, title.folder);
-  const folderReal = await realpath(folder).catch(() => undefined);
-  // The folder name is data from outside. It must stay inside the root.
-  if (!inside(rootReal, folder) || (folderReal && !inside(rootReal, folderReal))) return empty('no_folder');
-
-  const isDirectory = folderReal ? (await stat(folderReal).catch(() => undefined))?.isDirectory() : false;
-  const videos = isDirectory ? await findVideos(folderReal!, rootReal) : [];
+  const folder = await readTitleFolder(title);
+  if (folder.status === 'root_unavailable') return empty('root_unavailable');
+  if (folder.status === 'no_folder') return empty('no_folder');
 
   // The user can remove the title while the scan reads the disk. A file record must not outlive its title.
   if (db.data.titles[key] !== title) return empty('no_folder');
@@ -88,13 +113,16 @@ export async function scanTitle(key: string): Promise<ScanResult> {
   if (filesVersion(key) !== version) return empty('changed');
 
   // No await from here on, so the changes land in one step.
-  const result = empty(isDirectory ? 'ok' : 'folder_missing');
+  const result = empty(folder.status === 'ok' ? 'ok' : 'folder_missing');
+  const videos = folder.files;
   const mine = Object.values(db.data.files).filter((file) => file.titleKey === key);
   const byPath = new Map(mine.map((file) => [file.path, file]));
-  const seen = new Set<string>();
+  // A recorded file that is still on the disk is not missing, also when its name gives no episode. A name that the
+  // user matched to an episode must not take the file from it.
+  const seen = new Set<string>(videos.map((found) => found.path));
   const now = Date.now();
 
-  const record = (found: Found, episodes: MediaFile['episodes']): MediaFile => {
+  const record = (found: InventoryFile, episodes: MediaFile['episodes']): MediaFile => {
     let file = byPath.get(found.path);
     if (file) {
       file.sizeBytes = found.sizeBytes;
@@ -108,7 +136,6 @@ export async function scanTitle(key: string): Promise<ScanResult> {
       byPath.set(file.path, file);
       result.added++;
     }
-    seen.add(file.path);
     return file;
   };
 
@@ -131,7 +158,7 @@ export async function scanTitle(key: string): Promise<ScanResult> {
   } else {
     for (const found of videos) {
       // The folder of the file can name the season: "Season 02/Berserk E01.mkv".
-      const parsed = parseEpisodes(found.path);
+      const parsed = found.parsed;
       if (!parsed) {
         result.unmatched.push(found.path);
         continue;
@@ -179,4 +206,3 @@ export async function scanTitle(key: string): Promise<ScanResult> {
   }
   return result;
 }
-

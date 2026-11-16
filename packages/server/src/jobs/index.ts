@@ -11,6 +11,7 @@ import type { Tmdb } from '../metadata/tmdb.ts';
 import { backupAutoHandler } from './backup-auto.ts';
 import { importResumeHandler } from './import-resume.ts';
 import { importRunHandler } from './import-run.ts';
+import { importLocalHandler } from './import-local.ts';
 import { libraryScanHandler } from './library-scan.ts';
 import { librarySearchHandler } from './library-search.ts';
 import { libraryVerifyHandler } from './library-verify.ts';
@@ -55,6 +56,7 @@ export function jobHandlers({ backupDir, events, save, tmdb, enqueue, clients, q
     'queue.retry': queueRetryHandler({ queue, finder, clients, enqueue, events }),
     'import.run': importRunHandler({ queue, events, clients, save, status: importStatus, partial: finder.partial }),
     'import.resume': importResumeHandler(),
+    'import.local': importLocalHandler({ queue, clients }),
     ...webhookDeliverHandler({}),
   };
 }
