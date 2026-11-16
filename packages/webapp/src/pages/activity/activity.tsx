@@ -151,7 +151,7 @@ function OtherSeasonsFix({ titleKey, season, run }: { titleKey: string; season: 
         }
       }}
     >
-      {t('Search other seasons')}
+      {t('Search individually')}
     </Button>
   );
 }
@@ -944,7 +944,7 @@ const actionLabel: Record<QueueActionName, string> = {
   unpriority: 'Delete priority from',
   remove_torrent: 'Delete the torrent of',
   replace: 'Replace',
-  search_other_seasons: 'Search other seasons',
+  search_other_seasons: 'Search individually',
 };
 
 // A text for a screen reader that changes at most once in a while, so a burst of changes reads as one message.

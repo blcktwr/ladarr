@@ -31,7 +31,7 @@ test('offers the search of the other seasons on the card of the season', async (
   const main = page.getByRole('main');
   // The card says why the episode waits, and it starts the search of the other seasons of the releases.
   await expect(main.getByText('The pack did not hold every episode of the season.')).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Search other seasons' })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Search individually' })).toBeVisible();
   // The retry of the season comes from the menu of the three points, not from the card.
   await expect(main.getByRole('button', { name: 'Try again', exact: true })).toBeHidden();
 });

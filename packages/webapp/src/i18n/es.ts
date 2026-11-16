@@ -879,7 +879,7 @@ export const es: Record<string, string> = {
   'The last pack did not hold every episode of the season.': 'El último pack no contenía todos los episodios de la temporada.',
   'The download has no file for this target.': 'La descarga no tiene ningún archivo para este objetivo.',
   'The pack did not hold every episode of the season.': 'El pack no contenía todos los episodios de la temporada.',
-  'Search other seasons': 'Buscar en otras temporadas',
+  'Search individually': 'Buscar individualmente',
   'This target does not need a search of other seasons.': 'Este objetivo no necesita una búsqueda en otras temporadas.',
   'A file with this name is in the library folder already. It is not replaced.': 'Ya hay un archivo con este nombre en la carpeta de la biblioteca. No se reemplaza.',
   'The destination is outside the library folder.': 'El destino está fuera de la carpeta de la biblioteca.',
