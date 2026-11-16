@@ -848,8 +848,9 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       const counts: number[] = [];
       // The season queries come first. They give the packs, the singles, and the number of releases of each name,
       // which selects the name of the individual queries. A catalog season can be the release season itself and one or
-      // more other release seasons, so each of them gets a query.
-      if (!manual && season !== null && open.length > 1 && resume?.phase !== 'absolute') {
+      // more other release seasons, so each of them gets a query. A manual search of one target keeps its own query: a
+      // pack would cover targets that the user did not ask for.
+      if (season !== null && open.length > 1 && resume?.phase !== 'absolute') {
         for (const releaseSeason of releaseSeasons(numbering, season)) {
           for (const [nameIndex, name] of names.entries()) {
             const group = open;

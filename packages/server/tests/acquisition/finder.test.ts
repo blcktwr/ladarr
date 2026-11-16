@@ -208,6 +208,21 @@ describe('the sweep', () => {
   });
 });
 
+describe('manual search', () => {
+  it('searches the season pack when the user asks for several episodes of a season', async () => {
+    pipe = await startPipeline();
+    const series = title({ rootId: 'tv', episodes: [1, 2, 3].map((n) => episode(1, n, '2020-01-01')) });
+    pipe.db.data.titles[series.key] = series;
+    pipe.tracker.state.items = [{ title: 'Show.Name.S01.1080p.WEB-DL-GRP', size: 3 * 60 * 45 * MIB }];
+
+    const entries = pipe.finder.requestSearch(series.key, { season: 1, manual: true, fresh: true });
+    await until(() => entries.every((entry) => stageOf(entry) === 'downloading'));
+    // The pack covers every episode, so the run asks for the season and no episode needs its own query.
+    expect(pipe.tracker.state.searches.filter((url) => url.searchParams.get('t') !== 'caps').map((url) => url.searchParams.get('ep'))).toEqual([null]);
+    expect(pipe.qbit.torrents.size).toBe(1);
+  });
+});
+
 describe('the next search', () => {
   type Payload = { titleKey: string; season: number | null; entryIds: string[] };
   const searchJobs = () => Object.values(pipe!.db.data.jobs).filter((job) => job.type === 'queue.search');
