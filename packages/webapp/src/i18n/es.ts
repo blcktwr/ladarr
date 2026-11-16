@@ -388,7 +388,7 @@ export const es: Record<string, string> = {
   'Enter categories as numbers.': 'Ingresa las categorías como números.',
   'Connected to the indexer.': 'Conectado al indexador.',
   'About the delay': 'Sobre el retraso',
-  'Delay requests': 'Retraso entre solicitudes',
+  'Delay requests': 'Intervalo',
   'sec': 'seg',
   'Torznab': 'Torznab',
   'Newznab': 'Newznab',
