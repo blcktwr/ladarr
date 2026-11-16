@@ -205,7 +205,7 @@ function UpgradeDialog({ titleKey, qualities, error }: { titleKey: string; quali
       title={t('Search for upgrades')}
       trigger={
         <span title={empty ? t('You already have the latest quality.') : undefined}>
-          <Button variant="ghost" disabled={empty}>
+          <Button variant="primary" disabled={empty}>
             {t('Upgrade')}
           </Button>
         </span>
