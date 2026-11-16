@@ -398,7 +398,7 @@ export const es: Record<string, string> = {
   'Enter lowercase language codes, such as en or ja.': 'Ingresa códigos de idioma en minúsculas, como en o ja.',
   'Edit an indexer': 'Editar un indexador',
   'Enter the address of the indexer, with no user name or password in it.': 'Ingresa la dirección del indexador, sin usuario ni contraseña.',
-  'Interactive search': 'Búsqueda interactiva',
+  'Manual search': 'Búsqueda manual',
   'Priority': 'Prioridad',
   'RSS': 'RSS',
   'The address is not a Torznab indexer.': 'La dirección no es un indexador Torznab.',

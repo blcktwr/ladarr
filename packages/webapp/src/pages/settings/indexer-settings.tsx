@@ -213,7 +213,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
           <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-3 gap-3 justify-items-start w-full">
             <Checkbox label={t('RSS')} checked={draft.enableRss} onCheckedChange={(enableRss) => set({ enableRss })} />
             <Checkbox label={t('Automatic search')} checked={draft.enableAutomaticSearch} onCheckedChange={(enableAutomaticSearch) => set({ enableAutomaticSearch })} />
-            <Checkbox label={t('Interactive search')} checked={draft.enableInteractiveSearch} onCheckedChange={(enableInteractiveSearch) => set({ enableInteractiveSearch })} />
+            <Checkbox label={t('Manual search')} checked={draft.enableInteractiveSearch} onCheckedChange={(enableInteractiveSearch) => set({ enableInteractiveSearch })} />
           </div>
         )}
         <div className="grid grid-cols-[minmax(0,1fr)] gap-3 justify-items-start w-full">
