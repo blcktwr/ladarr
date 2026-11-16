@@ -201,12 +201,14 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   await expect(indexer.getByRole('button', { name: 'Add', exact: true })).toBeDisabled();
   await indexer.getByRole('button', { name: 'Test connection' }).click();
   await expect(indexer.getByRole('button', { name: 'Add', exact: true })).toBeEnabled();
-  // A change to a field makes the result stale, so Add waits for a new test.
+  // Only the address and the key make the result stale. The other fields keep it.
   await indexer.getByLabel(/^Name/).fill('Manual 2');
+  await expect(indexer.getByRole('button', { name: 'Add', exact: true })).toBeEnabled();
+  await indexer.getByLabel('Address').fill(`http://127.0.0.1:${stack.tracker.port}/3/`);
   await expect(indexer.getByRole('button', { name: 'Add', exact: true })).toBeDisabled();
-  await indexer.getByLabel(/^Name/).fill('Manual');
   await indexer.getByRole('button', { name: 'Test connection' }).click();
   await expect(indexer.getByRole('button', { name: 'Add', exact: true })).toBeEnabled();
+  await indexer.getByLabel(/^Name/).fill('Manual');
   await expect(indexer.getByText('Connected')).toBeVisible();
   // The test saves nothing.
   expect((await (await page.request.get(`${URL_BASE}/api/indexers`)).json()).indexers).toEqual([]);
@@ -219,11 +221,8 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   // The form shows the saved key.
   await expect(editIndexer.getByLabel('API key')).toHaveValue('indexer-key');
   await editIndexer.getByLabel(/^Name/).fill('Renamed');
-  await editIndexer.getByRole('checkbox', { name: 'Interactive search' }).click();
-  // An edit also waits for a test, because the indexer lists the categories that it has.
-  await expect(editIndexer.getByRole('button', { name: 'Save' })).toBeDisabled();
-  await editIndexer.getByRole('button', { name: 'Test connection' }).click();
-  await expect(editIndexer.getByText('Connected')).toBeVisible();
+  await editIndexer.getByRole('checkbox', { name: 'Manual search' }).click();
+  // An edit saves without a test while the address and the key stay as they are.
   await expect(editIndexer.getByRole('button', { name: 'Save' })).toBeEnabled();
   await editIndexer.getByRole('button', { name: 'Save' }).click();
   await expect(editIndexer).toBeHidden();

@@ -53,16 +53,6 @@ describe('settings', () => {
     }
   });
 
-  it('offers the languages of the aliases of every title', async () => {
-    const aliased = (tmdbId: number, aliasRegions: Record<string, string[]>) =>
-      movie({ key: `movie:${tmdbId}`, tmdbId, meta: { ...movie().meta, tmdbId, aliasRegions } });
-    app.db.data.titles['movie:901'] = aliased(901, { 'Alias MA': ['MA'], 'Alias TH': ['TH'], 'Alias FR': ['FR'] });
-    expect((await app.get('/settings')).body.aliasLanguageOptions).toEqual(['ar', 'fr', 'th']);
-
-    app.db.data.titles['movie:902'] = aliased(902, { 'Alias JP': ['JP'] });
-    expect((await app.get('/settings')).body.aliasLanguageOptions).toEqual(['ar', 'fr', 'ja', 'th']);
-  });
-
   it('saves valid changes', async () => {
     const changes = { language: 'es', theme: 'light', audio: { language: 'es', strict: true }, keepQueueLogs: false };
     expect((await app.patch('/settings', changes)).status).toBe(200);

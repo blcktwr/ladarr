@@ -1,4 +1,4 @@
-import type { IndexerRow, IndexerTestResult, SettingsResponse } from '@ladarr/shared/types';
+import type { IndexerRow, IndexerTestResult } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { useEffect, useId, useMemo, useState, type ReactElement } from 'react';
@@ -6,8 +6,9 @@ import { ActionMenu, Button, Checkbox, Confirm, Dropdown, EmptyState, Field, For
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { api, ApiError } from '../../lib/api.ts';
-import { getLanguage, t } from '../../i18n/index.ts';
+import { t, useLanguage } from '../../i18n/index.ts';
 import { useLive } from '../../lib/live.ts';
+import { languages } from '../../lib/languages.ts';
 
 const testText = (test: IndexerTestResult) =>
   test.ok
@@ -74,27 +75,28 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
   const [pending, setPending] = useState<'test' | 'save' | null>(null);
   // The list does not hold the key, so the form asks for the key of the indexer that it edits.
   const saved = useQuery<{ apiKey: string }>({ queryKey: [`/indexers/${indexer?.id}/key`], enabled: editing && !managed, gcTime: 0 });
-  const settings = useQuery<SettingsResponse>({ queryKey: ['/settings'] });
-  const language = settings.data?.settings.language;
-  const languageNames = useMemo(() => new Intl.DisplayNames([language ?? getLanguage()], { type: 'language' }), [language]);
-  // A value that Intl does not read as a language tag stays as it is. One bad value does not break the form.
-  const languageLabel = (value: string) => {
-    try {
-      return languageNames.of(value) ?? value;
-    } catch {
-      return value;
-    }
-  };
-  const languageOptions = (settings.data?.aliasLanguageOptions ?? []).map((value) => ({ value, label: languageLabel(value) }));
+  const language = useLanguage();
+  const languageOptions = useMemo(
+    () =>
+      languages
+        .map(({ value, name }) => ({ value, label: t(name) }))
+        .sort((a, b) => a.label.localeCompare(b.label, language)),
+    [language],
+  );
   useEffect(() => {
     if (saved.data) setDraft((current) => (current.apiKey ? current : { ...current, apiKey: saved.data.apiKey }));
   }, [saved.data]);
   const set = (changes: Partial<Draft>) => {
     setDraft({ ...draft, ...changes });
     setErrors({});
-    setResult(null);
+    // The address and the key are what the test asks. A change to any other field keeps a test that worked.
+    if (changes.baseUrl !== undefined || changes.apiKey !== undefined) setResult(null);
     setCategoriesUpdated(false);
   };
+
+  // A test is needed only when the address or the key changes, or when the indexer is new.
+  const connectionChanged = !editing || draft.baseUrl !== indexer!.baseUrl || (draft.apiKey !== '' && draft.apiKey !== saved.data?.apiKey);
+  const needsTest = !managed && connectionChanged;
 
   const messages: Record<string, string> = {
     name: t('Enter a name.'),
@@ -106,8 +108,8 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
   };
 
   async function run(action: 'test' | 'save') {
-    // The indexer is saved only after a test that worked, also when the form edits one. A field that changes drops the result, so the test must run again.
-    if (action === 'save' && !managed && !result?.ok) return;
+    // The indexer is saved only after a test that worked, when the address or the key changed.
+    if (action === 'save' && needsTest && !result?.ok) return;
     const seconds = delayOf(draft.delay);
     if (!delayValid(seconds)) return setErrors({ delaySeconds: messages.delaySeconds! });
     setPending(action);
@@ -163,7 +165,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
               </Button>
             </>
           )}
-          <Button type="submit" form={formId} pending={pending === 'save'} disabled={pending === 'test' || (!managed && !result?.ok)}>
+          <Button type="submit" form={formId} pending={pending === 'save'} disabled={pending === 'test' || (needsTest && !result?.ok)}>
             {editing ? t('Save') : t('Add')}
           </Button>
         </>

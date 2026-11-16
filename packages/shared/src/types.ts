@@ -308,8 +308,6 @@ export type SettingsResponse = {
   settings: SettingsData;
   presets: PresetRow[];
   qualityTableVersion: number;
-  // The language codes of the aliases of every title, for the tag input of the indexer settings.
-  aliasLanguageOptions: string[];
 };
 
 export type SettingsSaved = { settings: SettingsData };
