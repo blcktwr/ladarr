@@ -1279,7 +1279,9 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   const MAX_ATTEMPTS = 3;
 
   // The episodes that the pack lacks, in the log line that records it. The reason alone does not say which one was missing.
-  const packDetail = (missing: QueueEntry[], files: number) => ({ files, missing: missing.map((entry) => `${entry.season}x${entry.number}`) });
+  // Each lacking target writes this line, so the list holds the first episodes only: a full list makes the log grow with the square of the pack.
+  const MAX_LISTED = 20;
+  const packDetail = (missing: QueueEntry[], files: number) => ({ files, missingCount: missing.length, missing: missing.slice(0, MAX_LISTED).map((entry) => `${entry.season}x${entry.number}`) });
 
   // Known file coverage keeps an unsuitable pack out of later searches. Unknown coverage does not establish absence.
   function partial(entries: QueueEntry[], missing: QueueEntry[], { files, releaseSeason, numbers }: { files: number; releaseSeason?: number | null; numbers?: number[] }) {
@@ -1313,9 +1315,10 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
         };
       }
     }
+    const detail = packDetail(missing, files);
     for (const entry of missing) {
       if (entry.state.kind === 'blocked' || entry.state.kind === 'paused' || !isActive(entry)) continue;
-      catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: pack_partial`, itemFields(entry), { code: 'pack_partial', release: entry.release?.title ?? null, ...packDetail(missing, files) });
+      catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: pack_partial`, itemFields(entry), { code: 'pack_partial', release: entry.release?.title ?? null, ...detail });
       queue.endAttempt(entry, 'failed', 'pack_partial');
       // The files of the pack say which season of the releases it is, so the manual search starts from that season.
       if (releaseSeason !== undefined) entry.partialPack = { releaseSeason, numbers: numbers ?? [] };
