@@ -89,15 +89,22 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
     const progress: Record<string, number> = {};
     const found: Record<string, { name: string; sizeBytes: number }> = {};
     const title = db.data.titles[entries[0]!.titleKey];
+    // A file reads the same for every target with the same numbering, and a pack has one target for each file.
+    // The key is the content of the numbering, because each target has its own copy of it.
+    const readings = new Map<string, Map<string, ReturnType<typeof releaseEpisodes>>>();
     for (const entry of entries) {
       const manual = entry.manualMatch?.file;
+      const numbering = entry.numbering ?? title?.numbering ?? null;
+      const numberingKey = JSON.stringify(numbering);
+      const read = readings.get(numberingKey) ?? readings.set(numberingKey, new Map()).get(numberingKey)!;
       const file =
         entry.number === null && !manual
           ? [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)[0]
           : files.find((item) => {
               if (manual) return item.name === manual || item.name.endsWith(`/${manual}`);
               // The whole name of the file, so a folder that names the season is read.
-              const parsed = releaseEpisodes(item.name, title?.episodes ?? [], entry.numbering ?? title?.numbering ?? null, null, title?.meta.title ?? null);
+              if (!read.has(item.name)) read.set(item.name, releaseEpisodes(item.name, title?.episodes ?? [], numbering, null, title?.meta.title ?? null));
+              const parsed = read.get(item.name);
               return entry.number !== null && parsed?.season === entry.season && parsed.numbers.includes(entry.number);
             });
       if (file) {
