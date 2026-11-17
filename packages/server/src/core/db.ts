@@ -220,8 +220,9 @@ class SplitJSONFile implements Adapter<Data> {
   }
   async write(data: Data): Promise<void> {
     // The queue first: if the second write fails, the old app data still matches the queue on the disk.
-    await this.#queue.write(JSON.stringify(queueDataOf(data), null, 2));
-    await this.#app.write(JSON.stringify(appDataOf(data), null, 2));
+    // No indentation: it makes the files 40 % bigger, and each write holds the whole text in memory.
+    await this.#queue.write(JSON.stringify(queueDataOf(data)));
+    await this.#app.write(JSON.stringify(appDataOf(data)));
   }
 }
 
