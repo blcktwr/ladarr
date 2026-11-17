@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { emptyData, withDefaults } from '../../src/core/db.ts';
 import { decide } from '../../src/library/grab/decide.ts';
 import { stageOf } from '../../src/library/downloads/queue.ts';
+import { entryOf } from '../helpers/test-queue.ts';
 import { releaseEpisodes } from '../../src/library/parse.ts';
 import { episode, indexer, release, title } from '../helpers/test-fixtures.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
@@ -135,5 +138,162 @@ describe('the numbering of a title', () => {
 
     expect(next.titles[item.key]!.numbering).toEqual({ revision: 0, ranges: [] });
     expect(next.titles[item.key]!.numbering!.ranges).toEqual([]);
+  });
+});
+
+describe('apply numbering to selected acquisitions', () => {
+  async function blocked() {
+    pipe = await startPipeline();
+    await pipe.worker.pause();
+    pipe.poller.stop();
+    api = await pipe.api();
+    const item = title({ rootId: 'tv', episodes: range(1, 23).map((number) => episode(1, number)), numbering: numbering([], 0) });
+    pipe.db.data.titles[item.key] = item;
+    const hash = hashOf('Show.Name.S02.1080p.WEB-DL-GRP');
+    const entries = [13, 14].map((number) => entryOf({
+      id: `tv:1:1x${number}`, titleKey: item.key, season: 1, number,
+      stage: 'importing', reason: { code: 'numbering_required' },
+      numbering: numbering([], 0), transferHash: hash, clientId: 'client-1',
+    }));
+    for (const entry of entries) pipe.db.data.queue[entry.id] = entry;
+    pipe.qbit.torrents.set(hash, {
+      hash, name: 'Show.Name.S02.1080p.WEB-DL-GRP', size: 1_000, progress: 1, state: 'uploading',
+      category: 'ladarr', tags: '', save_path: pipe.folders.downloads, content_path: pipe.folders.downloads,
+      dlspeed: 0, eta: 0, num_seeds: 1, num_leechs: 0, added_on: 1,
+    });
+    pipe.qbit.setFiles(hash, [{ name: 'Show.Name.S02E01.mkv', size: 1_000, progress: 1 }]);
+    return { item, selected: entries[0]!, sibling: entries[1]! };
+  }
+
+  it('saves a map without a search, a job, or an acquisition snapshot change', async () => {
+    const { item, selected, sibling } = await blocked();
+    const before = structuredClone(pipe!.db.data.queue);
+    const jobs = structuredClone(pipe!.db.data.jobs);
+
+    expect((await api!.patch(`/library/${item.key}`, { numbering: numbering([RANGE], 0) })).status).toBe(200);
+
+    expect(item.numbering).toEqual(numbering());
+    expect(selected.numbering).toEqual(numbering([], 0));
+    expect(sibling.numbering).toEqual(numbering([], 0));
+    expect(pipe!.db.data.queue).toEqual(before);
+    expect(pipe!.db.data.jobs).toEqual(jobs);
+    expect(pipe!.tracker.state.searches).toEqual([]);
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+  });
+
+  it('previews and updates only the selected acquisition snapshot before import', async () => {
+    const { item, selected, sibling } = await blocked();
+    await api!.patch(`/library/${item.key}`, { numbering: numbering([RANGE], 0) });
+    const siblingBefore = structuredClone(sibling);
+    const body = { action: 'apply_numbering', ids: [selected.id] };
+    const jobs = structuredClone(pipe!.db.data.jobs);
+
+    const preview = await api!.post('/queue/actions', { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    expect(preview.body.affected.map((entry: { id: string }) => entry.id)).toEqual([selected.id]);
+    expect(selected.numbering).toEqual(numbering([], 0));
+    expect(pipe!.db.data.jobs).toEqual(jobs);
+
+    const applied = await api!.post('/queue/actions', { ...preview.body, ...body });
+    expect(applied.status).toBe(200);
+    expect(selected.numbering).toEqual(numbering());
+    expect(selected.state).toEqual({ kind: 'importing' });
+    expect(sibling).toEqual(siblingBefore);
+    expect(pipe!.tracker.state.searches).toEqual([]);
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+    expect(Object.values(pipe!.db.data.jobs).some((job) => ['queue.search', 'queue.grab', 'queue.send'].includes(job.type))).toBe(false);
+  });
+
+  it('applies numbering to a selected local source through import without a search', async () => {
+    pipe = await startPipeline();
+    await pipe.worker.pause();
+    pipe.poller.stop();
+    api = await pipe.api();
+    const item = title({
+      rootId: 'tv', folder: 'Show Name (2020)', episodes: [episode(1, 21), episode(1, 22)], numbering: numbering([], 0),
+    });
+    pipe.db.data.titles[item.key] = item;
+    const folder = join(pipe.folders.tv, item.folder!, 'Season 01');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'Show.Name.S01E01.mkv'), 'episode-twenty-one');
+    writeFileSync(join(folder, 'Show.Name.S01E02.mkv'), 'episode-twenty-two');
+    const entries = [21, 22].map((number) => entryOf({
+      id: `tv:1:1x${number}`, titleKey: item.key, season: 1, number,
+      stage: 'importing', reason: { code: 'numbering_required' }, numbering: numbering([], 0),
+      transferHash: null, clientId: null, source: null, release: null,
+    }));
+    for (const entry of entries) pipe.db.data.queue[entry.id] = entry;
+    const [selected, sibling] = entries as [QueueEntry, QueueEntry];
+    const before = structuredClone({ queue: pipe.db.data.queue, jobs: pipe.db.data.jobs });
+    const saved = numbering([{ season: 1, from: 21, to: 22, releaseSeason: 1, releaseFrom: 1 }], 0);
+
+    expect((await api.patch(`/library/${item.key}`, { numbering: saved })).status).toBe(200);
+    expect({ queue: pipe.db.data.queue, jobs: pipe.db.data.jobs }).toEqual(before);
+    const siblingBefore = structuredClone(sibling);
+    const body = { action: 'apply_numbering', ids: [selected.id] };
+    const preview = await api.post('/queue/actions', { ...body, preview: true });
+
+    expect(preview.status).toBe(200);
+    expect(preview.body.version).toEqual(expect.any(String));
+    expect(preview.body.numbering).toEqual([
+      expect.objectContaining({ id: selected.id, phase: 'importing', from: numbering([], 0), to: { ...saved, revision: 1 } }),
+    ]);
+    expect({ queue: pipe.db.data.queue, jobs: pipe.db.data.jobs }).toEqual(before);
+
+    const applied = await api.post('/queue/actions', { ...preview.body, ...body });
+
+    expect(applied.status).toBe(200);
+    expect(selected.state).toEqual({ kind: 'importing' });
+    expect(selected.numbering).toEqual({ ...saved, revision: 1 });
+    expect(sibling).toEqual(siblingBefore);
+    const local = Object.values(pipe.db.data.jobs).filter((job) => job.type === 'import.local');
+    expect(local).toHaveLength(1);
+    expect(local[0]!.payload).toEqual({ titleKey: item.key, entryIds: [selected.id], localOnly: true });
+    expect(Object.values(pipe.db.data.jobs).some((job) => ['queue.search', 'queue.grab', 'queue.send', 'import.run'].includes(job.type))).toBe(false);
+    expect(pipe.tracker.state.searches).toEqual([]);
+    expect(pipe.tracker.state.downloads).toEqual([]);
+    expect(pipe.qbit.torrents.size).toBe(0);
+  });
+
+  it('requires a preview before an acquisition map change and changes no data', async () => {
+    const { item, selected } = await blocked();
+    await api!.patch(`/library/${item.key}`, { numbering: numbering([RANGE], 0) });
+    const before = structuredClone({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs, files: pipe!.db.data.files });
+
+    const applied = await api!.post('/queue/actions', { action: 'apply_numbering', ids: [selected.id] });
+
+    expect(applied.status).toBe(409);
+    expect(applied.body.error).toBe('preview_required');
+    expect({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs, files: pipe!.db.data.files }).toEqual(before);
+  });
+
+  it('rejects the preview after the saved map changes and changes no acquisition', async () => {
+    const { item, selected } = await blocked();
+    await api!.patch(`/library/${item.key}`, { numbering: numbering([RANGE], 0) });
+    const body = { action: 'apply_numbering', ids: [selected.id] };
+    const preview = await api!.post('/queue/actions', { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    await api!.patch(`/library/${item.key}`, { numbering: numbering([{ ...RANGE, releaseSeason: 3 }], 1) });
+    const before = structuredClone({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs });
+
+    const applied = await api!.post('/queue/actions', { ...preview.body, ...body });
+
+    expect(applied.status).toBe(409);
+    expect({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs }).toEqual(before);
+  });
+
+  it('rejects a preview for a different selection', async () => {
+    const { item, selected, sibling } = await blocked();
+    await api!.patch(`/library/${item.key}`, { numbering: numbering([RANGE], 0) });
+    const preview = await api!.post('/queue/actions', { action: 'apply_numbering', ids: [selected.id], preview: true });
+    expect(preview.status).toBe(200);
+    const before = structuredClone({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs });
+
+    const applied = await api!.post('/queue/actions', {
+      ...preview.body, action: 'apply_numbering', ids: [selected.id, sibling.id],
+    });
+
+    expect(applied.status).toBe(409);
+    expect({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs }).toEqual(before);
   });
 });

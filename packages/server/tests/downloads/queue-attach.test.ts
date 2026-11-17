@@ -1,6 +1,7 @@
-import { move, branchOf } from '../helpers/test-queue.ts';
+import { move, branchOf, entryOf } from '../helpers/test-queue.ts';
 import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
 import { join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
@@ -16,6 +17,12 @@ afterEach(async () => {
 const aired = (n: number) => episode(1, n, '2020-01-0' + n);
 const NAME = 'Movie.Name.2019.1080p.BluRay-GRP';
 const PACK = 'Show.Name.S01.1080p.WEB-DL-GRP';
+
+async function apply(path: string, body: object) {
+  const preview = await api!.post(path, { ...body, preview: true });
+  expect(preview.status).toBe(200);
+  return api!.post(path, { ...preview.body, ...body });
+}
 
 // A torrent that the user added to the client by hand.
 function addExternal(name: string, extra: { category?: string; tags?: string; contentPath?: string } = {}) {
@@ -162,6 +169,10 @@ describe('attach a download', () => {
     pipe.finder.requestSearch(series.key);
     await until(() => branchOf(pipe!.queue.get('tv:1:1x1')) === 'waiting' && branchOf(pipe!.queue.get('tv:1:1x2')) === 'waiting');
     const hash = addExternal(PACK);
+    pipe.qbit.setFiles(hash, [
+      { name: `${PACK}/Show.Name.S01E01.mkv`, size: 1_000, progress: 0.2 },
+      { name: `${PACK}/Show.Name.S01E02.mkv`, size: 1_000, progress: 0.2 },
+    ]);
     const first = pipe.queue.get('tv:1:1x1')!;
 
     const body = { hash, ids: ['tv:1:1x2'] };
@@ -171,10 +182,11 @@ describe('attach a download', () => {
     expect(first.transferHash).toBeNull();
 
     const preview = (await api.post('/queue/entries/tv:1:1x1/attach', { ...body, preview: true })).body;
-    expect(preview).toEqual({ hash, name: PACK, affected: [{ id: 'tv:1:1x1', label: 'Show Name S01E01' }, { id: 'tv:1:1x2', label: 'Show Name S01E02' }] });
+    expect(preview).toMatchObject({ hash, name: PACK, affected: [{ id: 'tv:1:1x1', label: 'Show Name S01E01' }, { id: 'tv:1:1x2', label: 'Show Name S01E02' }], blocked: [] });
+    expect(preview.version).toEqual(expect.any(String));
     expect(first.transferHash).toBeNull();
 
-    expect((await api.post('/queue/entries/tv:1:1x1/attach', { ...body, confirmOwner: true, confirmTitle: true })).status).toBe(200);
+    expect((await api.post('/queue/entries/tv:1:1x1/attach', { ...preview, ...body, confirmOwner: true, confirmTitle: true })).status).toBe(200);
     for (const id of ['tv:1:1x1', 'tv:1:1x2']) {
       const entry = pipe.queue.get(id)!;
       expect(entry).toMatchObject({ state: { kind: 'downloading' }, transferHash: hash, release: { external: true, manual: true, kind: 'pack', title: PACK } });
@@ -191,7 +203,7 @@ describe('attach a download', () => {
     const entry = await waitingMovie();
     const hash = addExternal(NAME);
     const before = pipe!.qbit.calls.length;
-    expect((await api!.post('/queue/entries/movie:2/attach', { hash, confirmOwner: true, confirmTitle: true })).status).toBe(200);
+    expect((await apply('/queue/entries/movie:2/attach', { hash, confirmOwner: true, confirmTitle: true })).status).toBe(200);
     // The attach only reads the client. It adds no tag and no category.
     expect(pipe!.qbit.calls.slice(before).filter((call) => /add|delete|stop|start|pause|resume|Tags|Category/.test(call.path))).toEqual([]);
     expect(pipe!.qbit.torrents.get(hash)).toMatchObject({ tags: '', category: 'manual' });
@@ -211,7 +223,7 @@ describe('attach a download', () => {
     const entry = await waitingMovie();
     const hash = addExternal(NAME);
     pipe!.complete(NAME, { 'Movie.mkv': 'the-film' });
-    expect((await api!.post('/queue/entries/movie:2/attach', { hash, confirmOwner: true, confirmTitle: true })).status).toBe(200);
+    expect((await apply('/queue/entries/movie:2/attach', { hash, confirmOwner: true, confirmTitle: true })).status).toBe(200);
     expect(entry.history.at(-1)).toMatchObject({ stage: 'importing', cause: 'download attached by the user' });
     await until(() => stageOf(entry) === 'available');
   });
@@ -300,7 +312,7 @@ describe('attach a download', () => {
     move(pipe.queue, entry, { stage: 'fetching', reason: { code: 'torrent_exists' } }, 'test');
     expect(reasonOfEntry(entry)?.code).toBe('torrent_exists');
     expect((await api.get('/queue/entries/movie:2')).body.entry.reason).toMatchObject({ action: 'attach' });
-    expect((await api.post('/queue/entries/movie:2/attach', { hash: hashOf(NAME), confirmOwner: true, confirmTitle: true })).status).toBe(200);
+    expect((await apply('/queue/entries/movie:2/attach', { hash: hashOf(NAME), confirmOwner: true, confirmTitle: true })).status).toBe(200);
     expect(entry.state).toEqual({ kind: 'downloading' });
     pipe.complete(NAME, { 'Movie.mkv': 'the-film' });
     await until(() => stageOf(entry) === 'available');
@@ -348,6 +360,10 @@ describe('attach a download', () => {
     pipe.tracker.state.items = [{ title: PACK, size: 2 * 60 * 45 * MIB }];
     // The user added the pack by hand in another category. The search finds it, and both episodes point at it.
     const hash = addExternal(PACK);
+    pipe.qbit.setFiles(hash, [
+      { name: `${PACK}/Show.Name.S01E01.mkv`, size: 1_000, progress: 0.2 },
+      { name: `${PACK}/Show.Name.S01E02.mkv`, size: 1_000, progress: 0.2 },
+    ]);
     pipe.finder.requestSearch(series.key);
     const [one, two] = ['tv:1:1x1', 'tv:1:1x2'].map((id) => pipe!.queue.get(id)!);
     await until(() => stageOf(one!) === 'downloading' && stageOf(two!) === 'downloading');
@@ -358,7 +374,7 @@ describe('attach a download', () => {
       entry.source = null;
       move(pipe!.queue, entry, { stage: 'fetching', reason: { code: 'torrent_exists' } }, 'test');
     }
-    expect((await api.post('/queue/entries/tv:1:1x1/attach', { hash, confirmOwner: true, confirmTitle: true })).status).toBe(200);
+    expect((await apply('/queue/entries/tv:1:1x1/attach', { hash, confirmOwner: true, confirmTitle: true })).status).toBe(200);
     await until(() => pipe!.poller.transfer(hash)?.entryIds.length === 1);
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(pipe.queue.get('tv:1:1x1')!.state).toEqual({ kind: 'downloading' });
@@ -369,14 +385,17 @@ describe('attach a download', () => {
   it('checks the targets again after the client answers, and refuses a target that changed in that time', async () => {
     const entry = await waitingMovie();
     const hash = addExternal(NAME);
+    const body = { hash, confirmOwner: true, confirmTitle: true };
+    const preview = await api!.post('/queue/entries/movie:2/attach', { ...body, preview: true });
+    expect(preview.status).toBe(200);
     // The client answers slowly. The user cancels the target while the attach waits.
     pipe!.qbit.control.delayInfoMs = 300;
-    const attaching = api!.post('/queue/entries/movie:2/attach', { hash, confirmOwner: true, confirmTitle: true });
+    const attaching = api!.post('/queue/entries/movie:2/attach', { ...preview.body, ...body });
     await new Promise((resolve) => setTimeout(resolve, 100));
     move(pipe!.queue, entry, { branch: 'cancelled', reason: null }, 'cancelled by the user');
     const result = await attaching;
     expect(result.status).toBe(409);
-    expect(result.body.error).toBe('attach_not_supported');
+    expect(result.body.error).toBe('preview_changed');
     expect(entry).toMatchObject({ state: { kind: 'cancelled' }, transferHash: null });
   });
 
@@ -464,7 +483,7 @@ describe('match a file that covers several episodes', () => {
     await until(() => stageOf(pipe!.queue.get('tv:1:1x3')!) === 'downloading');
     // The names of the files give no episode numbers, so ladarr can not pick.
     pipe.complete(PACK, { 'part-a.mkv': 'first-and-second', 'part-b.mkv': 'third-file' });
-    await until(() => ['1x1', '1x2', '1x3'].every((n) => reasonOfEntry(pipe!.queue.get(`tv:1:${n}`)!)?.code === 'file_not_found'));
+    await until(() => ['1x1', '1x2', '1x3'].every((n) => reasonOfEntry(pipe!.queue.get(`tv:1:${n}`)!)?.code === 'file_unmapped'));
   }
 
   it('previews each association before it changes, and imports one file for two episodes', async () => {
@@ -472,9 +491,9 @@ describe('match a file that covers several episodes', () => {
     const files = (await api!.get('/queue/entries/tv:1:1x1/files')).body;
     expect(files.entries.map((e: { id: string }) => e.id).sort()).toEqual(['tv:1:1x1', 'tv:1:1x2', 'tv:1:1x3']);
 
-    const body = { file: 'part-a.mkv', covers: [{ season: 1, number: 1 }, { season: 1, number: 2 }] };
+    const body = { file: 'part-a.mkv', covers: [{ season: 1, number: 1 }, { season: 1, number: 2 }], ids: ['tv:1:1x1', 'tv:1:1x2'] };
     const preview = (await api!.post('/queue/entries/tv:1:1x1/match', { ...body, preview: true })).body;
-    expect(preview).toEqual({
+    expect(preview).toMatchObject({
       file: 'part-a.mkv',
       affected: [
         { id: 'tv:1:1x1', label: 'Show Name S01E01', current: null },
@@ -488,16 +507,16 @@ describe('match a file that covers several episodes', () => {
     });
     expect(pipe!.queue.get('tv:1:1x1')!.manualMatch).toBeNull();
 
-    expect((await api!.post('/queue/entries/tv:1:1x1/match', body)).status).toBe(200);
+    expect((await api!.post('/queue/entries/tv:1:1x1/match', { ...preview, ...body })).status).toBe(200);
     await until(() => ['1x1', '1x2'].every((n) => stageOf(pipe!.queue.get(`tv:1:${n}`)!) === 'available'));
     // One file holds both episodes, and the third episode still waits for its own file.
     const files2 = Object.values(pipe!.db.data.files);
     expect(files2).toHaveLength(1);
     expect(files2[0]!.path).toBe('Show Name (2020)/Season 01/Show Name - S01E01E02.mkv');
     expect(files2[0]!.episodes.map((e) => e.number)).toEqual([1, 2]);
-    expect(reasonOfEntry(pipe!.queue.get('tv:1:1x3')!)?.code).toBe('file_not_found');
+    expect(reasonOfEntry(pipe!.queue.get('tv:1:1x3')!)?.code).toBe('file_unmapped');
 
-    expect((await api!.post('/queue/entries/tv:1:1x3/match', { file: 'part-b.mkv' })).status).toBe(200);
+    expect((await apply('/queue/entries/tv:1:1x3/match', { file: 'part-b.mkv', ids: ['tv:1:1x3'] })).status).toBe(200);
     await until(() => stageOf(pipe!.queue.get('tv:1:1x3')!) === 'available');
     expect(Object.values(pipe!.db.data.files)).toHaveLength(2);
   });
@@ -508,7 +527,8 @@ describe('match a file that covers several episodes', () => {
     const third = pipe!.queue.get('tv:1:1x3')!;
     second.manualMatch = { file: 'part-a.mkv', covers: [{ season: 1, number: 2 }] };
     third.manualMatch = { file: 'part-b.mkv', covers: [{ season: 1, number: 3 }] };
-    const preview = (await api!.post('/queue/entries/tv:1:1x1/match', { file: 'part-a.mkv', covers: [{ season: 1, number: 1 }, { season: 1, number: 3 }], preview: true })).body;
+    const body = { file: 'part-a.mkv', covers: [{ season: 1, number: 1 }, { season: 1, number: 3 }], ids: ['tv:1:1x1', 'tv:1:1x3'] };
+    const preview = (await api!.post('/queue/entries/tv:1:1x1/match', { ...body, preview: true })).body;
     expect(preview.affected).toEqual([
       { id: 'tv:1:1x1', label: 'Show Name S01E01', current: null },
       { id: 'tv:1:1x3', label: 'Show Name S01E03', current: 'part-b.mkv' },
@@ -516,7 +536,7 @@ describe('match a file that covers several episodes', () => {
     expect(preview.replaces).toEqual([{ id: 'tv:1:1x2', label: 'Show Name S01E02' }]);
     // The preview changed nothing. The apply takes the file from the target that loses it.
     expect(second.manualMatch).not.toBeNull();
-    await api!.post('/queue/entries/tv:1:1x1/match', { file: 'part-a.mkv', covers: [{ season: 1, number: 1 }, { season: 1, number: 3 }] });
+    expect((await api!.post('/queue/entries/tv:1:1x1/match', { ...preview, ...body })).status).toBe(200);
     expect(second.manualMatch).toBeNull();
     expect(third.manualMatch).toMatchObject({ file: 'part-a.mkv' });
   });
@@ -529,5 +549,498 @@ describe('match a file that covers several episodes', () => {
     expect((await post({ file: 'missing.mkv', covers: [{ season: 1, number: 1 }] })).body.error).toBe('file_not_in_download');
     expect((await post({ file: 'part-a.mkv', covers: 'x' })).status).toBe(400);
     expect(pipe!.queue.get('tv:1:1x1')!.manualMatch).toBeNull();
+  });
+});
+
+describe('catalog-wide download mapping', () => {
+  async function source() {
+    pipe = await startPipeline();
+    await pipe.worker.pause();
+    pipe.poller.stop();
+    api = await pipe.api();
+    const series = title({
+      rootId: 'tv',
+      episodes: [aired(1), episode(1, 2, '2020-01-02', { fileId: 'existing' }), episode(2, 1)],
+    });
+    pipe.db.data.titles[series.key] = series;
+    pipe.db.data.files.existing = {
+      id: 'existing', titleKey: series.key, path: 'Show Name (2020)/Season 01/Show Name - S01E02.mkv',
+      episodes: [{ season: 1, number: 2 }], sizeBytes: 4, mtimeMs: 0, missing: false, addedAt: 0,
+    };
+    const hash = addExternal(PACK);
+    pipe.complete(PACK, { 'part-a.mkv': 'first-video', 'part-b.mkv': 'second-video' });
+    const selected = entryOf({
+      id: 'tv:1:1x1', titleKey: series.key, season: 1, number: 1,
+      stage: 'importing', reason: { code: 'file_not_found' }, transferHash: hash, clientId: 'client-1',
+    });
+    const sibling = entryOf({
+      id: 'tv:1:2x1', titleKey: series.key, season: 2, number: 1,
+      stage: 'importing', reason: { code: 'file_not_found' }, transferHash: hash, clientId: 'client-1',
+    });
+    pipe.db.data.queue[selected.id] = selected;
+    pipe.db.data.queue[sibling.id] = sibling;
+    return { selected, sibling, series };
+  }
+
+  async function librarySource() {
+    const context = await source();
+    context.series.folder = 'Show Name (2020)';
+    const path = 'Show Name (2020)/Library clip.mkv';
+    mkdirSync(join(pipe!.folders.tv, context.series.folder), { recursive: true });
+    writeFileSync(join(pipe!.folders.tv, path), 'library-video');
+    pipe!.db.data.files.local = {
+      id: 'local', titleKey: context.series.key, path, episodes: [], sizeBytes: 13, mtimeMs: 0, missing: false, addedAt: 0,
+    };
+    return { ...context, path };
+  }
+
+  it('requires a preview before a source association changes and changes no data', async () => {
+    const { selected } = await source();
+    const before = structuredClone({ files: pipe!.db.data.files, queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs, imports: pipe!.db.data.imports });
+
+    const applied = await api!.post(`/queue/entries/${selected.id}/match`, {
+      file: 'part-a.mkv', covers: [{ season: 1, number: 1 }], ids: [selected.id],
+    });
+
+    expect(applied.status).toBe(409);
+    expect(applied.body.error).toBe('preview_required');
+    expect({ files: pipe!.db.data.files, queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs, imports: pipe!.db.data.imports }).toEqual(before);
+  });
+
+  it('lists library alternatives for a target that still has a torrent', async () => {
+    const { selected, path } = await librarySource();
+    pipe!.qbit.control.down = true;
+
+    const listing = await api!.get(`/queue/entries/${selected.id}/files?source=library`);
+
+    expect(listing.status).toBe(200);
+    expect(listing.body.source).toBe('library');
+    expect(listing.body.sources).toEqual(expect.arrayContaining(['download', 'library']));
+    expect(listing.body.files.map((file: { rel: string }) => file.rel)).toEqual([path]);
+    expect(listing.body.entries.map((entry: { id: string }) => entry.id)).toEqual(['tv:1:1x1', 'tv:1:1x2', 'tv:1:2x1']);
+  });
+
+  it.each([
+    { name: 'no download provenance', download: null },
+    { name: 'its original download provenance', download: { clientId: 'client-1', hash: hashOf('Original.Library.Source'), external: true } },
+  ])('uses an explicit library source with $name without importing the old torrent or resolving its siblings', async ({ download }) => {
+    const { selected, sibling, path } = await librarySource();
+    pipe!.db.data.files.local!.download = structuredClone(download);
+    const siblingBefore = structuredClone(sibling);
+    const hash = selected.transferHash;
+    pipe!.qbit.control.down = true;
+    const body = { source: 'library', file: path, covers: [{ season: 1, number: 1 }], ids: [selected.id] };
+    const preview = await api!.post(`/queue/entries/${selected.id}/match`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    expect(selected.state.kind).toBe('blocked');
+    expect(selected.manualMatch).toBeNull();
+
+    const applied = await api!.post(`/queue/entries/${selected.id}/match`, { ...preview.body, ...body });
+
+    expect(applied.status).toBe(200);
+    expect(selected.state).toEqual({ kind: 'importing' });
+    expect(selected.manualMatch).toMatchObject({ file: path, covers: body.covers });
+    expect(selected.transferHash).toBe(hash);
+    expect(sibling).toEqual(siblingBefore);
+    expect(Object.values(pipe!.db.data.jobs).some((job) => job.type === 'import.run' && (job.payload as { hash?: string })?.hash === hash)).toBe(false);
+    pipe!.worker.resume();
+    await until(() => selected.state.kind === 'available');
+    const file = Object.values(pipe!.db.data.files).find((record) => record.path === path)!;
+    expect(file.download ?? null).toEqual(download);
+    expect(file.download?.hash).not.toBe(hash);
+    expect(sibling).toEqual(siblingBefore);
+    expect(pipe!.tracker.state.searches).toEqual([]);
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+  });
+
+  it('offers an explicit library source for an existing destination file', async () => {
+    const { selected } = await librarySource();
+    selected.state = { kind: 'blocked', at: 'importing', problem: { code: 'destination_exists' } };
+
+    const detail = await api!.get(`/queue/entries/${selected.id}`);
+
+    expect(detail.status).toBe(200);
+    expect(detail.body.entry.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'use_existing', label: 'Use existing file', fileSource: 'library', ids: [selected.id] }),
+      expect.objectContaining({ action: 'replace', label: 'Replace file', ids: [selected.id] }),
+    ]));
+    expect(selected.state.kind).toBe('blocked');
+  });
+
+  it('unassigns a download file with empty coverage without authorizing any target', async () => {
+    const { selected, sibling } = await source();
+    selected.manualMatch = { file: 'part-a.mkv', covers: [{ season: 1, number: 1 }] };
+    sibling.manualMatch = { file: 'part-b.mkv', covers: [{ season: 2, number: 1 }] };
+    const siblingBefore = structuredClone(sibling);
+    const state = structuredClone(selected.state);
+    const jobs = structuredClone(pipe!.db.data.jobs);
+    const body = { file: 'part-a.mkv', covers: [], ids: [] };
+    const preview = await api!.post(`/queue/entries/${selected.id}/match`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    expect(preview.body.retries).toEqual([]);
+    expect(selected.manualMatch).not.toBeNull();
+
+    const applied = await api!.post(`/queue/entries/${selected.id}/match`, { ...preview.body, ...body });
+
+    expect(applied.status).toBe(200);
+    expect(selected.manualMatch?.covers ?? []).toEqual([]);
+    expect(selected.state).toEqual(state);
+    expect(sibling).toEqual(siblingBefore);
+    expect(pipe!.db.data.jobs).toEqual(jobs);
+  });
+
+  it('previews lost availability and continuation separately from file coverage', async () => {
+    const { selected, sibling } = await source();
+    const available = entryOf({ id: 'tv:1:1x2', titleKey: selected.titleKey, season: 1, number: 2, stage: 'available', transferHash: selected.transferHash, clientId: selected.clientId });
+    pipe!.db.data.queue[available.id] = available;
+    const file = pipe!.db.data.files.existing!;
+    file.download = { hash: selected.transferHash!, clientId: selected.clientId!, external: true };
+    file.association = { source: 'manual', originalName: 'part-a.mkv', numberingRevision: 0, identity: { sizeBytes: file.sizeBytes, mtimeMs: file.mtimeMs } };
+    const before = structuredClone({ files: pipe!.db.data.files, queue: pipe!.db.data.queue, titles: pipe!.db.data.titles, jobs: pipe!.db.data.jobs });
+
+    const preview = await api!.post(`/queue/entries/${selected.id}/match`, {
+      file: 'part-a.mkv', covers: [{ season: 1, number: 1 }], ids: [selected.id], preview: true,
+    });
+
+    expect(preview.status).toBe(200);
+    expect(preview.body.replaces).toEqual(expect.arrayContaining([expect.objectContaining({ id: available.id })]));
+    expect(preview.body.effects).toMatchObject({
+      lostAvailability: [{ season: 1, number: 2 }],
+      continued: [{ id: selected.id, phase: 'importing' }],
+      conflicts: [],
+    });
+    expect(preview.body.effects.staysBlocked).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: sibling.id }),
+      expect.objectContaining({ id: available.id, code: 'file_unmapped' }),
+    ]));
+    expect({ files: pipe!.db.data.files, queue: pipe!.db.data.queue, titles: pipe!.db.data.titles, jobs: pipe!.db.data.jobs }).toEqual(before);
+  });
+
+  it('lists every catalog episode, including available episodes without queue entries', async () => {
+    await source();
+
+    const listing = await api!.get('/queue/entries/tv:1:1x1/files');
+
+    expect(listing.status).toBe(200);
+    expect(listing.body.entries.map((entry: { season: number; number: number }) => [entry.season, entry.number])).toEqual([[1, 1], [1, 2], [2, 1]]);
+    expect(listing.body.entries.find((entry: { season: number; number: number }) => entry.season === 1 && entry.number === 2)).toMatchObject({
+      id: 'tv:1:1x2', season: 1, number: 2,
+    });
+    expect(pipe!.queue.get('tv:1:1x2')).toBeUndefined();
+  });
+
+  it('previews coverage of an available episode outside the source queue', async () => {
+    const { selected, series } = await source();
+    const before = structuredClone({ files: pipe!.db.data.files, queue: pipe!.db.data.queue, episodes: series.episodes });
+
+    const preview = await api!.post(`/queue/entries/${selected.id}/match`, {
+      file: 'part-a.mkv', covers: [{ season: 1, number: 1 }, { season: 1, number: 2 }], preview: true,
+    });
+
+    expect(preview.status).toBe(200);
+    expect(preview.body.affected.map((entry: { id: string }) => entry.id)).toEqual(['tv:1:1x1', 'tv:1:1x2']);
+    expect({ files: pipe!.db.data.files, queue: pipe!.db.data.queue, episodes: series.episodes }).toEqual(before);
+  });
+
+  it('applies catalog coverage without authorizing an available catalog target', async () => {
+    const { selected, sibling, series } = await source();
+    const siblingBefore = structuredClone(sibling);
+    const body = {
+      file: 'part-a.mkv', covers: [{ season: 1, number: 1 }, { season: 1, number: 2 }], ids: [selected.id],
+    };
+    const preview = await api!.post(`/queue/entries/${selected.id}/match`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+
+    const applied = await api!.post(`/queue/entries/${selected.id}/match`, { ...preview.body, ...body });
+
+    expect(applied.status).toBe(200);
+    expect(selected.manualMatch).toEqual({ file: body.file, covers: body.covers });
+    expect(selected.state).toEqual({ kind: 'importing' });
+    expect(pipe!.queue.get('tv:1:1x2')?.state.kind ?? 'available').toBe('available');
+    expect(series.episodes[1]!.fileId).toBe('existing');
+    expect(sibling).toEqual(siblingBefore);
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+  });
+
+  it('maps only the selected episodes and keeps another blocked target of the hash unchanged', async () => {
+    const { selected, sibling } = await source();
+    const siblingBefore = structuredClone(sibling);
+    const body = { file: 'part-a.mkv', covers: [{ season: 1, number: 1 }] };
+    const preview = await api!.post(`/queue/entries/${selected.id}/match`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+
+    const applied = await api!.post(`/queue/entries/${selected.id}/match`, { ...preview.body, ...body, ids: [selected.id] });
+
+    expect(applied.status).toBe(200);
+    expect(selected.manualMatch).toEqual(body);
+    expect(selected.state).toEqual({ kind: 'importing' });
+    expect(sibling).toEqual(siblingBefore);
+    expect(pipe!.tracker.state.searches).toEqual([]);
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+  });
+
+  it('keeps content coverage separate from the targets authorized to continue', async () => {
+    const { selected, sibling } = await source();
+    const before = structuredClone(sibling);
+    const body = {
+      file: 'part-a.mkv', covers: [{ season: 1, number: 1 }, { season: 2, number: 1 }], ids: [selected.id],
+    };
+    const preview = await api!.post(`/queue/entries/${selected.id}/match`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    expect(preview.body.retries.map((entry: { id: string }) => entry.id)).toEqual([selected.id]);
+
+    const applied = await api!.post(`/queue/entries/${selected.id}/match`, { ...preview.body, ...body });
+
+    expect(applied.status).toBe(200);
+    expect(selected.manualMatch).toMatchObject({ file: body.file, covers: body.covers });
+    expect(selected.state).toEqual({ kind: 'importing' });
+    expect(sibling.state).toEqual(before.state);
+    expect(sibling.attempt).toBe(before.attempt);
+    expect(sibling.numbering).toEqual(before.numbering);
+  });
+
+  it('rejects a file preview after the selected target changes', async () => {
+    const { selected } = await source();
+    const body = { file: 'part-a.mkv', covers: [{ season: 1, number: 1 }] };
+    const preview = await api!.post(`/queue/entries/${selected.id}/match`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    selected.manualMatch = { file: 'part-b.mkv', covers: [{ season: 1, number: 1 }] };
+    pipe!.queue.touch(selected);
+    const before = structuredClone({ queue: pipe!.db.data.queue, files: pipe!.db.data.files, jobs: pipe!.db.data.jobs });
+
+    const applied = await api!.post(`/queue/entries/${selected.id}/match`, { ...preview.body, ...body });
+
+    expect(applied.status).toBe(409);
+    expect({ queue: pipe!.db.data.queue, files: pipe!.db.data.files, jobs: pipe!.db.data.jobs }).toEqual(before);
+  });
+
+  it('rejects a file preview after the source manifest changes', async () => {
+    const { selected } = await source();
+    const body = { file: 'part-a.mkv', covers: [{ season: 1, number: 1 }] };
+    const preview = await api!.post(`/queue/entries/${selected.id}/match`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    pipe!.qbit.setFiles(selected.transferHash!, [
+      { name: `${PACK}/part-a.mkv`, size: 500, progress: 1 },
+      { name: `${PACK}/part-c.mkv`, size: 600, progress: 1 },
+    ]);
+    const before = structuredClone({ queue: pipe!.db.data.queue, files: pipe!.db.data.files, jobs: pipe!.db.data.jobs });
+
+    const applied = await api!.post(`/queue/entries/${selected.id}/match`, { ...preview.body, ...body });
+
+    expect(applied.status).toBe(409);
+    expect({ queue: pipe!.db.data.queue, files: pipe!.db.data.files, jobs: pipe!.db.data.jobs }).toEqual(before);
+  });
+});
+
+describe('attachment coverage', () => {
+  async function waitingSeries(episodes = [aired(1), aired(2)], name = PACK) {
+    pipe = await startPipeline();
+    await pipe.worker.pause();
+    pipe.poller.stop();
+    api = await pipe.api();
+    const series = title({ rootId: 'tv', episodes });
+    pipe.db.data.titles[series.key] = series;
+    const entries = episodes.map((one) => entryOf({
+      id: `tv:1:${one.season}x${one.number}`, titleKey: series.key, season: one.season, number: one.number,
+      branch: 'waiting', reason: { code: 'no_results' },
+    }));
+    for (const entry of entries) pipe.db.data.queue[entry.id] = entry;
+    return { hash: addExternal(name), entries };
+  }
+
+  it('requires a preview before attachment and changes no data', async () => {
+    const { hash, entries } = await waitingSeries();
+    pipe!.qbit.setFiles(hash, [{ name: `${PACK}/Show.Name.S01E01.mkv`, size: 1_000, progress: 0.2 }]);
+    const before = structuredClone({ files: pipe!.db.data.files, queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs, imports: pipe!.db.data.imports });
+
+    const applied = await api!.post(`/queue/entries/${entries[0]!.id}/attach`, {
+      hash, confirmOwner: true, confirmTitle: true,
+    });
+
+    expect(applied.status).toBe(409);
+    expect(applied.body.error).toBe('preview_required');
+    expect({ files: pipe!.db.data.files, queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs, imports: pipe!.db.data.imports }).toEqual(before);
+  });
+
+  it('attaches identified episodes but not a target absent from the manifest', async () => {
+    const { hash, entries } = await waitingSeries();
+    pipe!.qbit.setFiles(hash, [{ name: `${PACK}/Show.Name.S01E01.mkv`, size: 1_000, progress: 0.2 }]);
+    const body = { hash, ids: [entries[1]!.id] };
+    const preview = await api!.post(`/queue/entries/${entries[0]!.id}/attach`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    expect(preview.body.affected.map((entry: { id: string }) => entry.id)).toEqual([entries[0]!.id]);
+
+    const applied = await api!.post(`/queue/entries/${entries[0]!.id}/attach`, {
+      ...preview.body, ...body, confirmOwner: true, confirmTitle: true,
+    });
+
+    expect(applied.status).toBe(200);
+    expect(entries[0]).toMatchObject({ transferHash: hash, state: { kind: 'downloading' } });
+    expect(entries[1]).toMatchObject({ transferHash: null, state: { kind: 'blocked', problem: { code: 'pack_partial' } } });
+  });
+
+  it('keeps an unknown file association distinct from an absent episode', async () => {
+    const { hash, entries } = await waitingSeries();
+    pipe!.qbit.setFiles(hash, [
+      { name: `${PACK}/Show.Name.S01E01.mkv`, size: 1_000, progress: 0.2 },
+      { name: `${PACK}/unassigned.mkv`, size: 1_000, progress: 0.2 },
+    ]);
+    const body = { hash, ids: [entries[1]!.id] };
+    const preview = await api!.post(`/queue/entries/${entries[0]!.id}/attach`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    const applied = await api!.post(`/queue/entries/${entries[0]!.id}/attach`, {
+      ...preview.body, ...body, confirmOwner: true, confirmTitle: true,
+    });
+
+    expect(applied.status).toBe(200);
+    expect(entries[0]).toMatchObject({ transferHash: hash, state: { kind: 'downloading' } });
+    expect(entries[1]!.state.kind).toBe('blocked');
+    expect(reasonOfEntry(entries[1]!)).not.toMatchObject({ code: 'pack_partial' });
+    expect(reasonOfEntry(entries[1]!)).not.toMatchObject({ code: 'file_not_found' });
+  });
+
+  it('uses file coverage from several seasons instead of the pack name', async () => {
+    const name = 'Show.Name.S01-S02.1080p.WEB-DL-GRP';
+    const { hash, entries } = await waitingSeries([aired(1), aired(2), episode(2, 1)], name);
+    pipe!.qbit.setFiles(hash, [
+      { name: `${name}/Show.Name.S01E01.mkv`, size: 1_000, progress: 0.2 },
+      { name: `${name}/Show.Name.S02E01.mkv`, size: 1_000, progress: 0.2 },
+    ]);
+    const body = { hash, ids: entries.slice(1).map((entry) => entry.id) };
+    const preview = await api!.post(`/queue/entries/${entries[0]!.id}/attach`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    expect(preview.body.affected.map((entry: { id: string }) => entry.id)).toEqual([entries[0]!.id, entries[2]!.id]);
+    const applied = await api!.post(`/queue/entries/${entries[0]!.id}/attach`, {
+      ...preview.body, ...body, confirmOwner: true, confirmTitle: true,
+    });
+
+    expect(applied.status).toBe(200);
+    expect(entries[0]!.transferHash).toBe(hash);
+    expect(entries[2]!.transferHash).toBe(hash);
+    expect(entries[1]).toMatchObject({ transferHash: null, state: { kind: 'blocked', problem: { code: 'pack_partial' } } });
+  });
+
+  it('rejects an attachment preview after the manifest changes', async () => {
+    const { hash, entries } = await waitingSeries();
+    pipe!.qbit.setFiles(hash, [
+      { name: `${PACK}/Show.Name.S01E01.mkv`, size: 1_000, progress: 0.2 },
+      { name: `${PACK}/Show.Name.S01E02.mkv`, size: 1_000, progress: 0.2 },
+    ]);
+    const body = { hash, ids: [entries[1]!.id] };
+    const preview = await api!.post(`/queue/entries/${entries[0]!.id}/attach`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    pipe!.qbit.setFiles(hash, [{ name: `${PACK}/Show.Name.S01E01.mkv`, size: 1_000, progress: 0.2 }]);
+    const before = structuredClone({ queue: pipe!.db.data.queue, files: pipe!.db.data.files, jobs: pipe!.db.data.jobs });
+
+    const applied = await api!.post(`/queue/entries/${entries[0]!.id}/attach`, {
+      ...preview.body, ...body, confirmOwner: true, confirmTitle: true,
+    });
+
+    expect(applied.status).toBe(409);
+    expect({ queue: pipe!.db.data.queue, files: pipe!.db.data.files, jobs: pipe!.db.data.jobs }).toEqual(before);
+  });
+});
+
+describe('approved empty download coverage', () => {
+  it.each([
+    { name: 'the current target', number: 1, restart: false },
+    { name: 'the current target after a restart', number: 1, restart: true },
+    { name: 'a sibling of the same source', number: 2, restart: false },
+  ])('does not restore filename coverage when the user retries $name', async ({ number, restart }) => {
+    pipe = await startPipeline();
+    await pipe.worker.pause();
+    pipe.poller.stop();
+    api = await pipe.api();
+    const series = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
+    pipe.db.data.titles[series.key] = series;
+    const hash = addExternal(PACK);
+    const file = 'Show.Name.S01E01E02.mkv';
+    const content = 'both-episodes';
+    pipe.complete(PACK, { [file]: content });
+    const entries = [1, 2].map((episodeNumber) => entryOf({
+      id: `tv:1:1x${episodeNumber}`, titleKey: series.key, season: 1, number: episodeNumber,
+      stage: 'importing', reason: { code: 'file_not_found' }, transferHash: hash, clientId: 'client-1',
+    }));
+    for (const entry of entries) pipe.db.data.queue[entry.id] = entry;
+    const anchor = entries[0]!;
+    anchor.manualMatch = { file, covers: [{ season: 1, number: 1 }, { season: 1, number: 2 }] };
+    const states = entries.map((entry) => structuredClone(entry.state));
+    const jobs = structuredClone(pipe.db.data.jobs);
+
+    const unassigned = await apply(`/queue/entries/${anchor.id}/match`, { file, covers: [], ids: [] });
+
+    expect(unassigned.status).toBe(200);
+    expect(entries.map((entry) => entry.state)).toEqual(states);
+    expect(pipe.db.data.jobs).toEqual(jobs);
+    if (restart) {
+      const data = JSON.parse(JSON.stringify(pipe.db.data)) as typeof pipe.db.data;
+      const torrent = structuredClone(pipe.qbit.torrents.get(hash)!);
+      api.close();
+      await pipe.stop();
+      pipe = await startPipeline();
+      await pipe.worker.pause();
+      pipe.poller.stop();
+      const indexers = pipe.db.data.indexers;
+      Object.assign(pipe.db.data, data, {
+        owner: null, sessions: {}, indexers,
+        downloadClients: data.downloadClients.map((client) => ({ ...client, port: pipe!.qbit.port })),
+      });
+      pipe.qbit.torrents.set(hash, torrent);
+      pipe.qbit.setFiles(hash, [{ name: `${PACK}/${file}`, size: Buffer.byteLength(content), progress: 1 }]);
+      api = await pipe.api();
+    }
+    const target = pipe.queue.get(`tv:1:1x${number}`)!;
+    const other = pipe.queue.get(`tv:1:1x${number === 1 ? 2 : 1}`)!;
+    const otherBefore = structuredClone(other);
+
+    const retried = await api.post('/queue/actions', { action: 'retry_import', ids: [target.id] });
+
+    expect(retried.status).toBe(200);
+    expect(Object.values(pipe.db.data.jobs).some((job) => job.type === 'import.run' && (job.payload as { hash?: string })?.hash === hash)).toBe(true);
+    pipe.worker.resume();
+    await until(() => !Object.values(pipe!.db.data.jobs).some((job) => job.type === 'import.run' && ['waiting', 'running'].includes(job.state)));
+
+    expect(target.state).toMatchObject({ kind: 'blocked', at: 'importing' });
+    expect(pipe.db.data.titles[series.key]!.episodes.map((episode) => episode.fileId)).toEqual([null, null]);
+    expect(Object.values(pipe.db.data.files).filter((record) => record.titleKey === series.key).flatMap((record) => record.episodes)).toEqual([]);
+    expect(other).toEqual(otherBefore);
+    expect(pipe.tracker.state.searches).toEqual([]);
+    expect(pipe.tracker.state.downloads).toEqual([]);
+    expect(pipe.qbit.calls.some((call) => call.path === 'torrents/add')).toBe(false);
+  });
+});
+
+describe('movie file selection', () => {
+  it('uses an explicit file selection and enters import without another search', async () => {
+    pipe = await startPipeline();
+    await pipe.worker.pause();
+    pipe.poller.stop();
+    api = await pipe.api();
+    const film = movie({ rootId: 'movie', manualRelease: true });
+    pipe.db.data.titles[film.key] = film;
+    const hash = addExternal(NAME);
+    const file = 'Movie.Name.2019.Theatrical.mkv';
+    pipe.complete(NAME, { [file]: 'selected-cut', 'Movie.Name.2019.Directors.Cut.mkv': 'longer-cut'.repeat(100) });
+    const entry = entryOf({
+      id: film.key, titleKey: film.key, stage: 'importing', reason: { code: 'file_unmapped' },
+      transferHash: hash, clientId: 'client-1',
+    });
+    pipe.db.data.queue[entry.id] = entry;
+    const body = { file, ids: [entry.id] };
+    const preview = await api.post(`/queue/entries/${entry.id}/match`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    expect(preview.body.affected.map((target: { id: string }) => target.id)).toEqual([entry.id]);
+    expect(entry.manualMatch).toBeNull();
+    expect(entry.state.kind).toBe('blocked');
+
+    const applied = await api.post(`/queue/entries/${entry.id}/match`, { ...preview.body, ...body });
+
+    expect(applied.status).toBe(200);
+    expect(entry.manualMatch).toEqual({ file, covers: [] });
+    expect(entry.state).toEqual({ kind: 'importing' });
+    expect(film.fileId).toBeNull();
+    expect(pipe.tracker.state.searches).toEqual([]);
+    expect(pipe.tracker.state.downloads).toEqual([]);
+    expect(Object.values(pipe.db.data.jobs).some((job) => ['queue.search', 'queue.grab', 'queue.send'].includes(job.type))).toBe(false);
   });
 });

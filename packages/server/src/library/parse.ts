@@ -89,17 +89,10 @@ export function parseEpisodes(name: string, seasonHint?: number | null): ParsedE
   return number === undefined ? undefined : { season, numbers: [number] };
 }
 
-// A title can number the episodes of a season across the whole series, while a release starts again at 1 in each season.
-// This gives the numbers of the title for the numbers of a file. A number that is already an episode of the season stays,
-// and the other numbers are the position in the season. A number that is neither is not a match and is left out.
+// Only catalog numbers count here. A source map must convert release numbers before this step.
 export function titleNumbers(parsed: ParsedEpisodes, episodes: { season: number; number: number }[]): number[] {
-  const season = episodes.filter((episode) => episode.season === parsed.season).map((episode) => episode.number).sort((a, b) => a - b);
-  const known = new Set(season);
-  return parsed.numbers.flatMap((number) => {
-    if (known.has(number)) return [number];
-    const at = season[number - 1];
-    return at === undefined ? [] : [at];
-  });
+  const known = new Set(episodes.filter((episode) => episode.season === parsed.season).map((episode) => episode.number));
+  return parsed.numbers.filter((number) => known.has(number));
 }
 
 // The season and the episodes of the title that a file of a release names. The numbers of the file are the numbers of

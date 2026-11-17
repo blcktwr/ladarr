@@ -36,26 +36,29 @@ export function recordTorrent(
 // both use it, so a manual attach and an automatic attach leave the same entry.
 export async function attachTorrent(
   { queue }: { queue: Queue },
-  { handle, torrent, targets, cause }: { handle: ClientHandle; torrent: Torrent; targets: QueueEntry[]; cause: string },
+  { handle, torrent, targets, cause, manual = false }: { handle: ClientHandle; torrent: Torrent; targets: QueueEntry[]; cause: string; manual?: boolean },
 ): Promise<void> {
   const hash = torrent.hash;
+  let attached = false;
   for (const target of targets) {
     // A cancelled or completed target stays as it is. A late attach must not revive it.
-    if (!isActive(target)) continue;
+    if (!isActive(target) || target.state.kind === 'paused' || (target.state.kind === 'blocked' && !manual)) continue;
     queue.endAttempt(target, 'cancelled', 'replaced by an attached download');
     queue.startAttempt(target, 'attached download');
     recordTorrent(target, { handle, torrent, kind: targets.length > 1 ? 'pack' : 'single', external: true });
     // A torrent that the user attaches enters the acquisition with the numbering of the title now. A target that has a
     // snapshot already keeps it, so a restart does not reinterpret its download.
-    target.numbering ??= normalizeNumbering(db.data.titles[target.titleKey]?.numbering);
+    if (target.numbering === undefined) target.numbering = structuredClone(normalizeNumbering(db.data.titles[target.titleKey]?.numbering));
     // The old work of the target is gone. A search result, an import result, or a manual match of another download
     // must not stay next to the attached torrent.
     target.search = null;
     target.importResult = null;
     target.manualMatch = null;
-    queue.enter(target, torrent.complete ? 'importing' : 'downloading', cause, torrent.name);
+    if (manual) queue.resolve(target, torrent.complete ? 'importing' : 'downloading', cause, torrent.name);
+    else queue.enter(target, torrent.complete ? 'importing' : 'downloading', cause, torrent.name);
+    attached = true;
   }
   // A partial torrent that the client keeps stopped never moves. The verification resumes it, so a restart of the
   // client or of ladarr does not leave the download dead.
-  if (!torrent.complete && torrent.status === 'paused') await handle.api.setPaused(hash, false).catch(() => {});
+  if (attached && !torrent.complete && torrent.status === 'paused') await handle.api.setPaused(hash, false).catch(() => {});
 }

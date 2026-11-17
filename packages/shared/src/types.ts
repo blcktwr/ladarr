@@ -18,6 +18,7 @@ import type {
   PlanSkip,
   Policy,
   QueueActionName,
+  QueueResolutionAction,
   RootProblem,
   TorrentStatus,
   TrackerStatus,
@@ -519,6 +520,7 @@ export type QueueEntryView = {
   phase: Phase;
   // The problem of a stuck target, or the result of a search that keeps it waiting. Null otherwise.
   reason: QueueReason | null;
+  actions: QueueResolution[];
   stateSince: number;
   revision: number;
   lane: number | null;
@@ -572,6 +574,7 @@ export type QueueGroupRow = {
   tabs: Tab[];
   // The most frequent problem of the blocked targets of the group.
   problem: QueueReason | null;
+  actions: QueueResolution[];
   // The targets of the group whose pack did not hold every episode of the season. The card of the season offers the
   // search of the other seasons of the releases while the count is above zero.
   otherSeasons: number;
@@ -597,7 +600,7 @@ export type QueuePage = { cursor: number; total: number; items: QueueRow[] };
 
 // The aggregate of a whole group, before the tab filter and the page. The inspector header reads it beside the
 // filtered items, so the row and the header show the same status.
-export type QueueGroupSummary = Pick<QueueGroupRow, 'status' | 'counts' | 'tabs' | 'total' | 'reached' | 'download' | 'problem' | 'otherSeasons'>;
+export type QueueGroupSummary = Pick<QueueGroupRow, 'status' | 'counts' | 'tabs' | 'total' | 'reached' | 'download' | 'problem' | 'otherSeasons' | 'actions'>;
 
 export type QueueGroupPage = { cursor: number; group: QueueGroupSummary; items: QueueEntryView[] };
 
@@ -640,8 +643,21 @@ export type QueueJob = {
   posterPath: string | null;
 };
 
+export type QueueResolution = {
+  action: QueueResolutionAction;
+  label: string;
+  ids: string[];
+  phase: Phase;
+  cause: string;
+  source: string | null;
+  fileSource?: 'library' | 'download';
+  settings?: string;
+};
+
 export type QueueActionPreview = {
   action: QueueActionName;
+  version?: string;
+  numbering?: { id: string; from: Numbering; to: Numbering; phase: Phase }[];
   affected: { id: string; label: string; status: Status; phase: Phase; lane: number | null }[];
   unsupported: { id: string; reason: string }[];
   sharedTransfers: { name: string; entries: number }[];
@@ -649,6 +665,14 @@ export type QueueActionPreview = {
 
 export type QueueMatchPreview = {
   file: string;
+  source: 'library' | 'download';
+  version?: string;
+  effects: {
+    lostAvailability: EpisodeRef[];
+    continued: { id: string; phase: Phase }[];
+    staysBlocked: { id: string; code: string }[];
+    conflicts: { file: string; ids: string[]; code: string }[];
+  };
   // The file that each target has now, or null.
   affected: { id: string; label: string; current: string | null }[];
   // Targets that lose their file, because another target takes it.
@@ -682,11 +706,29 @@ export type AttachCandidates = {
   siblings: { id: string; label: string }[];
 };
 
-export type AttachPreview = { hash: string; name: string; affected: { id: string; label: string }[] };
+export type AttachPreview = {
+  hash: string;
+  name: string;
+  version?: string;
+  affected: { id: string; label: string }[];
+  blocked?: { id: string; label: string; code: string; coverage: 'absent' | 'unknown' }[];
+};
 
 // The files of a download, and the targets that the same download can cover.
 export type QueuePackFiles = {
-  files: { rel: string; sizeBytes: number }[];
+  source: 'library' | 'download';
+  sources: ('library' | 'download')[];
+  files: {
+    rel: string;
+    sizeBytes: number;
+    originalName?: string;
+    location?: string;
+    source?: { hash: string; clientId: string | null } | null;
+    current?: EpisodeRef[];
+    metadata?: { title: string | null; season: number | null; episode: number | null; durationSeconds: number | null };
+    proposal?: { episodes: EpisodeRef[]; step: string; evidence: string } | null;
+    rejection?: { reason: string; evidence: string } | null;
+  }[];
   entries: { id: string; label: string; season: number | null; number: number | null }[];
 };
 

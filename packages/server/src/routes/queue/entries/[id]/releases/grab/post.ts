@@ -1,8 +1,7 @@
 import { db } from '../../../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { REJECTION_TEXT } from '../../../../../../library/grab/decide.ts';
-import { normalizeNumbering, releasePoint } from '../../../../../../library/numbering.ts';
-import { shown, titleOf } from '../../../../../../helpers/queue.ts';
+import { catalogTargets, shown, titleOf } from '../../../../../../helpers/queue.ts';
 import type { Finder, Queue, RawRelease } from '../../../../../../types.ts';
 
 // A release of the last search that the user picks by hand after a no-match. The preferences are skipped, the
@@ -10,12 +9,15 @@ import type { Finder, Queue, RawRelease } from '../../../../../../types.ts';
 export function queueEntryReleaseGrabPost(queue: Queue, finder: Finder): RequestHandler<{ id: string }> {
   return (req, res) => {
     const entry = db.data.queue[req.params.id];
-    const { indexerId, guid } = (req.body ?? {}) as { indexerId?: unknown; guid?: unknown };
+    const { indexerId, guid, ids } = (req.body ?? {}) as { indexerId?: unknown; guid?: unknown; ids?: unknown };
     if (!entry || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
     if (typeof indexerId !== 'number' || typeof guid !== 'string') return void res.status(400).json({ error: 'invalid_request' });
     const candidate = (entry.search?.rejected ?? []).find((release) => release.indexerId === indexerId && release.guid === guid);
     if (!candidate) return void res.status(404).json({ error: 'release_not_found' });
     const title = titleOf(entry)!;
+    const catalog = catalogTargets(title);
+    const selected = ids ?? [entry.id];
+    if (!Array.isArray(selected) || !selected.length || selected.length > 1000 || !selected.every((id) => typeof id === 'string' && (title.mediaType === 'movie' ? id === entry.id : catalog.some((target) => target.id === id)))) return void res.status(400).json({ error: 'invalid_request' });
     const release: RawRelease = {
       indexerId: candidate.indexerId,
       guid: candidate.guid,
@@ -34,13 +36,11 @@ export function queueEntryReleaseGrabPost(queue: Queue, finder: Finder): Request
       const rejections = [{ code: 'not_an_episode', message: REJECTION_TEXT.not_an_episode }];
       return void res.status(409).json({ error: 'release_rejected', rejections });
     }
-    const numbering = normalizeNumbering(title.numbering);
-    const targets: [number | null, number | null][] =
-      want.kind === 'movie'
-        ? [[null, null]]
-        : want.kind === 'episode'
-          ? [[want.season, want.number]]
-          : title.episodes.filter((episode) => releasePoint(numbering, episode)?.season === want.releaseSeason).map((episode) => [episode.season, episode.number]);
+    const targets: [number | null, number | null][] = [...new Set(selected)].map((id) => {
+      if (title.mediaType === 'movie') return [null, null];
+      const target = catalog.find((item) => item.id === id)!;
+      return [target.season, target.number];
+    });
     if (!targets.length) return void res.status(409).json({ error: 'release_rejected', rejections: [{ code: 'wrong_season', message: REJECTION_TEXT.wrong_season }] });
     const entries = targets.map(([season, number]) => queue.ensure(entry.titleKey, season, number));
     const outcome = finder.grabManual(entries, release, want);

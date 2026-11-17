@@ -1,10 +1,13 @@
 import { linkSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { episode, title } from '../helpers/test-fixtures.ts';
+import { episode, movie, title } from '../helpers/test-fixtures.ts';
 import { hashOf, startPipeline, until } from '../helpers/test-pipeline.ts';
 import { reasonOfEntry, stageOf } from '../../src/library/downloads/queue.ts';
 import { scanTitle } from '../../src/library/scan.ts';
+import { importLocal } from '../../src/library/imports/local.ts';
+import { createClients } from '../../src/library/downloads/client-api.ts';
+import { entryOf } from '../helpers/test-queue.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
 afterEach(async () => {
@@ -134,7 +137,10 @@ describe('a series that is in its folder', () => {
     expect(listing.status).toBe(200);
     expect(listing.body.files.map((file: { rel: string }) => file.rel).sort()).toEqual(['Show Name (2020)/Season 01/Clip A.mkv', 'Show Name (2020)/Season 01/Clip B.mkv']);
 
-    const match = await api.post('/queue/entries/tv:1:1x1/match', { file: 'Show Name (2020)/Season 01/Clip A.mkv' });
+    const body = { file: 'Show Name (2020)/Season 01/Clip A.mkv', ids: [first.id] };
+    const preview = await api.post(`/queue/entries/${first.id}/match`, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    const match = await api.post(`/queue/entries/${first.id}/match`, { ...preview.body, ...body });
     expect(match.status).toBe(200);
     await until(() => stageOf(first) === 'available', 10_000);
     expect(reasonOfEntry(first)).toBeNull();
@@ -142,7 +148,10 @@ describe('a series that is in its folder', () => {
     // The other episode has no file of its own yet, so it keeps waiting for the user.
     expect(reasonOfEntry(second)?.code).toBe('file_unmapped');
 
-    const secondMatch = await api.post('/queue/entries/tv:1:1x2/match', { file: 'Show Name (2020)/Season 01/Clip B.mkv' });
+    const secondBody = { file: 'Show Name (2020)/Season 01/Clip B.mkv', ids: [second.id] };
+    const secondPreview = await api.post(`/queue/entries/${second.id}/match`, { ...secondBody, preview: true });
+    expect(secondPreview.status).toBe(200);
+    const secondMatch = await api.post(`/queue/entries/${second.id}/match`, { ...secondPreview.body, ...secondBody });
     expect(secondMatch.status).toBe(200);
     await until(() => stageOf(second) === 'available', 10_000);
     expect(pipe.tracker.state.searches).toEqual([]);
@@ -165,7 +174,10 @@ describe('a series that is in its folder', () => {
       ['tv:1:1x1', 'Show Name (2020)/Season 01/Clip A.mkv'],
       ['tv:1:1x2', 'Show Name (2020)/Season 01/Clip B.mkv'],
     ] as const) {
-      expect((await api.post(`/queue/entries/${id}/match`, { file })).status).toBe(200);
+      const body = { file, ids: [id] };
+      const preview = await api.post(`/queue/entries/${id}/match`, { ...body, preview: true });
+      expect(preview.status).toBe(200);
+      expect((await api.post(`/queue/entries/${id}/match`, { ...preview.body, ...body })).status).toBe(200);
       await until(() => stageOf(pipe!.queue.get(id)!) === 'available', 10_000);
     }
 
@@ -259,6 +271,119 @@ describe('the torrent of a file that is in the folder', () => {
     const entry = pipe.queue.get('tv:1:1x1')!;
     await until(() => reasonOfEntry(entry)?.code === 'root_unavailable', 15_000);
     // A download would put a second copy next to a file that the app cannot see.
+    expect(pipe.tracker.state.searches).toEqual([]);
+    expect(pipe.tracker.state.downloads).toEqual([]);
+  });
+});
+
+describe('automatic attachment uses manifest coverage', () => {
+  async function source(name: string, files: string[], episodes = [episode(1, 1), episode(1, 2)]) {
+    pipe = await startPipeline();
+    await pipe.worker.pause();
+    pipe.poller.stop();
+    const series = title({ rootId: 'tv', episodes });
+    pipe.db.data.titles[series.key] = series;
+    const entries = episodes.map((one) => entryOf({
+      id: `tv:1:${one.season}x${one.number}`, titleKey: series.key, season: one.season, number: one.number, stage: 'searching',
+    }));
+    for (const entry of entries) pipe.db.data.queue[entry.id] = entry;
+    const hash = hashOf(name);
+    pipe.qbit.torrents.set(hash, {
+      hash, name, size: files.length * 1_000, progress: 0.5, state: 'downloading',
+      category: 'manual', tags: '', save_path: pipe.folders.downloads, content_path: join(pipe.folders.downloads, name),
+      dlspeed: 1_000, eta: 100, num_seeds: 1, num_leechs: 1, added_on: 1,
+    });
+    pipe.qbit.setFiles(hash, files.map((file) => ({ name: `${name}/${file}`, size: 1_000, progress: 0.5 })));
+    const run = (ids = entries.map((entry) => entry.id)) => importLocal(
+      { queue: pipe!.queue, clients: createClients() }, { titleKey: series.key, entryIds: ids },
+    );
+    return { series, entries, hash, run };
+  }
+
+  it('does not attach a missing episode merely because the torrent names its season', async () => {
+    const { entries, hash, run } = await source('Show.Name.S01.1080p.WEB-DL-GRP', ['Show.Name.S01E01.mkv']);
+
+    const result = await run();
+
+    expect(entries[0]).toMatchObject({ transferHash: hash, state: { kind: 'downloading' } });
+    expect(entries[1]!.transferHash).toBeNull();
+    expect(result.imported).not.toContain(entries[1]!.id);
+    expect(pipe!.tracker.state.searches).toEqual([]);
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+  });
+
+  it('does not reattach the same partial pack when only its absent episode is selected', async () => {
+    const { entries, run } = await source('Show.Name.S01.1080p.WEB-DL-GRP', ['Show.Name.S01E01.mkv']);
+
+    await run([entries[1]!.id]);
+    await run([entries[1]!.id]);
+
+    expect(entries[1]!.transferHash).toBeNull();
+    expect(entries[1]!.state.kind).not.toBe('downloading');
+    expect(entries[1]!.state.kind).not.toBe('available');
+    expect(pipe!.qbit.torrents.size).toBe(1);
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+  });
+
+  it('keeps unknown content pending without declaring an episode absent', async () => {
+    const { entries, hash, run } = await source('Show.Name.S01.1080p.WEB-DL-GRP', [
+      'Show.Name.S01E01.mkv', 'unassigned.mkv',
+    ]);
+
+    await run();
+
+    expect(entries[0]).toMatchObject({ transferHash: hash, state: { kind: 'downloading' } });
+    expect(entries[1]!.state.kind).toBe('blocked');
+    expect(reasonOfEntry(entries[1]!)).not.toMatchObject({ code: 'pack_partial' });
+    expect(reasonOfEntry(entries[1]!)).not.toMatchObject({ code: 'file_not_found' });
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+  });
+
+  it('attaches only actual file coverage from a multi-season pack', async () => {
+    const { entries, hash, run } = await source('Show.Name.S01-S02.1080p.WEB-DL-GRP', [
+      'Show.Name.S01E01.mkv', 'Show.Name.S02E01.mkv',
+    ], [episode(1, 1), episode(1, 2), episode(2, 1)]);
+
+    await run();
+
+    expect(entries[0]!.transferHash).toBe(hash);
+    expect(entries[2]!.transferHash).toBe(hash);
+    expect(entries[1]!.transferHash).toBeNull();
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+  });
+
+  it('uses the acquisition map to recalculate file coverage', async () => {
+    const { entries, series, hash, run } = await source('Show.Name.S02.1080p.WEB-DL-GRP', ['Show.Name.S02E01.mkv']);
+    entries[1]!.numbering = { revision: 1, ranges: [{ season: 1, from: 2, to: 2, releaseSeason: 2, releaseFrom: 1 }] };
+    series.numbering = { revision: 0, ranges: [] };
+
+    await run([entries[1]!.id]);
+
+    expect(entries[1]).toMatchObject({ transferHash: hash, state: { kind: 'downloading' } });
+    expect(entries[0]!.transferHash).toBeNull();
+    expect(entries[1]!.numbering!.revision).toBe(1);
+  });
+});
+
+describe('local movie identity', () => {
+  it('does not identify a movie from the size of two plausible files', async () => {
+    pipe = await startPipeline();
+    await pipe.worker.pause();
+    pipe.poller.stop();
+    const film = movie({ rootId: 'movie', folder: 'Movie Name (2019)' });
+    pipe.db.data.titles[film.key] = film;
+    const folder = join(pipe.folders.movies, film.folder!);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'Movie.Name.2019.Theatrical.mkv'), 'one-cut');
+    writeFileSync(join(folder, 'Movie.Name.2019.Directors.Cut.mkv'), 'longer-cut'.repeat(100));
+    const entry = entryOf({ id: film.key, titleKey: film.key, stage: 'searching' });
+    pipe.db.data.queue[entry.id] = entry;
+
+    await importLocal({ queue: pipe.queue, clients: createClients() }, { titleKey: film.key, entryIds: [entry.id] });
+
+    expect(film.fileId).toBeNull();
+    expect(Object.values(pipe.db.data.files)).toEqual([]);
+    expect(entry.state).toMatchObject({ kind: 'blocked', at: 'importing' });
     expect(pipe.tracker.state.searches).toEqual([]);
     expect(pipe.tracker.state.downloads).toEqual([]);
   });

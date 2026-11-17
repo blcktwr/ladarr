@@ -31,7 +31,7 @@ test('says why the last release failed on the card of the season', async ({ page
   // The reason says why the last release failed, so the page gives the fact and no generic instruction.
   await expect(main.getByText('The last release had a damaged .torrent file.')).toBeVisible();
 
-  // The card has no action. The retry comes from the menu.
-  await expect(main.getByRole('button', { name: 'Choose a release for Show Name (2020) Season 1' })).toBeHidden();
+  await expect(main.getByRole('button', { name: 'Retry fetch', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Search releases', exact: true })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Try again', exact: true })).toBeHidden();
 });

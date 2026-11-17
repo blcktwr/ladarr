@@ -23,8 +23,8 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
   let lastPublish = 0;
   let dirty = new Set<string>();
 
-  // A target that is blocked at its download keeps its torrent in the client, so the poll still reads it and clears
-  // the problem when the torrent or the client comes back. A target that imports keeps its torrent too: the poll sees
+  // A blocked target keeps its torrent telemetry, but only a user action can release the target.
+  // A target that imports keeps its torrent too: the poll sees
   // a complete download that has no import job, such as one that the user attached.
   const tracked = () => Object.values(db.data.queue).filter((entry) => isActive(entry) && entry.transferHash && ['sending', 'downloading', 'importing'].includes(phaseOfEntry(entry)));
 
@@ -139,7 +139,7 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
         const recent = group.every((entry) => Date.now() - entry.phaseSince < GRACE_MS);
         // The torrent was there and is gone: someone removed it in the client.
         if (seen.has(hash) && !recent) {
-          for (const entry of group) if (entry.state.kind !== 'blocked' || entry.state.problem.code !== 'torrent_missing') queue.block(entry, { code: 'torrent_missing' }, 'torrent is not in the client');
+          for (const entry of group) if (entry.state.kind !== 'blocked') queue.block(entry, { code: 'torrent_missing' }, 'torrent is not in the client');
           seen.delete(hash);
           transfers.delete(hash);
         }
@@ -152,13 +152,10 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
       const parts = !torrent.complete || !knownFiles ? await fileParts(handle, hash, group) : null;
       observe(group, hash, torrent, parts?.progress ?? null, parts?.files ?? null);
       for (const entry of group) {
+        if (entry.state.kind === 'blocked') continue;
         if (entry.state.kind === 'sending') queue.enter(entry, 'downloading', 'client reported the torrent');
-        // The torrent is back, or the client cleared its error.
-        if (entry.state.kind === 'blocked' && entry.state.problem.code === 'torrent_missing') queue.unblock(entry, 'torrent is in the client again');
         if (torrent.status === 'error') {
-          if (entry.state.kind !== 'blocked' || entry.state.problem.code !== 'client_error') queue.block(entry, { code: 'client_error' }, 'client reported an error', torrent.state);
-        } else if (entry.state.kind === 'blocked' && entry.state.problem.code === 'client_error') {
-          queue.unblock(entry, 'client error cleared');
+          queue.block(entry, { code: 'client_error' }, 'client reported an error', torrent.state);
         }
         if (torrent.complete && entry.state.kind === 'downloading') {
           // The client has all the data. The files are not in the library yet, so the next step is the import and

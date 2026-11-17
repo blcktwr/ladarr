@@ -11,6 +11,8 @@ export const REASONS: Record<string, ReasonInfo> = {
   // The release season of the missing episodes is not saved, so the search of the other seasons has no numbers to ask
   // for. The user saves the numbering of the series.
   numbering_required: { message: 'The episodes of this season come from another season of the release. Save the episode map to search them.', action: 'numbering' },
+  no_download_link: { message: 'The release has no download link.', action: 'retry' },
+  invalid_torrent: { message: 'The release did not return a valid torrent.', action: 'retry' },
   no_indexers: { message: 'No indexer configured', action: 'settings', settings: 'indexers' },
   indexer_unavailable: { message: 'The indexer does not answer. The search tries again.', action: 'none' },
   indexer_rejected: { message: 'The indexer rejects the API key. Sync the indexers again.', action: 'settings', settings: 'indexers' },
@@ -29,7 +31,9 @@ export const REASONS: Record<string, ReasonInfo> = {
   // The import.
   file_not_found: { message: 'The download has no file for this target.', action: 'match' },
   file_unmapped: { message: 'The title folder has a file that names no episode.', action: 'match' },
+  coverage_unknown: { message: 'The files do not identify this episode. Map the files before continuation.', action: 'match' },
   file_unreadable: { message: 'The file is damaged or not a video.', action: 'none' },
+  file_invalid: { message: 'The file changed or has no video data. Select a file and review its association.', action: 'match' },
   destination_exists: { message: 'A file with this name is in the library folder already. It is not replaced.', action: 'retry' },
   destination_outside_root: { message: 'The destination is outside the library folder.', action: 'settings', settings: 'library' },
   disk_full: { message: 'The disk has no room for the file.', action: 'retry' },

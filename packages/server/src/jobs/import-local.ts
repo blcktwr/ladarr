@@ -9,8 +9,8 @@ export function importLocalHandler({ queue, clients }: { queue: Queue; clients: 
     concurrency: 1,
     maxAttempts: 3,
     run: async (job) => {
-      const { titleKey } = job.payload as { titleKey: string };
-      await withTitleLock(titleKey, () => importLocal({ queue, clients }, { titleKey }));
+      const { titleKey, entryIds, localOnly } = job.payload as { titleKey: string; entryIds?: string[]; localOnly?: boolean };
+      await withTitleLock(titleKey, () => importLocal({ queue, clients }, { titleKey, entryIds, localOnly }));
     },
   };
 }

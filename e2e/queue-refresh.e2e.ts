@@ -18,6 +18,9 @@ test.beforeAll(async () => {
   if (movie.status >= 300) throw new Error(`POST /library answered ${movie.status}: ${JSON.stringify(movie.body)}`);
 });
 test.afterAll(() => stack.stop());
+test.afterEach(async () => {
+  expect((await stack.call('POST', '/queue/pause', { paused: false })).status).toBe(200);
+});
 test.beforeEach(async ({ context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
 });

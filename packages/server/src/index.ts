@@ -8,8 +8,7 @@ import { createFinder } from './library/grab/finder.ts';
 import { unfinishedImports } from './library/imports/importer.ts';
 import { createLimiter } from './core/limiter.ts';
 import { createPoller } from './library/downloads/poller.ts';
-import { createQueue, isActive, phaseOfEntry } from './library/downloads/queue.ts';
-import { createRetry } from './library/downloads/queue-api.ts';
+import { createQueue } from './library/downloads/queue.ts';
 import { createIndexerService } from './library/grab/torznab.ts';
 import { UpdateError, installUpdate } from './system/update.ts';
 import { SCHEMA_VERSION, createSaver, db, open } from './core/db.ts';
@@ -71,20 +70,18 @@ poller.start();
 // An import that stopped in the middle runs again. Its journal says where to go on.
 for (const hash of unfinishedImports()) worker.enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
 // A local import has no journal. A target that stopped in one has no torrent to resume, so the folder is read again.
-const local = new Set(Object.values(db.data.queue).filter((entry) => !entry.transferHash && isActive(entry) && phaseOfEntry(entry) === 'importing').map((entry) => entry.titleKey));
+const local = new Set(Object.values(db.data.queue).filter((entry) => !entry.transferHash && entry.state.kind === 'importing').map((entry) => entry.titleKey));
 for (const titleKey of local) worker.enqueue({ type: 'import.local', payload: { titleKey }, dedupeKey: `local:${titleKey}` });
 // A target that fetched its torrent waits for a slot. The source stays in the data, so the send does not ask the
 // indexer for the release again.
 for (const entry of Object.values(db.data.queue)) {
-  if (!isActive(entry) || phaseOfEntry(entry) !== 'waiting_slot' || !entry.source) continue;
+  if (entry.state.kind !== 'waiting_slot' || !entry.source) continue;
   worker.enqueue({ type: 'queue.send', payload: { entryIds: [entry.id] }, dedupeKey: `send:${entry.id}`, runAt: entry.createdAt });
 }
 
 const restorer = createRestorer({ dir: config.backupDir, worker });
 const services = { queue, finder, poller, clients, importStatus };
-const retries = createRetry({ queue, enqueue: (input) => worker.enqueue(input) });
 const indexersChanged = () => {
-  retries.retryBlocked('no_indexers');
   events.publish('indexers.changed');
 };
 

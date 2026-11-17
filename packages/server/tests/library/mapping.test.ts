@@ -151,7 +151,7 @@ describe('pointers', () => {
       { path: 'Show/b.mkv', episodes: [ref(1, 2)] },
     ]);
 
-    expect(correction.rows[0]).toMatchObject({ fileId: 'a', status: 'review', reason: 'episode_unknown', from: [ref(1, 1), ref(1, 2)], to: [] });
+    expect(correction.rows[0]).toMatchObject({ fileId: 'a', status: 'change', reason: null, from: [ref(1, 1), ref(1, 2)], to: [] });
     expect(correction.rows[1]).toMatchObject({ fileId: 'b', status: 'change', reason: null, from: [], to: [ref(1, 2)] });
     expect(correction.pointers).toContainEqual({ season: 1, number: 2, from: 'Show/a.mkv', to: 'Show/b.mkv' });
 
@@ -190,14 +190,21 @@ describe('blocked rows', () => {
     expect(rows.find((row) => row.path === 'Show/a.mkv')).toMatchObject({ status: 'same' });
   });
 
-  it('blocks episodes of more than one season', () => {
-    db.data.titles['tv:1'] = title('tv:1', 'tv', [episode(1, 1), episode(2, 1)]);
+  it('assigns one file to several episodes across catalog seasons', () => {
+    db.data.titles['tv:1'] = title('tv:1', 'tv', [episode(1, 12), episode(2, 1), episode(2, 2)]);
     db.data.files.a = file('a', 'tv:1', 'Show/a.mkv', []);
 
-    const rows = correctionOf('tv:1', [{ path: 'Show/a.mkv', episodes: [ref(2, 1), ref(1, 1)] }]).rows;
+    const correction = correctionOf('tv:1', [{ path: 'Show/a.mkv', episodes: [ref(2, 2), ref(1, 12), ref(2, 1)] }]);
 
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ status: 'blocked', reason: 'mixed_season' });
+    expect(correction.rows).toHaveLength(1);
+    expect(correction.rows[0]).toMatchObject({ status: 'change', reason: null, to: [ref(1, 12), ref(2, 1), ref(2, 2)] });
+
+    applyCorrection(correction);
+
+    expect(Object.keys(db.data.files)).toEqual(['a']);
+    expect(db.data.files.a!.episodes).toEqual([ref(1, 12), ref(2, 1), ref(2, 2)]);
+    expect(db.data.titles['tv:1']!.episodes.map((one) => one.fileId)).toEqual(['a', 'a', 'a']);
+    expect(seriesCounts(db.data.titles['tv:1']!, clock()).available).toBe(3);
   });
 
   it('blocks an episode that the title does not have', () => {
@@ -228,6 +235,84 @@ describe('blocked rows', () => {
 });
 
 describe('apply', () => {
+  it('approves an explicit assignment even when its coverage does not change', () => {
+    db.data.titles['tv:1'] = title('tv:1', 'tv', [episode(1, 1)]);
+    db.data.titles['tv:1']!.numbering = { revision: 3, ranges: [] };
+    db.data.files.a = file('a', 'tv:1', 'Show/a.mkv', [ref(1, 1)]);
+    db.data.titles['tv:1']!.episodes[0]!.fileId = 'a';
+    const correction = correctionOf('tv:1', [{ path: 'Show/a.mkv', episodes: [ref(1, 1)] }]);
+
+    applyCorrection(correction);
+
+    expect(db.data.files.a).toMatchObject({
+      episodes: [ref(1, 1)],
+      association: {
+        source: 'manual',
+        originalName: 'Show/a.mkv',
+        numberingRevision: 3,
+        identity: { sizeBytes: 10, mtimeMs: 1 },
+      },
+    });
+  });
+
+  it('retains the original source name when a person corrects an imported file', () => {
+    db.data.titles['tv:1'] = title('tv:1', 'tv', [episode(1, 1), episode(1, 2)]);
+    db.data.files.a = file('a', 'tv:1', 'Show/generated.S01E01.mkv', [ref(1, 1)]);
+    Object.assign(db.data.files.a!, {
+      association: { source: 'numbering', originalName: 'Original/Release.S03E07.mkv', numberingRevision: 2, identity: { sizeBytes: 10, mtimeMs: 1 } },
+    });
+    db.data.titles['tv:1']!.episodes[0]!.fileId = 'a';
+
+    applyCorrection(correctionOf('tv:1', [{ path: 'Show/generated.S01E01.mkv', episodes: [ref(1, 2)] }]));
+
+    expect(db.data.files.a).toMatchObject({
+      episodes: [ref(1, 2)],
+      association: { source: 'manual', originalName: 'Original/Release.S03E07.mkv' },
+    });
+  });
+
+  it('removes all associations when an explicit entry selects no episodes', () => {
+    db.data.titles['tv:1'] = title('tv:1', 'tv', [episode(1, 1), episode(1, 2)]);
+    db.data.files.a = file('a', 'tv:1', 'Show/a.mkv', [ref(1, 1), ref(1, 2)]);
+    for (const one of db.data.titles['tv:1']!.episodes) one.fileId = 'a';
+    const before = structuredClone(db.data);
+
+    const correction = correctionOf('tv:1', [{ path: 'Show/a.mkv', episodes: [] }]);
+
+    expect(db.data).toEqual(before);
+    expect(correction.rows[0]).toMatchObject({ status: 'change', reason: null, to: [] });
+    expect(correction.pointers).toEqual([
+      { season: 1, number: 1, from: 'Show/a.mkv', to: null },
+      { season: 1, number: 2, from: 'Show/a.mkv', to: null },
+    ]);
+
+    applyCorrection(correction);
+
+    expect(db.data.files.a!.episodes).toEqual([]);
+    expect(db.data.titles['tv:1']!.episodes.map((one) => one.fileId)).toEqual([null, null]);
+    expect(seriesCounts(db.data.titles['tv:1']!, clock()).available).toBe(0);
+  });
+
+  it('distinguishes an explicit empty assignment from an omitted unresolved file', () => {
+    db.data.titles['tv:1'] = title('tv:1', 'tv', [episode(1, 1), episode(1, 2)]);
+    db.data.files.a = file('a', 'tv:1', 'Show/a.mkv', [ref(1, 1)]);
+    db.data.files.b = file('b', 'tv:1', 'Show/b.mkv', []);
+    db.data.files.c = file('c', 'tv:1', 'Show/c.mkv', []);
+    db.data.titles['tv:1']!.episodes[0]!.fileId = 'a';
+    const unresolved = structuredClone(db.data.files.b);
+
+    const correction = correctionOf('tv:1', [
+      { path: 'Show/a.mkv', episodes: [] },
+      { path: 'Show/c.mkv', episodes: [ref(1, 2)] },
+    ]);
+    applyCorrection(correction);
+
+    expect(db.data.files.a!.episodes).toEqual([]);
+    expect(db.data.files.b).toEqual(unresolved);
+    expect(db.data.files.c!.episodes).toEqual([ref(1, 2)]);
+    expect(db.data.titles['tv:1']!.episodes.map((one) => one.fileId)).toEqual([null, 'c']);
+  });
+
   it('writes the coverage of each file and the file of each episode', () => {
     db.data.titles['tv:1'] = title('tv:1', 'tv', [episode(1, 1), episode(1, 2), episode(1, 3)]);
     db.data.files.a = file('a', 'tv:1', 'Show/a.mkv', []);
@@ -262,6 +347,48 @@ describe('apply', () => {
     applyCorrection(correction);
 
     expect({ files: db.data.files, pointers: db.data.titles['tv:1']!.episodes.map((one) => one.fileId) }).toEqual(before);
+  });
+});
+
+describe('stale corrections', () => {
+  it.each([
+    ['file coverage', () => { db.data.files.a!.episodes = [ref(1, 3)]; }],
+    ['file size', () => { db.data.files.a!.sizeBytes++; }],
+    ['file modification time', () => { db.data.files.a!.mtimeMs++; }],
+    ['file path', () => { db.data.files.a!.path = 'Show/renamed.mkv'; }],
+    ['file presence', () => { db.data.files.a!.missing = true; }],
+    ['episode pointer', () => { db.data.titles['tv:1']!.episodes[0]!.fileId = null; }],
+    ['file replacement', () => {
+      delete db.data.files.a;
+      db.data.files.replacement = file('replacement', 'tv:1', 'Show/a.mkv', [ref(1, 1)]);
+      db.data.titles['tv:1']!.episodes[0]!.fileId = 'replacement';
+    }],
+  ] as const)('rejects the complete correction after a change to the %s', (_name, change) => {
+    db.data.titles['tv:1'] = title('tv:1', 'tv', [episode(1, 1), episode(1, 2), episode(1, 3)]);
+    db.data.files.a = file('a', 'tv:1', 'Show/a.mkv', [ref(1, 1)]);
+    db.data.files.b = file('b', 'tv:1', 'Show/b.mkv', []);
+    db.data.titles['tv:1']!.episodes[0]!.fileId = 'a';
+    const correction = correctionOf('tv:1', [
+      { path: 'Show/a.mkv', episodes: [ref(1, 2)] },
+      { path: 'Show/b.mkv', episodes: [ref(1, 3)] },
+    ]);
+    change();
+    const before = structuredClone(db.data);
+
+    expect(() => applyCorrection(correction)).toThrow(PlanError);
+    expect(db.data).toEqual(before);
+  });
+
+  it('does not let an old preview replace a newer manual correction', () => {
+    db.data.titles['tv:1'] = title('tv:1', 'tv', [episode(1, 1), episode(1, 2), episode(1, 3)]);
+    db.data.files.a = file('a', 'tv:1', 'Show/a.mkv', [ref(1, 1)]);
+    db.data.titles['tv:1']!.episodes[0]!.fileId = 'a';
+    const old = correctionOf('tv:1', [{ path: 'Show/a.mkv', episodes: [ref(1, 2)] }]);
+    applyCorrection(correctionOf('tv:1', [{ path: 'Show/a.mkv', episodes: [ref(1, 3)] }]));
+    const before = structuredClone(db.data);
+
+    expect(() => applyCorrection(old)).toThrow(PlanError);
+    expect(db.data).toEqual(before);
   });
 });
 

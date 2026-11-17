@@ -38,13 +38,11 @@ export function NumberingDialog({
   titleKey,
   open,
   onOpenChange,
-  submitLabel,
   onSaved,
 }: {
   titleKey: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  submitLabel?: string;
   onSaved?: () => void | Promise<void>;
 }) {
   const { data, error, refetch } = useQuery<{ title: TitleDetail }>({ queryKey: [`/library/${titleKey}`], enabled: open });
@@ -105,7 +103,7 @@ export function NumberingDialog({
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      title={t('Choose episodes')}
+      title={t('Edit numbering')}
       width="xl"
       actions={
         <>
@@ -113,7 +111,7 @@ export function NumberingDialog({
             {t('Cancel')}
           </Button>
           <Button type="button" pending={pending} onClick={() => void save()}>
-            {submitLabel ?? t('Save')}
+            {t('Save numbering')}
           </Button>
         </>
       }
@@ -122,7 +120,7 @@ export function NumberingDialog({
       {error && !data && <Alert tone="danger">{describeError(error)}</Alert>}
       <Form onSubmit={(event) => { event.preventDefault(); void save(); }}>
         <Table
-          aria-label={t('Choose episodes')}
+          aria-label={t('Edit numbering')}
           columns={[
             { label: t('Catalog season'), width: '8rem' },
             { label: t('First catalog episode'), width: '9rem' },

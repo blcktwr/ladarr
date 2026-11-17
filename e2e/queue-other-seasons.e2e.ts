@@ -2,6 +2,7 @@ import { expect, test } from './fixtures.ts';
 import { configure, startStack, URL_BASE, type Stack } from './stack.ts';
 
 test.setTimeout(120_000);
+test.use({ actionTimeout: 15_000 });
 
 // The releases count the last two episodes of the catalog season as their season 2.
 const RANGE = { season: 1, from: 2, to: 3, releaseSeason: 2, releaseFrom: 1 };
@@ -47,18 +48,18 @@ test.beforeEach(async ({ context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
 });
 
-test('offers the search of the other seasons on the card of the season', async ({ page }) => {
+test('offers separate numbering and release actions on the card of the season', async ({ page }) => {
   // The pack did not hold every episode of its release season, so the target waits for the user.
   await expect.poll(reason, { timeout: 60_000 }).toMatchObject({ code: 'pack_partial' });
 
   await page.goto(`${URL_BASE}/activity`);
   await page.locator('[data-row="group:tv:1:1"]').click();
   const main = page.getByRole('main');
-  // The card says why the episode waits, and it starts the search of the other seasons of the releases.
   await expect(main.getByText('The pack did not hold every episode of the season.')).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Search individually' })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Choose episodes' })).toBeVisible();
-  // The retry of the season comes from the menu of the three points, not from the card.
+  await expect(main.getByRole('button', { name: 'Search releases', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Attach download', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Edit numbering', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Search individually', exact: true })).toHaveCount(0);
   await expect(main.getByRole('button', { name: 'Try again', exact: true })).toBeHidden();
 });
 
@@ -67,7 +68,7 @@ test('manages the episodes of a stuck target in the queue', async ({ page }) => 
 
   await page.goto(`${URL_BASE}/activity`);
   await page.locator('[data-row="group:tv:1:1"]').click();
-  await page.getByRole('main').getByRole('button', { name: 'Choose episodes' }).click();
+  await page.getByRole('main').getByRole('button', { name: 'Edit numbering', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   // The row shows the catalog range and the release episodes that it names.
@@ -77,6 +78,62 @@ test('manages the episodes of a stuck target in the queue', async ({ page }) => 
   await expect(dialog.getByRole('spinbutton', { name: 'Release season', exact: true })).toHaveValue('2');
   await expect(dialog.getByRole('spinbutton', { name: 'First release episode', exact: true })).toHaveValue('1');
   await expect(dialog.getByText('S02E01–S02E02')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Save numbering', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Save and search', exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Apply numbering', exact: true })).toHaveCount(0);
+});
+
+test('saves numbering without a search or continuation', async ({ page }) => {
+  await expect.poll(reason, { timeout: 60_000 }).toMatchObject({ code: 'pack_partial' });
+  expect((await stack.call('POST', '/queue/pause', { paused: true })).status).toBe(200);
+  await expect.poll(async () => (await stack.call('GET', '/queue/jobs')).body.items.filter((item: { state: string }) => item.state === 'running').length, { timeout: 60_000 }).toBe(0);
+  const before = (await stack.call('GET', '/queue/entries/tv:1:1x3')).body.entry;
+  const jobs = (await stack.call('GET', '/queue/jobs')).body.items.map((item: { id: string; type: string; payload: unknown }) => ({ id: item.id, type: item.type, payload: item.payload }));
+  const searches = stack.tracker.state.searches.length;
+  const downloads = stack.tracker.state.downloads.length;
+  const actions: unknown[] = [];
+  page.on('request', (request) => {
+    if (request.method() !== 'GET' && new URL(request.url()).pathname.startsWith('/api/queue')) actions.push({ path: new URL(request.url()).pathname, body: request.postDataJSON() });
+  });
+  await page.goto(`${URL_BASE}/activity`);
+  await page.locator('[data-row="group:tv:1:1"]').click();
+  await page.getByRole('main').getByRole('button', { name: 'Edit numbering', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('spinbutton', { name: 'First release episode', exact: true }).fill('4');
+  await dialog.getByRole('button', { name: 'Save numbering', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const title = (await stack.call('GET', '/library/tv:1')).body.title;
+  expect(title.numbering).toMatchObject({ ranges: [{ ...RANGE, releaseFrom: 4 }] });
+  expect(title.numbering.revision).toBeGreaterThan(1);
+  expect((await stack.call('GET', '/queue/entries/tv:1:1x3')).body.entry).toMatchObject({ status: 'stuck', phase: before.phase, reason: before.reason });
+  expect(stack.tracker.state.searches).toHaveLength(searches);
+  expect(stack.tracker.state.downloads).toHaveLength(downloads);
+  expect((await stack.call('GET', '/queue/jobs')).body.items.map((item: { id: string; type: string; payload: unknown }) => ({ id: item.id, type: item.type, payload: item.payload }))).toEqual(jobs);
+  expect(actions).toEqual([]);
+  expect((await stack.call('POST', '/queue/pause', { paused: false })).status).toBe(200);
+  expect((await stack.call('GET', '/queue/entries/tv:1:1x3')).body.entry).toMatchObject({ status: 'stuck', phase: before.phase, reason: before.reason });
+});
+
+test('previews Apply numbering separately from Save numbering', async ({ page }) => {
+  await expect.poll(reason, { timeout: 60_000 }).toMatchObject({ code: 'pack_partial' });
+  const title = (await stack.call('GET', '/library/tv:1')).body.title;
+  const releaseFrom = title.numbering.ranges[0].releaseFrom + 1;
+  expect((await stack.call('PATCH', '/library/tv:1', { numbering: { revision: title.numbering.revision, ranges: [{ ...RANGE, releaseFrom }] } })).status).toBe(200);
+  const before = (await stack.call('GET', '/queue/entries/tv:1:1x3')).body.entry;
+  await page.goto(`${URL_BASE}/activity`);
+  await page.locator('[data-row="group:tv:1:1"]').click();
+  const apply = page.getByRole('main').getByRole('button', { name: 'Apply numbering', exact: true });
+  await expect(apply).toBeVisible();
+  const [request] = await Promise.all([
+    page.waitForRequest((request) => request.method() === 'POST' && new URL(request.url()).pathname === '/api/queue/actions'),
+    apply.click(),
+  ]);
+  expect(request.postDataJSON()).toMatchObject({ action: 'apply_numbering', preview: true });
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Show Name S01E03');
+  await expect(dialog.getByRole('button', { name: 'Apply numbering', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Save numbering', exact: true })).toHaveCount(0);
+  expect((await stack.call('GET', '/queue/entries/tv:1:1x3')).body.entry).toMatchObject({ status: 'stuck', revision: before.revision, reason: before.reason });
 });
 
 test('lists every episode of the season under the tab that filters the rows', async ({ page }) => {

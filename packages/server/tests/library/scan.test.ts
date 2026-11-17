@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { open } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { availability, seriesCounts } from '../../src/library/library.ts';
+import { applyCorrection, correctionOf } from '../../src/library/mapping.ts';
 import { scanTitle } from '../../src/library/scan.ts';
 import { libraryScanHandler } from '../../src/jobs/library-scan.ts';
 import { startTestApp } from '../helpers/test-app.ts';
@@ -146,6 +147,45 @@ describe('series scan', () => {
     expect(db.data.titles['tv:1']!.episodes[0]!.fileId).toBe(first);
   });
 
+  it('uses the explicit source map once and preserves the catalog result on later scans', async () => {
+    write(join(tv, 'Show', 'Show.S02E05.mkv'));
+    db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', Array.from({ length: 21 }, (_, index) => episode(2, index + 5)));
+    db.data.titles['tv:1']!.numbering = { revision: 4, ranges: [{ season: 2, from: 5, to: 25, releaseSeason: 2, releaseFrom: 1 }] };
+
+    await scanTitle('tv:1');
+
+    const mapped = db.data.titles['tv:1']!.episodes.find((one) => one.number === 9)!;
+    expect(mapped.fileId).toBeTruthy();
+    const id = mapped.fileId!;
+    expect(db.data.files[id]!.episodes).toEqual([{ season: 2, number: 9 }]);
+
+    await scanTitle('tv:1');
+
+    expect(db.data.files[id]!.episodes).toEqual([{ season: 2, number: 9 }]);
+    expect(db.data.titles['tv:1']!.episodes.filter((one) => one.fileId).map((one) => one.number)).toEqual([9]);
+  });
+
+  it('does not approve a whole-source offset conflict until an explicit map resolves it', async () => {
+    for (let number = 1; number <= 21; number++) write(join(tv, 'Show', `Example.Series.S02E${String(number).padStart(2, '0')}.mkv`));
+    const item = title('tv:1', 'tv', 'Show', Array.from({ length: 21 }, (_, index) => episode(2, index + 5)));
+    db.data.titles[item.key] = item;
+
+    await scanTitle(item.key);
+
+    expect(seriesCounts(item, clock()).available).toBe(0);
+    expect(item.episodes.every((one) => one.fileId === null)).toBe(true);
+    item.numbering = { revision: 1, ranges: [{ season: 2, from: 5, to: 25, releaseSeason: 2, releaseFrom: 1 }] };
+
+    await scanTitle(item.key);
+
+    expect(seriesCounts(item, clock()).available).toBe(21);
+    for (const one of item.episodes) {
+      const file = db.data.files[one.fileId!]!;
+      expect(file.path).toBe(`Show/Example.Series.S02E${String(one.number - 4).padStart(2, '0')}.mkv`);
+      expect(file.episodes).toEqual([{ season: 2, number: one.number }]);
+    }
+  });
+
   it('marks the files of a removed episode as missing and shows the episode as missing', async () => {
     write(join(tv, 'Show', 'Show.S01E01.mkv'));
     write(join(tv, 'Show', 'Show.S01E02.mkv'));
@@ -157,25 +197,133 @@ describe('series scan', () => {
     expect(db.data.titles['tv:1']!.episodes[1]!.fileId).toBeTruthy();
   });
 
-  it('clears a pointer to an episode that the file does not cover', async () => {
+  it('preserves approved multi-episode coverage instead of reconstructing it from the filename', async () => {
     write(join(tv, 'Show', 'Show.S01E01.mkv'));
     db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes());
     await scanTitle('tv:1');
     const id = db.data.titles['tv:1']!.episodes[0]!.fileId!;
 
-    // A correction or an import can leave a coverage that is larger than the name at that path.
-    db.data.files[id]!.episodes = [{ season: 1, number: 1 }, { season: 1, number: 2 }];
-    db.data.titles['tv:1']!.episodes[1]!.fileId = id;
+    applyCorrection(correctionOf('tv:1', [{ path: 'Show/Show.S01E01.mkv', episodes: [{ season: 1, number: 1 }, { season: 1, number: 2 }] }]));
     const before = seriesCounts(db.data.titles['tv:1']!, clock());
     expect(before.available).toBe(2);
 
     await scanTitle('tv:1');
 
     const [one, two] = db.data.titles['tv:1']!.episodes;
-    expect(db.data.files[id]!.episodes).toEqual([{ season: 1, number: 1 }]);
+    expect(db.data.files[id]!.episodes).toEqual([{ season: 1, number: 1 }, { season: 1, number: 2 }]);
     expect(one!.fileId).toBe(id);
-    expect(two!.fileId).toBeNull();
-    expect(seriesCounts(db.data.titles['tv:1']!, clock()).available).toBe(before.available - 1);
+    expect(two!.fileId).toBe(id);
+    expect(seriesCounts(db.data.titles['tv:1']!, clock()).available).toBe(before.available);
+  });
+
+  it('does not treat legacy coverage without provenance as an approved manual assignment', async () => {
+    const path = join(tv, 'Show', 'Show.S01E01.mkv');
+    write(path);
+    db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes());
+    const info = statSync(path);
+    db.data.files.legacy = {
+      id: 'legacy', titleKey: 'tv:1', path: 'Show/Show.S01E01.mkv', sizeBytes: info.size, mtimeMs: info.mtimeMs,
+      episodes: [{ season: 1, number: 1 }, { season: 1, number: 2 }], missing: false, addedAt: 1,
+    };
+    db.data.titles['tv:1']!.episodes[0]!.fileId = 'legacy';
+    db.data.titles['tv:1']!.episodes[1]!.fileId = 'legacy';
+
+    await scanTitle('tv:1');
+
+    expect(db.data.files.legacy!.episodes).not.toContainEqual({ season: 1, number: 2 });
+    expect(db.data.titles['tv:1']!.episodes[1]!.fileId).toBeNull();
+  });
+
+  it('does not restore a filename association that a person removed', async () => {
+    write(join(tv, 'Show', 'Show.S01E01.mkv'));
+    db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes());
+    await scanTitle('tv:1');
+    const id = db.data.titles['tv:1']!.episodes[0]!.fileId!;
+    applyCorrection(correctionOf('tv:1', [{ path: 'Show/Show.S01E01.mkv', episodes: [] }]));
+
+    await scanTitle('tv:1');
+    await scanTitle('tv:1');
+
+    expect(db.data.files[id]!.episodes).toEqual([]);
+    expect(db.data.files[id]!.missing).toBe(false);
+    expect(db.data.titles['tv:1']!.episodes.every((one) => one.fileId === null)).toBe(true);
+    expect(seriesCounts(db.data.titles['tv:1']!, clock()).available).toBe(0);
+  });
+
+  it('preserves a correction between catalog seasons without restoring the original association', async () => {
+    write(join(tv, 'Show', 'Show.S02E01.mkv'));
+    db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', [episode(1, 21), episode(2, 1)]);
+    await scanTitle('tv:1');
+    const id = db.data.titles['tv:1']!.episodes[1]!.fileId!;
+    applyCorrection(correctionOf('tv:1', [{ path: 'Show/Show.S02E01.mkv', episodes: [{ season: 1, number: 21 }] }]));
+
+    await scanTitle('tv:1');
+
+    expect(Object.keys(db.data.files)).toEqual([id]);
+    expect(db.data.files[id]!.episodes).toEqual([{ season: 1, number: 21 }]);
+    expect(db.data.titles['tv:1']!.episodes.map((one) => one.fileId)).toEqual([id, null]);
+    expect(seriesCounts(db.data.titles['tv:1']!, clock()).available).toBe(1);
+  });
+
+  it('keeps approved coverage across seasons through repeated scans', async () => {
+    write(join(tv, 'Show', 'Show.S01E12.mkv'));
+    db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', [episode(1, 12), episode(2, 1), episode(2, 2)]);
+    await scanTitle('tv:1');
+    const id = db.data.titles['tv:1']!.episodes[0]!.fileId!;
+    const coverage = [{ season: 1, number: 12 }, { season: 2, number: 1 }, { season: 2, number: 2 }];
+    applyCorrection(correctionOf('tv:1', [{ path: 'Show/Show.S01E12.mkv', episodes: coverage }]));
+
+    await scanTitle('tv:1');
+    await scanTitle('tv:1');
+
+    expect(Object.keys(db.data.files)).toEqual([id]);
+    expect(db.data.files[id]!.episodes).toEqual(coverage);
+    expect(db.data.titles['tv:1']!.episodes.map((one) => one.fileId)).toEqual([id, id, id]);
+    expect(seriesCounts(db.data.titles['tv:1']!, clock()).available).toBe(3);
+  });
+
+  it('updates the path of the same file without losing approved coverage', async () => {
+    const old = join(tv, 'Show', 'Show.S01E01.mkv');
+    const next = join(tv, 'Show', 'renamed.mkv');
+    write(old);
+    db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes());
+    await scanTitle('tv:1');
+    const id = db.data.titles['tv:1']!.episodes[0]!.fileId!;
+    applyCorrection(correctionOf('tv:1', [{ path: 'Show/Show.S01E01.mkv', episodes: [{ season: 1, number: 2 }] }]));
+    renameSync(old, next);
+
+    await scanTitle('tv:1');
+
+    expect(Object.keys(db.data.files)).toEqual([id]);
+    expect(db.data.files[id]).toMatchObject({ path: 'Show/renamed.mkv', missing: false, episodes: [{ season: 1, number: 2 }] });
+    expect(db.data.titles['tv:1']!.episodes.map((one) => one.fileId)).toEqual([null, id, null, null]);
+    expect(seriesCounts(db.data.titles['tv:1']!, clock()).available).toBe(1);
+  });
+
+  it.each([false, true])('invalidates old approval after file replacement, with matching properties: %s', async (sameProperties) => {
+    const path = join(tv, 'Show', 'Show.S01E01.mkv');
+    write(path);
+    utimesSync(path, 1_600_000_000, 1_600_000_000);
+    db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes());
+    await scanTitle('tv:1');
+    const id = db.data.titles['tv:1']!.episodes[0]!.fileId!;
+    applyCorrection(correctionOf('tv:1', [{ path: 'Show/Show.S01E01.mkv', episodes: [{ season: 1, number: 2 }] }]));
+    const original = statSync(path);
+    const replacement = join(tv, 'Show', 'replacement.part');
+    writeFileSync(replacement, Buffer.alloc(sameProperties ? original.size : original.size + 1, 1));
+    if (sameProperties) utimesSync(replacement, original.atime, original.mtime);
+    renameSync(replacement, path);
+    expect(statSync(path).ino).not.toBe(original.ino);
+    if (sameProperties) {
+      expect(statSync(path).size).toBe(original.size);
+      expect(statSync(path).mtimeMs).toBe(original.mtimeMs);
+    }
+
+    await scanTitle('tv:1');
+
+    const pointer = db.data.titles['tv:1']!.episodes[1]!.fileId;
+    const current = pointer ? db.data.files[pointer] : undefined;
+    expect(current && !current.missing && current.episodes.some((one) => one.season === 1 && one.number === 2)).toBeFalsy();
   });
 
   it('keeps the pointer of an episode whose file is missing', async () => {

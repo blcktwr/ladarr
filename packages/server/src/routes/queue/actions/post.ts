@@ -1,17 +1,19 @@
 import { db } from '../../../core/db.ts';
-import { normalizeNumbering, releaseSeasons } from '../../../library/numbering.ts';
+import { normalizeNumbering, releasePoint, releaseSeasons } from '../../../library/numbering.ts';
+import type { QueueActionName } from '@ladarr/shared/enums';
+import type { WorkPhase } from '@ladarr/shared/queue';
 import type { RequestHandler } from 'express';
 import { deprioritize, prioritize } from '../../../core/jobs.ts';
 import { ClientError } from '../../../library/downloads/qbittorrent.ts';
 import { addedByApp, isActive, phaseOfEntry } from '../../../library/downloads/queue.ts';
 import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts';
-import { bySeasonNumber, label, lanePositions, otherSeasonsTargets, shown, statusOf } from '../../../helpers/queue.ts';
+import { actionsOf, associationState, bySeasonNumber, label, lanePositions, otherSeasonsTargets, resolutionCurrent, resolutionVersion, shown, statusOf } from '../../../helpers/queue.ts';
 import { canRetry, needsOtherSeasons } from '@ladarr/shared/queue';
 import type { ClientHandle, Clients, EnqueueInput, Finder, Job, Poller, Queue, QueueEntry, Torrent } from '../../../types.ts';
 
 export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
-  type Action = 'pause' | 'resume' | 'retry' | 'priority' | 'unpriority' | 'remove_torrent' | 'replace' | 'search_other_seasons';
-  const ACTIONS: Action[] = ['pause', 'resume', 'retry', 'priority', 'unpriority', 'remove_torrent', 'replace', 'search_other_seasons'];
+  type Action = QueueActionName;
+  const ACTIONS: Action[] = ['pause', 'resume', 'retry', 'priority', 'unpriority', 'remove_torrent', 'replace', 'search_other_seasons', 'apply_numbering', 'retry_fetch', 'retry_send', 'check_download', 'retry_import'];
 
   const jobsOf = (entry: QueueEntry) =>
     Object.values(db.data.jobs).filter((job) => {
@@ -33,7 +35,15 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
       case 'resume':
         return entry.state.kind === 'paused' ? null : 'This target is not paused.';
       case 'retry':
+        if (entry.state.kind === 'blocked' && (entry.state.problem.code === 'file_invalid' || (entry.state.problem.code === 'too_many_attempts' && entry.state.problem.detail === 'file_invalid'))) return 'Select a file before continuation.';
         return canRetry(entry.state) ? null : 'This target does not need a retry.';
+      case 'apply_numbering':
+        return entry.state.kind === 'blocked' && entry.season !== null ? null : 'This target has no blocked acquisition.';
+      case 'retry_fetch':
+      case 'retry_send':
+      case 'check_download':
+      case 'retry_import':
+        return actionsOf([entry]).some((item) => item.action === action) ? null : 'This action does not apply to this target.';
       case 'priority':
         return isActive(entry) && entry.priority === null && entry.state.kind !== 'paused' && early ? null : 'Only waiting work can have priority.';
       case 'unpriority':
@@ -102,6 +112,10 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
           break;
         }
         case 'retry':
+        case 'retry_fetch':
+        case 'retry_send':
+        case 'check_download':
+        case 'retry_import':
           retry(entry);
           break;
         case 'replace':
@@ -142,7 +156,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
   }
 
   return async (req, res) => {
-    const { action, ids, group, preview } = (req.body ?? {}) as { action?: Action; ids?: unknown; group?: { titleKey?: string; season?: number | null }; preview?: boolean };
+    const { action, ids, group, preview, version } = (req.body ?? {}) as { action?: Action; ids?: unknown; group?: { titleKey?: string; season?: number | null }; preview?: boolean; version?: unknown };
     if (!action || !ACTIONS.includes(action)) return void res.status(400).json({ error: 'invalid_action' });
     let picked: QueueEntry[];
     // The retry of a title starts again the targets that wait for its work: the ones that a problem stops, and the ones
@@ -156,6 +170,80 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     } else if (action === 'search_other_seasons') return void res.status(400).json({ error: 'invalid_request' });
     else if (Array.isArray(ids) && ids.length <= 1000 && ids.every((id) => typeof id === 'string')) picked = ids.flatMap((id) => (db.data.queue[id] && shown(db.data.queue[id]!) ? [db.data.queue[id]!] : []));
     else return void res.status(400).json({ error: 'invalid_request' });
+
+    if (action === 'apply_numbering') {
+      const selected = [...new Map(picked.map((entry) => [entry.id, entry])).values()];
+      const unsupported = selected.flatMap((entry) => {
+        const reason = supports(action, entry);
+        return reason ? [{ id: entry.id, reason }] : [];
+      });
+      const scope = { action, ids: selected.map((entry) => entry.id).sort() };
+      const numbering = selected.map((entry) => ({ id: entry.id, from: normalizeNumbering(entry.numbering), to: normalizeNumbering(db.data.titles[entry.titleKey]?.numbering), phase: 'queued' as WorkPhase }));
+      const manifest: unknown[] = [];
+      try {
+        for (const item of numbering) {
+          const entry = db.data.queue[item.id]!;
+          if (entry.season !== null && !releasePoint(item.to, { season: entry.season, number: entry.number! })) return void res.status(409).json({ error: 'numbering_required' });
+          if (entry.transferHash) {
+            const handle = clients.get(entry.clientId);
+            if (!handle) return void res.status(409).json({ error: 'client_missing' });
+            const torrent = (await handle.api.byHashes([entry.transferHash]))[0];
+            const files = torrent ? await handle.api.files(entry.transferHash) : [];
+            manifest.push({ id: entry.id, torrent: torrent ? { hash: torrent.hash, complete: torrent.complete, contentPath: torrent.contentPath } : null, files: files.map(({ name, sizeBytes }) => ({ name, sizeBytes })) });
+            if (!torrent) return void res.status(409).json({ error: 'torrent_not_found' });
+            item.phase = torrent.complete ? 'importing' : 'downloading';
+          } else if (entry.source) item.phase = 'sending';
+          else if (entry.release) item.phase = 'fetching';
+          else if (phaseOfEntry(entry) === 'importing') item.phase = 'importing';
+        }
+      } catch (error) {
+        if (error instanceof ClientError) return void res.status(502).json({ error: 'client_unreachable' });
+        throw error;
+      }
+      if (selected.some((entry) => db.data.queue[entry.id] !== entry)) return void res.status(409).json({ error: 'preview_changed' });
+      const boundScope = { ...scope, maps: numbering.map(({ id, to }) => ({ id, to })), manifest };
+      const state = { selected, associations: [...new Set(selected.map((entry) => entry.titleKey))].map(associationState) };
+      const summary = {
+        action,
+        version: resolutionVersion(boundScope, state),
+        affected: selected.filter((entry) => !unsupported.some((item) => item.id === entry.id)).map((entry) => ({ id: entry.id, label: label(entry), status: statusOf(entry), phase: phaseOfEntry(entry), lane: lanePositions().get(entry.id) ?? null })),
+        unsupported,
+        sharedTransfers: [],
+        numbering,
+      };
+      if (preview) return void res.json(summary);
+      if (typeof version !== 'string' || !version) return void res.status(409).json({ error: 'preview_required' });
+      const already = selected.length > 0 && numbering.every((item) => {
+        const entry = db.data.queue[item.id]!;
+        return JSON.stringify(normalizeNumbering(entry.numbering)) === JSON.stringify(item.to) && entry.state.kind === item.phase;
+      });
+      if (version === undefined || !resolutionCurrent(version, boundScope, already ? undefined : state)) return void res.status(409).json({ error: 'preview_changed' });
+      if (already) return void res.json({ ...summary, done: true });
+      if (unsupported.length || !selected.length) return void res.status(409).json({ error: 'action_not_supported', unsupported });
+      for (const item of numbering) {
+        const entry = db.data.queue[item.id]!;
+        entry.numbering = structuredClone(item.to);
+        queue.retryAttempt(entry, 'apply numbering');
+        queue.resolve(entry, item.phase, 'numbering applied by the user');
+        if (item.phase === 'importing') {
+          if (entry.transferHash) {
+            const entryIds = numbering.filter((other) => other.phase === 'importing' && db.data.queue[other.id]?.transferHash === entry.transferHash).map((other) => other.id);
+            const payload = { hash: entry.transferHash, entryIds, manual: true };
+            const job = enqueue({ type: 'import.run', payload, dedupeKey: `import:${entry.transferHash}`, priority: entry.priority !== null });
+            if (job.type === 'import.run' && job.state === 'waiting') job.payload = payload;
+          } else {
+            const entryIds = numbering.filter((other) => other.phase === 'importing' && db.data.queue[other.id]?.titleKey === entry.titleKey && !db.data.queue[other.id]?.transferHash).map((other) => other.id);
+            const payload = { titleKey: entry.titleKey, entryIds, localOnly: true };
+            const job = enqueue({ type: 'import.local', payload, dedupeKey: `local:${entry.titleKey}`, priority: entry.priority !== null });
+            if (job.type === 'import.local' && job.state === 'waiting') job.payload = payload;
+          }
+        }
+        else if (item.phase === 'sending') enqueue({ type: 'queue.send', payload: { entryIds: [entry.id] }, dedupeKey: `send:${entry.id}`, priority: entry.priority !== null });
+        else if (item.phase === 'fetching') enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, dedupeKey: `grab:${entry.id}`, priority: entry.priority !== null });
+        else if (item.phase === 'queued') finder.enqueueSearch({ titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id] });
+      }
+      return void res.json({ ...summary, done: true });
+    }
 
     // The search of the other seasons needs the saved numbering of the season. The map is a decision of the user, so a
     // missing one opens the editor instead of guessing from the files of a pack.
@@ -200,8 +288,12 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     const list = [...affected.values()];
     const transfers = new Map<string, number>();
     for (const entry of list) if (entry.transferHash && ['pause', 'resume', 'remove_torrent'].includes(action)) transfers.set(entry.transferHash, (transfers.get(entry.transferHash) ?? 0) + 1);
-    const summary = { action, affected: list.map((entry) => ({ id: entry.id, label: label(entry), status: statusOf(entry), phase: phaseOfEntry(entry), lane: lane.get(entry.id) ?? null })), unsupported, sharedTransfers: [...transfers].map(([hash, count]) => ({ name: poller.transfer(hash)?.name ?? removal?.torrents.get(hash)?.name ?? hash, entries: count })) };
+    const actionScope = { action, ids: picked.map((entry) => entry.id).sort(), affected: list.map((entry) => entry.id).sort() };
+    const actionState = { entries: list, associations: [...new Set(list.map((entry) => entry.titleKey))].map(associationState) };
+    const summary = { action, version: resolutionVersion(actionScope, actionState), affected: list.map((entry) => ({ id: entry.id, label: label(entry), status: statusOf(entry), phase: phaseOfEntry(entry), lane: lane.get(entry.id) ?? null })), unsupported, sharedTransfers: [...transfers].map(([hash, count]) => ({ name: poller.transfer(hash)?.name ?? removal?.torrents.get(hash)?.name ?? hash, entries: count })) };
     if (preview) return void res.json(summary);
+    if (action === 'replace' && (typeof version !== 'string' || !version)) return void res.status(409).json({ error: 'preview_required' });
+    if (version !== undefined && !resolutionCurrent(version, actionScope, actionState)) return void res.status(409).json({ error: 'preview_changed' });
     if (!list.length) return void res.status(409).json({ error: 'action_not_supported', unsupported });
     // The search of the other seasons moves the targets to the queue and starts one job for the season. It needs no
     // request to the download client.

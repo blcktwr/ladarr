@@ -99,7 +99,7 @@ export function libraryVerifyHandler({ queue, clients, finder, events, enqueue }
           target = queue.ensure(key, episode.season, episode.number);
         }
         // A target that already works with this torrent keeps its work.
-        if (target && !(target.transferHash === download.hash && isActive(target))) byHash.set(download.hash, [...(byHash.get(download.hash) ?? []), target]);
+        if (target && target.state.kind !== 'blocked' && target.state.kind !== 'paused' && !(target.transferHash === download.hash && isActive(target))) byHash.set(download.hash, [...(byHash.get(download.hash) ?? []), target]);
       }
       // The client can answer slowly. The title and its files may have changed, so each target is checked again.
       for (const [hash, targets] of byHash) {
@@ -113,19 +113,16 @@ export function libraryVerifyHandler({ queue, clients, finder, events, enqueue }
     // The scan can find the file of a target that still waits. Its old entry is done, so the queue does not show work
     // that the library already has.
     for (const entry of Object.values(db.data.queue)) {
-      if (entry.titleKey !== key || !isActive(entry)) continue;
+      if (entry.titleKey !== key || !isActive(entry) || entry.state.kind === 'blocked' || entry.state.kind === 'paused') continue;
       const hasFile =
         title.mediaType === 'movie'
           ? present(title.fileId)
           : present(title.episodes.find((episode) => episode.season === entry.season && episode.number === entry.number)?.fileId ?? null);
       if (!hasFile) continue;
+      queue.enter(entry, 'importing', 'validate the library association');
       queue.endAttempt(entry, 'imported', 'the file is in the library');
       queue.complete(entry, 'file is in the library');
     }
-
-    // A target that the import blocked because its pack lacks the episode, or because the torrent left the client,
-    // goes back to the search after a delay.
-    finder.repairBlocked(key);
 
     // Search every target that is still missing, monitored, and aired. An attached torrent holds its target, so it
     // is not searched again.

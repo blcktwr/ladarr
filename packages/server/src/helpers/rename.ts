@@ -4,7 +4,7 @@ import { templateProblem } from '../library/naming.ts';
 import { PlanError } from '../library/imports/plan.ts';
 import type { Db, NamingTemplates } from '../types.ts';
 
-const STATUS: Record<string, number> = { title_not_found: 404, root_unavailable: 409, title_busy: 409, nothing_to_rename: 409, not_a_series: 409, mapping_blocked: 409 };
+const STATUS: Record<string, number> = { title_not_found: 404, root_unavailable: 409, title_busy: 409, nothing_to_rename: 409, not_a_series: 409, mapping_blocked: 409, mapping_stale: 409 };
 
 export const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 

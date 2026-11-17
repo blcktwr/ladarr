@@ -208,36 +208,23 @@ async function unreadableMovie() {
   return entry;
 }
 
-// Runs the automatic import until the three attempts of the download are used.
-async function stuckImport() {
-  const entry = await unreadableMovie();
-  const hash = entry.transferHash!;
-  await until(() => (entry.importTries ?? 0) === 1);
-  for (const tries of [2, 3]) {
-    await until(() => !Object.values(pipe!.db.data.jobs).some((job) => job.type === 'import.run'));
-    pipe!.worker.enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
-    await until(() => (entry.importTries ?? 0) === tries && entry.state.kind === 'blocked' && entry.state.at === 'importing');
-  }
-  return entry;
-}
-
 describe('failed imports', () => {
-  it('stops after three automatic attempts and runs no fourth', async () => {
-    const entry = await stuckImport();
-    expect(entry.importTries).toBe(3);
-    expect(entry.state).toMatchObject({ kind: 'blocked', at: 'importing', problem: { code: 'file_unreadable' } });
-
-    // The budget is gone, so a new automatic run leaves the target where it is.
+  it('does not retry automatically after the import blocks', async () => {
+    const entry = await unreadableMovie();
     await until(() => !Object.values(pipe!.db.data.jobs).some((job) => job.type === 'import.run'));
-    pipe!.worker.enqueue({ type: 'import.run', payload: { hash: entry.transferHash! }, dedupeKey: `import:${entry.transferHash}` });
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
-    expect(entry.importTries).toBe(3);
+    const before = structuredClone(entry);
     expect(entry.state).toMatchObject({ kind: 'blocked', at: 'importing', problem: { code: 'file_unreadable' } });
+
+    const job = pipe!.worker.enqueue({ type: 'import.run', payload: { hash: entry.transferHash! }, dedupeKey: `import:${entry.transferHash}` });
+    await until(() => !pipe!.db.data.jobs[job.id]);
+
+    expect(entry).toEqual(before);
   }, 20_000);
 
   it('reruns the import checks on a manual retry, with no limit and no new download', async () => {
-    const entry = await stuckImport();
+    const entry = await unreadableMovie();
+    await until(() => !Object.values(pipe!.db.data.jobs).some((job) => job.type === 'import.run'));
+    const tries = entry.importTries;
     const downloads = pipe!.tracker.state.downloads.length;
     const blocks = entry.history.filter((event) => event.cause === 'import blocked').length;
 
@@ -248,7 +235,7 @@ describe('failed imports', () => {
     await until(() => entry.history.filter((event) => event.cause === 'import blocked').length > blocks);
 
     // The manual run does not use the automatic budget, and it does not fetch the release again.
-    expect(entry.importTries).toBe(3);
+    expect(entry.importTries).toBe(tries);
     expect(entry.state).toMatchObject({ kind: 'blocked', at: 'importing', problem: { code: 'file_unreadable' } });
     expect(pipe!.tracker.state.downloads.length).toBe(downloads);
   }, 20_000);

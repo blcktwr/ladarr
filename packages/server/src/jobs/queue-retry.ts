@@ -3,7 +3,7 @@ import { catalog, itemFields } from '../core/log.ts';
 import { withTitleLock } from '../core/title-lock.ts';
 import { ClientError } from '../library/downloads/qbittorrent.ts';
 import { isActive, phaseOfEntry } from '../library/downloads/queue.ts';
-import { scanTitle } from '../library/scan.ts';
+import { readTitleFolder, scanTitle } from '../library/scan.ts';
 import type { Handler, QueueEntry, QueueRetryDeps, Title } from '../types.ts';
 
 const present = (fileId: string | null) => Boolean(fileId && db.data.files[fileId] && !db.data.files[fileId]!.missing);
@@ -22,26 +22,35 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
   async function fromLibrary(entry: QueueEntry, title: Title, scan: boolean) {
     if (entry.replaceDestination) return false;
     const id = fileOf(title, entry);
-    if (!scan || !present(id)) return false;
+    if (!scan) return false;
+    if (!present(id)) {
+      const folder = await readTitleFolder(title, { guessedFolder: true });
+      if (entry.state.kind === 'blocked' || entry.state.kind === 'paused' || !isActive(entry)) return true;
+      const empty = folder.files.some((file) => file.sizeBytes === 0 && (title.mediaType === 'movie' || (file.parsed?.season === entry.season && file.parsed.numbers.includes(entry.number!))));
+      if (!empty) return false;
+      queue.enter(entry, 'importing', 'retry: validate the library file');
+      queue.block(entry, { code: 'file_unreadable', detail: 'empty' }, 'import blocked');
+      return true;
+    }
     const file = db.data.files[id!]!;
+    queue.enter(entry, 'importing', 'retry: validate the library file');
+    if (file.titleKey !== title.key) {
+      queue.block(entry, { code: 'file_unmapped' }, 'import blocked');
+      return true;
+    }
+    if (file.sizeBytes <= 0) {
+      queue.block(entry, { code: 'file_unreadable', detail: 'empty' }, 'import blocked');
+      return true;
+    }
+    if (entry.season !== null && !file.episodes.some((episode) => episode.season === entry.season && episode.number === entry.number)) {
+      queue.block(entry, { code: 'file_unmapped' }, 'import blocked');
+      return true;
+    }
     catalog.info('available', 'The file is in the library', itemFields(entry), { source: 'retry', path: file.path, sizeBytes: file.sizeBytes });
     queue.endAttempt(entry, 'imported', 'the file is in the library');
     queue.complete(entry, 'file is in the library', file.path);
     return true;
   }
-
-  // True while the target is in a retry that the user asked for, so several targets that the user retried together stay
-  // one group. A target that waits on its own is not part of the retry of another one.
-  const retrying = (entry: QueueEntry) => {
-    const attempt = entry.attempts.at(-1);
-    return attempt?.outcome === 'running' && attempt.reason === 'retry';
-  };
-
-  // The active targets that the same torrent imports. A torrent covers every target that points at it, so a retry of
-  // one of them resolves them together: the import reads them as one group, and a file that holds two episodes stays
-  // one file. A target that the user paused, or that the user did not retry, stays out.
-  const torrentTargets = (entry: QueueEntry, hash: string) =>
-    Object.values(db.data.queue).filter((other) => other.titleKey === entry.titleKey && isActive(other) && other.state.kind !== 'paused' && retrying(other) && (other.transferHash === hash || other.release?.infoHash === hash));
 
   // The torrent that the target points at. The client that has it is read first, so a finished torrent goes to its
   // import and a torrent that still downloads is waited for. The release is never fetched again in this case.
@@ -60,7 +69,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
     }
     if (!torrent) return false;
     const fields = { client: handle.config.name, hash, name: torrent.name, complete: torrent.complete, progress: torrent.progress };
-    const targets = torrentTargets(entry, hash);
+    const targets = [entry];
     for (const target of targets) {
       target.transferHash = hash;
       target.clientId = handle.id;
@@ -80,6 +89,36 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
       await handle.api.setPaused(hash, false).catch(() => {});
     }
     return true;
+  }
+
+  async function checkDownload(entry: QueueEntry, revision: number) {
+    if (entry.state.kind !== 'blocked' || entry.state.at !== 'downloading' || entry.revision !== revision) return;
+    const current = () => db.data.queue[entry.id] === entry && entry.state.kind === 'blocked' && entry.revision === revision;
+    const hash = entry.transferHash ?? entry.release?.infoHash;
+    const handle = clients.get(entry.clientId) ?? clients.next();
+    if (!handle || !hash) {
+      queue.block(entry, { code: !handle ? 'client_missing' : 'torrent_missing' }, 'download check');
+      return;
+    }
+    let torrent;
+    try {
+      torrent = await handle.api.find(hash);
+    } catch (error) {
+      if (!(error instanceof ClientError)) throw error;
+      if (current()) queue.block(entry, { code: error.code === 'rejected' ? 'client_rejected' : 'client_unreachable' }, 'download check');
+      return;
+    }
+    if (!current()) return;
+    if (!torrent || torrent.status === 'error') {
+      queue.block(entry, { code: torrent ? 'client_error' : 'torrent_missing' }, 'download check');
+      return;
+    }
+    queue.retryAttempt(entry, 'retry');
+    entry.transferHash = hash;
+    entry.clientId = handle.id;
+    queue.resolve(entry, torrent.complete ? 'importing' : 'downloading', 'download checked');
+    if (torrent.complete) enqueue({ type: 'import.run', payload: { hash, manual: true }, dedupeKey: `import:${hash}`, priority: entry.priority !== null });
+    else if (torrent.status === 'paused') await handle.api.setPaused(hash, false).catch(() => {});
   }
 
   // The release that the target kept. The grab reads the client first, so a torrent that it has is used as it is. A
@@ -120,8 +159,15 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
     separate: true,
     maxAttempts: 3,
     run: async (job, { signal }) => {
-      const { entryIds } = job.payload as { entryIds: string[] };
+      const { entryIds, checkDownload: check, revisions } = job.payload as { entryIds: string[]; checkDownload?: boolean; revisions?: Record<string, number> };
       const entries = entryIds.map((id) => queue.get(id)).filter((entry): entry is QueueEntry => Boolean(entry));
+      if (check) {
+        for (const entry of entries) {
+          signal.throwIfAborted();
+          if (revisions?.[entry.id] !== undefined) await checkDownload(entry, revisions[entry.id]!);
+        }
+        return;
+      }
       const byTitle = new Map<string, QueueEntry[]>();
       for (const entry of entries) byTitle.set(entry.titleKey, [...(byTitle.get(entry.titleKey) ?? []), entry]);
       for (const [key, group] of byTitle) {
@@ -135,7 +181,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
           for (const entry of group) {
             signal.throwIfAborted();
             // The user can pause or cancel the target while the retry waits for its title.
-            if (!isActive(entry) || entry.state.kind === 'paused') continue;
+            if (!isActive(entry) || entry.state.kind === 'paused' || entry.state.kind === 'blocked') continue;
             // A target of an import runs its import checks. Its own job does that, with no limit.
             if (phaseOfEntry(entry) === 'importing') continue;
             if (await fromLibrary(entry, title, fresh)) continue;

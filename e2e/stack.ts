@@ -170,7 +170,7 @@ export async function startStack() {
     },
 
     // The end of a download: the files are in the download folder, the client lists them, and it reports 100%.
-    complete(name: string, files: Record<string, string>) {
+    complete(name: string, files: Record<string, string>, hash = hashOf(name)) {
       const list: { name: string; size: number; progress: number }[] = [];
       for (const [rel, content] of Object.entries(files)) {
         const abs = join(folders.downloads, name, rel);
@@ -178,8 +178,8 @@ export async function startStack() {
         writeFileSync(abs, content);
         list.push({ name: `${name}/${rel}`, size: Buffer.byteLength(content), progress: 1 });
       }
-      qbit.setFiles(hashOf(name), list);
-      qbit.progress(hashOf(name), 1);
+      qbit.setFiles(hash, list);
+      qbit.progress(hash, 1);
     },
 
     async stop() {

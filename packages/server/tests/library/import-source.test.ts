@@ -161,6 +161,28 @@ describe('detect', () => {
 });
 
 describe('preview', () => {
+  it('leaves plausible movie videos unselected instead of taking the largest one', async () => {
+    t = await startSourceTest();
+    t.write(t.inbox, { 'Movie.Name.2019.Cut.A.mkv': 'a'.repeat(500), 'Movie.Name.2019.Cut.B.mkv': 'short-cut' });
+    const jobs = structuredClone(t.pipe.db.data.jobs);
+    const input = { path: t.inbox, mediaType: 'movie', tmdbId: 2 };
+
+    const { status, body } = await t.preview(input);
+
+    expect(status).toBe(200);
+    expect(body.preview.plan.importable).toBe(0);
+    expect(body.preview.plan.files).toHaveLength(2);
+    for (const file of body.preview.plan.files) {
+      expect(['unmatched', 'blocked']).toContain(file.status);
+      expect(file).toMatchObject({ dest: null, replaces: null, episodes: [] });
+    }
+    expect((await t.start(input)).body.error).toBe('nothing_to_import');
+    expect(t.pipe.db.data.titles).toEqual({});
+    expect(t.pipe.db.data.files).toEqual({});
+    expect(t.pipe.db.data.imports).toEqual({});
+    expect(t.pipe.db.data.jobs).toEqual(jobs);
+  });
+
   it('shows the plan of a series that is not in the catalog, and changes nothing', async () => {
     t = await startSourceTest();
     // The worker schedules its periodic jobs before the first request.

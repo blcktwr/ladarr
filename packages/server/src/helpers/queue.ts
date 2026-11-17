@@ -2,7 +2,9 @@ import { qualityLabel } from '../library/grab/quality.ts';
 import { parseRelease } from '../library/grab/release.ts';
 import { REJECTION_TEXT } from '../library/grab/decide.ts';
 import { aggregate, describe, needsOtherSeasons, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
-import type { QueueGroupRow, QueuePage, QueueRow } from '@ladarr/shared/types';
+import { createHash } from 'node:crypto';
+import type { QueueGroupRow, QueuePage, QueueResolution, QueueRow } from '@ladarr/shared/types';
+import { normalizeNumbering } from '../library/numbering.ts';
 import { db } from '../core/db.ts';
 import { seasonOf } from '../core/jobs.ts';
 import { reasonInfo } from '../core/reasons.ts';
@@ -57,14 +59,91 @@ export function problemOf(entry: QueueEntry): StateProblem | null {
 export function reasonOf(entry: QueueEntry): (ReasonInfo & { code: string; detail: string | null }) | null {
   const problem = problemOf(entry);
   if (!problem) return null;
-  return { code: problem.code, ...reasonInfo(problem.code), detail: problem.detail ?? null };
+  const specific = problem.code === 'too_many_attempts' && problem.detail ? reasonInfo(problem.detail) : reasonInfo(problem.code);
+  return { code: problem.code, ...specific, detail: problem.detail ?? null };
 }
 // The reason of a group, from the problem that aggregate() chose.
 export const reasonOfProblem = (problem: StateProblem | null) => {
   if (!problem) return null;
-  const info = reasonInfo(problem.code);
+  const info = reasonInfo(problem.code === 'too_many_attempts' && problem.detail ? problem.detail : problem.code);
   return { code: problem.code, message: info.message, action: info.action, settings: info.settings ?? null, detail: problem.detail ?? null };
 };
+
+const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+export function resolutionVersion(scope: unknown, state: unknown): string {
+  return Buffer.from(JSON.stringify({ scope: digest(scope), state: digest(state) })).toString('base64url');
+}
+
+export function resolutionCurrent(version: unknown, scope: unknown, state?: unknown): boolean {
+  if (typeof version !== 'string') return false;
+  try {
+    const saved = JSON.parse(Buffer.from(version, 'base64url').toString()) as { scope: string; state: string };
+    return saved.scope === digest(scope) && (state === undefined || saved.state === digest(state));
+  } catch {
+    return false;
+  }
+}
+
+export function associationState(titleKey: string) {
+  const title = db.data.titles[titleKey]!;
+  return {
+    numbering: normalizeNumbering(title.numbering),
+    episodes: title.episodes.map(({ season, number, fileId }) => ({ season, number, fileId })),
+    fileId: title.fileId,
+    files: Object.values(db.data.files).filter((file) => file.titleKey === titleKey).sort((a, b) => a.id.localeCompare(b.id)),
+  };
+}
+
+export function catalogTargets(title: Title) {
+  return title.episodes
+    .map((episode) => ({
+      id: `${title.key}:${episode.season}x${episode.number}`,
+      label: `${title.meta.title} S${pad(episode.season)}E${pad(episode.number)}`,
+      season: episode.season,
+      number: episode.number,
+    }))
+    .sort((a, b) => a.season - b.season || a.number - b.number);
+}
+
+export function actionsOf(entries: QueueEntry[]): QueueResolution[] {
+  const result = new Map<string, QueueResolution>();
+  for (const entry of entries) {
+    if (entry.state.kind !== 'blocked') continue;
+    const problem = entry.state.problem;
+    const cause = problem.code === 'too_many_attempts' && problem.detail ? problem.detail : problem.code;
+    const phase = entry.state.at;
+    const source = entry.transferHash ?? (cause === 'pack_partial' ? problem.detail : null) ?? entry.release?.title ?? entry.manualMatch?.file ?? null;
+    const add = (action: QueueResolution['action'], text: string, settings?: string, fileSource?: QueueResolution['fileSource']) => {
+      const key = JSON.stringify([action, phase, cause, problem.detail, source, settings, fileSource]);
+      const item = result.get(key) ?? { action, label: text, ids: [], phase, cause, source, ...(settings ? { settings } : {}), ...(fileSource ? { fileSource } : {}) };
+      item.ids.push(entry.id);
+      result.set(key, item);
+    };
+    const title = titleOf(entry);
+    if (title?.mediaType === 'tv' && ['numbering_required', 'pack_partial', 'file_not_found', 'file_unmapped', 'coverage_unknown'].includes(cause)) {
+      add('edit_numbering', 'Edit numbering');
+      if (JSON.stringify(normalizeNumbering(entry.numbering)) !== JSON.stringify(normalizeNumbering(title.numbering))) add('apply_numbering', 'Apply numbering');
+    }
+    if (['file_not_found', 'file_unmapped', 'coverage_unknown', 'file_unreadable', 'file_invalid', 'destination_exists'].includes(cause)) {
+      add('match', title?.mediaType === 'movie' ? 'Select file' : 'Map episodes', undefined, entry.transferHash ? 'download' : 'library');
+    }
+    if (cause === 'destination_exists') {
+      add('use_existing', 'Use existing file', undefined, 'library');
+      add('replace', 'Replace file');
+    }
+    if (['pack_partial', 'torrent_missing', 'torrent_exists', 'client_error', 'coverage_unknown'].includes(cause)) add('attach', 'Attach download');
+    if (['pack_partial', 'file_not_found', 'file_unmapped', 'coverage_unknown', 'file_unreadable', 'file_invalid', 'torrent_missing', 'client_error', 'grab_failed', 'no_download_link', 'invalid_torrent'].includes(cause)) add('search_releases', 'Search releases');
+    if (phase === 'fetching' && entry.release && !['pack_partial', 'numbering_required', 'torrent_exists', 'file_invalid'].includes(cause)) add('retry_fetch', 'Retry fetch');
+    if ((phase === 'sending' || phase === 'waiting_slot') && entry.release && cause !== 'file_invalid') add('retry_send', 'Retry send');
+    if (['torrent_missing', 'client_error', 'client_unreachable'].includes(cause) && entry.transferHash) add('check_download', 'Check download');
+    if (phase === 'importing' && !['pack_partial', 'numbering_required', 'file_unmapped', 'coverage_unknown', 'file_unreadable', 'file_invalid'].includes(cause)) add('retry_import', 'Retry import');
+    if ((phase === 'queued' || phase === 'searching') && !['pack_partial', 'numbering_required', 'file_invalid'].includes(cause)) add('retry', 'Retry');
+    const settings = reasonInfo(cause).settings;
+    if (settings) add('settings', 'Settings', settings);
+  }
+  return [...result.values()];
+}
 
 // The title whose first search waits for its episodes. A series has a target for each episode, so it has none until
 // the episodes arrive. The queue shows one pending row for the series meanwhile.
@@ -259,6 +338,7 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
     tab: description.tab,
     phase: description.phase,
     reason: info ? { code: info.code, message: info.message, action: info.action, settings: info.settings ?? null, detail: info.detail } : null,
+    actions: actionsOf([entry]),
     stateSince: entry.stateSince,
     revision: entry.revision,
     lane: lane.get(entry.id) ?? null,
@@ -448,6 +528,7 @@ export function groupAggregate(entries: QueueEntry[]) {
     tabs: result.tabs,
     total: result.total,
     problem: reasonOfProblem(result.problem),
+    actions: actionsOf(entries),
     otherSeasons: entries.filter((entry) => needsOtherSeasons(entry.state)).length,
   };
 }
@@ -470,6 +551,7 @@ function groupRow(group: RowGroup): QueueGroupRow {
     counts: summary.counts,
     tabs: summary.tabs,
     problem: summary.problem,
+    actions: summary.actions,
     otherSeasons: summary.otherSeasons,
     priority: group.entries.some((entry) => entry.priority !== null && isActive(entry)),
   };

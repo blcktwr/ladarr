@@ -83,7 +83,14 @@ export function decide(release: RawRelease, want: Want, ctx: DecideContext): Dec
     const unresolved = numbering.ranges.length > 0 && parsed.season !== null && numbers.length > 0 && !converted;
     const mapped = rangeOfCatalog(numbering, want.season, want.number) !== null;
     // A pack is not an episode, also when its name carries the air date of one.
-    if (parsed.pack || parsed.multiSeason) reject(parsed.multiSeason ? 'multi_season_pack' : 'not_an_episode');
+    if (parsed.multiSeason) {
+      const held = ctx.coverage(release);
+      const known = held && held.titleKey === title.key && held.season === want.season && held.numberingRevision === numbering.revision ? held.numbers : null;
+      kind = 'pack';
+      if (known && !known.includes(want.number)) reject('wrong_episode');
+      // The requested target is provisional until the manifest establishes its coverage.
+      else covers = [{ season: want.season, number: want.number }];
+    } else if (parsed.pack) reject('not_an_episode');
     else if (unresolved) reject('wrong_episode');
     else if (parsed.absolute !== null && !mapped) {
       // An anime release names the absolute number of the episode. It matches the episode with that number.
@@ -103,7 +110,7 @@ export function decide(release: RawRelease, want: Want, ctx: DecideContext): Dec
       season = converted.season;
       numbers = converted.numbers;
     } else if (season === null || !numbers.length) reject('not_an_episode');
-    if (!rejections.includes('daily_ambiguous') && season !== null && numbers.length) {
+    if (!parsed.multiSeason && !rejections.includes('daily_ambiguous') && season !== null && numbers.length) {
       if (season !== want.season) reject('wrong_season');
       else if (!numbers.includes(want.number)) reject('wrong_episode');
       else {
@@ -120,16 +127,15 @@ export function decide(release: RawRelease, want: Want, ctx: DecideContext): Dec
     const numbering = normalizeNumbering(want.numbering);
     // A pack names one release season. The saved ranges say which catalog episodes that season holds.
     const releaseSeason = want.releaseSeason ?? want.season;
-    if (parsed.multiSeason) reject('multi_season_pack');
-    else if (!parsed.pack) reject('not_a_pack');
-    else if (parsed.season !== releaseSeason) reject('wrong_season');
+    const held = ctx.coverage(release);
+    const known = held && held.titleKey === title.key && held.season === want.season && held.numberingRevision === numbering.revision ? new Set(held.numbers) : null;
+    if (!parsed.pack && !parsed.multiSeason) reject('not_a_pack');
+    else if (!parsed.multiSeason && parsed.season !== releaseSeason) reject('wrong_season');
     else {
-      const inSeason = title.episodes.filter((episode) => releasePoint(numbering, episode)?.season === releaseSeason);
+      const inSeason = title.episodes.filter((episode) => parsed.multiSeason ? episode.season === want.season : releasePoint(numbering, episode)?.season === releaseSeason);
       // The files of an earlier download of this pack say which episodes it holds. A pack can hold fewer episodes than
       // TMDB gives the season, so the record decides instead of the count of the season. A record of another numbering
       // says nothing about this one.
-      const held = ctx.coverage(release);
-      const known = held && held.titleKey === title.key && held.season === want.season && held.numberingRevision === numbering.revision ? new Set(held.numbers) : null;
       covers = inSeason.filter((episode) => !known || known.has(episode.number)).map((episode) => ({ season: episode.season, number: episode.number }));
       if (!inSeason.length) reject('wrong_season');
       // The pack held other episodes of the season, so it gives none of this target.

@@ -88,7 +88,6 @@ import { mappingApply } from './routes/mapping/apply/post.ts';
 import { mappingPreview } from './routes/mapping/preview/post.ts';
 import { mappingProposal } from './routes/mapping/proposal/post.ts';
 import { ffprobeAvailable } from './library/probe.ts';
-import { createRetry } from './library/downloads/queue-api.ts';
 import { createAttachCache } from './helpers/queue-attach.ts';
 import { queueEntryAttachPost } from './routes/queue/entries/[id]/attach/post.ts';
 import { queueEntryClientGet } from './routes/queue/entries/[id]/client/get.ts';
@@ -153,10 +152,7 @@ import type { AppOptions, EnqueueInput } from './types.ts';
 export function createApp({ services, urlBase = '', events = createEvents(), webDir, devOrigin, heartbeat, tmdb, configDir, backupDir, enqueue: enqueueInput, cancelJob, persist, restorer, indexers, installUpdate, pauseQueue, resumeQueue, restart }: AppOptions = {}) {
   const enqueue = enqueueInput ?? ((input: EnqueueInput) => enqueueJob(input));
   const api = express.Router();
-  // A change of the indexers or of the clients can lift the block of a target. The target goes on, and the pages read the new state.
-  const retries = services ? createRetry({ queue: services.queue, enqueue }) : undefined;
   const setupChanged = (kind: 'indexers' | 'clients') => {
-    retries?.retryBlocked(kind === 'indexers' ? 'no_indexers' : 'client_missing');
     events.publish(`${kind}.changed`);
   };
   api.use((_req, res, next) => {
@@ -233,7 +229,7 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   api.post('/rename/apply', renameApply({ enqueue, status: importStatus }));
   api.post('/mapping/proposal', mappingProposal());
   api.post('/mapping/preview', mappingPreview());
-  api.post('/mapping/apply', mappingApply({ persist, events }));
+  api.post('/mapping/apply', mappingApply({ persist, events, queue: services?.queue, enqueue }));
   api.get('/webhook', webhookGet());
   api.post('/webhook', webhookCreate());
   api.put('/webhook/:id', webhookUpdate());

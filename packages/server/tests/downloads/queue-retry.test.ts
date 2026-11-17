@@ -109,6 +109,7 @@ describe('retry', () => {
     const entry = pipe.queue.ensure('tv:1', 1, 1);
     pipe.queue.request(entry, 'test');
     move(pipe.queue, entry, { stage: 'queued', branch: null, reason: { code: 'too_many_attempts' } }, 'test');
+    const history = entry.history.length;
 
     expect((await api.post('/queue/actions', { action: 'retry', ids: ['tv:1:1x1'] })).status).toBe(200);
 
@@ -119,9 +120,78 @@ describe('retry', () => {
     expect(files).toHaveLength(1);
     expect(files[0]!.path).toBe('Show Name (2020)/Season 01/Show Name E01.mkv');
     expect(files[0]!.episodes).toEqual([{ season: 1, number: 1 }]);
+    expect(files[0]!.titleKey).toBe(series.key);
+    expect(files[0]!.sizeBytes).toBe(Buffer.byteLength('video-data'));
+    expect(series.episodes[0]!.fileId).toBe(files[0]!.id);
+    const stages = entry.history.slice(history).map((event) => event.stage);
+    expect(stages.indexOf('importing')).toBeGreaterThanOrEqual(0);
+    expect(stages.indexOf('importing')).toBeLessThan(stages.indexOf('available'));
     expect(pipe.tracker.state.searches).toEqual([]);
     expect(pipe.tracker.state.downloads).toEqual([]);
     expect(pipe.qbit.torrents.size).toBe(0);
+  });
+
+  it.each(['movie', 'tv'] as const)('keeps an empty library file blocked at import for %s', async (mediaType) => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const item = mediaType === 'movie'
+      ? movie({ rootId: 'movie', folder: 'Movie Name (2019)', manualRelease: true })
+      : title({ rootId: 'tv', folder: 'Show Name (2020)', episodes: [episode(1, 1)] });
+    pipe.db.data.titles[item.key] = item;
+    const folder = mediaType === 'movie'
+      ? join(pipe.folders.movies, item.folder!)
+      : join(pipe.folders.tv, item.folder!, 'Season 01');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, mediaType === 'movie' ? 'Movie Name (2019).mkv' : 'Show Name - S01E01.mkv'), '');
+    const entry = pipe.queue.ensure(item.key, mediaType === 'movie' ? null : 1, mediaType === 'movie' ? null : 1);
+    pipe.queue.request(entry, 'test');
+    move(pipe.queue, entry, { stage: 'searching', reason: { code: 'too_many_attempts' } }, 'test');
+    const history = entry.history.length;
+
+    expect((await api.post('/queue/actions', { action: 'retry', ids: [entry.id] })).status).toBe(200);
+    await until(() => entry.state.kind === 'blocked' && entry.state.at === 'importing');
+
+    expect(entry.state).toMatchObject({ kind: 'blocked', at: 'importing', problem: { code: 'file_unreadable' } });
+    expect(entry.history.slice(history).some((event) => event.stage === 'importing')).toBe(true);
+    expect(entry.history.slice(history).some((event) => event.state.kind === 'available')).toBe(false);
+    expect(entry.completedAt).toBeNull();
+    expect(pipe.tracker.state.searches).toEqual([]);
+    expect(pipe.tracker.state.downloads).toEqual([]);
+    expect(pipe.qbit.torrents.size).toBe(0);
+  });
+
+  it.each(['movie', 'tv'] as const)('does not complete %s from a file pointer that belongs to another title', async (mediaType) => {
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const item = mediaType === 'movie'
+      ? movie({ rootId: 'movie', folder: 'Movie Name (2019)', manualRelease: true })
+      : title({ rootId: 'tv', folder: 'Show Name (2020)', episodes: [episode(1, 1)] });
+    pipe.db.data.titles[item.key] = item;
+    const root = mediaType === 'movie' ? pipe.folders.movies : pipe.folders.tv;
+    mkdirSync(join(root, item.folder!), { recursive: true });
+    mkdirSync(join(root, 'Other Title'), { recursive: true });
+    writeFileSync(join(root, 'Other Title', 'Other Title.mkv'), 'other-content');
+    const file = {
+      id: 'other-file', titleKey: `${mediaType}:99`, path: 'Other Title/Other Title.mkv',
+      sizeBytes: Buffer.byteLength('other-content'), mtimeMs: 0, episodes: mediaType === 'movie' ? [] : [{ season: 1, number: 1 }],
+      missing: false, addedAt: Date.now(),
+    };
+    pipe.db.data.files[file.id] = file;
+    if (mediaType === 'movie') item.fileId = file.id;
+    else item.episodes[0]!.fileId = file.id;
+    const entry = pipe.queue.ensure(item.key, mediaType === 'movie' ? null : 1, mediaType === 'movie' ? null : 1);
+    pipe.queue.request(entry, 'test');
+    move(pipe.queue, entry, { stage: 'searching', reason: { code: 'too_many_attempts' } }, 'test');
+    const history = entry.history.length;
+
+    expect((await api.post('/queue/actions', { action: 'retry', ids: [entry.id] })).status).toBe(200);
+    await until(() => !Object.values(pipe!.db.data.jobs).some((job) => job.type === 'queue.retry'));
+
+    expect(entry.state.kind).not.toBe('available');
+    expect(entry.history.slice(history).some((event) => event.state.kind === 'available')).toBe(false);
+    expect(entry.completedAt).toBeNull();
+    expect(pipe.db.data.files[file.id]).toEqual(file);
+    expect(pipe.tracker.state.downloads).toEqual([]);
   });
 
   it('resumes the import of a torrent that the client has', async () => {

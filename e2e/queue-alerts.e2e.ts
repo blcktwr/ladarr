@@ -6,36 +6,44 @@ test.setTimeout(120_000);
 
 let stack: Stack;
 let cookie: Awaited<ReturnType<Stack['createOwner']>>;
+const files = [1, 2, 3].map((number) => `Show.Name.S01E0${number}.mkv`);
+const hash = hashOf(SERIES_PACK, files);
 test.beforeAll(async () => {
   stack = await startStack();
   cookie = await stack.createOwner();
   await configure(stack);
-  // The user added the pack in the client before the app found the release, so the grab stops for each episode.
-  const hash = hashOf(SERIES_PACK);
-  stack.qbit.torrents.set(hash, {
-    hash,
-    name: SERIES_PACK,
-    size: 1_000_000,
-    progress: 0.2,
-    state: 'downloading',
-    category: 'manual',
-    tags: '',
-    save_path: stack.folders.downloads,
-    content_path: `${stack.folders.downloads}/${SERIES_PACK}`,
-    dlspeed: 1000,
-    eta: 100,
-    num_seeds: 1,
-    num_leechs: 1,
-    added_on: Math.floor(Date.now() / 1000),
-  });
+  stack.tracker.state.items.find((item) => item.title === SERIES_PACK)!.files = files;
+  // The manual torrent arrives after the initial client lookup, but before the release reaches the client.
+  stack.tracker.state.answer = (url) => {
+    if (url.searchParams.get('t') === 'tvsearch' && !stack.qbit.torrents.has(hash)) {
+      stack.qbit.torrents.set(hash, {
+        hash,
+        name: SERIES_PACK,
+        size: 1_000_000,
+        progress: 0.2,
+        state: 'downloading',
+        category: 'manual',
+        tags: '',
+        save_path: stack.folders.downloads,
+        content_path: `${stack.folders.downloads}/${SERIES_PACK}`,
+        dlspeed: 1000,
+        eta: 100,
+        num_seeds: 1,
+        num_leechs: 1,
+        added_on: Math.floor(Date.now() / 1000),
+      });
+      stack.qbit.setFiles(hash, files.map((name) => ({ name: `${SERIES_PACK}/${name}`, size: 1000, progress: 0.2 })));
+    }
+    return stack.tracker.state.items;
+  };
   const added = await stack.call('POST', '/library', { mediaType: 'tv', tmdbId: 1, add: 'all' });
   if (added.status >= 300) throw new Error(`POST /library answered ${added.status}: ${JSON.stringify(added.body)}`);
   // The three episodes of the pack stop on the reason before the page opens.
   await expect
     .poll(
       async () => {
-        const items = (await stack.call('GET', '/queue/groups/tv:1')).body.items as { status: string }[];
-        return items.length === 3 && items.every((item) => item.status === 'stuck');
+        const items = (await stack.call('GET', '/queue/groups/tv:1')).body.items as { status: string; reason: { code: string } | null }[];
+        return items.length === 3 && items.every((item) => item.status === 'stuck' && item.reason?.code === 'torrent_exists');
       },
       { timeout: 60_000 },
     )
@@ -91,11 +99,18 @@ test('attaches the download that is in the client to an episode', async ({ page,
   const attach = row.getByRole('button', { name: 'Attach download' });
   await expect(attach).toBeVisible();
   await attach.click();
-  const panel = page.getByRole('dialog', { name: /Attach download to/ });
+  const panel = page.getByRole('dialog');
   await expect(panel).toBeVisible();
   // The torrent of the client is the one that stopped the episode. The option shows its size and progress too.
   await panel.getByRole('combobox', { name: 'Download' }).click();
   await page.getByRole('option', { name: new RegExp(SERIES_PACK) }).click();
+  const [preview] = await Promise.all([
+    page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/queue/entries/tv:1:1x1/attach' && response.request().postDataJSON().preview === true),
+    panel.getByRole('button', { name: 'Preview attachment', exact: true }).click(),
+  ]);
+  expect(preview.status()).toBe(200);
+  expect((await preview.json()).affected.map((item: { id: string }) => item.id)).toEqual(['tv:1:1x1']);
+  expect((await stack.call('GET', '/queue/groups/tv:1')).body.items.every((item: { status: string }) => item.status === 'stuck')).toBe(true);
   await panel.getByRole('checkbox', { name: 'I added this download. It will not be removed from the client.' }).click();
   await panel.getByRole('checkbox', { name: /^This download is/ }).click();
   await panel.getByRole('button', { name: 'Attach download' }).click();
@@ -110,5 +125,7 @@ test('attaches the download that is in the client to an episode', async ({ page,
       },
       { timeout: 60_000 },
     )
-    .toEqual({ hash: hashOf(SERIES_PACK), reason: null });
+    .toEqual({ hash, reason: null });
+  const siblings = (await stack.call('GET', '/queue/groups/tv:1')).body.items.filter((item: { number: number }) => item.number !== 1);
+  expect(siblings.map((item: { status: string }) => item.status)).toEqual(['stuck', 'stuck']);
 });

@@ -1,19 +1,23 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { hashOf } from '../packages/server/tests/helpers/test-pipeline.ts';
 import { expect, test } from './fixtures.ts';
 import { configure, SERIES_PACK, startStack, URL_BASE, type Stack } from './stack.ts';
 
 test.setTimeout(120_000);
+test.use({ actionTimeout: 15_000 });
 
 let stack: Stack;
 let cookie: Awaited<ReturnType<Stack['createOwner']>>;
 const DEST = (number: number) => `Show Name (2020)/Season 01/Show Name - S01E0${number} - Episode ${number}.mkv`;
+const FILES = [1, 2, 3].map((number) => `Show.Name.S01E0${number}.mkv`);
 const entry = (number: number) => stack.call('GET', `/queue/entries/tv:1:1x${number}`).then((res) => res.body.entry);
 
 test.beforeAll(async () => {
   stack = await startStack();
   cookie = await stack.createOwner();
   await configure(stack);
+  stack.tracker.state.items = [{ title: SERIES_PACK, size: 3 * 60 * 45 * 1024 * 1024, files: FILES }];
   const added = await stack.call('POST', '/library', { mediaType: 'tv', tmdbId: 1, add: 'all' });
   if (added.status >= 300) throw new Error(`POST /library answered ${added.status}: ${JSON.stringify(added.body)}`);
 });
@@ -31,7 +35,7 @@ test('replaces the files of every episode that stopped on a taken destination na
     mkdirSync(dirname(dest), { recursive: true });
     writeFileSync(dest, 'someone else');
   }
-  stack.complete(SERIES_PACK, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two', 'Show.Name.S01E03.mkv': 'three' });
+  stack.complete(SERIES_PACK, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two', 'Show.Name.S01E03.mkv': 'three' }, hashOf(SERIES_PACK, FILES));
   await expect
     .poll(
       async () => {
@@ -44,7 +48,9 @@ test('replaces the files of every episode that stopped on a taken destination na
 
   // The row of the season offers one replacement for the two files that it stopped on.
   await page.goto(`${URL_BASE}/activity`);
-  await page.getByRole('button', { name: 'Replace the file', exact: true }).click();
+  const replace = page.getByRole('button', { name: 'Replace file', exact: true });
+  await expect(replace).toHaveCount(1);
+  await replace.click();
   const ask = page.getByRole('dialog', { name: 'Replace the file?' });
   await expect(ask).toBeVisible();
   await ask.getByRole('button', { name: 'Replace', exact: true }).click();

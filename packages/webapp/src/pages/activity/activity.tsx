@@ -1,6 +1,6 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
 import { RETRY_STATUSES } from '@ladarr/shared/queue';
-import type { LogEntry, LogsResponse, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueReason, QueueRejectedRelease, QueueRow, QueueSummary, QueueTorrent, TitleDetail } from '@ladarr/shared/types';
+import type { LogEntry, LogsResponse, Numbering, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueResolution, QueueRow, QueueSummary, QueueTorrent } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, FileText, FileVideo, Info, LoaderCircle, Pause, Play, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
@@ -15,7 +15,7 @@ import { MatchDialog } from './activity-match.tsx';
 import { AttachDialog } from './activity-client.tsx';
 import { ReleasePicker } from './activity-releases.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
-import { LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
+import { Link, LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
 import { NumberingDialog } from '../../components/numbering.tsx';
 import { catalogPath, formatBytes, groupName, posterUrl, reasonText, seasonName, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
@@ -69,7 +69,7 @@ function DetailStatus({ status, icon, message, bar, divider = true, action, chil
         <StatusText small status={status} icon={icon} help={message ?? statusHelpText(icon)} />
         {bar}
         {message && <Text variant="small">{message}</Text>}
-        {action && <div className="flex justify-start gap-2 mt-2">{action}</div>}
+        {action && <div className="flex justify-end gap-2 mt-2 w-full">{action}</div>}
         {children}
       </div>
       {divider && <Divider />}
@@ -82,122 +82,93 @@ function EntryStatus({ entry }: { entry: QueueEntryView }) {
   return <StatusText small status={statusLabel(entry.status)} icon={entry.status} help={entry.reason ? t(entry.reason.message) : statusHelpText(entry.status)} />;
 }
 
-// A target that stopped because the destination name is taken. The user decides to replace the file, and the import
-// starts again. A target that stopped before the checks were kept has no list, so its reason is enough.
-const canReplace = (entry: QueueEntryView) => {
-  const failed = !entry.checks?.length || entry.checks.some((check) => check.id === 'destination_free' && check.state === 'failed');
-  return entry.reason?.code === 'destination_exists' && failed;
-};
-
 // The same fix for one target or for several targets of a season. The preview of the action names every target that it
 // changes.
 function ReplaceAllFix({ ids, run }: { ids: string[]; run: Run }) {
-  return <Confirm label={t('Replace the file')} title={t('Replace the file?')} confirm={t('Replace')} onConfirm={() => void run('replace', ids)} />;
-}
-
-function ReplaceFix({ entry, run }: { entry: QueueEntryView; run: Run }) {
-  if (!canReplace(entry)) return null;
-  return <ReplaceAllFix ids={[entry.id]} run={run} />;
+  return <Confirm label={t('Replace file')} title={t('Replace the file?')} confirm={t('Replace')} onConfirm={() => void run('replace', ids)} />;
 }
 
 // The target of a manual search: the title, and the season and the episode when the target has them.
 const targetOf = (entry: QueueEntryView) => ({ titleKey: entry.titleKey, ...(entry.season === null ? {} : { season: entry.season }), ...(entry.number === null ? {} : { number: entry.number }) });
 
-// The options that end the problem of a target. The reason of the target says which one applies: the file of the
-// destination is replaced, the download in the client is attached, or the file is matched by hand. A target that used
-// its attempts has no option here: it shows why the last release failed. The retry of the target comes from the menu.
-function EntryFix({ entry, run, refresh }: { entry: QueueEntryView; run: Run; refresh: () => void }) {
-  if (canReplace(entry)) return <ReplaceFix entry={entry} run={run} />;
-  if (entry.reason?.code === 'file_unreadable') {
-    return (
-      <>
-        <ReleasePicker target={targetOf(entry)} label={entry.label} onDone={refresh} />
-        <MatchDialog entry={entry} onDone={refresh} />
-      </>
-    );
-  }
-  if (entry.reason?.action === 'attach') return <AttachDialog entry={entry} onDone={refresh} />;
-  if (entry.reason?.action === 'match') return <MatchDialog entry={entry} onDone={refresh} />;
-  return null;
-}
-
-// The options that end the problem of a season. The problem picks the fix: one replacement for every episode with a
-// taken destination name, the download or the file of the first stopped episode, or a release for a damaged file. A
-// season that used its attempts shows no option here. The retry of the season comes from the menu. A pack that held a
-// part of the season adds the search of the other seasons of the releases, because the releases can count the season in
-// another way.
-function GroupFix(props: { reason: QueueReason | null; otherSeasons: number; stopped: QueueEntryView[]; titleKey: string; season: number | null; label: string; run: Run; refresh: () => void }) {
-  const other = props.otherSeasons > 0 ? <OtherSeasonsFix titleKey={props.titleKey} season={props.season} run={props.run} /> : null;
-  const fix = fixOfGroup(props);
-  return fix || other ? (
-    <>
-      {fix}
-      {other}
-    </>
-  ) : null;
-}
-
-// The search of the other seasons of the releases. It needs the saved numbering of the season, so a season without a
-// range opens the editor first, and the save starts the search. The user manages the episodes of a stuck target here,
-// in the queue, and not on the page of the series.
-function OtherSeasonsFix({ titleKey, season, run }: { titleKey: string; season: number | null; run: Run }) {
-  const [pending, setPending] = useState(false);
+// The server supplies each action and its explicit target scope.
+function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refresh }: { entry: QueueEntryView; entries?: QueueEntryView[]; actions?: QueueResolution[]; run: Run; refresh: () => void }) {
   const [numbering, setNumbering] = useState(false);
-  const search = () => run('search_other_seasons', [], { titleKey, season });
   return (
     <>
-      <Button
-        pending={pending}
-        onClick={async () => {
-          setPending(true);
-          try {
-            if (season === null) return await search();
-            const { title } = await api<{ title: TitleDetail }>(`/library/${titleKey}`);
-            if (title.numbering.ranges.some((range) => range.season === season)) await search();
-            else setNumbering(true);
-          } catch {
-            // The page shows the failure of the action in its own alert.
-          } finally {
-            setPending(false);
-          }
-        }}
-      >
-        {t('Search individually')}
-      </Button>
-      <Button variant="ghost" onClick={() => setNumbering(true)}>
-        {t('Choose episodes')}
-      </Button>
-      <NumberingDialog titleKey={titleKey} open={numbering} onOpenChange={setNumbering} submitLabel={t('Save and search')} onSaved={search} />
+      {actions?.map((item) => {
+        const action = item.action;
+        const targets = entries.filter((target) => item.ids.includes(target.id));
+        const target = targets[0] ?? entry;
+        const label = targets.map((target) => target.label).join(', ') || target.label;
+        switch (action) {
+          case 'edit_numbering':
+            return <Button key={item.action} onClick={() => setNumbering(true)}>{t(item.label)}</Button>;
+          case 'match':
+          case 'use_existing':
+            return <MatchDialog key={item.action} entry={target} ids={item.ids} label={item.label} fileSource={item.fileSource ?? (action === 'use_existing' ? 'library' : undefined)} fixedSource={action === 'use_existing'} onDone={refresh} />;
+          case 'attach':
+            return <AttachDialog key={item.action} entry={target} ids={item.ids} label={label} onDone={refresh} />;
+          case 'search_releases':
+            return <ReleasePicker key={item.action} target={item.ids.length === 1 ? targetOf(target) : { titleKey: target.titleKey, ...(target.season === null ? {} : { season: target.season }) }} ids={item.ids} label={label} onDone={refresh} />;
+          case 'replace':
+            return <ReplaceAllFix key={item.action} ids={item.ids} run={run} />;
+          case 'settings':
+            return <Link key={item.action} href={`/settings#${item.settings === 'library' ? 'media' : 'connections'}`}>{t(item.label)}</Link>;
+          default:
+            return <Button key={`${action}:${item.label}`} onClick={() => void run(action, item.ids, undefined, item.label)}>{t(item.label)}</Button>;
+        }
+      })}
+      <NumberingDialog titleKey={entry.titleKey} open={numbering} onOpenChange={setNumbering} onSaved={refresh} />
     </>
   );
 }
 
-function fixOfGroup({ reason, stopped, titleKey, season, label, run, refresh }: { reason: QueueReason | null; stopped: QueueEntryView[]; titleKey: string; season: number | null; label: string; run: Run; refresh: () => void }) {
-  if (!reason) return null;
-  const target = { titleKey, ...(season === null ? {} : { season }) };
-  if (reason.code === 'file_unreadable') {
-    return (
-      <>
-        <ReleasePicker target={target} label={label} onDone={refresh} />
-        {stopped.length === 1 && <MatchDialog entry={stopped[0]!} onDone={refresh} />}
-      </>
-    );
+// Each cause and source keeps its own affected episodes and actions.
+function GroupFix({ actions, stopped, run, refresh }: { actions: QueueResolution[]; stopped: QueueEntryView[]; run: Run; refresh: () => void }) {
+  const groups = new Map<string, { entries: QueueEntryView[]; actions: QueueResolution[] }>();
+  const common = new Map<string, QueueResolution>();
+  for (const item of actions) {
+    if (!['edit_numbering', 'apply_numbering', 'search_releases', 'replace'].includes(item.action)) continue;
+    const current = common.get(item.action);
+    common.set(item.action, { ...item, ids: [...new Set([...(current?.ids ?? []), ...item.ids])] });
   }
-  // The client answers again by itself, so the target waits and shows no action.
-  if (reason.code === 'client_unreachable') return null;
-  if (reason.code === 'destination_exists') {
-    const ids = stopped.filter(canReplace).map((entry) => entry.id);
-    if (ids.length) return <ReplaceAllFix ids={ids} run={run} />;
+  for (const entry of stopped) {
+    const descriptors = actions.filter((item) => item.ids.includes(entry.id));
+    const key = JSON.stringify([entry.phase, entry.reason?.code, entry.reason?.detail, descriptors[0]?.source ?? entry.release?.title ?? entry.file?.name]);
+    const group = groups.get(key) ?? { entries: [], actions: descriptors };
+    group.entries.push(entry);
+    groups.set(key, group);
   }
-  if (reason.action === 'attach') {
-    const entry = stopped.find((item) => item.reason?.action === 'attach');
-    if (entry) return <AttachDialog entry={entry} onDone={refresh} />;
-  }
-  if (reason.action === 'match') {
-    const entry = stopped.find((item) => item.reason?.action === 'match');
-    if (entry) return <MatchDialog entry={entry} onDone={refresh} />;
-  }
-  return null;
+  return (
+    <div className="grid gap-5 w-full">
+      {[...groups].map(([key, group]) => {
+        const entry = group.entries[0]!;
+        const ids = group.entries.map((item) => item.id);
+        const source = entry.release?.title ?? entry.file?.name ?? group.actions[0]?.source;
+        const local = group.actions.filter((item) => !common.has(item.action)).map((item) => ({ ...item, ids: item.ids.filter((id) => ids.includes(id)) }));
+        return (
+          <div key={key} className="grid gap-2 w-full">
+            <Text variant="small">{stageLabel(entry.phase)}</Text>
+            {entry.reason && <Text>{reasonText(entry.reason)}</Text>}
+            {source && <Text variant="small">{source}</Text>}
+            <Text variant="small">{group.entries.map((item) => item.label).join(', ')}</Text>
+            {local.length > 0 && <div className="flex flex-wrap justify-end gap-2 w-full">
+              <EntryFix entry={entry} entries={group.entries} actions={local} run={run} refresh={refresh} />
+            </div>}
+          </div>
+        );
+      })}
+      {stopped[0] && [...common.values()].map((item) => (
+        <div key={item.action} className="grid gap-2 w-full">
+          <Text variant="small">{stopped.filter((entry) => item.ids.includes(entry.id)).map((entry) => entry.label).join(', ')}</Text>
+          <div className="flex flex-wrap justify-end gap-2 w-full">
+            <EntryFix entry={stopped[0]} entries={stopped} actions={[item]} run={run} refresh={refresh} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // The comment of a release can hold more than one link, with text beside it. Each link opens in a new tab, and the
@@ -511,8 +482,7 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
   const reason = entry.reason ? reasonText(entry.reason) : null;
   const checks = showsChecks(entry);
   // The container of the action is not rendered when the reason has no option to show.
-  const hasFix = canReplace(entry) || entry.reason?.code === 'file_unreadable' || entry.reason?.action === 'attach' || entry.reason?.action === 'match';
-  const action = hasFix ? fix : undefined;
+  const action = entry.actions?.length ? fix : undefined;
   if (inline) {
     return (
       <div className="grid gap-2 w-full min-w-0">
@@ -533,6 +503,7 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
     <div className="grid gap-4 w-full min-w-0">
       {name}
       <DetailStatus status={statusLabel(status)} icon={status} message={reason} divider={!checks && Boolean(data)} action={action}>
+        {status === 'stuck' && <Text variant="small">{stageLabel(entry.phase)}</Text>}
         <TransferProgress entry={entry} />
       </DetailStatus>
       {checks && <ImportChecks entry={entry} />}
@@ -542,13 +513,13 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
   );
 }
 
-type Run = (action: QueueActionName, ids: string[], group?: { titleKey: string; season: number | null }) => Promise<void>;
+type Run = (action: QueueActionName, ids: string[], group?: { titleKey: string; season: number | null }, label?: string) => Promise<void>;
 
 // The actions of a row, in its menu. A target that a problem stops, and a target that waits for its next search with a
 // result, take a retry: the phases of the target run again, from the file in the library to a new search.
 function entryMenu(entry: QueueEntryView, run: Run, openLogs: (entry: QueueEntryView) => void): { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] {
   const items: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] = [];
-  if (RETRY_STATUSES.includes(entry.status)) items.push({ label: t('Try again'), onClick: () => run('retry', [entry.id]) });
+  if (entry.status !== 'stuck' && RETRY_STATUSES.includes(entry.status)) items.push({ label: t('Try again'), onClick: () => run('retry', [entry.id]) });
   if (entry.lane !== null) items.push({ label: t('Delete priority'), onClick: () => run('unpriority', [entry.id]) });
   items.push({ label: t('Logs'), onClick: () => openLogs(entry) });
   return items;
@@ -635,7 +606,7 @@ function GroupLine({ group }: { group: QueueGroupRow }) {
 function groupMenu(group: QueueGroupRow, openLogs: (group: QueueGroupRow) => void, run: Run) {
   const items = [{ label: t('Logs'), onClick: () => openLogs(group) }];
   // The episodes that wait for their next search, or that a problem stops, start again together from the row.
-  if (RETRY_STATUSES.some((status) => (group.counts[status] ?? 0) > 0)) items.unshift({ label: t('Try again'), onClick: () => run('retry', [], { titleKey: group.titleKey, season: group.season }) });
+  if (group.status !== 'stuck' && RETRY_STATUSES.some((status) => status !== 'stuck' && (group.counts[status] ?? 0) > 0)) items.unshift({ label: t('Try again'), onClick: () => run('retry', [], { titleKey: group.titleKey, season: group.season }) });
   return items;
 }
 
@@ -679,13 +650,7 @@ function SeasonEpisodes({ season, entries, run, refresh }: { season: number; ent
               key="detail"
               entry={entry}
               inline
-              fix={
-                <>
-                  <ReplaceFix entry={entry} run={run} />
-                  {entry.reason?.action === 'attach' && <AttachDialog entry={entry} onDone={refresh} />}
-                </>
-              }
-              actions={entry.reason?.action === 'match' ? <MatchDialog entry={entry} onDone={refresh} /> : undefined}
+              fix={<EntryFix entry={entry} run={run} refresh={refresh} />}
             />,
           ],
         }))}
@@ -744,8 +709,6 @@ function GroupDetail({ group, filters, run, refresh }: { group: QueueGroupRow; f
   const completed = summary?.reached.completed ?? group.reached.completed;
   const total = summary?.total ?? group.total;
   const download = summary?.download ?? group.download;
-  const problem = summary?.problem ?? group.problem ?? null;
-  const stuck = status === 'stuck' ? problem : null;
   const toggle = (number: number) => setSeason((current) => (current === number ? null : number));
   // The releases of the series. A pack is one release. Several episodes can have their own.
   const releases = new Map<string, NonNullable<QueueEntryView['release']>>();
@@ -762,9 +725,7 @@ function GroupDetail({ group, filters, run, refresh }: { group: QueueGroupRow; f
   const message =
     status === 'no_match'
       ? t('The indexers have releases, but none fits your selected qualities.')
-      : stuck
-        ? reasonText(stuck)
-        : t('{count} / {total} episodes', { count: completed, total });
+      : t('{count} / {total} episodes', { count: completed, total });
   // The bar of the whole series: the part of its episodes that is complete, or the part of its download that the
   // client reports while it downloads. A series that waits for its turn, that searches, that the search did not find,
   // that found no match, or that is stuck has no work to fill.
@@ -785,19 +746,9 @@ function GroupDetail({ group, filters, run, refresh }: { group: QueueGroupRow; f
             bar={bar}
             message={message}
             divider={!importing}
-            action={
-              <GroupFix
-                reason={stuck}
-                otherSeasons={summary?.otherSeasons ?? group.otherSeasons}
-                stopped={stopped}
-                titleKey={group.titleKey}
-                season={group.season}
-                label={groupName(group)}
-                run={run}
-                refresh={refresh}
-              />
-            }
-          />
+          >
+            {stopped.length > 0 && <GroupFix actions={summary?.actions ?? group.actions ?? []} stopped={stopped} run={run} refresh={refresh} />}
+          </DetailStatus>
         ) : (
           <Text>—</Text>
         )}
@@ -915,18 +866,23 @@ function StageMenu({ summary, filters, setFilters }: { summary: QueueSummary | u
   );
 }
 
+const numberingText = (numbering: Numbering) => numbering.ranges.map((range) => {
+  const episode = (season: number, number: number) => `S${String(season).padStart(2, '0')}E${String(number).padStart(2, '0')}`;
+  return `${episode(range.season, range.from)}–${episode(range.season, range.to)} → ${episode(range.releaseSeason, range.releaseFrom)}–${episode(range.releaseSeason, range.releaseFrom + range.to - range.from)}`;
+}).join(', ') || t('Catalog numbering');
+
 // The question shows in a modal, and the action runs after the second click.
-function ConfirmAction({ preview, onCancel, onConfirm }: { preview: QueueActionPreview; onCancel: () => void; onConfirm: () => void }) {
+function ConfirmAction({ preview, label = actionLabel[preview.action], onCancel, onConfirm }: { preview: QueueActionPreview; label?: string; onCancel: () => void; onConfirm: () => void }) {
   const count = preview.affected.length;
   return (
     <Modal
       open
       onOpenChange={(open) => !open && onCancel()}
-      title={count === 1 ? t('{action} 1 target?', { action: t(actionLabel[preview.action]) }) : t('{action} {n} targets?', { action: t(actionLabel[preview.action]), n: count })}
+      title={count === 1 ? t('{action} 1 target?', { action: t(label) }) : t('{action} {n} targets?', { action: t(label), n: count })}
     >
       {preview.sharedTransfers.map((transfer) => (
         <p key={transfer.name}>
-          {t('{name} is one download for {count} targets. The action changes the whole download.', { name: transfer.name, count: transfer.entries })}
+          {t('{name} is one download for {count} targets.', { name: transfer.name, count: transfer.entries })}
         </p>
       ))}
       {preview.action === 'remove_torrent' && <p>{t('The files stay on the disk.')}</p>}
@@ -939,11 +895,21 @@ function ConfirmAction({ preview, onCancel, onConfirm }: { preview: QueueActionP
       </ul>
       {preview.affected.length > 20 && <p>{t('And {count} more.', { count: preview.affected.length - 20 })}</p>}
       {preview.unsupported.length > 0 && <p>{t('{count} targets are not changed, because their stage does not fit this action.', { count: preview.unsupported.length })}</p>}
+      {preview.numbering?.map((item) => (
+        <Details key={item.id} items={[
+          { label: t('Target'), value: preview.affected.find((target) => target.id === item.id)?.label ?? item.id },
+          { label: t('Current map version'), value: item.from.revision },
+          { label: t('New map version'), value: item.to.revision },
+          { label: t('Current numbering'), value: numberingText(item.from), wide: true },
+          { label: t('New numbering'), value: numberingText(item.to), wide: true },
+          { label: t('Continue at'), value: stageLabel(item.phase) },
+        ]} />
+      ))}
       <ModalActions>
         <Button variant="ghost" onClick={onCancel}>
           {t('Cancel')}
         </Button>
-        <Button onClick={onConfirm}>{t(actionLabel[preview.action])}</Button>
+        <Button onClick={onConfirm}>{t(label)}</Button>
       </ModalActions>
     </Modal>
   );
@@ -958,6 +924,11 @@ const actionLabel: Record<QueueActionName, string> = {
   remove_torrent: 'Delete the torrent of',
   replace: 'Replace',
   search_other_seasons: 'Search individually',
+  apply_numbering: 'Apply numbering',
+  retry_fetch: 'Retry fetch',
+  retry_send: 'Retry send',
+  check_download: 'Check download',
+  retry_import: 'Retry import',
 };
 
 // A text for a screen reader that changes at most once in a while, so a burst of changes reads as one message.
@@ -1009,7 +980,7 @@ function QueueView() {
   const detailsBox = useRef<HTMLDivElement | null>(null);
   const [reveal, setReveal] = useState(0);
 
-  const [preview, setPreview] = useState<{ body: Parameters<typeof send>[0]; data: QueueActionPreview } | null>(null);
+  const [preview, setPreview] = useState<{ body: Parameters<typeof send>[0]; data: QueueActionPreview; label?: string } | null>(null);
   const [deletion, setDeletion] = useState<{ request: PlanRequest; subject: string } | null>(null);
   const [logs, setLogs] = useState<QueueEntryView | null>(null);
   const [groupLogs, setGroupLogs] = useState<QueueGroupRow | null>(null);
@@ -1080,23 +1051,24 @@ function QueueView() {
     lastCount.current = total;
   }, [total, loading]);
 
-  async function send(body: { action: QueueActionName; ids?: string[]; group?: { titleKey: string; season: number | null } }) {
+  async function send(body: { action: QueueActionName; ids?: string[]; group?: { titleKey: string; season: number | null }; version?: string }) {
     try {
       await api('/queue/actions', { method: 'POST', body });
       refresh();
     } catch (err) {
-      setAnnouncement(err instanceof ApiError && err.message === 'client_unreachable' ? t('The download client does not answer. Nothing changed.') : t('The action did not complete.'));
+      refresh();
+      setAnnouncement(err instanceof ApiError && err.message === 'client_unreachable' ? t('The download client does not answer. Nothing changed.') : err instanceof ApiError && ['preview_changed', 'numbering_changed', 'mapping_changed'].includes(err.message) ? t('The preview changed. Preview the changes again.') : t('The action did not complete.'));
     }
   }
 
   // An action on a group, or on a shared download, shows every target that it changes before it starts.
-  const run = useCallback(async (action: QueueActionName, ids: string[], group?: { titleKey: string; season: number | null }) => {
+  const run = useCallback(async (action: QueueActionName, ids: string[], group?: { titleKey: string; season: number | null }, label?: string) => {
     const body = group ? { action, group } : { action, ids };
     try {
       const data = await api<QueueActionPreview>('/queue/actions', { method: 'POST', body: { ...body, preview: true } });
       if (data.affected.length === 0) setAnnouncement(t(data.unsupported[0]?.reason ?? 'Nothing to change.'));
-      else if (data.affected.length > 1 || data.sharedTransfers.length || group) setPreview({ body, data });
-      else await send(body);
+      else if (action === 'apply_numbering' || data.affected.length > 1 || data.sharedTransfers.length || group) setPreview({ body: { ...body, ...(data.version ? { version: data.version } : {}) }, data, label });
+      else await send({ ...body, ...(data.version ? { version: data.version } : {}) });
     } catch {
       setAnnouncement(t('The action did not complete.'));
     }
@@ -1293,6 +1265,7 @@ function QueueView() {
       {preview && (
         <ConfirmAction
           preview={preview.data}
+          label={preview.label}
           onCancel={() => setPreview(null)}
           onConfirm={() => {
             const body = preview.body;

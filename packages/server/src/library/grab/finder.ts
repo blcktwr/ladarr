@@ -1098,33 +1098,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
 
   // --- Sweep ------------------------------------------------------------------------------
 
-  // A target that stopped before its import, on a file of its pack or on a torrent that left the client, goes back to
-  // the search after a delay. A mount or a path that ladarr cannot see is not one of these: a new download blocks again.
-  // A target that stopped in Importing stays stuck, so the person resolves the problem there.
-  const REPAIR = new Set(['file_not_found', 'torrent_missing']);
-  const REPAIR_MS = 30 * 60_000;
-
-  function repairBlocked(titleKey?: string) {
-    const t = now();
-    const again = new Map<string, { titleKey: string; season: number | null; entryIds: string[] }>();
-    for (const entry of Object.values(db.data.queue)) {
-      if (titleKey && entry.titleKey !== titleKey) continue;
-      if (!isActive(entry) || entry.state.kind === 'paused' || entry.state.kind === 'cancelled') continue;
-      if (entry.state.kind !== 'blocked') continue;
-      const problem = entry.state.problem;
-      const at = entry.state.at;
-      if (!REPAIR.has(problem.code) || at === 'importing') continue;
-      if (t - entry.stateSince < REPAIR_MS) continue;
-      catalog.info('repair', `The import stopped on ${problem.code}. The search starts again.`, itemFields(entry), { code: problem.code });
-      queue.endAttempt(entry, 'failed', 'verification repair');
-      queue.fallback(entry, 'verification repair', problem.code, 'verification repair');
-      const key = `${entry.titleKey}|${entry.season ?? ''}`;
-      const group = again.get(key) ?? { titleKey: entry.titleKey, season: entry.season, entryIds: [] };
-      group.entryIds.push(entry.id);
-      again.set(key, group);
-    }
-    for (const { titleKey, season, entryIds } of again.values()) enqueueSearch({ titleKey, season, entryIds, fresh: true });
-  }
+  // A scan or a scheduled sweep gives no authorization to release a blocked target.
+  function repairBlocked(_titleKey?: string) {}
 
   // A target whose attempt runs but that no search job holds is work that a lost job left behind: the app stopped in
   // the middle of a search, or a job went before it opened its targets. The search starts again, so the target does not
@@ -1185,9 +1160,6 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       });
       if (!wanted) delete db.data.jobs[job.id];
     }
-    // The repair runs after the cleanup of the future work. Its jobs are work of now, and the cleanup of the old state
-    // must not see them and take them for future searches that no target waits for.
-    repairBlocked();
     recoverLost();
     for (const { titleKey, season, entryIds, nextAt } of lastIfNotFound([...waiting.values()])) enqueueSearch({ titleKey, season, entryIds }, { runAt: nextAt, afterRun: true });
 
@@ -1229,6 +1201,9 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     if (title.mediaType === 'movie') return { kind: 'movie', title };
     const numbering = numberingOf(title);
     const parsed = parseRelease(release.title);
+    if (parsed.multiSeason && season !== undefined) return number === undefined
+      ? { kind: 'season', title, season, numbering }
+      : { kind: 'episode', title, season, number, numbering };
     if (parsed.pack && parsed.season !== null) {
       const seasons = catalogSeasons(numbering, parsed.season);
       const catalog = season !== undefined && seasons.includes(season) ? season : seasons[0]!;
@@ -1280,8 +1255,20 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   // rejected.
   function grabManual(entries: QueueEntry[], release: RawRelease, want: Want) {
     const decision = decide(release, want, decideContext(true));
+    if (!decision.accepted) return { rejections: decision.rejections };
+    if (!entries.length || entries.some((entry) =>
+      entry.titleKey !== want.title.key ||
+      !['blocked', 'waiting', 'queued', 'searching', 'available', 'cancelled'].includes(entry.state.kind) ||
+      (['queued', 'searching', 'waiting'].includes(entry.state.kind) && entry.release !== null),
+    )) return { rejections: ['already_downloading'] };
+    const title = db.data.titles[want.title.key];
+    if (!title || (title.mediaType !== 'movie' && decision.numbering && numberingOf(title).revision !== decision.numbering.revision)) return { rejections: ['wrong_episode'] };
     for (const entry of entries) {
-      if (entry.state.kind === 'waiting') queue.enter(entry, 'queued', 'release chosen by the user');
+      if (entry.state.kind === 'blocked') {
+        queue.retryAttempt(entry, 'release chosen by the user');
+        Object.assign(entry, { release: null, transferHash: null, clientId: null, source: null, manualMatch: null, importResult: null });
+        queue.resolve(entry, 'queued', 'release chosen by the user');
+      } else if (entry.state.kind === 'waiting') queue.enter(entry, 'queued', 'release chosen by the user');
       else queue.request(entry, 'release chosen by the user');
     }
     return reserve(entries, decision, true) ? { reserved: true } : { rejections: ['already_downloading'] };
@@ -1294,12 +1281,16 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   // The episodes that the pack lacks, in the log line that records it. The reason alone does not say which one was missing.
   const packDetail = (missing: QueueEntry[], files: number) => ({ files, missing: missing.map((entry) => `${entry.season}x${entry.number}`) });
 
-  // A pack that holds a part of its season: `missing` are the targets of the pack that its files do not cover. The record
-  // of the files keeps the episodes that it holds, so a later search does not take the pack again for the others. A pack
-  // whose files name no episode holds nothing of the season, and the empty record keeps it out of the searches. The
-  // missing targets stop, and the user starts the search of the other seasons of the releases from the card of the
-  // season. Nothing searches another season by itself. Returns the targets that the pack covers.
+  // Known file coverage keeps an unsuitable pack out of later searches. Unknown coverage does not establish absence.
   function partial(entries: QueueEntry[], missing: QueueEntry[], { files, releaseSeason, numbers }: { files: number; releaseSeason?: number | null; numbers?: number[] }) {
+    if (!numbers?.length) {
+      for (const entry of missing) {
+        if (entry.state.kind === 'blocked' || entry.state.kind === 'paused' || !isActive(entry)) continue;
+        queue.endAttempt(entry, 'failed', 'file_unmapped');
+        queue.block(entry, { code: 'file_unmapped' }, 'file coverage is unknown');
+      }
+      return entries.filter((entry) => !missing.includes(entry));
+    }
     const leader = entries[0];
     const ref = leader?.release ?? null;
     const season = missing[0]?.season ?? null;
@@ -1312,22 +1303,20 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
         db.data.releaseCoverage[key] = {
           titleKey: leader.titleKey,
           season,
-          numbers: entries.filter((entry) => !missing.includes(entry) && entry.season === season).map((entry) => entry.number!),
+          numbers: releaseSeason === null || releaseSeason === undefined
+            ? entries.filter((entry) => !missing.includes(entry) && entry.season === season).map((entry) => entry.number!)
+            : numbers.flatMap((number) => {
+                const point = catalogPoint(normalizeNumbering(leader.numbering ?? db.data.titles[leader.titleKey]?.numbering), { season: releaseSeason, number });
+                return point?.season === season && db.data.titles[leader.titleKey]?.episodes.some((episode) => episode.season === point.season && episode.number === point.number) ? [point.number] : [];
+              }),
           numberingRevision: revision,
         };
       }
     }
-    // A pack that names no episode holds nothing of the season, so it is a release that failed: the target tries its
-    // season again. A pack that names its episodes and still misses some of its targets is a difference of numbering,
-    // and that is a question for the user.
-    if (!numbers?.length) {
-      fallback(missing, 'pack_partial', packDetail(missing, files));
-      return entries.filter((entry) => !missing.includes(entry));
-    }
     for (const entry of missing) {
+      if (entry.state.kind === 'blocked' || entry.state.kind === 'paused' || !isActive(entry)) continue;
       catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: pack_partial`, itemFields(entry), { code: 'pack_partial', release: entry.release?.title ?? null, ...packDetail(missing, files) });
       queue.endAttempt(entry, 'failed', 'pack_partial');
-      Object.assign(entry, { release: null, transferHash: null, clientId: null });
       // The files of the pack say which season of the releases it is, so the manual search starts from that season.
       if (releaseSeason !== undefined) entry.partialPack = { releaseSeason, numbers: numbers ?? [] };
       queue.block(entry, { code: 'pack_partial' }, 'pack does not hold every episode', 'pack_partial');
@@ -1342,7 +1331,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     for (const entry of entries) {
       if (!needsOtherSeasons(entry.state)) continue;
       queue.retryAttempt(entry, OTHER_SEASONS_REASON);
-      queue.enter(entry, 'queued', OTHER_SEASONS_REASON);
+      Object.assign(entry, { release: null, transferHash: null, clientId: null, source: null, manualMatch: null, importResult: null, importTries: 0, numbering: normalizeNumbering(db.data.titles[entry.titleKey]?.numbering) });
+      queue.resolve(entry, 'queued', OTHER_SEASONS_REASON);
       const key = `${entry.titleKey}|${entry.season ?? ''}`;
       bySeason.set(key, [...(bySeason.get(key) ?? []), entry]);
     }
@@ -1355,9 +1345,14 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   function fallback(entries: QueueEntry[], cause: string, detail?: Record<string, unknown>) {
     const again: QueueEntry[] = [];
     for (const entry of entries) {
+      if (entry.state.kind === 'blocked' || entry.state.kind === 'paused' || !isActive(entry)) continue;
       catalog.warn('release_failed', `${entry.release ? `"${entry.release.title}"` : 'The release'} failed: ${cause}`, itemFields(entry), { code: cause, release: entry.release?.title ?? null, ...detail });
+      const operation = entry.attempts.at(-1)?.reason;
       queue.endAttempt(entry, 'failed', cause);
-      Object.assign(entry, { release: null, transferHash: null, clientId: null });
+      if (operation === 'retry fetch' || operation === 'retry send' || operation === 'retry import') {
+        queue.block(entry, { code: cause }, 'operation stopped', cause);
+        continue;
+      }
       if (entry.attempt >= MAX_ATTEMPTS) {
         queue.block(entry, { code: 'too_many_attempts', detail: cause }, 'attempts used', cause);
         continue;

@@ -1,7 +1,7 @@
 import { move, branchOf } from '../helpers/test-queue.ts';
 import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { episode, indexer, movie, title } from '../helpers/test-fixtures.ts';
+import { episode, indexer, movie, release, title } from '../helpers/test-fixtures.ts';
 import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
@@ -403,14 +403,14 @@ describe('the repair of a blocked import', () => {
     expect(searchJobs()).toHaveLength(0);
   });
 
-  it('repairs a target that stopped before the import', async () => {
+  it('keeps a target stuck before the import after a delay', async () => {
     pipe = await startPipeline();
-    const { m, entry } = blockedImport();
-    // A torrent that left the client before the import is a new search, not work for the user.
-    move(pipe.queue, entry, { stage: 'downloading', reason: { code: 'torrent_missing' } }, 'torrent left the client');
+    const { entry } = blockedImport();
+    entry.state = { kind: 'blocked', at: 'downloading', problem: { code: 'torrent_missing' } };
     entry.stateSince = Date.now() - 31 * 60_000;
+    const before = structuredClone(entry);
     pipe.db.data.queuePaused = true;
-    // The clock moves forward, so the job that the repair makes is not taken for a search of the past.
+    // Time advances on each read, as it does during a sweep.
     let at = Date.now();
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => (at += 1));
     try {
@@ -419,13 +419,8 @@ describe('the repair of a blocked import', () => {
       clock.mockRestore();
     }
 
-    expect(entry.state).toEqual({ kind: 'queued' });
-    expect(entry.attempt).toBe(2);
-    expect(entry.attempts.at(-1)).toMatchObject({ n: 2, reason: 'verification repair' });
-    const jobs = searchJobs();
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0]!.payload).toMatchObject({ titleKey: m.key, season: null });
-    expect(holds(jobs[0]!, entry.id)).toBe(true);
+    expect(entry).toEqual(before);
+    expect(searchJobs()).toHaveLength(0);
   });
 
   it('starts the search of a target that the queue left with an open attempt and no job', async () => {
@@ -477,6 +472,54 @@ describe('categories', () => {
     pipe.finder.requestSearch(m.key);
     await until(() => searches() === 1);
     expect(pipe.tracker.state.searches.find((url) => url.searchParams.get('t') !== 'caps')!.searchParams.has('cat')).toBe(false);
+  });
+});
+
+describe('manual reservation', () => {
+  async function selected() {
+    pipe = await startPipeline();
+    pipe.poller.stop();
+    pipe.db.data.queuePaused = true;
+    const series = title({ rootId: 'tv', episodes: [episode(1, 1), episode(1, 2)], numbering: { revision: 1, ranges: [] } });
+    pipe.db.data.titles[series.key] = series;
+    const entries = series.episodes.map((episode) => {
+      const entry = pipe!.queue.ensure(series.key, episode.season, episode.number);
+      pipe!.queue.request(entry, 'attached download');
+      move(pipe!.queue, entry, { stage: 'importing', reason: { code: 'file_unmapped' } }, 'import blocked');
+      entry.transferHash = hashOf('Show.Name.S01.720p.WEB-DL-OLD');
+      entry.clientId = 'client-1';
+      return entry;
+    });
+    const chosen = release('Show.Name.S01.1080p.WEB-DL-GRP', { sizeBytes: 2 * 60 * 45 * MIB });
+    const want = pipe.finder.wantForRelease(series, chosen, 1)!;
+    return { series, entries, chosen, want };
+  }
+
+  it.each(['busy target', 'stale numbering'] as const)('refuses a %s without changes to targets, attempts, or jobs', async (cause) => {
+    const { series, entries, chosen, want } = await selected();
+    if (cause === 'busy target') pipe!.queue.resolve(entries[1]!, 'downloading', 'fixture: download is active');
+    else series.numbering = { revision: 2, ranges: [] };
+    const before = structuredClone({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs, revision: pipe!.db.data.queueRev });
+
+    const result = pipe!.finder.grabManual(entries, chosen, want);
+
+    expect(result).toMatchObject({ rejections: expect.any(Array) });
+    expect({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs, revision: pipe!.db.data.queueRev }).toEqual(before);
+  });
+
+  it('reserves the selected blocked targets when the complete selection is valid', async () => {
+    const { entries, chosen, want } = await selected();
+    const attempts = entries.map((entry) => entry.attempt);
+
+    expect(pipe!.finder.grabManual(entries, chosen, want)).toEqual({ reserved: true });
+
+    expect(entries.map((entry) => entry.state.kind)).toEqual(['fetching', 'fetching']);
+    expect(entries.map((entry) => entry.attempt)).toEqual(attempts.map((attempt) => attempt + 1));
+    expect(entries.every((entry) => entry.release?.guid === chosen.guid && entry.release.manual)).toBe(true);
+    const jobs = Object.values(pipe!.db.data.jobs).filter((job) => job.type === 'queue.grab');
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.payload).toEqual({ entryIds: entries.map((entry) => entry.id) });
+    expect(pipe!.tracker.state.downloads).toEqual([]);
   });
 });
 

@@ -120,11 +120,11 @@ describe('the Season 01 Berserk torrent', () => {
 describe('title numbers', () => {
   const season = (season: number, first: number, last: number) => Array.from({ length: last - first + 1 }, (_, i) => episode(season, first + i));
 
-  it('maps a relative number to the episode at that position', () => {
+  it('does not infer relative positions without a source map', () => {
     const episodes = season(2, 33, 53);
-    expect(titleNumbers(parseEpisodes('Show.S02E01.mkv')!, episodes)).toEqual([33]);
-    expect(titleNumbers(parseEpisodes('Show.S02E02.mkv')!, episodes)).toEqual([34]);
-    expect(titleNumbers(parseEpisodes('Show.S02E21.mkv')!, episodes)).toEqual([53]);
+    expect(titleNumbers(parseEpisodes('Show.S02E01.mkv')!, episodes)).toEqual([]);
+    expect(titleNumbers(parseEpisodes('Show.S02E02.mkv')!, episodes)).toEqual([]);
+    expect(titleNumbers(parseEpisodes('Show.S02E21.mkv')!, episodes)).toEqual([]);
   });
 
   it('keeps the numbers of a season that starts at 1', () => {
@@ -160,9 +160,10 @@ describe('release episodes with markers', () => {
     expect(releaseEpisodes(name, episodes)).toEqual({ season, numbers });
   });
 
-  it('maps a relative number to a season that starts at 33', () => {
-    expect(releaseEpisodes('Show.S02E01.mkv', seasonEpisodes(2, 33, 53))).toEqual({ season: 2, numbers: [33] });
-    expect(releaseEpisodes('Show.S02E21.mkv', seasonEpisodes(2, 33, 53))).toEqual({ season: 2, numbers: [53] });
+  it('maps relative numbers only through the source map', () => {
+    const numbering = { revision: 1, ranges: [{ season: 2, from: 33, to: 53, releaseSeason: 2, releaseFrom: 1 }] };
+    expect(releaseEpisodes('Show.S02E01.mkv', seasonEpisodes(2, 33, 53), numbering)).toEqual({ season: 2, numbers: [33] });
+    expect(releaseEpisodes('Show.S02E21.mkv', seasonEpisodes(2, 33, 53), numbering)).toEqual({ season: 2, numbers: [53] });
   });
 
   it('maps the numbers of a saved range', () => {
@@ -173,6 +174,60 @@ describe('release episodes with markers', () => {
   it('keeps a correct SxxExx ahead of the episode name and the air date', () => {
     const episodes = [episode(1, 2, '2020-06-01'), episode(3, 7, '2020-01-05', { name: 'The Battle' })];
     expect(releaseEpisodes('Show Name - S01E02 - 2020-01-05 - The Battle.mkv', episodes)).toEqual({ season: 1, numbers: [2] });
+  });
+});
+
+describe('source numbering consistency', () => {
+  it.each([
+    [2, 5, 25],
+    [4, 13, 40],
+  ])('maps every file of catalog season %s with the same offset', (season, first, last) => {
+    const episodes = seasonEpisodes(season, first, last);
+    const numbering = { revision: 3, ranges: [{ season, from: first, to: last, releaseSeason: season, releaseFrom: 1 }] };
+    const mapped = Array.from({ length: episodes.length }, (_, index) => {
+      const name = `Example.Series.S${String(season).padStart(2, '0')}E${String(index + 1).padStart(2, '0')}.mkv`;
+      return releaseEpisodes(name, episodes, numbering);
+    });
+
+    expect(mapped).toEqual(episodes.map((episode) => ({ season, numbers: [episode.number] })));
+    expect(new Set(mapped.flatMap((parsed) => parsed?.numbers ?? [])).size).toBe(episodes.length);
+  });
+
+  it('does not mix relative positions and catalog numbers in one file', () => {
+    const episodes = seasonEpisodes(2, 5, 25);
+
+    expect(titleNumbers({ season: 2, numbers: [1, 5] }, episodes)).toEqual([5]);
+    expect(releaseEpisodes('Example.Series.S02E01.mkv', episodes)?.numbers ?? []).toEqual([]);
+    expect(releaseEpisodes('Example.Series.S02E05.mkv', episodes)).toEqual({ season: 2, numbers: [5] });
+  });
+
+  it('applies a same-season map exactly once when the number ranges overlap', () => {
+    const episodes = seasonEpisodes(2, 5, 25);
+    const numbering = { revision: 4, ranges: [{ season: 2, from: 5, to: 25, releaseSeason: 2, releaseFrom: 1 }] };
+
+    expect(releaseEpisodes('Example.Series.S02E05E06.mkv', episodes, numbering)).toEqual({ season: 2, numbers: [9, 10] });
+    expect(releaseEpisodes('Example.Series.S02E21.mkv', episodes, numbering)).toEqual({ season: 2, numbers: [25] });
+  });
+
+  it('does not infer a relative position for an unmapped source number', () => {
+    const episodes = seasonEpisodes(2, 5, 25);
+    const numbering = { revision: 2, ranges: [{ season: 2, from: 9, to: 12, releaseSeason: 3, releaseFrom: 1 }] };
+
+    expect(releaseEpisodes('Example.Series.S02E01.mkv', episodes, numbering)?.numbers ?? []).toEqual([]);
+    expect(releaseEpisodes('Example.Series.S03E01.mkv', episodes, numbering)).toEqual({ season: 2, numbers: [9] });
+  });
+
+  it('keeps different map snapshots independent for the same source filename', () => {
+    const episodes = [...seasonEpisodes(1, 1, 30), ...seasonEpisodes(2, 1, 12)];
+    const first = { revision: 1, ranges: [{ season: 1, from: 19, to: 30, releaseSeason: 2, releaseFrom: 1 }] };
+    const second = { revision: 2, ranges: [{ season: 1, from: 7, to: 18, releaseSeason: 2, releaseFrom: 1 }] };
+    const before = structuredClone(first);
+    const name = 'Example.Series.S02E03.mkv';
+
+    expect(releaseEpisodes(name, episodes, first)).toEqual({ season: 1, numbers: [21] });
+    expect(releaseEpisodes(name, episodes, second)).toEqual({ season: 1, numbers: [9] });
+    expect(releaseEpisodes(name, episodes)).toEqual({ season: 2, numbers: [3] });
+    expect(first).toEqual(before);
   });
 });
 

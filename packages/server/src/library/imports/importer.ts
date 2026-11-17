@@ -7,14 +7,17 @@ import { db } from '../../core/db.ts';
 import { enqueue as enqueueJob, JobError } from '../../core/jobs.ts';
 import { catalog, itemFields, log } from '../../core/log.ts';
 import { episodePath, folderName, moviePath, versionedPath } from '../naming.ts';
-import { isSample, isVideoFile, parseEpisodes, releaseEpisodes } from '../parse.ts';
+import { isSample, isVideoFile, parseEpisodes } from '../parse.ts';
+import { evidenceOf, matchContent } from '../content.ts';
+import { inspectCoverage } from '../coverage.ts';
+import { recoverCorrection } from '../mapping.ts';
 import { parseRelease } from '../grab/release.ts';
 import { probeFile } from '../probe.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
 import { entryId, isActive, phaseOfEntry } from '../downloads/queue.ts';
 import { checkRoot } from '../roots.ts';
 import { MAX_IMPORT_ATTEMPTS } from './limits.ts';
-import type { ClientHandle, Db, Episode, Fs, ImporterDeps, ImporterFound, ImportJournal, JournalStep, MediaFile, QueueEntry, Title, Torrent } from '../../types.ts';
+import type { ClientHandle, Episode, Fs, ImporterDeps, ImporterFound, ImportJournal, JournalStep, MediaFile, ProbeResult, QueueEntry, Title, Torrent } from '../../types.ts';
 
 // The log line of each step of a file. The event is stable, and the message says what the step did.
 const STEP_LOG: Record<JournalStep['state'], { event: string; message: string }> = {
@@ -98,14 +101,68 @@ export async function torrentVideos(handle: ClientHandle, torrent: Torrent): Pro
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const checkKey = (hash: string, titleKey: string) => `${hash}:${titleKey}`;
+class StaleImport extends Error {}
+const sameIdentity = (expected: NonNullable<JournalStep['sourceIdentity']>, actual: { size: number; mtimeMs: number; dev: number; ino: number }) =>
+  expected.sizeBytes === actual.size && expected.mtimeMs === actual.mtimeMs && (expected.dev === undefined || expected.dev === actual.dev) && (expected.ino === undefined || expected.ino === actual.ino);
 
-export function createImporter({ queue, events, clients, save, probe = probeFile, status, partial, checkDelayMs = 100, fs = {}, afterStep, now = Date.now }: ImporterDeps) {
+const numberingOf = (entry: QueueEntry) => entry.numbering === undefined ? db.data.titles[entry.titleKey]?.numbering ?? null : entry.numbering;
+const assignmentsOf = (entry: QueueEntry) => {
+  const assignments = new Map<string, { file: string; covers: { season: number; number: number }[]; revision: number }>();
+  if (db.data.titles[entry.titleKey]?.mediaType !== 'tv') return [];
+  for (const other of Object.values(db.data.queue)) {
+    if (other.titleKey !== entry.titleKey || other.clientId !== entry.clientId || other.transferHash !== entry.transferHash || !other.manualMatch) continue;
+    const match = other.manualMatch;
+    const revision = other.manualMatchRevision ?? 0;
+    const previous = assignments.get(match.file);
+    if (!previous || revision > previous.revision || (revision === previous.revision && !match.covers.length)) assignments.set(match.file, { ...match, revision });
+  }
+  return [...assignments.values()].sort((a, b) => a.file.localeCompare(b.file));
+};
+const inputOf = (entry: QueueEntry) => JSON.stringify({
+  attempt: entry.attempt, clientId: entry.clientId, hash: entry.transferHash,
+  release: entry.release, manualMatch: entry.manualMatch, numbering: numberingOf(entry), replaceDestination: entry.replaceDestination === true,
+  manualMatchRevision: entry.manualMatchRevision ?? 0,
+  assignments: assignmentsOf(entry),
+});
+const libraryOf = (title: Title, step: JournalStep) => {
+  const pointers = title.mediaType === 'movie' ? [title.fileId] : step.episodes.map((ref) => title.episodes.find((episode) => episode.season === ref.season && episode.number === ref.number)?.fileId);
+  const files = Object.values(db.data.files).filter((file) => pointers.includes(file.id) || (file.titleKey === title.key && file.path === step.dest));
+  return JSON.stringify({ root: db.data.roots[title.rootId], pointers, files: files.map((file) => ({ id: file.id, path: file.path, episodes: file.episodes, association: file.association })) });
+};
+
+export function bindJournal(journal: ImportJournal) {
+  const title = db.data.titles[journal.titleKey];
+  if (!title) return;
+  for (const step of journal.steps) {
+    if (step.state !== 'planned') continue;
+    step.expected ??= {
+      entries: Object.fromEntries(step.entryIds.map((id) => [id, db.data.queue[id] ? inputOf(db.data.queue[id]!) : ''])),
+      library: libraryOf(title, step),
+    };
+  }
+}
+
+export function createImporter({ queue, events, clients, save, probe = probeFile, status, checkDelayMs = 100, fs = {}, afterStep, now = Date.now }: ImporterDeps) {
   const ops: Fs = { link: fs.link ?? fsLink, copyFile: fs.copyFile ?? fsCopyFile, rename: fs.rename ?? fsRename };
   const wait = async () => {
     if (checkDelayMs > 0) await sleep(checkDelayMs);
   };
 
   const entriesOf = (ids: string[]) => ids.map((id) => queue.get(id)).filter((entry): entry is QueueEntry => Boolean(entry));
+  const current = (journal: ImportJournal, step: JournalStep) => {
+    if (db.data.imports[journal.id] !== journal || !journal.steps.includes(step)) throw new StaleImport();
+    const title = db.data.titles[journal.titleKey];
+    if (!title) throw new StaleImport();
+    if (journal.kind !== 'rename' && step.entryIds.some((id) => {
+      const entry = queue.get(id);
+      return !entry || (entry.state.kind !== 'importing' && !(entry.state.kind === 'available' && (step.state === 'committed' || step.state === 'retired')));
+    })) throw new StaleImport();
+    if (!step.expected) return;
+    if (Object.entries(step.expected.entries).some(([id, input]) => {
+      const entry = queue.get(id);
+      return !entry || inputOf(entry) !== input;
+    }) || libraryOf(title, step) !== step.expected.library) throw new StaleImport();
+  };
   const block = (entries: QueueEntry[], code: string, detail?: string) => {
     for (const entry of entries) {
       if (entry.replaceDestination) {
@@ -118,18 +175,16 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     }
   };
 
-  // A pack can leave episodes without a file. Those targets stay stuck on the import, so a person resolves them there
-  // and the app does not download the episode again.
-  const uncovered = (entries: QueueEntry[]) => block(entries, 'file_not_found');
-
   // --- Plan -------------------------------------------------------------------------------
 
-  type Pick = { file: ImporterFound; entries: QueueEntry[]; episodes: Episode[] };
+  type Pick = { file: ImporterFound; entries: QueueEntry[]; episodes: Episode[]; source: 'manual' | 'numbering' | 'automatic'; probe?: ProbeResult; identity?: JournalStep['sourceIdentity'] };
+  type Picks = { picks: Pick[]; missing: QueueEntry[]; unknown: QueueEntry[]; coverage: Episode[]; complete: boolean };
 
-  function pick(title: Title, group: QueueEntry[], files: ImporterFound[], content: string): { picks: Pick[]; missing: QueueEntry[] } {
+  async function pick(title: Title, group: QueueEntry[], files: ImporterFound[], content: string): Promise<Picks> {
     const picks: Pick[] = [];
     const taken = new Set<string>();
-    const episodeOf = (entry: QueueEntry) => title.episodes.find((e) => e.season === entry.season && e.number === entry.number);
+    const episodesOf = (refs: { season: number; number: number }[]) => refs.map((ref) => title.episodes.find((episode) => episode.season === ref.season && episode.number === ref.number)).filter((episode): episode is Episode => Boolean(episode));
+    const sameCoverage = (a: { season: number; number: number }[], b: { season: number; number: number }[]) => a.length === b.length && a.every((one) => b.some((other) => one.season === other.season && one.number === other.number));
     // The name of the release, or the folder of the download, can give the season that the client leaves out of each
     // file name. A group of several seasons has no one season for these files.
     const seasons = new Set(group.map((entry) => entry.season));
@@ -138,47 +193,113 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
 
     if (title.mediaType === 'movie') {
       const entry = group[0]!;
-      const chosen = (entry.manualMatch && files.find((file) => file.rel === entry.manualMatch!.file)) ?? [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)[0];
-      return chosen ? { picks: [{ file: chosen, entries: [entry], episodes: [] }], missing: [] } : { picks, missing: group };
+      const chosen = entry.manualMatch ? files.find((file) => file.rel === entry.manualMatch!.file) : files.length === 1 ? files[0] : undefined;
+      return chosen
+        ? { picks: [{ file: chosen, entries: [entry], episodes: [], source: entry.manualMatch ? 'manual' : 'automatic' }], missing: [], unknown: [], coverage: [], complete: true }
+        : { picks, missing: files.length ? [] : group, unknown: files.length ? group : [], coverage: [], complete: false };
     }
 
-    // A match that the user made comes first. It survives a retry.
+    const assignments = new Map(assignmentsOf(group[0]!).map((assignment) => [assignment.file, assignment]));
     for (const entry of group) {
-      const manual = entry.manualMatch;
-      const file = manual && files.find((item) => item.rel === manual.file);
-      if (!manual || !file || taken.has(file.rel)) continue;
-      const covered = group.filter((other) => manual.covers.some((c) => c.season === other.season && c.number === other.number));
-      picks.push({ file, entries: covered, episodes: covered.map(episodeOf).filter((e): e is Episode => Boolean(e)) });
+      const match = entry.manualMatch;
+      if (!match?.covers.length || (entry.manualMatchRevision ?? 0) < (assignments.get(match.file)?.revision ?? 0)) continue;
+      assignments.set(match.file, { ...match, revision: entry.manualMatchRevision ?? 0 });
+    }
+    const unassigned = new Set([...assignments.values()].filter((match) => !match.covers.length && files.some((file) => file.rel === match.file)).map((match) => match.file));
+    // A match that the user made comes first. It survives a retry.
+    for (const manual of assignments.values()) {
+      const file = files.find((item) => item.rel === manual.file);
+      if (!file || taken.has(file.rel) || !manual.covers.length) continue;
+      const episodes = episodesOf(manual.covers);
+      if (!episodes.length || episodes.length !== manual.covers.length) continue;
+      const covered = group.filter((other) => manual.covers.some((c) => c.season === other.season && c.number === other.number) && (!other.manualMatch || (other.manualMatch.file === manual.file && ((other.manualMatchRevision ?? 0) < manual.revision || !other.manualMatch.covers.length || sameCoverage(other.manualMatch.covers, manual.covers)))));
+      if (!covered.length || [...assignments.values()].some((other) => other.file !== manual.file && other.covers.some((ref) => manual.covers.some((one) => ref.season === one.season && ref.number === one.number)))) continue;
+      picks.push({ file, entries: covered, episodes, source: 'manual' });
       taken.add(file.rel);
     }
+    for (const path of unassigned) taken.add(path);
     const done = () => new Set(picks.flatMap((p) => p.entries.map((e) => e.id)));
     // The numbering of the acquisition, saved with its release. A target of an older version has none, so the title map
     // applies. The release numbers go to the catalog episodes through it.
-    const numbering = group.find((entry) => entry.numbering)?.numbering ?? title.numbering ?? null;
+    const numbering = numberingOf(group[0]!);
+    const sourceCoverage = inspectCoverage(files.map((file) => file.rel), title, numbering, seasonHint);
+    const probes = new Map<string, ProbeResult>();
+    const identities = new Map<string, NonNullable<JournalStep['sourceIdentity']>>();
+    for (const file of files) {
+      if (taken.has(file.rel)) continue;
+      const before = await stat(file.abs);
+      probes.set(file.rel, await probe(file.abs));
+      const info = await stat(file.abs);
+      if (!info.isFile() || before.size !== info.size || before.mtimeMs !== info.mtimeMs || before.dev !== info.dev || before.ino !== info.ino) throw new StaleImport();
+      identities.set(file.rel, { sizeBytes: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino });
+    }
+    const evidence = files.filter((file) => probes.has(file.rel)).map((file) => evidenceOf(file.rel, probes.get(file.rel)!));
+    const matched = matchContent(evidence.map((file) => ({ ...file, durationSeconds: null })), title.episodes);
+    const unknown = new Set(unassigned);
+    const uncertain = new Set<string>();
+    const coverage = picks.flatMap((item) => item.episodes);
+    const point = (episode: { season: number; number: number }) => `${episode.season}:${episode.number}`;
     for (const file of [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)) {
       if (taken.has(file.rel)) continue;
-      // The folder of the file can name the season: "Season 02/Berserk E01.mkv".
-      const found = releaseEpisodes(file.rel, title.episodes, numbering, seasonHint, title.meta.title);
-      if (!found) continue;
-      const covered = group.filter((entry) => entry.season === found.season && found.numbers.includes(entry.number!) && !done().has(entry.id));
+      const positionOnly = seasonHint === null && !parseEpisodes(file.rel) && /(?:^|[ ._-])\d{1,3}\.[^.]+$/.test(file.rel);
+      const ambiguousNumbering = sourceCoverage.ambiguous.includes(file.rel);
+      const named = positionOnly || ambiguousNumbering ? [] : episodesOf(inspectCoverage([file.rel], title, numbering, seasonHint).episodes);
+      const proposal = matched.proposals.find((item) => item.path === file.rel);
+      const exact = proposal && (proposal.step === 'whole_title' || proposal.step === 'segments') ? episodesOf(proposal.episodes) : [];
+      const tags = evidence.find((item) => item.path === file.rel)!;
+      const tagged = tags.season !== null && tags.episode !== null;
+      const tagEpisodes = tagged && !ambiguousNumbering ? episodesOf(inspectCoverage([`S${tags.season}E${tags.episode}.mkv`], title, numbering).episodes) : [];
+      const conflict = matched.rejections.some((item) => item.path === file.rel && item.reason === 'conflict')
+        || (tagged && !ambiguousNumbering && !tagEpisodes.length)
+        || (!ambiguousNumbering && parseEpisodes(file.rel, seasonHint) && !named.length && (exact.length || tagEpisodes.length))
+        || (exact.length && named.length && !sameCoverage(exact, named))
+        || (tagEpisodes.length && named.length && !sameCoverage(tagEpisodes, named))
+        || (tagEpisodes.length && exact.length && !sameCoverage(tagEpisodes, exact));
+      const manualConflict = assignments.has(file.rel);
+      // A partial title, similarity, or elimination is a proposal, not an identity.
+      const weakTitle = tags.title?.includes('/') && !exact.length;
+      if (conflict || manualConflict || weakTitle || (!exact.length && !named.length && !tagEpisodes.length)) {
+        unknown.add(file.rel);
+        for (const episode of [...named, ...exact, ...tagEpisodes]) uncertain.add(point(episode));
+        continue;
+      }
+      const episodes = exact.length ? exact : named.length ? named : tagEpisodes;
+      coverage.push(...episodes);
+      if (picks.some((item) => item.episodes.some((one) => episodes.some((other) => one.season === other.season && one.number === other.number)))) {
+        unknown.add(file.rel);
+        continue;
+      }
+      const covered = group.filter((entry) => !entry.manualMatch && episodes.some((one) => one.season === entry.season && one.number === entry.number) && !done().has(entry.id));
       // A file for an episode that was not asked for is part of the pack. It is not imported.
       if (!covered.length) continue;
-      picks.push({ file, entries: covered, episodes: covered.map(episodeOf).filter((e): e is Episode => Boolean(e)) });
+      const parsed = parseEpisodes(file.rel, seasonHint);
+      const mapped = numbering?.ranges.length && (parsed || tagged);
+      picks.push({ file, entries: covered, episodes, source: mapped && !exact.length ? 'numbering' : 'automatic', probe: probes.get(file.rel), identity: identities.get(file.rel) });
       taken.add(file.rel);
     }
     const left = group.filter((entry) => !done().has(entry.id));
-    // A release for one episode with a name that gives no number: the one video is the episode. A file that names an
-    // episode contradicts the target when the earlier pass did not give it, so it is not a fallback. A pack gives no
-    // fallback either: a missing episode of a pack is a question for the user.
-    const loose = files.filter((file) => !taken.has(file.rel));
-    if (left.length === 1 && group.length === 1 && loose.length === 1 && group[0]!.release?.kind !== 'pack' && !parseEpisodes(loose[0]!.rel, seasonHint)) {
-      picks.push({ file: loose[0]!, entries: left, episodes: [episodeOf(left[0]!)].filter((e): e is Episode => Boolean(e)) });
-      return { picks, missing: [] };
-    }
-    return { picks, missing: left };
+    const pending = inspectCoverage([...unknown], title, numbering, seasonHint);
+    const unresolved = left.filter((entry) => {
+      if (entry.manualMatch) return files.some((file) => file.rel === entry.manualMatch!.file);
+      if (unassigned.size) return true;
+      if (!unknown.size) return false;
+      const episode = { season: entry.season!, number: entry.number! };
+      return uncertain.has(point(episode)) || pending.status(episode) !== 'absent';
+    });
+    return { picks, missing: left.filter((entry) => !unresolved.includes(entry)), unknown: unresolved, coverage, complete: files.length > 0 && unknown.size === 0 };
   }
 
   async function plan(hash: string, group: QueueEntry[], handle: ClientHandle): Promise<ImportJournal | undefined> {
+    const inputs = new Map(group.map((entry) => [entry.id, inputOf(entry)]));
+    const library = () => JSON.stringify({
+      root: db.data.roots[db.data.titles[group[0]!.titleKey]?.rootId ?? ''],
+      pointers: db.data.titles[group[0]!.titleKey]?.episodes.map((episode) => [episode.season, episode.number, episode.fileId]),
+      files: Object.values(db.data.files).filter((file) => file.titleKey === group[0]!.titleKey),
+    });
+    const beforeLibrary = library();
+    const currentPlan = () => {
+      if (library() !== beforeLibrary || group.some((entry) => queue.get(entry.id) !== entry || entry.state.kind !== 'importing' || inputOf(entry) !== inputs.get(entry.id))) throw new StaleImport();
+    };
     const existing = db.data.titles[group[0]!.titleKey];
     // A manual import or a rename of this title is open. Its names are not in the library records yet, so the plan would see a taken name.
     // The targets stay in Validating, and the next poll of the client asks for a new run.
@@ -196,9 +317,12 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       await wait();
       try {
         const value = await work();
+        currentPlan();
         status?.setCheck(key, id, 'ok');
         return value;
       } catch (error) {
+        currentPlan();
+        if (error instanceof StaleImport) throw error;
         const problem = problemOf(error);
         status?.setCheck(key, id, 'failed', failureOf(problem));
         throw problem;
@@ -209,6 +333,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       try {
         return await run(id, work);
       } catch (error) {
+        if (error instanceof StaleImport) throw error;
         failGroup(problemOf(error));
         return undefined;
       }
@@ -220,6 +345,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     // The import confirms the download now, so an older read of the client cannot answer.
     clients.invalidate(handle);
     const torrent = await handle.api.find(hash);
+    currentPlan();
     if (!torrent) {
       status?.setCheck(key, 'download_complete', 'failed', { code: 'torrent_missing' });
       block(group, 'torrent_missing');
@@ -271,26 +397,41 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     });
     if (!leads) return;
 
-    let picked: { picks: Pick[]; missing: QueueEntry[] };
+    let picked: Picks;
     try {
       picked = await run('files_found', async () => {
         const files = await torrentVideos(handle, clientTorrent);
-        const result = pick(title, group, files ?? [], content);
-        if (!result.picks.length) throw new ImportProblem('file_not_found');
+        const result = await pick(title, group, files ?? [], content);
+        currentPlan();
+        const ref = group[0]!.release;
+        const season = result.missing[0]?.season;
+        if (ref && result.complete && season !== null && season !== undefined && result.missing.every((entry) => entry.season === season)) {
+          const key = `${ref.indexerId}:${ref.guid}`;
+          const revision = numberingOf(group[0]!)?.revision ?? 0;
+          if (!db.data.releaseCoverage[key] || db.data.releaseCoverage[key]!.numberingRevision <= revision) db.data.releaseCoverage[key] = {
+            titleKey: title.key, season, numbers: [...new Set(result.coverage.filter((episode) => episode.season === season).map((episode) => episode.number))].sort((a, b) => a - b), numberingRevision: revision,
+          };
+        }
+        if (!result.picks.length) throw new ImportProblem(result.unknown.length ? 'file_unmapped' : 'file_not_found');
         return result;
       });
     } catch (error) {
+      if (error instanceof StaleImport) throw error;
       failGroup(problemOf(error));
       return;
     }
-    // A pack with some files leaves the other episodes to a new search, so the app does not wait on a file that the
-    // release does not hold. A torrent with no usable file blocks, because another search would only find the same torrent.
-    if (picked.missing.length) {
-      if (partial && picked.picks.length) partial(group, picked.missing, { files: picked.picks.length });
-      else uncovered(picked.missing);
-    }
+    if (picked.unknown.length) block(picked.unknown, 'file_unmapped');
+    // Only identified files can prove that the other episodes are absent.
+    if (picked.missing.length) block(picked.missing, 'pack_partial');
 
-    type Candidate = Pick & { dest: string | null; replaces: string | null; validation: 'ffprobe' | 'basic'; failed: boolean };
+    const activeInputs = new Map(group.filter((entry) => entry.state.kind === 'importing').map((entry) => [entry.id, inputs.get(entry.id)!]));
+    const currentCandidates = () => {
+      if (library() !== beforeLibrary || [...activeInputs].some(([id, input]) => {
+        const entry = queue.get(id);
+        return !entry || entry.state.kind !== 'importing' || inputOf(entry) !== input;
+      })) throw new StaleImport();
+    };
+    type Candidate = Pick & { dest: string | null; replaces: string | null; validation: 'ffprobe' | 'basic'; failed: boolean; identity?: JournalStep['sourceIdentity'] };
     const candidates: Candidate[] = picked.picks.map((item) => ({ ...item, dest: null, replaces: null, validation: 'basic', failed: false }));
     const alive = () => candidates.filter((candidate) => !candidate.failed);
 
@@ -302,11 +443,15 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       for (const candidate of alive()) {
         try {
           await work(candidate);
+          currentCandidates();
         } catch (error) {
+          currentCandidates();
+          if (error instanceof StaleImport) throw error;
           const problem = problemOf(error);
           candidate.failed = true;
           failure ??= problem;
           block(candidate.entries, problem.code, problem.message === problem.code ? undefined : problem.message);
+          for (const entry of candidate.entries) activeInputs.delete(entry.id);
         }
       }
       status?.setCheck(key, id, failure ? 'failed' : 'ok', failure ? failureOf(failure) : undefined);
@@ -325,11 +470,16 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     if (!destinations || !rootReal) return;
 
     const readable = await perFile('file_readable', async (candidate) => {
-      const result = await probe(candidate.file.abs);
+      const before = await stat(candidate.file.abs);
+      const result = candidate.probe ?? await probe(candidate.file.abs);
+      const info = await stat(candidate.file.abs);
+      if (!info.isFile() || before.size !== info.size || before.mtimeMs !== info.mtimeMs || before.dev !== info.dev || before.ino !== info.ino) throw new ImportProblem('file_unreadable');
+      if (candidate.identity && (candidate.identity.sizeBytes !== info.size || candidate.identity.mtimeMs !== info.mtimeMs || candidate.identity.dev !== info.dev || candidate.identity.ino !== info.ino)) throw new StaleImport();
       if (result.ok === false) throw new ImportProblem('file_unreadable', result.reason);
       // Without ffprobe the check is basic: the file has data. A health problem tells the user.
       if (result.ok === 'skipped' && candidate.file.sizeBytes === 0) throw new ImportProblem('file_unreadable', 'empty');
       candidate.validation = result.ok === true ? 'ffprobe' : 'basic';
+      candidate.identity = { sizeBytes: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino };
     });
     if (!readable) return;
 
@@ -362,7 +512,9 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       const recordedAt = (path: string) => Object.values(db.data.files).find((file) => file.titleKey === title.key && file.path === path);
       const fromSameTorrent = (file: MediaFile | undefined) => Boolean(file?.download && entry && file.download.clientId === entry.clientId && file.download.hash === entry.transferHash);
       const currentIds = title.mediaType === 'movie' ? [title.fileId] : candidate.episodes.map((episode) => episode.fileId);
-      const same = currentIds.map((id) => (id ? db.data.files[id] : undefined)).find((file) => fromSameTorrent(file));
+      const sameSource = Object.values(db.data.files).find((file) => file.titleKey === title.key && fromSameTorrent(file) && file.association?.originalName === candidate.file.rel);
+      if (sameSource && candidate.source !== 'manual' && (sameSource.episodes.length !== candidate.episodes.length || sameSource.episodes.some((ref) => !candidate.episodes.some((episode) => ref.season === episode.season && ref.number === episode.number)))) throw new ImportProblem('file_unmapped');
+      const same = sameSource ?? currentIds.map((id) => (id ? db.data.files[id] : undefined)).find((file) => fromSameTorrent(file));
       const replace = candidate.entries.some((item) => item.replaceDestination);
       // A torrent that gave a file of this title already updates that file, so it does not add a second record.
       if (same && same.path !== dest) {
@@ -396,11 +548,13 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
         // The destination is this download already: an earlier run published it and stopped before the record. It is
         // the same file, so the import finishes instead of asking the user about a file that is its own.
         const source = await stat(candidate.file.abs);
+        currentCandidates();
         if (target.isFile() && target.ino === source.ino && target.dev === source.dev) {
           candidate.replaces = null;
           return;
         }
         if (!replace || target.isDirectory()) throw new ImportProblem('destination_exists', dest);
+        currentCandidates();
         await unlink(join(rootReal!, dest));
       }
       candidate.replaces = null;
@@ -409,6 +563,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
 
     status?.setCheck(key, 'names_unique', 'running');
     await wait();
+    currentCandidates();
     const built = alive();
     const names = new Map<string, number>();
     for (const candidate of built) if (candidate.dest) names.set(candidate.dest, (names.get(candidate.dest) ?? 0) + 1);
@@ -426,13 +581,16 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       replaces: candidate.replaces,
       state: 'planned',
       method: null,
-      sizeBytes: candidate.file.sizeBytes,
+      sizeBytes: candidate.identity?.sizeBytes ?? candidate.file.sizeBytes,
       episodes: candidate.episodes.map((e) => ({ season: e.season, number: e.number })),
       validation: candidate.validation,
+      association: { source: candidate.source, originalName: candidate.file.rel, numberingRevision: numberingOf(candidate.entries[0]!)?.revision ?? 0 },
+      sourceIdentity: candidate.identity,
     }));
     if (!steps.length) return;
 
     const journal: ImportJournal = { id: randomUUID(), hash, titleKey: title.key, steps, createdAt: now(), clientId: handle.id, downloadBase: base };
+    for (const step of steps) step.expected = { entries: Object.fromEntries(step.entryIds.map((id) => [id, inputs.get(id)!])), library: libraryOf(title, step) };
     db.data.imports[journal.id] = journal;
     for (const step of steps) {
       for (const entry of entriesOf(step.entryIds)) {
@@ -450,19 +608,26 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       }
     }
     await save();
+    currentCandidates();
     return journal;
   }
 
   // --- Execute ----------------------------------------------------------------------------
 
   async function stage(journal: ImportJournal, step: JournalStep, rootReal: string, base: string) {
+    current(journal, step);
     const dest = join(rootReal, step.dest);
     const stagePath = join(dirname(dest), `.ladarr-${journal.id.slice(0, 8)}-${basename(dest)}`);
     await mkdir(dirname(dest), { recursive: true });
     // The folders were just made. They must be inside the root, also after links are resolved.
     if (!inside(rootReal, await realpath(dirname(dest)))) throw new ImportProblem('destination_outside_root');
     const source = join(base, step.source);
+    const info = await stat(source);
+    current(journal, step);
+    const identity = step.sourceIdentity;
+    if (!info.isFile() || (identity && !sameIdentity(identity, info))) throw new ImportProblem('file_unreadable');
     await rm(stagePath, { force: true });
+    current(journal, step);
     try {
       await ops.link(source, stagePath);
       step.method = 'hardlink';
@@ -473,6 +638,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       if (journal.kind === 'rename' || journal.linkOnly) throw new ImportProblem('hard_link_unavailable');
       // No hard link here. The copy needs room, and it leaves the source as it is.
       const space = await statfs(dirname(dest));
+      current(journal, step);
       if (Number(space.bavail) * Number(space.bsize) < step.sizeBytes + MIN_FREE_BYTES) throw new ImportProblem('disk_full');
       const stop = status?.watchCopy(journal.id, step.dest, step.entryIds, stagePath, step.sizeBytes);
       try {
@@ -483,17 +649,34 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       step.method = 'copy';
       if ((await stat(stagePath)).size !== step.sizeBytes) throw new ImportProblem('copy_incomplete');
     }
+    const [staged, sourceInfo] = await Promise.all([stat(stagePath), stat(source)]);
+    current(journal, step);
+    if (!staged.isFile() || staged.size !== step.sizeBytes || (identity && !sameIdentity(identity, sourceInfo))) throw new ImportProblem('file_unreadable');
+    step.stagedIdentity = { sizeBytes: staged.size, mtimeMs: staged.mtimeMs, dev: staged.dev, ino: staged.ino };
     return stagePath;
   }
 
   const stagePathOf = (journal: ImportJournal, step: JournalStep, rootReal: string) => join(dirname(join(rootReal, step.dest)), `.ladarr-${journal.id.slice(0, 8)}-${basename(step.dest)}`);
 
+  async function cleanupStage(journal: ImportJournal, step: JournalStep, rootReal: string) {
+    const stagePath = stagePathOf(journal, step, rootReal);
+    const [staged, published] = await Promise.all([lstat(stagePath).catch(() => undefined), lstat(join(rootReal, step.dest)).catch(() => undefined)]);
+    current(journal, step);
+    if (staged?.isFile() && published?.isFile() && staged.ino === published.ino && staged.dev === published.dev) {
+      await unlink(stagePath).catch((error) => {
+        if (errno(error) !== 'ENOENT') throw error;
+      });
+    }
+  }
+
   async function publish(journal: ImportJournal, step: JournalStep, rootReal: string) {
+    current(journal, step);
     const dest = join(rootReal, step.dest);
     const stagePath = stagePathOf(journal, step, rootReal);
     if (step.replaces === step.dest) {
       // The same name: replace the old data in one step.
       await ops.rename(stagePath, dest);
+      await cleanupStage(journal, step, rootReal);
       return;
     }
     try {
@@ -505,27 +688,29 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       const [a, b] = await Promise.all([stat(stagePath), stat(dest)]);
       if (a.ino !== b.ino || a.dev !== b.dev) throw new ImportProblem('destination_exists');
     }
-    await unlink(stagePath).catch(() => {});
+    await cleanupStage(journal, step, rootReal);
   }
 
   // A rename keeps the library record of the file. Only its path changes.
   async function commitRename(journal: ImportJournal, step: JournalStep, rootReal: string) {
     const info = await stat(join(rootReal, step.dest));
+    current(journal, step);
+    if (!info.isFile() || (step.stagedIdentity && !sameIdentity(step.stagedIdentity, info))) throw new ImportProblem('file_unreadable');
     // No await from here, so the record changes in one step. A restart can find the record at the new path already.
     const file = Object.values(db.data.files).find((item) => item.titleKey === journal.titleKey && (item.path === step.replaces || item.path === step.dest));
     if (file) Object.assign(file, { path: step.dest, sizeBytes: info.size, mtimeMs: info.mtimeMs, missing: false });
     step.state = 'committed';
+    const title = db.data.titles[journal.titleKey];
+    if (title && step.expected) step.expected.library = libraryOf(title, step);
   }
 
-  // A target that waits for a release, or that has an import problem, is done when the user adds its file by hand.
-  // A target that has a download in work keeps it.
+  // A manual folder import can finish a waiting search, but it cannot resume a blocked target or an active download.
   function settleQueue(title: Title, step: JournalStep) {
     const ids = title.mediaType === 'movie' ? [title.key] : step.episodes.map((c) => entryId(title.key, c.season, c.number));
     for (const entry of ids.map((id) => queue.get(id))) {
-      if (!entry || entry.attempt === 0 || !isActive(entry) || entry.state.kind === 'paused') continue;
-      // A download import that stopped on a problem leaves its target in Importing with a block. Its journal has ended.
+      if (!entry || entry.attempt === 0 || !isActive(entry) || entry.state.kind === 'paused' || entry.state.kind === 'blocked') continue;
       const phase = phaseOfEntry(entry);
-      if (!(phase === 'queued' || phase === 'searching' || (phase === 'importing' && entry.state.kind === 'blocked'))) continue;
+      if (phase !== 'queued' && phase !== 'searching') continue;
       queue.endAttempt(entry, 'imported', 'imported by hand');
       entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };
       catalog.info('import_completed', `Import completed by hand: ${step.dest}`, itemFields(entry), { path: step.dest, method: step.method, validation: step.validation, manual: true });
@@ -536,6 +721,14 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
   async function commit(journal: ImportJournal, step: JournalStep, rootReal: string) {
     if (journal.kind === 'rename') return commitRename(journal, step, rootReal);
     const info = await stat(join(rootReal, step.dest));
+    current(journal, step);
+    if (!info.isFile() || info.size !== step.sizeBytes || info.size === 0 || (step.stagedIdentity && !sameIdentity(step.stagedIdentity, info))) throw new ImportProblem('file_unreadable');
+    if (!step.stagedIdentity) {
+      const result = await probe(join(rootReal, step.dest));
+      const after = await stat(join(rootReal, step.dest));
+      current(journal, step);
+      if (result.ok === false || !sameIdentity({ sizeBytes: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino }, after)) throw new ImportProblem('file_unreadable');
+    }
     // No await from here, so the library record and the queue change in one step.
     const title = db.data.titles[journal.titleKey];
     if (!title) return;
@@ -547,7 +740,9 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     // The torrent that gave the file goes with it, so a removal can delete it later. A manual import has none.
     const source = entriesOf(step.entryIds).find((entry) => entry.clientId && entry.transferHash);
     const download = source ? { clientId: source.clientId!, hash: source.transferHash!, external: source.release?.external === true } : null;
-    Object.assign(file, { sizeBytes: info.size, mtimeMs: info.mtimeMs, episodes: step.episodes, missing: false, source: parsed?.source ?? null, resolution: parsed?.resolution ?? null, download });
+    const inPlace = journal.sourceBase && step.source === step.dest && existing?.association && sameIdentity(existing.association.identity, info);
+    Object.assign(file, { sizeBytes: info.size, mtimeMs: info.mtimeMs, episodes: step.episodes, missing: false, source: inPlace ? existing!.source ?? null : parsed?.source ?? null, resolution: inPlace ? existing!.resolution ?? null : parsed?.resolution ?? null, download: inPlace ? existing!.download ?? null : download });
+    file.association = step.association ? { ...step.association, identity: { sizeBytes: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino } } : undefined;
     db.data.files[file.id] = file;
 
     const covered = title.mediaType === 'movie' ? [] : step.episodes.map((c) => title.episodes.find((e) => e.season === c.season && e.number === c.number)).filter((e): e is Episode => Boolean(e));
@@ -557,6 +752,13 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       if (title.fileId && title.fileId !== file.id) previous.add(title.fileId);
       title.fileId = file.id;
     } else {
+      for (const episode of title.episodes) {
+        if (episode.fileId === file.id && !covered.includes(episode)) {
+          episode.fileId = null;
+          const entry = queue.get(entryId(title.key, episode.season, episode.number));
+          if (entry?.state.kind === 'available') queue.invalidate(entry, 'mapping removed the file association');
+        }
+      }
       for (const episode of covered) {
         if (episode.fileId && episode.fileId !== file.id) previous.add(episode.fileId);
         episode.fileId = file.id;
@@ -571,10 +773,12 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     title.folder ??= step.dest.split('/')[0]!;
     if (journal.sourceBase) settleQueue(title, step);
     for (const entry of entriesOf(step.entryIds)) {
+      if (entry.state.kind !== 'importing') continue;
       entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };
       if (entry.replaceDestination) {
         entry.replaceDestination = undefined;
         queue.touch(entry);
+        if (step.expected) step.expected.entries[entry.id] = inputOf(entry);
       }
       // A download import moves its targets to Available after every step is retired. A manual import and a rename
       // finish each target here.
@@ -584,6 +788,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       queue.complete(entry, 'imported', step.method ?? undefined);
     }
     step.state = 'committed';
+    if (step.expected) step.expected.library = libraryOf(title, step);
   }
 
   // The new name is the same data as the old name. The old name goes, but only when it is still that data.
@@ -596,6 +801,8 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
   }
 
   async function retire(journal: ImportJournal, step: JournalStep, rootReal: string) {
+    current(journal, step);
+    await cleanupStage(journal, step, rootReal);
     if (journal.kind === 'rename') return retireRename(step, rootReal);
     // A replaced file with another name is removed. The same name was replaced at publish.
     if (step.replaces && step.replaces !== step.dest) {
@@ -607,11 +814,23 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
   }
 
   // A file of a manual import did not pass the check of a download. It is read here, in the worker, so the request of the user stays short.
-  async function checkSource(step: JournalStep, base: string) {
+  async function checkSource(journal: ImportJournal, step: JournalStep, base: string) {
+    if (db.data.titles[journal.titleKey]?.mediaType === 'movie' && step.association?.source !== 'manual') {
+      const videos = await listVideos(base, { skipHidden: true });
+      current(journal, step);
+      if (videos.length > 1) throw new ImportProblem('file_unmapped');
+    }
+    const info = await stat(join(base, step.source));
+    current(journal, step);
+    if (step.sourceIdentity && !sameIdentity(step.sourceIdentity, info)) throw new ImportProblem('file_unreadable');
     const result = await probe(join(base, step.source));
+    const after = await stat(join(base, step.source));
+    current(journal, step);
+    if (!info.isFile() || info.size !== after.size || info.mtimeMs !== after.mtimeMs || info.dev !== after.dev || info.ino !== after.ino) throw new ImportProblem('file_unreadable');
     if (result.ok === false) throw new ImportProblem('file_unreadable', result.reason);
     if (result.ok === 'skipped' && step.sizeBytes === 0) throw new ImportProblem('file_unreadable', 'empty');
     step.validation = result.ok === true ? 'ffprobe' : 'basic';
+    step.sourceIdentity ??= { sizeBytes: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino };
   }
 
   // A download import moves its targets to Available only when every step is retired. Until then they stay in
@@ -620,6 +839,8 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     const done = new Set<string>();
     for (const step of journal.steps) {
       for (const entry of entriesOf(step.entryIds)) {
+        current(journal, step);
+        if (entry.state.kind !== 'importing') continue;
         if (done.has(entry.id)) continue;
         done.add(entry.id);
         entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };
@@ -631,7 +852,8 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
   }
 
   // Moves each step forward from the state that it has. A restart calls this again, so every state can start from itself.
-  async function execute(journal: ImportJournal) {
+  async function advance(journal: ImportJournal) {
+    if (!journal.sourceBase && journal.steps.some((step) => entriesOf(step.entryIds).some((entry) => entry.state.kind !== 'importing' && entry.state.kind !== 'available'))) return;
     const title = db.data.titles[journal.titleKey];
     const root = title && db.data.roots[title.rootId];
     // The title left the library while a manual import or a rename was open. Nothing can commit, so the journal ends.
@@ -643,6 +865,15 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     }
     const base = journal.sourceBase ?? journal.downloadBase;
     if (!title || !root || !base) return;
+    if (journal.sourceBase) bindJournal(journal);
+    if (journal.sourceBase) for (const step of journal.steps) {
+      if (step.state !== 'planned') continue;
+      if (journal.kind !== 'rename') step.association ??= {
+        source: entriesOf(step.entryIds).some((entry) => entry.manualMatch) ? 'manual' : 'automatic',
+        originalName: step.source,
+        numberingRevision: 0,
+      };
+    }
     // A manual import and a rename read files that the library has. The root must be the one that the user accepted.
     if (journal.sourceBase && (await checkRoot(root.path, root.dev)).problems.some((problem) => BAD_ROOT.includes(problem))) throw new JobError('outage', 'root_unavailable');
     const rootReal = await realpath(root.path);
@@ -660,6 +891,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     // The queue shows the step and the method of an open import. A change of the step is a change of the entry, and a
     // line in the log of each item.
     const shown = (step: JournalStep) => {
+      current(journal, step);
       const info = STEP_LOG[step.state];
       for (const entry of entriesOf(step.entryIds)) {
         queue.touch(entry);
@@ -680,6 +912,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     // the import go on. A failure after the name is there can not be undone, so the journal keeps the step and the next
     // run finishes it. The file is not left in the library without a record.
     const failed = async (step: JournalStep, error: unknown): Promise<ImportProblem> => {
+      current(journal, step);
       const problem = problemOf(error);
       if (step.state !== 'planned' && step.state !== 'staged') throw error;
       // Nothing is in the library yet. Remove the staged file. The old library file was not changed.
@@ -698,7 +931,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       for (const step of [...journal.steps]) {
         try {
           if (step.state === 'planned') {
-            if (journal.kind !== 'rename') await checkSource(step, base);
+            if (journal.kind !== 'rename') await checkSource(journal, step, base);
             await stage(journal, step, rootReal, base);
             step.state = 'staged';
             await save();
@@ -735,6 +968,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
           }
         } catch (error) {
           if (error === crash) throw error;
+          if (error instanceof StaleImport) throw error;
           await failed(step, error);
         }
       }
@@ -748,9 +982,11 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
         let failure: ImportProblem | undefined;
         for (const step of [...journal.steps]) {
           try {
+            current(journal, step);
             await advance(step);
           } catch (error) {
             if (error === crash) throw error;
+            if (error instanceof StaleImport) throw error;
             failure ??= await failed(step, error);
           }
         }
@@ -804,7 +1040,20 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       }
     }
     if (journal.steps.every((step) => step.state === 'retired') || !journal.steps.length) {
-      if (!journal.sourceBase) finishDownload(journal);
+      if (!journal.sourceBase) {
+        for (const step of journal.steps) {
+          const info = await stat(join(rootReal, step.dest)).catch(() => undefined);
+          current(journal, step);
+          if (!info?.isFile() || info.size === 0 || info.size !== step.sizeBytes || (step.stagedIdentity && !sameIdentity(step.stagedIdentity, info))) {
+            const file = Object.values(db.data.files).find((file) => file.titleKey === title.key && file.path === step.dest);
+            if (file) file.missing = true;
+            block(entriesOf(step.entryIds).filter((entry) => entry.state.kind === 'importing'), 'file_unreadable');
+            await save();
+            return;
+          }
+        }
+        finishDownload(journal);
+      }
       delete db.data.imports[journal.id];
       // The files are in, so a search only targets the episodes that have no file. A download import runs it too:
       // a pack can leave episodes without a file, and they must not wait for another action.
@@ -813,6 +1062,34 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       status?.finish(journal.id);
     }
     events.publish('library.changed', { key: journal.titleKey });
+  }
+
+  async function execute(journal: ImportJournal) {
+    try {
+      if (journal.correction) {
+        await recoverCorrection(journal, { queue });
+        if (db.data.imports[journal.id] !== journal) return;
+      }
+      await advance(journal);
+    } catch (error) {
+      if (!(error instanceof StaleImport)) throw error;
+      const title = db.data.titles[journal.titleKey];
+      const root = title && db.data.roots[title.rootId];
+      if (root) {
+        const rootReal = await realpath(root.path).catch(() => undefined);
+        if (rootReal) for (const step of journal.steps) {
+          if (step.state === 'planned' || step.state === 'staged') await rm(stagePathOf(journal, step, rootReal), { force: true }).catch(() => {});
+          if (step.state === 'published' && step.stagedIdentity) {
+            const info = await stat(join(rootReal, step.dest)).catch(() => undefined);
+            const recorded = Object.values(db.data.files).some((file) => file.titleKey === journal.titleKey && file.path === step.dest);
+            if (!recorded && info?.isFile() && sameIdentity(step.stagedIdentity, info)) await unlink(join(rootReal, step.dest)).catch(() => {});
+          }
+        }
+      }
+      if (db.data.imports[journal.id] === journal) delete db.data.imports[journal.id];
+      await save();
+      status?.finish(journal.id);
+    }
   }
 
   async function run(hash: string) {
@@ -824,13 +1101,17 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     // The targets of one torrent have the same client.
     const handle = clients.get(ready[0]?.clientId);
     if (!handle) return;
-    const byTitle = new Map<string, QueueEntry[]>();
-    for (const entry of ready) byTitle.set(entry.titleKey, [...(byTitle.get(entry.titleKey) ?? []), entry]);
-    for (const group of byTitle.values()) {
+    const groups = new Map<string, QueueEntry[]>();
+    for (const entry of ready) {
+      const key = JSON.stringify([entry.titleKey, numberingOf(entry)]);
+      groups.set(key, [...(groups.get(key) ?? []), entry]);
+    }
+    for (const group of groups.values()) {
       let journal: ImportJournal | undefined;
       try {
         journal = await plan(hash, group, handle);
       } catch (error) {
+        if (error instanceof StaleImport) continue;
         if (error instanceof ClientError) throw error;
         const problem = problemOf(error);
         block(group, problem.code);
@@ -849,9 +1130,12 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
 // Importing with a torrent is unfinished too, also when no journal was written. A target that used its automatic
 // attempts stays stuck until the user retries.
 export const unfinishedImports = () => {
-  const hashes = new Set(Object.values(db.data.imports).map((journal) => journal.hash));
+  const hashes = new Set(Object.values(db.data.imports).filter((journal) => journal.sourceBase || journal.steps.every((step) => step.entryIds.every((id) => {
+    const entry = db.data.queue[id];
+    return entry && (entry.state.kind === 'importing' || entry.state.kind === 'available');
+  }))).map((journal) => journal.hash));
   for (const entry of Object.values(db.data.queue)) {
-    if (!entry.transferHash || entry.state.kind === 'cancelled') continue;
+    if (!entry.transferHash || entry.state.kind !== 'importing') continue;
     if ((entry.importTries ?? 0) >= MAX_IMPORT_ATTEMPTS) continue;
     if (phaseOfEntry(entry) === 'importing') hashes.add(entry.transferHash);
   }

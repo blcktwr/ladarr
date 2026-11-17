@@ -1,36 +1,66 @@
+import { basename } from 'node:path';
 import { db } from '../../../../../core/db.ts';
 import type { QueuePackFiles } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { ClientError } from '../../../../../library/downloads/qbittorrent.ts';
-import { isActive } from '../../../../../library/downloads/queue.ts';
-import { sharingOf } from '../../../../../library/downloads/queue-api.ts';
-import { listDownloadFiles } from '../../../../../library/imports/importer.ts';
-import { titleFiles } from '../../../../../library/imports/local.ts';
-import { label, shown } from '../../../../../helpers/queue.ts';
+import { evidenceOf, matchContent } from '../../../../../library/content.ts';
+import { releaseEpisodes } from '../../../../../library/parse.ts';
+import { catalogPoint, normalizeNumbering } from '../../../../../library/numbering.ts';
+import { probeFile } from '../../../../../library/probe.ts';
+import { matchSource } from '../../../../../helpers/queue-attach.ts';
+import { catalogTargets, shown } from '../../../../../helpers/queue.ts';
 import type { Clients } from '../../../../../types.ts';
 
 export function queueEntryFilesGet(clients: Clients): RequestHandler<{ id: string }> {
   return async (req, res) => {
     const entry = db.data.queue[req.params.id];
     if (!entry || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
-    // A target without a torrent reads the folder of its title. The files are the same paths as its library records.
-    if (!entry.transferHash) {
-      const title = db.data.titles[entry.titleKey];
-      if (!title) return void res.status(404).json({ error: 'not_found' });
-      const folder = await titleFiles(title);
-      if (folder.status === 'root_unavailable') return void res.status(409).json({ error: 'root_unavailable' });
-      const entries = Object.values(db.data.queue)
-        .filter((other) => other.titleKey === entry.titleKey && other.attempt > 0 && isActive(other) && other.season !== null)
-        .sort((a, b) => a.season! - b.season! || a.number! - b.number!)
-        .map((other) => ({ id: other.id, label: label(other), season: other.season, number: other.number }));
-      return void res.json({ files: folder.files, entries } satisfies QueuePackFiles);
-    }
-    const handle = clients.get(entry.clientId);
-    if (!handle) return void res.status(409).json({ error: 'client_missing' });
+    const title = db.data.titles[entry.titleKey]!;
+    const selectedSource = req.query.source ?? (entry.transferHash ? 'download' : 'library');
+    if (selectedSource !== 'library' && selectedSource !== 'download') return void res.status(400).json({ error: 'invalid_request' });
     try {
-      const files = await listDownloadFiles(handle, entry.transferHash);
-      if (!files) return void res.status(409).json({ error: 'download_not_found' });
-      res.json({ files, entries: sharingOf(entry).map((other) => ({ id: other.id, label: label(other), season: other.season, number: other.number })) } satisfies QueuePackFiles);
+      const source = await matchSource(entry, clients, selectedSource);
+      if ('error' in source) return void res.status(409).json({ error: source.error });
+      const records = Object.values(db.data.files).filter((known) => known.titleKey === title.key);
+      const recordOf = (rel: string) => records.find((known) => selectedSource === 'library' ? known.path === rel : known.download?.hash === entry.transferHash && known.association?.originalName === rel);
+      const metadata = await Promise.all(source.files.map(async (file) => evidenceOf(file.rel, await probeFile(file.abs))));
+      const map = normalizeNumbering(entry.numbering ?? title.numbering);
+      const evidence = source.files.map((file, index) => {
+        const item = { ...metadata[index]! };
+        const record = recordOf(file.rel);
+        const original = record ? record.association?.originalName ?? null : file.rel;
+        if (item.season !== null && item.episode !== null) {
+          const point = catalogPoint(map, { season: item.season, number: item.episode });
+          item.season = point?.season ?? null;
+          item.episode = point?.number ?? null;
+        }
+        const parsed = original ? releaseEpisodes(original, title.episodes, map, entry.season, title.meta.title) : null;
+        if (item.season === null && item.episode === null && parsed?.numbers.length === 1) {
+          item.season = parsed.season;
+          item.episode = parsed.numbers[0]!;
+        }
+        return item;
+      });
+      const content = matchContent(evidence, title.episodes);
+      const files = source.files.map((file, index) => {
+        const record = recordOf(file.rel);
+        const manual = Object.values(db.data.queue).filter((other) => other.titleKey === title.key && (selectedSource === 'library' || (other.transferHash === entry.transferHash && other.clientId === entry.clientId)) && other.manualMatch?.file === file.rel).sort((a, b) => (b.manualMatchRevision ?? 0) - (a.manualMatchRevision ?? 0))[0]?.manualMatch;
+        const proposal = content.proposals.find((item) => item.path === file.rel);
+        const rejection = content.rejections.find((item) => item.path === file.rel);
+        const tags = metadata[index]!;
+        return {
+          rel: file.rel,
+          sizeBytes: file.sizeBytes,
+          originalName: record?.association?.originalName ?? basename(file.rel),
+          location: file.rel,
+          source: selectedSource === 'download' && entry.transferHash ? { hash: entry.transferHash, clientId: entry.clientId } : record?.download ? { hash: record.download.hash, clientId: record.download.clientId } : null,
+          current: manual?.covers ?? record?.episodes ?? [],
+          metadata: { title: tags.title, season: tags.season, episode: tags.episode, durationSeconds: tags.durationSeconds },
+          proposal: proposal ? { episodes: proposal.episodes, step: proposal.step, evidence: proposal.evidence } : null,
+          rejection: rejection ? { reason: rejection.reason, evidence: rejection.evidence } : null,
+        };
+      });
+      res.json({ source: selectedSource, sources: entry.transferHash ? ['download', 'library'] : ['library'], files, entries: catalogTargets(title) } satisfies QueuePackFiles);
     } catch (error) {
       if (error instanceof ClientError) return void res.status(502).json({ error: 'client_unreachable' });
       throw error;

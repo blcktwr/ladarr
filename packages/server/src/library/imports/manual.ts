@@ -44,7 +44,6 @@ export async function planFiles(input: PlanInput): Promise<FolderPlan & { steps:
   const steps: JournalStep[] = [];
   const takenEpisodes = new Set<string>();
   const takenNames = new Set<string>();
-  let movieChosen = false;
 
   const row = (file: { rel: string; sizeBytes: number }, status: FolderFileStatus, extra: Partial<FolderFile> = {}): FolderFile => ({ rel: file.rel, sizeBytes: file.sizeBytes, status, reason: null, episodes: [], dest: null, replaces: null, ...extra });
 
@@ -84,9 +83,7 @@ export async function planFiles(input: PlanInput): Promise<FolderPlan & { steps:
 
   for (const file of videos) {
     if (movie) {
-      // A movie has one managed file. The biggest video is the movie, and the other videos are extra files.
-      rows.push(movieChosen ? row(file, 'extra') : await evaluate(file, []));
-      movieChosen = true;
+      rows.push(videos.length === 1 ? await evaluate(file, []) : row(file, 'unmatched', { reason: 'file_unmapped' }));
       continue;
     }
     // The folder of the file can name the season: "Season 02/Berserk E01.mkv".

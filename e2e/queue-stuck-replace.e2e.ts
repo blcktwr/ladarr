@@ -4,6 +4,7 @@ import { expect, test } from './fixtures.ts';
 import { configure, MOVIE_RELEASE, startStack, URL_BASE, type Stack } from './stack.ts';
 
 test.setTimeout(120_000);
+test.use({ actionTimeout: 15_000 });
 
 let stack: Stack;
 let cookie: Awaited<ReturnType<Stack['createOwner']>>;
@@ -38,7 +39,7 @@ test('replaces the file that holds the destination name when the user asks', asy
   await page.goto(`${URL_BASE}/activity`);
   await page.locator('[data-row="entry:movie:2"]').click();
   await expect(page.getByRole('heading', { name: 'Movie Name (2019)' })).toBeVisible();
-  await page.getByRole('button', { name: 'Replace the file', exact: true }).click();
+  await page.getByRole('button', { name: 'Replace file', exact: true }).click();
   await page.getByRole('button', { name: 'Replace', exact: true }).click();
 
   await expect.poll(async () => (await entry())?.status, { timeout: 60_000 }).toBe('available');

@@ -4,6 +4,7 @@ import { expect, test } from './fixtures.ts';
 import { configure, startStack, URL_BASE, type Stack } from './stack.ts';
 
 test.setTimeout(120_000);
+test.use({ actionTimeout: 15_000 });
 
 let stack: Stack;
 let cookie: Awaited<ReturnType<Stack['createOwner']>>;
@@ -46,12 +47,12 @@ test('offers the file of the folder and maps the episode with it', async ({ page
   await expect(episodes).toContainText('Stuck');
 
   // The row of an episode that the folder holds offers the match of its file.
-  await episodes.locator('[data-row="entry:tv:1:1x1"]').getByRole('button', { name: 'Match file' }).click();
-  const panel = page.getByRole('dialog', { name: /Match file to/ });
+  await episodes.locator('[data-row="entry:tv:1:1x1"]').getByRole('button', { name: 'Map episodes', exact: true }).click();
+  const panel = page.getByRole('dialog');
   await panel.getByRole('combobox', { name: 'File' }).click();
   await page.getByRole('option', { name: /Clip A\.mkv/ }).click();
-  await panel.getByRole('button', { name: 'Show the changes' }).click();
-  await panel.getByRole('button', { name: 'Use this file' }).click();
+  await panel.getByRole('button', { name: 'Preview changes', exact: true }).click();
+  await panel.getByRole('button', { name: 'Apply mapping', exact: true }).click();
 
   // The episode that the user matched is in the library, and the file keeps the path of its folder.
   await expect.poll(() => reason('tv:1:1x1'), { timeout: 60_000 }).toBeUndefined();

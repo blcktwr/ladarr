@@ -12,7 +12,7 @@ type Target = { titleKey: string; season?: number; number?: number };
 
 // The releases that the indexers have for one target, with the reason for each rejection. A person takes one by hand,
 // also when the automatic search rejected it.
-function Releases({ target, label, onDone }: { target: Target; label: string; onDone: () => void }) {
+function Releases({ target, ids, label, onDone }: { target: Target; ids?: string[]; label: string; onDone: () => void }) {
   const queryClient = useQueryClient();
   const [error, setError] = useState('');
   const queueNotice = useQueueNotice();
@@ -32,7 +32,7 @@ function Releases({ target, label, onDone }: { target: Target; label: string; on
   async function grab(release: ReleaseRow) {
     setError('');
     try {
-      const { started } = await api<{ started: string[] }>('/queue/releases/grab', { method: 'POST', body: { ...target, indexerId: release.indexerId, guid: release.guid } });
+      const { started } = await api<{ started: string[] }>('/queue/releases/grab', { method: 'POST', body: { ...target, ...(ids ? { ids } : {}), indexerId: release.indexerId, guid: release.guid } });
       queueNotice(started.length);
       onDone();
     } catch (err) {
@@ -84,12 +84,14 @@ function Releases({ target, label, onDone }: { target: Target; label: string; on
 }
 
 // The releases of a target, in a panel of their own. The panel closes when the person takes a release.
-export function ReleasePicker({ target, label, onDone }: { target: Target; label: string; onDone: () => void }) {
+export function ReleasePicker({ target, ids, label, onDone }: { target: Target; ids?: string[]; label: string; onDone: () => void }) {
   const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState(ids);
   return (
-    <Panel open={open} onOpenChange={setOpen} label={t('Choose a release for {label}', { label })} trigger={<Button>{t('Choose a release')}</Button>} size="lg">
+    <Panel open={open} onOpenChange={(next) => { if (next) setSelected(ids); setOpen(next); }} label={t('Search releases')} title={t('Releases for {label}', { label })} trigger={<Button>{t('Search releases')}</Button>} size="lg">
       <Releases
         target={target}
+        ids={selected}
         label={label}
         onDone={() => {
           setOpen(false);

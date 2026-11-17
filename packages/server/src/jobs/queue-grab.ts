@@ -2,13 +2,11 @@ import { db } from '../core/db.ts';
 import { JobError } from '../core/jobs.ts';
 import { catalog, itemFields } from '../core/log.ts';
 import { createGrabber, reasonOf } from '../library/grab/grab.ts';
-import { isActive, phaseOfEntry } from '../library/downloads/queue.ts';
 import type { GrabberDeps, Handler, QueueEntry } from '../types.ts';
 
 const MAX_ATTEMPTS = 8;
 
-// A grab can still work on a target that a try blocked: the entry keeps the phase of the fetch.
-const grabbable = (entry: QueueEntry) => isActive(entry) && entry.state.kind !== 'paused' && Boolean(entry.release) && phaseOfEntry(entry) === 'fetching';
+const grabbable = (entry: QueueEntry) => entry.state.kind === 'fetching' && Boolean(entry.release);
 
 export function queueGrabHandler(deps: GrabberDeps): Handler {
   const { queue } = deps;
@@ -33,8 +31,7 @@ export function queueGrabHandler(deps: GrabberDeps): Handler {
         if (kind === 'invalid_input' || job.attempts >= MAX_ATTEMPTS) {
           for (const entry of entries) queue.block(entry, reason, 'grab failed');
         } else {
-          // The entry keeps its phase. The problem shows why it waits.
-          for (const entry of entries) queue.block(entry, reason, 'grab will be tried again');
+          for (const entry of entries) queue.observe(entry, 'grab will be tried again', reason.code);
         }
         throw error;
       }

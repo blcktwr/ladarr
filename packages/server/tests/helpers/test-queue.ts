@@ -1,8 +1,7 @@
-import type { SearchOutcome, Phase } from '@ladarr/shared/queue';
+import type { SearchOutcome, Phase, WorkPhase } from '@ladarr/shared/queue';
 import type { Queue, QueueEntry } from '../../src/types.ts';
 
-// Forces a state in a test. The shape is the one that the old move() took, so a test reads the state that it
-// arranges. The production code has no such operation: it asks for enter, wait, block, pause, cancel, or complete.
+// Sets a fixture state. A change from blocked uses explicit authorization.
 type Change = { stage?: string; branch?: string | null; reason?: { code: string; detail?: string } | null };
 
 const OUTCOME: Record<string, SearchOutcome> = { no_results: 'no_results', all_rejected: 'all_rejected', search_deferred: 'deferred', indexers_failed: 'indexers_failed' };
@@ -56,12 +55,21 @@ export const branchOf = (entry: QueueEntry): 'waiting' | 'paused' | 'cancelled' 
 
 export function move(queue: Queue, entry: QueueEntry, change: Change, cause: string, detail?: string) {
   const outcome = change.reason ? (OUTCOME[change.reason.code] ?? 'unspecified') : 'unspecified';
-  if (change.stage === 'available') return queue.complete(entry, cause, detail);
-  if (change.stage) queue.enter(entry, change.stage as never, cause, detail);
+  if (change.stage === 'available') {
+    if (entry.state.kind === 'blocked') queue.resolve(entry, entry.state.at as WorkPhase, cause, detail);
+    return queue.complete(entry, cause, detail);
+  }
+  if (change.stage) {
+    if (entry.state.kind === 'blocked') queue.resolve(entry, change.stage as WorkPhase, cause, detail);
+    else queue.enter(entry, change.stage as WorkPhase, cause, detail);
+  }
   if (change.branch === 'cancelled') return queue.cancel(entry, cause);
   if (change.branch === 'paused') return queue.pause(entry, cause);
   if (change.branch === 'waiting') return queue.wait(entry, outcome, cause, detail);
   if (change.reason) queue.block(entry, { ...change.reason }, cause, detail);
-  else if (change.branch === null) queue.unblock(entry, cause);
+  else if (change.branch === null) {
+    if (entry.state.kind === 'blocked') queue.resolve(entry, entry.state.at as WorkPhase, cause, detail);
+    else queue.unblock(entry, cause);
+  }
   else if (!change.stage) queue.observe(entry, cause, detail);
 }

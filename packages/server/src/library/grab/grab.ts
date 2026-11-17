@@ -1,10 +1,11 @@
 import { db } from '../../core/db.ts';
 import { JobError } from '../../core/jobs.ts';
 import { catalog, itemFields } from '../../core/log.ts';
+import { inspectCoverage } from '../coverage.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
 import { addedByApp, isActive } from '../downloads/queue.ts';
 import { hasFreeSlot } from '../downloads/slots.ts';
-import { isSample, isVideoFile, parseEpisodes, releaseEpisodes } from '../parse.ts';
+import { isSample, isVideoFile, parseEpisodes } from '../parse.ts';
 import { NO_NUMBERING } from '../numbering.ts';
 import { infoHashOf, magnetHash, torrentComment, torrentFiles } from './torrent.ts';
 import { IndexerError } from './torznab.ts';
@@ -36,27 +37,60 @@ const decode = (entry: QueueEntry): Source | null =>
 // The chosen release is fetched first, and it waits for a slot of the client after that. The fetch and the send are two
 // steps: a full client must not stop the fetch, and the fetched torrent must not come from the indexer a second time.
 export function createGrabber({ queue, finder, indexers, clients, save, enqueue, reconcileMs = 1_000 }: GrabberDeps) {
-  // The entries of a pack that its files do not cover, and the number of files that name an episode. The check is the
-  // same as the check of the import. The names come from the torrent file, before the client has the release, or from
-  // the client, when it has the release already. The numbering of the acquisition turns the release numbers into the
-  // catalog episodes, so a file of another release season still finds its target.
+  // Async results belong to the acquisition that requested them, not to a later user selection.
+  function snapshot(entries: QueueEntry[]) {
+    const input = (entry: QueueEntry) => JSON.stringify({
+      state: entry.state, attempt: entry.attempt, release: entry.release, source: entry.source,
+      numbering: entry.numbering === undefined ? db.data.titles[entry.titleKey]?.numbering : entry.numbering,
+      hash: entry.transferHash, clientId: entry.clientId, manualMatch: entry.manualMatch,
+    });
+    const expected = entries.map((entry) => ({ entry, title: db.data.titles[entry.titleKey], release: entry.release, source: entry.source, input: input(entry) }));
+    return () => expected.filter((saved) => db.data.queue[saved.entry.id] === saved.entry
+      && db.data.titles[saved.entry.titleKey] === saved.title && saved.entry.release === saved.release && saved.entry.source === saved.source
+      && saved.entry.state.kind !== 'blocked' && saved.entry.state.kind !== 'paused' && isActive(saved.entry) && input(saved.entry) === saved.input).map((saved) => saved.entry);
+  }
+
+  // Unknown files are not evidence of absence. Each acquisition uses its saved map for the complete source.
   function missingFrom(files: string[], entries: QueueEntry[]) {
     const title = db.data.titles[entries[0]!.titleKey];
-    const numbering = entries.find((entry) => entry.numbering)?.numbering ?? title?.numbering ?? NO_NUMBERING;
     const videos = files.filter((file) => isVideoFile(file) && !isSample(file));
     // The numbers of the release, which the record of the pack keeps for the manual search of the other seasons.
     const readings = videos.map((file) => parseEpisodes(file)).filter((item): item is ParsedEpisodes => Boolean(item));
-    // A torrent of one file, or a list that names no episode, gives no evidence about the episodes that it holds. The
-    // import reads the files of the client and finds the episode there. A pack of several files that name no episode
-    // is a release that failed, so the record of its files says that it holds none of the season.
-    if (files.length <= 1 && !readings.length) return { missing: [] as QueueEntry[], releaseSeason: null as number | null, numbers: [] as number[] };
     const seasons = new Set(readings.map((item) => item.season));
-    const held = videos.map((file) => releaseEpisodes(file, title?.episodes ?? [], numbering, null, title?.meta.title ?? null));
+    const manifests = new Map<string, ReturnType<typeof inspectCoverage>>();
+    const status = (entry: QueueEntry) => {
+      if (!title || entry.season === null || entry.number === null) return 'unknown';
+      const numbering = entry.numbering === undefined ? title.numbering ?? NO_NUMBERING : entry.numbering;
+      const key = JSON.stringify(numbering);
+      if (!manifests.has(key)) manifests.set(key, inspectCoverage(files, title, numbering));
+      return manifests.get(key)!.status({ season: entry.season, number: entry.number });
+    };
+    const missing = entries.filter((entry) => status(entry) === 'absent');
+    const unknown = entries.filter((entry) => status(entry) === 'unknown');
     return {
-      missing: entries.filter((entry) => !held.some((found) => found?.season === entry.season && found.numbers.includes(entry.number!))),
+      missing,
+      unknown,
+      identified: [...manifests.values()].flatMap((manifest) => manifest.episodes),
       releaseSeason: seasons.size === 1 ? [...seasons][0]! : null,
       numbers: [...new Set(readings.flatMap((item) => item.numbers))].sort((a, b) => a - b),
     };
+  }
+
+  function inspect(entries: QueueEntry[], files: string[], deferUnknown = false) {
+    const pack = missingFrom(files, entries);
+    // An opaque source can need downloaded metadata. It establishes neither episode coverage nor absence.
+    if (deferUnknown && !pack.identified.length && !pack.missing.length) return entries;
+    for (const entry of pack.unknown) {
+      queue.endAttempt(entry, 'failed', 'file_unmapped');
+      queue.block(entry, { code: 'file_unmapped' }, 'the source has an unassigned file');
+    }
+    const known = entries.filter((entry) => !pack.unknown.includes(entry));
+    if (!pack.missing.length) return known;
+    if (!pack.numbers.length) {
+      for (const entry of pack.missing) queue.block(entry, { code: 'pack_partial' }, 'the manifest has no video for the target');
+      return known.filter((entry) => !pack.missing.includes(entry));
+    }
+    return finder.partial(known, pack.missing, { files: files.length, releaseSeason: pack.releaseSeason, numbers: pack.numbers });
   }
 
   // The files of the .torrent, or null when ladarr cannot read the list.
@@ -76,11 +110,8 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
   // the user stays the user's, so a removal never deletes it.
   function adopt(entries: QueueEntry[], connection: ClientHandle, found: Torrent, external: boolean) {
     for (const entry of entries) {
-      // The user cancelled while the fetch ran. The torrent stays in the client, and the entry stays cancelled.
-      if (entry.state.kind === 'cancelled') {
-        queue.observe(entry, 'torrent added before the cancel', 'The torrent stays in the client.');
-        continue;
-      }
+      // Automatic adoption leaves stopped targets unchanged.
+      if (!isActive(entry) || entry.state.kind === 'blocked' || entry.state.kind === 'paused') continue;
       entry.transferHash = found.hash;
       entry.clientId = connection.id;
       entry.source = null;
@@ -102,7 +133,29 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
   // A torrent in the client with the hash of the release is the release. A finished torrent is used as it is, also when
   // ladarr did not send it, because the user added it by hand or an older version did. A torrent that still downloads
   // is the user's, and ladarr does not take it over: the target stops with the reason that offers the attach.
-  function take(entries: QueueEntry[], connection: ClientHandle, found: Torrent) {
+  async function take(entries: QueueEntry[], connection: ClientHandle, found: Torrent) {
+    entries = entries.filter((entry) => isActive(entry) && entry.state.kind !== 'blocked' && entry.state.kind !== 'paused');
+    if (!entries.length) return;
+    if (entries[0]!.release?.kind === 'pack') {
+      const source = decode(entries[0]!);
+      const saved = source && 'torrent' in source ? packFiles(source.torrent) : null;
+      // The client can still lack metadata after an add. Its temporary names cannot replace the fetched manifest.
+      const current = snapshot(entries);
+      const files = saved ?? (await connection.api.files(found.hash)).map((file) => file.name);
+      entries = current();
+      if (!entries.length) return;
+      for (const entry of entries) {
+        if (entry.state.kind === 'blocked' || !isActive(entry)) continue;
+        entry.transferHash = found.hash;
+        entry.clientId = connection.id;
+        if (entry.release) {
+          entry.release.infoHash = found.hash;
+          if (!addedByApp(found.hash)) entry.release.external = true;
+        }
+      }
+      entries = inspect(entries.filter((entry) => entry.state.kind !== 'blocked' && isActive(entry)), files, addedByApp(found.hash));
+      if (!entries.length) return;
+    }
     if (addedByApp(found.hash) || found.complete) return adopt(entries, connection, found, !addedByApp(found.hash));
     for (const entry of entries) {
       catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
@@ -112,6 +165,8 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
 
   // Fetches the torrent of the release. The fetch ends when the source is saved, and the target then waits for a slot.
   async function fetch(entries: QueueEntry[], signal: AbortSignal) {
+    entries = entries.filter((entry) => isActive(entry) && entry.state.kind !== 'blocked' && entry.state.kind !== 'paused');
+    if (!entries.length) return;
     const leader = entries[0]!;
     const ref = leader.release!;
     // A retry goes to the client that got the first try, because the add may have worked there.
@@ -124,18 +179,20 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
       }
       return;
     }
-    const { api } = connection;
     // The client is known before the first request, so a send goes to the same client.
     for (const entry of entries) entry.clientId = connection.id;
 
     // A hash from an earlier try: if the client has the torrent, the work is done.
     let hash = ref.infoHash;
     if (hash) {
+      const current = snapshot(entries);
       const found = await clients.find(connection, hash);
+      entries = current();
+      if (!entries.length) return;
       if (found) return take(entries, connection, found);
     }
 
-    let source = decode(leader);
+    let source = decode(entries[0]!);
     if (!source) {
       if (ref.link) {
         const indexer = db.data.indexers[ref.indexerId] ?? downloaderOf(ref.link);
@@ -149,15 +206,23 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
         const seen = Object.values(db.data.queue).find(
           (entry) => entry.titleKey === leader.titleKey && entry.season === leader.season && entry.release?.indexerId === ref.indexerId && entry.release.guid === ref.guid && entry.transferHash,
         )?.transferHash;
+        const heldCurrent = snapshot(entries);
         const held = seen ? await clients.find(connection, seen) : undefined;
+        entries = heldCurrent();
+        if (!entries.length) return;
         if (held) {
-          const files = ref.kind === 'pack' ? (await api.files(held.hash)).map((file) => file.name) : [];
-          const pack = missingFrom(files, entries);
-          if (pack.missing.length) entries = finder.partial(entries, pack.missing, { files: files.length, releaseSeason: pack.releaseSeason, numbers: pack.numbers });
-          if (entries.length) take(entries, connection, held);
-          return;
+          return take(entries, connection, held);
         }
-        const got = await indexers.download(indexer, ref.link, { signal });
+        const current = snapshot(entries);
+        let got: Awaited<ReturnType<typeof indexers.download>>;
+        try {
+          got = await indexers.download(indexer, ref.link, { signal });
+        } catch (error) {
+          if (!current().length) return;
+          throw error;
+        }
+        entries = current();
+        if (!entries.length) return;
         if ('magnet' in got) source = got;
         else {
           try {
@@ -167,16 +232,6 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
             return finder.fallback(entries, 'invalid_torrent');
           }
           source = got;
-          // A pack must hold the episodes that it covers. The torrent file lists its files before the client has any data.
-          if (ref.kind === 'pack') {
-            const files = packFiles(got.torrent);
-            // A list that ladarr cannot read gives no check. The import still blocks a missing episode.
-            if (files) {
-              const pack = missingFrom(files, entries);
-              if (pack.missing.length) entries = finder.partial(entries, pack.missing, { files: files.length, releaseSeason: pack.releaseSeason, numbers: pack.numbers });
-              if (!entries.length) return;
-            }
-          }
         }
       } else if (ref.magnet) source = { magnet: ref.magnet };
       else return finder.fallback(entries, 'no_download_link');
@@ -195,16 +250,28 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
     // and the indexer is not asked again for it.
     const saved = encode(source);
     for (const entry of entries) {
+      if (entry.state.kind === 'blocked' || !isActive(entry)) continue;
       entry.transferHash = hash;
       entry.clientId = connection.id;
       entry.source = saved;
       if (entry.release) entry.release.infoHash = hash;
     }
+    entries = entries.filter((entry) => entry.state.kind !== 'blocked' && isActive(entry));
+    if (ref.kind === 'pack' && 'torrent' in source) {
+      const files = packFiles(source.torrent);
+      if (files && entries.length) entries = inspect(entries, files, true);
+    }
+    const savedCurrent = snapshot(entries);
     await save();
+    entries = savedCurrent();
+    if (!entries.length) return;
 
     // The torrent can appear in the client while the fetch runs, for example when another target of the pack sends it.
     clients.invalidate(connection);
+    const current = snapshot(entries);
     const existing = await clients.find(connection, hash!);
+    entries = current();
+    if (!entries.length) return;
     if (existing) return take(entries, connection, existing);
 
     for (const entry of entries) queue.enter(entry, 'waiting_slot', 'torrent fetched', ref.title);
@@ -221,6 +288,8 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
   // Sends the fetched torrent to the client, when the client has a free slot. The source stays with the targets until
   // the client accepts it, so a wait or a restart sends the saved source and never asks the indexer again.
   async function send(entries: QueueEntry[], signal: AbortSignal) {
+    entries = entries.filter((entry) => isActive(entry) && entry.state.kind !== 'blocked' && entry.state.kind !== 'paused');
+    if (!entries.length) return;
     const leader = entries[0]!;
     const ref = leader.release;
     const connection = leader.clientId ? clients.get(leader.clientId) : clients.next();
@@ -240,9 +309,12 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
     // The torrent can be in the client already, for example after a manual add. No slot is used by a torrent that is
     // there already.
     clients.invalidate(connection);
+    const current = snapshot(entries);
     const existing = await clients.find(connection, hash);
+    entries = current();
+    if (!entries.length) return;
     if (existing) return take(entries, connection, existing);
-    const source = decode(leader);
+    const source = decode(entries[0]!);
     if (!source) {
       for (const entry of entries) queue.enter(entry, 'fetching', 'the torrent source is gone');
       enqueue({ type: 'queue.grab', payload: { entryIds: entries.map((entry) => entry.id) }, dedupeKey: `grab:${leader.id}`, priority: entries.some((entry) => entry.priority !== null) });
@@ -265,6 +337,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
 
     db.data.sentTorrents[hash] = Date.now();
     for (const entry of entries) queue.enter(entry, 'sending', 'sending to the client', ref?.title ?? hash);
+    const sentCurrent = snapshot(entries);
     try {
       for (const entry of entries) {
         catalog.info('download_started', `Sending "${ref?.title ?? hash}" to ${connection.config.name}`, itemFields(entry), {
@@ -277,21 +350,35 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
       }
       await connection.api.add(source, ref?.seed);
     } catch (error) {
+      entries = sentCurrent();
+      if (!entries.length) return;
       if (!(error instanceof ClientError)) throw error;
       // The add may have worked even if the answer did not come. Read the client before any other try.
       for (let i = 0; i < 3; i++) {
+        const current = snapshot(entries);
         await sleep(reconcileMs);
+        entries = current();
+        if (!entries.length) return;
         clients.invalidate(connection);
         const found = await clients.find(connection, hash).catch(() => null);
+        entries = current();
+        if (!entries.length) return;
         if (found) return take(entries, connection, found);
       }
       throw new JobError(error.code === 'unreachable' ? 'uncertain' : 'outage', error.message);
     }
+    entries = sentCurrent();
+    if (!entries.length) return;
     // The client answers the add before it lists the torrent, so the reader waits for the list.
     for (let i = 0; i < 3; i++) {
+      const current = snapshot(entries);
       if (i) await sleep(reconcileMs);
+      entries = current();
+      if (!entries.length) return;
       clients.invalidate(connection);
       const added = await clients.find(connection, hash);
+      entries = current();
+      if (!entries.length) return;
       if (added) return take(entries, connection, added);
     }
     throw new JobError('uncertain', 'The client accepted the torrent but does not list it.');

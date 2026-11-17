@@ -102,10 +102,10 @@ export function createQueue(events: Events, persist: () => void, onState?: State
   }
 
   // The only place that writes the state. Every operation below goes through it.
-  function transition(entry: QueueEntry, next: QueueState, cause: string, detail?: string) {
+  function change(entry: QueueEntry, next: QueueState, cause: string, detail?: string, invalidation = false) {
     const before = entry.state;
     if (sameState(before, next)) return;
-    if (!canEnter(before, next)) throw new Error(`The queue does not allow ${before.kind} to become ${next.kind}.`);
+    if (!invalidation && !canEnter(before, next)) throw new Error(`The queue does not allow ${before.kind} to become ${next.kind}.`);
     const now = Date.now();
     const phaseBefore = phaseOf(before);
     const phaseAfter = phaseOf(next);
@@ -124,6 +124,25 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     catalog.info('moved', line, { ...itemFields(entry), status: statusText(next) }, fields);
     touch(entry);
     onState?.(entry, before);
+  }
+
+  function transition(entry: QueueEntry, next: QueueState, cause: string, detail?: string) {
+    if (entry.state.kind === 'blocked' && next.kind !== 'blocked' && next.kind !== 'cancelled') return;
+    if (entry.state.kind === 'paused' && entry.state.problem && next.kind !== 'blocked' && next.kind !== 'cancelled') return;
+    change(entry, next, cause, detail);
+  }
+
+  // Only an explicit user action releases this target. Shared downloads give no authorization.
+  function resolve(entry: QueueEntry, phase: WorkPhase, cause: string, detail?: string) {
+    if (entry.state.kind === 'available' || entry.state.kind === 'cancelled' || entry.state.kind === 'paused') return;
+    change(entry, { kind: phase }, cause, detail);
+  }
+
+  // A removed association is not a request for another download.
+  function invalidate(entry: QueueEntry, cause: string, detail?: string) {
+    if (entry.state.kind === 'cancelled' || entry.state.kind === 'blocked') return;
+    entry.completedAt = null;
+    change(entry, { kind: 'blocked', at: 'importing', problem: { code: 'file_unmapped', ...(detail ? { detail } : {}) } }, cause, detail, true);
   }
 
   // A fact that does not change the state, such as the client that accepted a torrent after the user cancelled it.
@@ -150,7 +169,7 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     transition(entry, { kind: 'blocked', at, problem }, cause, detail);
   }
 
-  // The problem is gone, and the target goes on from the phase that it stopped at.
+  // Observations alone cannot release a target. User actions use resolve().
   function unblock(entry: QueueEntry, cause: string) {
     if (entry.state.kind !== 'blocked') return;
     transition(entry, { kind: entry.state.at }, cause);
@@ -218,6 +237,7 @@ export function createQueue(events: Events, persist: () => void, onState?: State
 
   // A request for a target. It returns false when the target is already in the journey, so no second request starts.
   function request(entry: QueueEntry, reason: string) {
+    if (entry.state.kind === 'blocked' || (entry.state.kind === 'paused' && entry.state.problem)) return false;
     // An entry that was made but never requested has no attempt yet.
     if (entry.attempt > 0 && isActive(entry)) return false;
     rememberDownload(entry);
@@ -232,6 +252,7 @@ export function createQueue(events: Events, persist: () => void, onState?: State
   // A confirmed bad download or a target that its pack does not cover starts again from the top of the journey. The
   // caller ends the attempt first. It keeps the new attempt in the history of the target.
   function fallback(entry: QueueEntry, cause: string, detail?: string, attemptReason = `fallback: ${cause}`) {
+    if (entry.state.kind === 'blocked' || (entry.state.kind === 'paused' && entry.state.problem)) return;
     Object.assign(entry, { search: null, release: null, transferHash: null, clientId: null, source: null, importTries: 0, importResult: null, replaceDestination: undefined });
     startAttempt(entry, attemptReason);
     transition(entry, { kind: 'queued' }, 'fallback', detail ?? cause);
@@ -266,6 +287,8 @@ export function createQueue(events: Events, persist: () => void, onState?: State
   return {
     ensure,
     transition,
+    resolve,
+    invalidate,
     enter,
     wait,
     block,

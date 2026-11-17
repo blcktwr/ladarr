@@ -139,6 +139,7 @@ describe('series journey', () => {
   it('maps the numbers of a relative season pack to the numbers of the title', async () => {
     pipe = await startPipeline();
     const series = title({ rootId: 'tv', episodes: [episode(2, 33, '2020-01-01'), episode(2, 34, '2020-01-02'), episode(2, 35, '2020-01-03')] });
+    series.numbering = { revision: 1, ranges: [{ season: 2, from: 33, to: 35, releaseSeason: 2, releaseFrom: 1 }] };
     pipe.db.data.titles[series.key] = series;
     const pack = 'Show.Name.S02.1080p.WEB-DL.GRP';
     const files = ['Show.Name.S02E01.mkv', 'Show.Name.S02E02.mkv', 'Show.Name.S02E03.mkv'];
@@ -198,7 +199,7 @@ describe('series journey', () => {
     }
   });
 
-  it('shows a partial pack: the others available, and the missing episode back in the search', async () => {
+  it('imports the covered episodes and keeps the missing episode blocked with its source', async () => {
     pipe = await startPipeline();
     const series = show();
     pipe.db.data.titles[series.key] = series;
@@ -206,21 +207,23 @@ describe('series journey', () => {
     pipe.tracker.state.items = [{ title: pack, size: 3 * 60 * 45 * MIB }];
     const entries = pipe.finder.requestSearch(series.key);
     await until(() => entries.every((e) => stageOf(e) === 'downloading'));
-    // A new search of the missing episode would find nothing.
+    const searches = pipe.tracker.state.searches.length;
     pipe.tracker.state.items = [];
     pipe.complete(pack, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E03.mkv': 'three' });
-    await until(() => entries.filter((e) => stageOf(e) === 'available').length === 2 && stageOf(entries[1]!) === 'queued' && reasonOfEntry(entries[1]!)?.code === 'no_results');
-    expect(entries.map((e) => stageOf(e))).toEqual(['available', 'queued', 'available']);
-    // The missing episode waits for a release of its own, and it has no torrent.
-    expect(entries[1]).toMatchObject({ state: { kind: 'waiting' }, transferHash: null });
-    // A torrent that ladarr cannot read before the download is a release that failed: the target tries its season again.
-    // The record of the pack keeps the episodes that it holds.
-    expect(entries[1]!.attempts.map((attempt) => [attempt.n, attempt.outcome, attempt.reason])).toEqual([
-      [1, 'failed', 'search requested'],
-      [2, 'running', 'fallback: pack_partial'],
-    ]);
+    await until(() => entries.filter((e) => stageOf(e) === 'available').length === 2 && entries[1]!.state.kind === 'blocked' && entries[1]!.state.at === 'importing');
+    await until(() => !Object.values(pipe!.db.data.jobs).some((job) => job.type === 'import.run'));
+    expect(entries.map((e) => stageOf(e))).toEqual(['available', 'importing', 'available']);
+    expect(entries[1]).toMatchObject({ state: { kind: 'blocked', at: 'importing' }, transferHash: hashOf(pack), release: { title: pack }, clientId: 'client-1', attempt: 1 });
+    expect(['pack_partial', 'file_not_found']).toContain(reasonOfEntry(entries[1]!)?.code);
+    expect(entries[1]!.attempts).toHaveLength(1);
+    expect(entries[1]!.attempts[0]).toMatchObject({ n: 1, outcome: 'failed', reason: 'search requested' });
+    expect(series.episodes.map((episode) => Boolean(episode.fileId))).toEqual([true, false, true]);
+    expect(Object.values(pipe.db.data.files).flatMap((file) => file.episodes).sort((a, b) => a.number - b.number)).toEqual([{ season: 1, number: 1 }, { season: 1, number: 3 }]);
     expect(pipe.db.data.releaseCoverage[`1:${pack}`]).toMatchObject({ titleKey: series.key, season: 1, numbers: [1, 3] });
-    expect(Object.values(pipe.db.data.jobs).some((job) => job.type === 'queue.initial' && job.dedupeKey === `initial:${series.key}`)).toBe(true);
+    expect(pipe.tracker.state.searches).toHaveLength(searches);
+    expect(pipe.tracker.state.downloads).toEqual([pack]);
+    expect(pipe.qbit.torrents.size).toBe(1);
+    expect(Object.values(pipe.db.data.jobs).some((job) => job.type === 'queue.search' && (job.payload as { entryIds: string[] }).entryIds.includes(entries[1]!.id))).toBe(false);
   });
 
   it('takes a pack that holds a part of a season, and completes the season with the action of the user', async () => {
@@ -821,7 +824,9 @@ describe('item logs', () => {
       pipe.db.data.titles[film.key] = film;
       pipe.tracker.state.items = [{ title: 'Movie.Name.2019.1080p.BluRay-GRP', size: 100 * 120 * MIB }];
       const [entry] = pipe.finder.requestSearch(film.key);
-      await until(() => reasonOfEntry(entry!)?.code === 'grab_failed');
+      await until(() => entry!.history.some((event) => event.cause === 'send will be tried again'));
+      expect(entry!.state.kind).toBe('sending');
+      expect(reasonOfEntry(entry!)).toBeNull();
       await closeLog();
       const entries = await recentLogs(200, { itemId: entry!.id, itemType: 'movie' });
       expect(entries.map((line) => line.event)).toContain('download_failed');

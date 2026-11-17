@@ -66,16 +66,27 @@ describe('preview', () => {
     expect((await preview(t.inbox)).body.plan).toMatchObject({ nameMatch: false, importable: 1 });
   });
 
-  it('lists the other videos of a movie as extra files', async () => {
+  it.each([true, false])('does not select a movie by file size when both videos are plausible: first larger %s', async (firstLarger) => {
     t = await startImportTest();
-    t.pipe.db.data.titles['movie:2'] = (await import('../helpers/test-fixtures.ts')).movie({ rootId: 'movie' });
-    t.write(t.inbox, { 'Movie.Name.2019.mkv': 'the movie data', 'Movie.Name.2019.trailer.mkv': 'trailer' });
-    const { body } = await t.api.post('/import/folder/preview', { titleKey: 'movie:2', path: t.inbox });
-    expect(body.plan.files.map((f: { rel: string; status: string; dest: string | null }) => [f.rel, f.status, f.dest])).toEqual([
-      ['Movie.Name.2019.mkv', 'new', 'Movie Name (2019)/Movie Name (2019).mkv'],
-      ['Movie.Name.2019.trailer.mkv', 'extra', null],
-    ]);
+    t.pipe.db.data.titles['movie:2'] = movie({ rootId: 'movie' });
+    t.write(t.inbox, {
+      'Movie.Name.2019.Cut.A.mkv': 'a'.repeat(firstLarger ? 500 : 5),
+      'Movie.Name.2019.Cut.B.mkv': 'b'.repeat(firstLarger ? 5 : 500),
+    });
+    const before = structuredClone({ files: t.pipe.db.data.files, jobs: t.pipe.db.data.jobs, imports: t.pipe.db.data.imports });
+    const { status, body } = await t.api.post('/import/folder/preview', { titleKey: 'movie:2', path: t.inbox });
+    expect(status).toBe(200);
+    expect(body.plan.importable).toBe(0);
+    expect(body.plan.files).toHaveLength(2);
+    for (const file of body.plan.files) {
+      expect(['unmatched', 'blocked']).toContain(file.status);
+      expect(file).toMatchObject({ dest: null, replaces: null, episodes: [] });
+    }
     expect(body.plan.coverage).toEqual([]);
+    expect((await t.api.post('/import/folder', { titleKey: 'movie:2', path: t.inbox })).body.error).toBe('nothing_to_import');
+    expect(t.pipe.db.data.titles['movie:2']!.fileId).toBeNull();
+    expect({ files: t.pipe.db.data.files, jobs: t.pipe.db.data.jobs, imports: t.pipe.db.data.imports }).toEqual(before);
+    expect(t.tree(t.pipe.folders.movies)).toEqual([]);
   });
 
   it('marks a file that has a library file, and a replace only on request', async () => {
@@ -286,8 +297,9 @@ describe('import', () => {
     expect(t.tree(t.pipe.folders.tv)).toEqual([`${SEASON_DIR}/Show.Name.S01E01.mkv`]);
   });
 
-  it('completes the targets that wait for the file, and keeps the targets that have a download', async () => {
-    t = await startImportTest();
+  it('completes waiting targets but preserves unselected blocked targets and active downloads', async () => {
+    const completed: string[] = [];
+    t = await startImportTest({ onState: (entry) => { if (entry.state.kind === 'available') completed.push(entry.id); } });
     const queue = t.pipe.queue;
     t.show.episodes.push(episode(1, 4, '2020-01-04'), episode(1, 5, '2020-01-05'));
     const [waiting, loading, paused, attention, blocked] = [1, 2, 3, 4, 5].map((n) => {
@@ -302,6 +314,7 @@ describe('import', () => {
     move(queue, attention!, { stage: 'importing', reason: { code: 'file_not_found' } }, 'no file');
     // A download import that met a full disk leaves the target in Importing with a block.
     move(queue, blocked!, { stage: 'importing', reason: { code: 'disk_full' } }, 'import blocked');
+    const before = structuredClone([attention, blocked]);
     t.write(t.inbox, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two', 'Show.Name.S01E03.mkv': 'three', 'Show.Name.S01E04.mkv': 'four', 'Show.Name.S01E05.mkv': 'five' });
     const started = await importFolder(t.inbox);
     await t.finished(started.body.id);
@@ -309,12 +322,19 @@ describe('import', () => {
     expect(waiting).toMatchObject({ state: { kind: 'available' }, importResult: { ok: true, method: 'hardlink', path: E01 } });
     expect(waiting!.attempts.at(-1)).toMatchObject({ outcome: 'imported' });
     expect(waiting!.history.at(-1)).toMatchObject({ cause: 'imported by hand' });
-    expect(attention).toMatchObject({ state: { kind: 'available' } });
-    expect(blocked).toMatchObject({ state: { kind: 'available' } });
+    expect([attention, blocked]).toEqual(before);
+    expect(attention).toMatchObject({ state: { kind: 'blocked', at: 'importing', problem: { code: 'file_not_found' } }, completedAt: null, importResult: null });
+    expect(blocked).toMatchObject({ state: { kind: 'blocked', at: 'importing', problem: { code: 'disk_full' } }, completedAt: null, importResult: null });
+    expect(completed).not.toContain(attention!.id);
+    expect(completed).not.toContain(blocked!.id);
     // A download in work and a pause are the choice of the user.
     expect(loading).toMatchObject({ state: { kind: 'downloading' }, transferHash: 'a'.repeat(40) });
     expect(paused).toMatchObject({ state: { kind: 'paused', resume: 'queued', problem: null } });
     expect(Object.values(t.pipe.db.data.files)).toHaveLength(5);
+    for (const one of t.show.episodes.slice(3)) {
+      expect(one.fileId).toBeTruthy();
+      expect(t.pipe.db.data.files[one.fileId!]!.episodes).toContainEqual({ season: one.season, number: one.number });
+    }
   });
 
   it('does not undo a target that it settled while the search of the target runs', async () => {

@@ -82,6 +82,12 @@ export type MediaFile = {
   resolution?: number | null;
   // The torrent that gave the file. Scanned files and manual imports have none. An external torrent belongs to the user.
   download?: { clientId: string; hash: string; external: boolean } | null;
+  association?: {
+    source: 'manual' | 'numbering' | 'automatic';
+    originalName: string;
+    numberingRevision: number;
+    identity: { sizeBytes: number; mtimeMs: number; dev?: number; ino?: number };
+  };
 };
 // A library folder. `dev` is the device number at the time the user accepted the folder.
 // A different number later means that another disk is mounted there, or that the mount is gone.
@@ -552,6 +558,7 @@ export type QueueEntry = {
   importTries?: number;
   // Set when the user chose the file by hand. The import and the retries keep it.
   manualMatch: { file: string; covers: Covered[] } | null;
+  manualMatchRevision?: number;
   // Set when the user chose to replace the file that holds the destination name. The importer clears it.
   replaceDestination?: boolean;
   importResult: ImportResult | null;
@@ -801,12 +808,17 @@ export type JournalStep = {
   sizeBytes: number;
   episodes: { season: number; number: number }[];
   validation: 'ffprobe' | 'basic';
+  association?: { source: 'manual' | 'numbering' | 'automatic'; originalName: string; numberingRevision: number };
+  sourceIdentity?: { sizeBytes: number; mtimeMs: number; dev?: number; ino?: number };
+  stagedIdentity?: { sizeBytes: number; mtimeMs: number; dev?: number; ino?: number };
+  // The inputs must stay the same until the step commits.
+  expected?: { entries: Record<string, string>; library: string };
 };
 // A journal of a download has the hash of the torrent, the client that has it, and the folder of the download (`downloadBase`). It has no `sourceBase`. The other journals have a folder as source:
 // a manual import reads a folder that the user named, and a rename reads the root of the title (`kind: 'rename'`).
 // An import from a download folder is link only: it never copies. It asks for a search when its files are in, so the
 // episodes that it did not bring still get a release.
-export type ImportJournal = { id: string; hash: string; titleKey: string; steps: JournalStep[]; createdAt: number; kind?: 'rename'; sourceBase?: string; clientId?: string; downloadBase?: string; linkOnly?: true; searchOnFinish?: true };
+export type ImportJournal = { id: string; hash: string; titleKey: string; steps: JournalStep[]; createdAt: number; kind?: 'rename'; sourceBase?: string; clientId?: string; downloadBase?: string; linkOnly?: true; searchOnFinish?: true; correction?: CorrectionCommit };
 export type Fs = { link: typeof fsLink; copyFile: typeof fsCopyFile; rename: typeof fsRename };
 export type ImporterDeps = {
   queue: Queue;
@@ -895,7 +907,22 @@ export type CorrectionRow = {
 };
 // One episode whose file changes. The paths, or null when the episode has no file.
 export type PointerRow = { season: number; number: number; from: string | null; to: string | null };
-export type Correction = { titleKey: string; rows: CorrectionRow[]; pointers: PointerRow[] };
+export type Correction = {
+  titleKey: string;
+  entries: MappingEntry[];
+  ids: string[];
+  version: string;
+  rows: CorrectionRow[];
+  pointers: PointerRow[];
+  lostAvailability: EpisodeRef[];
+  continued: { id: string; phase: 'importing' }[];
+  staysBlocked: { id: string; code: string }[];
+};
+export type CorrectionCommit = Pick<Correction, 'titleKey' | 'ids' | 'lostAvailability' | 'continued'> & {
+  files: MediaFile[];
+  pointers: (EpisodeRef & { fileId: string | null })[];
+  numbering: Numbering;
+};
 // The name of a file, without its folders and its extension. The folders stay fixed, so a template can not leave the title folder.
 export type NamingTemplates = { movie: string; episode: string };
 export type TemplateProblem = 'template_invalid' | 'template_separator' | 'template_token' | 'template_missing_token' | 'template_unreadable';
@@ -948,9 +975,9 @@ export type ScanResult = {
 };
 // A video file of the folder of a title, and what its name says. The scan, the local import, and the choice of a file
 // for a target all read the folder through it.
-export type InventoryFile = { path: string; sizeBytes: number; mtimeMs: number; parsed: ParsedEpisodes | undefined };
+export type InventoryFile = ScanFound & { parsed: ParsedEpisodes | undefined };
 export type FolderInventory = { status: 'ok' | 'no_folder' | 'root_unavailable' | 'folder_missing'; rootReal: string | null; files: InventoryFile[] };
-export type ScanFound = { path: string; sizeBytes: number; mtimeMs: number };
+export type ScanFound = { path: string; sizeBytes: number; mtimeMs: number; dev?: number; ino?: number };
 export type AddInput = {
   mediaType: MediaType;
   tmdbId: number;
@@ -1161,7 +1188,7 @@ export type LibraryDeps = { tmdb?: Tmdb; events: Events; enqueue: (input: Enqueu
 // for a release of exactly that quality. Other plans look for the missing files.
 export type Kind = 'search' | 'upgrades';
 export type SearchPlan = { keys: string[]; targets: number; kind: Kind; quality: string; jobId: string | null };
-export type ApplyDeps = { persist?: () => void; events?: Events };
+export type ApplyDeps = { persist?: () => void; events?: Events; queue?: Queue; enqueue?: (input: EnqueueInput) => Job };
 export type ProposalDeps = { probe?: typeof probeFile };
 export type ProposalRow = ContentProposal & { fileId: string };
 export type RenameApplyDeps = { enqueue: (input: EnqueueInput) => Job; status: ImportStatus };

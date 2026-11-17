@@ -5,6 +5,7 @@ import { titleOf } from '../../../helpers/mapping.ts';
 import { fail } from '../../../helpers/rename.ts';
 import { evidenceOf, matchContent } from '../../../library/content.ts';
 import { readableRoot } from '../../../library/imports/plan.ts';
+import { releaseEpisodes } from '../../../library/parse.ts';
 import { probeFile } from '../../../library/probe.ts';
 import type { ContentRejection, FileEvidence, MappingEntry, ProposalDeps, ProposalRow } from '../../../types.ts';
 
@@ -25,7 +26,15 @@ export function mappingProposal({ probe = probeFile }: ProposalDeps = {}): Reque
       const packs = new Map<string, FileEvidence[]>();
       for (const file of files) {
         const pack = file.download?.hash ?? '';
-        packs.set(pack, [...(packs.get(pack) ?? []), evidenceOf(file.path, await probe(join(rootReal, file.path)))]);
+        const evidence = evidenceOf(file.path, await probe(join(rootReal, file.path)));
+        const originalName = file.association?.originalName ?? (file.download || file.source !== undefined ? null : file.path);
+        const numbering = Object.values(db.data.queue).find((entry) => entry.titleKey === titleKey && entry.transferHash === file.download?.hash && entry.numbering?.revision === file.association?.numberingRevision)?.numbering ?? title.numbering;
+        const parsed = originalName ? releaseEpisodes(originalName, title.episodes, numbering, null, title.meta.title) : undefined;
+        if (evidence.season === null && evidence.episode === null && parsed?.numbers.length === 1) {
+          evidence.season = parsed.season;
+          evidence.episode = parsed.numbers[0]!;
+        }
+        packs.set(pack, [...(packs.get(pack) ?? []), evidence]);
       }
       const idOf = new Map(files.map((file) => [file.path, file.id]));
       const proposals: ProposalRow[] = [];
@@ -35,9 +44,8 @@ export function mappingProposal({ probe = probeFile }: ProposalDeps = {}): Reque
         for (const proposal of match.proposals) proposals.push({ ...proposal, fileId: idOf.get(proposal.path)! });
         for (const rejection of match.rejections) rejections.push({ ...rejection, fileId: idOf.get(rejection.path)! });
       }
-      // The mapping that a person can review: the files that matched, and an empty row for the files that need a
-      // decision. A row that the person removes stays as it is.
-      const entries: MappingEntry[] = [...proposals.map((proposal) => ({ path: proposal.path, episodes: proposal.episodes })), ...rejections.map((rejection) => ({ path: rejection.path, episodes: [] }))];
+      // Unresolved files stay outside the request. An empty entry explicitly removes its coverage.
+      const entries: MappingEntry[] = proposals.map((proposal) => ({ path: proposal.path, episodes: proposal.episodes }));
       res.json({ titleKey, proposals, rejections, entries });
     } catch (error) {
       fail(res, error);

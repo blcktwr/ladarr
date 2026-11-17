@@ -39,7 +39,6 @@ describe('identity', () => {
     ['Show.Name.S01E03.1080p.WEB-DL-GRP', ['wrong_episode']],
     ['Show.Name.1080p.WEB-DL-GRP', ['not_an_episode']],
     ['Show.Name.S01.1080p.WEB-DL-GRP', ['not_an_episode']],
-    ['Show.Name.S01-S03.1080p.WEB-DL-GRP', ['multi_season_pack']],
   ])('rejects %s', (name, expected) => {
     expect(codes(name, ep2)).toEqual(expected);
   });
@@ -141,8 +140,33 @@ describe('packs', () => {
     expect(codes('Show.Name.S01.Part.1.1080p.WEB-DL-GRP', ep2)).toEqual(['not_an_episode']);
   });
 
-  it('rejects a list of several seasons', () => {
-    expect(codes('Show.Name.S01.S02.1080p.WEB-DL-GRP', season1)).toEqual(['multi_season_pack']);
+  it.each([1, 2])('accepts a first multi-season candidate provisionally for requested season %s', (season) => {
+    const series = title({ episodes: [episode(1, 1), episode(1, 2), episode(2, 1), episode(2, 2)] });
+    const decision = decide(release('Show.Name.S01-S02.1080p.WEB-DL-GRP'), { kind: 'season', title: series, season }, ctx({ coverage: () => null }));
+
+    expect(decision).toMatchObject({
+      accepted: true, kind: 'pack', covers: [{ season, number: 1 }, { season, number: 2 }],
+    });
+    expect(decision.rejections).toEqual([]);
+  });
+
+  it.each([1, 2])('limits a first multi-season candidate to the requested episode of season %s', (season) => {
+    const series = title({ episodes: [episode(1, 1), episode(1, 2), episode(2, 1), episode(2, 2)] });
+    const decision = decide(release('Show.Name.S01-S02.1080p.WEB-DL-GRP'), { kind: 'episode', title: series, season, number: 2 }, ctx({ coverage: () => null }));
+
+    expect(decision).toMatchObject({ accepted: true, kind: 'pack', covers: [{ season, number: 2 }] });
+    expect(decision.rejections).toEqual([]);
+  });
+
+  it.each([1, 2])('accepts identified coverage of season %s from a multi-season pack', (season) => {
+    const series = title({ episodes: [episode(1, 1), episode(1, 2), episode(2, 1), episode(2, 2)] });
+    const want: Want = { kind: 'season', title: series, season };
+    const decision = decide(release('Show.Name.S01-S02.1080p.WEB-DL-GRP'), want, ctx({
+      coverage: () => ({ titleKey: series.key, season, numbers: [1], numberingRevision: 0 }),
+    }));
+
+    expect(decision).toMatchObject({ accepted: true, kind: 'pack', covers: [{ season, number: 1 }] });
+    expect(decision.rejections).not.toContain('multi_season_pack');
   });
 
   it('rejects a pack that a daily name gives for a single episode', () => {
@@ -212,6 +236,17 @@ describe('a season that the releases count as two', () => {
     // A pack of the season that held a part of it covers that part only.
     const part = decide(release('Show.Name.S01.1080p.WEB-DL-GRP'), season1, held([1, 2], 0));
     expect(part).toMatchObject({ accepted: true, kind: 'pack', covers: [{ season: 1, number: 1 }, { season: 1, number: 2 }] });
+  });
+
+  it('recalculates coverage when the numbering revision changes', () => {
+    const want: Want = { ...restSeason, numbering: { ...numbering, revision: 2 } };
+    const decision = decide(restPack(), want, ctx({
+      coverage: () => ({ titleKey: split.key, season: 1, numbers: [1, 2, 3], numberingRevision: 1 }),
+    }));
+
+    expect(decision.accepted).toBe(true);
+    expect(decision.covers).toEqual(rest.map((number) => ({ season: 1, number })));
+    expect(decision.rejections).not.toContain('pack_covers_others');
   });
 
   it('accepts a pack that is too small for the whole season and large enough for a part of it', () => {

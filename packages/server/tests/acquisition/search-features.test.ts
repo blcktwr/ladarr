@@ -367,7 +367,7 @@ describe('the content of a pack', () => {
     expect(pipe.qbit.torrents.size).toBe(1);
     // The third episode stays stuck with the pack as the reason, and no second release is chosen for it.
     expect(entries[2]!.state).toMatchObject({ kind: 'blocked', at: 'fetching', problem: { code: 'pack_partial' } });
-    expect(entries[2]!.release).toBeNull();
+    expect(entries[2]!.release).toMatchObject({ title: PACK, guid: PACK, infoHash: hashOf(PACK, files) });
     // The single release of the tracker is never downloaded: no search follows the partial pack.
     expect(pipe.tracker.state.downloads).toEqual([PACK]);
     expect(entries[2]!.attempts.map((attempt) => [attempt.n, attempt.outcome, attempt.reason])).toEqual([[1, 'failed', 'search requested']]);
@@ -400,14 +400,31 @@ describe('the content of a pack', () => {
     pipe = await startPipeline();
     const series = season();
     pipe.db.data.titles[series.key] = series;
-    pipe.tracker.state.items = [{ title: PACK, size: packSize, files: ['Show.Name.S01.part1.rar', 'Show.Name.S01.part2.rar'] }];
+    const files = ['Show.Name.S02E01.mkv', 'Show.Name.S02E02.mkv'];
+    pipe.tracker.state.items = [{ title: PACK, size: packSize, files }];
     const entries = pipe.finder.requestSearch(series.key);
-    // A pack that names no episode is a release that failed: the targets try their own season again.
-    await until(() => entries.every((e) => branchOf(e) === 'waiting' && e.search?.topRejections.includes('pack_covers_others')));
+    await until(() => entries.every((entry) => entry.state.kind === 'blocked' && entry.state.problem.code === 'pack_partial'));
+    expect(entries.every((entry) => entry.state.kind === 'blocked' && entry.state.at === 'fetching')).toBe(true);
+    expect(entries.every((entry) => entry.release?.title === PACK && entry.transferHash === hashOf(PACK, files) && entry.attempt === 1)).toBe(true);
     expect(pipe.qbit.torrents.size).toBe(0);
     expect(pipe.qbit.calls.filter((c) => c.path === 'torrents/add')).toEqual([]);
-    // The record of the pack keeps the episodes that it holds, and it holds none: a later search does not take it.
     expect(pipe.db.data.releaseCoverage[`1:${PACK}`]).toMatchObject({ titleKey: 'tv:1', season: 1, numbers: [] });
+    expect(pipe.tracker.state.downloads).toEqual([PACK]);
+    expect(Object.values(pipe.db.data.jobs).some((job) => job.type === 'queue.search' && job.state === 'waiting')).toBe(false);
+  });
+
+  it('does not record opaque archive files as evidence that episodes are absent', async () => {
+    pipe = await startPipeline();
+    const series = season();
+    pipe.db.data.titles[series.key] = series;
+    pipe.tracker.state.items = [{ title: PACK, size: packSize, files: ['Show.Name.S01.part1.rar', 'Show.Name.S01.part2.rar'] }];
+    const entries = pipe.finder.requestSearch(series.key);
+
+    await until(() => entries.every((entry) => entry.state.kind === 'downloading' || entry.state.kind === 'blocked'));
+
+    expect(pipe.db.data.releaseCoverage[`1:${PACK}`]).toBeUndefined();
+    expect(entries.every((entry) => reasonOfEntry(entry)?.code !== 'pack_partial' && entry.attempt === 1)).toBe(true);
+    expect(pipe.tracker.state.downloads).toEqual([PACK]);
   });
 
   it('does not check a torrent that has one file', async () => {
@@ -501,17 +518,24 @@ describe('what the indexer manager pushes with an indexer', () => {
     expect(pipe.tracker.state.searches).toHaveLength(0);
   });
 
-  it('goes on when the user adds the indexer that was missing', async () => {
+  it('keeps the target stuck after an indexer change until the user retries it', async () => {
     pipe = await startPipeline();
     delete pipe.db.data.indexers[1];
     pipe.db.data.titles[film().key] = film();
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch('movie:2');
     await until(() => reasonOfEntry(entry!)?.code === 'no_indexers');
+    const before = structuredClone(entry!);
     const api = await pipe.api();
     try {
       const added = await api.post('/indexers', { name: 'Tracker', type: 'torznab', baseUrl: `http://127.0.0.1:${pipe.tracker.port}/1/`, apiKey: 'indexer-key', delaySeconds: 0 });
       expect(added.status).toBe(201);
+      pipe.finder.sweep();
+      await pipe.finder.rss(signal());
+      expect(entry).toEqual(before);
+      expect(pipe.tracker.state.downloads).toEqual([]);
+      expect(pipe.qbit.torrents.size).toBe(0);
+      expect((await api.post('/queue/actions', { action: 'retry', ids: [entry!.id] })).status).toBe(200);
       await until(() => stageOf(entry!) === 'downloading');
       expect(reasonOfEntry(entry!)).toBeNull();
       expect(pipe.published.some((event) => event.type === 'indexers.changed')).toBe(true);

@@ -36,6 +36,7 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
         reached: reachedOf(all),
         download,
         problem: summary.problem,
+        actions: summary.actions,
         otherSeasons: summary.otherSeasons,
       },
       items: items.map((entry) => view(poller, importStatus, entry, lane)),

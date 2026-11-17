@@ -16,8 +16,7 @@ test.beforeAll(async () => {
   stack = await startStack();
   cookie = await stack.createOwner();
   await configure(stack);
-  // The pack covers two episodes. The third episode searches on its own, so its download can run while the pack
-  // completes and one of its episodes stops.
+  // The pack covers two episodes. The third episode waits for an explicit release selection.
   stack.tracker.state.items = [
     { title: SERIES_PACK, size: 2 * 60 * 45 * MIB, files: ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'] },
     { title: SINGLE, size: 60 * 45 * MIB },
@@ -31,7 +30,17 @@ test.beforeEach(async ({ context }) => {
 });
 
 test('shows the aggregate of the season in the row and in the inspector under every tab', async ({ page }) => {
-  // The pack and the single episode download together.
+  await expect.poll(async () => (await stack.call('GET', '/queue/entries/tv:1:1x3')).body.entry?.reason?.code, { timeout: 60_000 }).toBe('pack_partial');
+  const releases = await stack.call('GET', '/queue/releases?titleKey=tv%3A1&season=1&number=3');
+  expect(releases.status).toBe(200);
+  const release = releases.body.releases.find((item: { title: string }) => item.title === SINGLE);
+  expect(release).toBeDefined();
+  expect((await stack.call('GET', '/queue/entries/tv:1:1x3')).body.entry.status).toBe('stuck');
+  const selected = await stack.call('POST', '/queue/releases/grab', { titleKey: 'tv:1', season: 1, number: 3, indexerId: release.indexerId, guid: release.guid, ids: ['tv:1:1x3'] });
+  expect(selected.status).toBe(202);
+  expect(selected.body.started).toEqual(['tv:1:1x3']);
+
+  // The selected episode and the identified episodes of the pack now download together.
   await expect.poll(async () => Boolean(await torrent(SERIES_PACK)) && Boolean(await torrent(SINGLE)), { timeout: 60_000 }).toBe(true);
 
   // The destination of the first episode holds a file that the library does not know, so that episode stops. The

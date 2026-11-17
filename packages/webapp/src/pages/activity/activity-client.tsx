@@ -1,7 +1,7 @@
 import type { TrackerStatus } from '@ladarr/shared/enums';
-import type { AttachCandidates, QueueClientDetail, QueueEntryView } from '@ladarr/shared/types';
+import type { AttachCandidates, AttachPreview, QueueClientDetail, QueueEntryView } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../lib/api.ts';
 import { Button, Checkbox, Dropdown, EmptyState, Panel, SearchField, Section, Spinner } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
@@ -84,15 +84,16 @@ export function ClientDetails({ entryId }: { entryId: string }) {
 }
 
 // Attaches a download that was in the client before ladarr looked for it. The user confirms the owner and the title.
-function AttachBody({ entry, onDone }: { entry: QueueEntryView; onDone: () => void }) {
+function AttachBody({ entry, ids, onDone }: { entry: QueueEntryView; ids?: string[]; onDone: () => void }) {
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
   const [hash, setHash] = useState('');
-  const [also, setAlso] = useState<string[]>([]);
+  const [also, setAlso] = useState<string[]>(() => ids?.filter((id) => id !== entry.id) ?? []);
   const [owner, setOwner] = useState(false);
   const [titleOk, setTitleOk] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<AttachPreview | null>(null);
 
   // A short wait joins the key strokes into one request.
   useEffect(() => {
@@ -107,13 +108,22 @@ function AttachBody({ entry, onDone }: { entry: QueueEntryView; onDone: () => vo
   const picked = found?.torrents.find((torrent) => torrent.hash === hash);
   const siblings = found?.siblings ?? [];
   const list = [entry.label, ...siblings.filter((item) => also.includes(item.id)).map((item) => item.label)].join(', ');
+  const selection = `${hash}|${[...also].sort().join(',')}`;
+  const current = useRef(selection);
+  current.current = selection;
 
-  async function attach() {
+  async function attach(show: boolean) {
+    if (!show && !preview?.version) return;
+    const sent = selection;
     setBusy(true);
+    setError('');
     try {
-      await api(`/queue/entries/${entry.id}/attach`, { method: 'POST', body: { hash, ids: also, confirmOwner: owner, confirmTitle: titleOk } });
-      onDone();
+      const result = await api<AttachPreview>(`/queue/entries/${entry.id}/attach`, { method: 'POST', body: { hash, ids: also, confirmOwner: owner, confirmTitle: titleOk, ...(show ? { preview: true } : { version: preview!.version }) } });
+      if (show) {
+        if (sent === current.current) setPreview(result);
+      } else onDone();
     } catch (err) {
+      setPreview(null);
       const code = err instanceof ApiError ? err.message : '';
       setError(
         code === 'torrent_in_use'
@@ -122,7 +132,9 @@ function AttachBody({ entry, onDone }: { entry: QueueEntryView; onDone: () => vo
             ? t('The client does not have this download now.')
             : code === 'attach_not_supported'
               ? t('A target is not waiting for a download now.')
-              : t('The request did not complete.'),
+              : ['preview_changed', 'preview_required', 'attachment_changed'].includes(code)
+                ? t('The preview changed. Preview the attachment again.')
+                : t('The request did not complete.'),
       );
     } finally {
       setBusy(false);
@@ -131,11 +143,12 @@ function AttachBody({ entry, onDone }: { entry: QueueEntryView; onDone: () => vo
 
   return (
     <Section
-      title={t('Attach a download to {label}', { label: entry.label })}
-      actions={
-        <Button disabled={!picked || !owner || !titleOk || busy} onClick={() => void attach()}>
-          {t('Attach download')}
-        </Button>
+      title={t('Attach a download to {label}', { label: list })}
+      action={
+        <div className="flex flex-wrap justify-end gap-2 w-full">
+          <Button disabled={!picked || busy} pending={busy && !preview} onClick={() => void attach(true)}>{t('Preview attachment')}</Button>
+          {preview && <Button disabled={!preview.version || !owner || !titleOk || busy} pending={busy} onClick={() => void attach(false)}>{t('Attach download')}</Button>}
+        </div>
       }
     >
       {shown && <Alert tone="danger">{shown}</Alert>}
@@ -146,7 +159,12 @@ function AttachBody({ entry, onDone }: { entry: QueueEntryView; onDone: () => vo
         <Dropdown
           label={t('Download')}
           value={hash || null}
-          onValueChange={(value) => setHash(value ?? '')}
+          onValueChange={(value) => {
+            setHash(value ?? '');
+            setPreview(null);
+            setOwner(false);
+            setTitleOk(false);
+          }}
           options={found.torrents.map((torrent) => ({
             value: torrent.hash,
             label: `${torrent.name} (${formatBytes(torrent.sizeBytes)}, ${torrent.complete ? t('complete') : `${Math.round(torrent.progress * 100)}%`}${torrent.category ? `, ${torrent.category}` : ''})`,
@@ -157,8 +175,18 @@ function AttachBody({ entry, onDone }: { entry: QueueEntryView; onDone: () => vo
       {picked && siblings.length > 0 && (
         <Section title={t('Also use this download for')}>
           {siblings.map((item) => (
-            <Checkbox key={item.id} label={item.label} checked={also.includes(item.id)} onCheckedChange={(on) => setAlso(on ? [...also, item.id] : also.filter((id) => id !== item.id))} />
+            <Checkbox key={item.id} label={item.label} checked={also.includes(item.id)} onCheckedChange={(on) => {
+              setAlso(on ? [...also, item.id] : also.filter((id) => id !== item.id));
+              setPreview(null);
+            }} />
           ))}
+        </Section>
+      )}
+      {preview && (
+        <Section title={t('Changes')}>
+          <p>{preview.name}</p>
+          <p>{preview.affected.map((item) => item.label).join(', ')}</p>
+          {preview.blocked?.map((item) => <p key={item.id}>{item.label}: {item.code} ({item.coverage})</p>)}
         </Section>
       )}
       {picked && (
@@ -174,11 +202,11 @@ function AttachBody({ entry, onDone }: { entry: QueueEntryView; onDone: () => vo
   );
 }
 
-// Nebula has no dialog that a page opens from its own state. A side panel opens from its own button, and it closes when the button leaves the page.
-export function AttachDialog({ entry, onDone }: { entry: QueueEntryView; onDone: () => void }) {
+export function AttachDialog({ entry, ids, label, onDone }: { entry: QueueEntryView; ids?: string[]; label?: string; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
   return (
-    <Panel label={t('Attach download to {label}', { label: entry.label })} trigger={<Button>{t('Attach download')}</Button>}>
-      <AttachBody entry={entry} onDone={onDone} />
+    <Panel open={open} onOpenChange={setOpen} label={t('Attach download')} title={label ?? entry.label} trigger={<Button>{t('Attach download')}</Button>}>
+      {open && <AttachBody entry={entry} ids={ids} onDone={() => { setOpen(false); onDone(); }} />}
     </Panel>
   );
 }

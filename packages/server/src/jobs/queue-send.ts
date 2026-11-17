@@ -2,14 +2,13 @@ import { db } from '../core/db.ts';
 import { JobError } from '../core/jobs.ts';
 import { catalog, itemFields } from '../core/log.ts';
 import { createGrabber, reasonOf } from '../library/grab/grab.ts';
-import { isActive, phaseOfEntry } from '../library/downloads/queue.ts';
 import { hasFreeSlot } from '../library/downloads/slots.ts';
 import type { GrabberDeps, Handler, QueueEntry } from '../types.ts';
 
 const MAX_ATTEMPTS = 8;
 
 // A send works on the target that waits for a slot, and on the target that a failed try sent already.
-const sendable = (entry: QueueEntry) => isActive(entry) && entry.state.kind !== 'paused' && Boolean(entry.release) && ['waiting_slot', 'sending'].includes(phaseOfEntry(entry));
+const sendable = (entry: QueueEntry) => Boolean(entry.release) && ['waiting_slot', 'sending'].includes(entry.state.kind);
 
 export function queueSendHandler(deps: GrabberDeps): Handler {
   const { queue, clients } = deps;
@@ -43,8 +42,7 @@ export function queueSendHandler(deps: GrabberDeps): Handler {
         if (kind === 'invalid_input' || job.attempts >= MAX_ATTEMPTS) {
           for (const entry of entries) queue.block(entry, reason, 'send failed');
         } else {
-          // The entry keeps its phase. The problem shows why it waits.
-          for (const entry of entries) queue.block(entry, reason, 'send will be tried again');
+          for (const entry of entries) queue.observe(entry, 'send will be tried again', reason.code);
         }
         throw error;
       }
