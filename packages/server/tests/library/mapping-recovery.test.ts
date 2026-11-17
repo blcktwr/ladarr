@@ -47,6 +47,10 @@ const importer = (options: Pick<ImporterDeps, 'probe' | 'afterStep'> = {}) => cr
 
 const counts = () => seriesCounts(db.data.titles[KEY]!, { now: Date.now(), files: db.data.files });
 
+// The history stays in memory and the file does not keep it, so a check of the saved data leaves it out.
+const queueWithoutHistory = (queue: Record<string, QueueEntry>) =>
+  Object.fromEntries(Object.entries(queue).map(([id, entry]) => [id, { ...entry, history: [] }]));
+
 function expectRecovered() {
   expect(Object.keys(db.data.files)).toEqual([FILE]);
   expect(db.data.files[FILE]).toMatchObject({ episodes: coverage, association: { source: 'manual', originalName: 'Original/airing.mkv', numberingRevision: 4 } });
@@ -58,7 +62,7 @@ function expectRecovered() {
     completedAt: null,
     importResult: null,
   });
-  expect(db.data.queue[siblingId]).toEqual(sibling);
+  expect(queueWithoutHistory(db.data.queue)[siblingId]).toEqual(sibling);
   expect(db.data.queue[removedId]).toMatchObject({
     state: { kind: 'blocked', at: 'importing', problem: { code: 'file_unmapped' } },
     completedAt: null,
@@ -113,7 +117,7 @@ beforeEach(async () => {
     entry.numbering = { revision: 1, ranges: [] };
     queue.block(entry, { code: 'file_not_found' }, 'manual resolution is necessary');
   }
-  sibling = structuredClone(db.data.queue[siblingId]!);
+  sibling = { ...structuredClone(db.data.queue[siblingId]!), history: [] };
   expect(db.data.queue[removedId]).toBeUndefined();
 });
 
@@ -154,7 +158,7 @@ describe('zero-byte mapping sources', () => {
     expect(db.data.files[FILE]!.episodes).toEqual([]);
     expect(db.data.titles[KEY]!.episodes.every((one) => one.fileId === null)).toBe(true);
     expect(counts().available).toBe(0);
-    expect(db.data.queue[siblingId]).toEqual(sibling);
+    expect(queueWithoutHistory(db.data.queue)[siblingId]).toEqual(sibling);
   });
 });
 
@@ -176,11 +180,11 @@ describe('persistent mapping recovery', () => {
     await reopen();
     expect(db.data.queue[selectedId]).toMatchObject({ state: { kind: 'importing' }, manualMatch: { file: PATH, covers: newerCoverage } });
     expect(db.data.files[FILE]!.episodes).toEqual(newerCoverage);
-    const before = structuredClone({ files: db.data.files, titles: db.data.titles, queue: db.data.queue, jobs: db.data.jobs });
+    const before = structuredClone({ files: db.data.files, titles: db.data.titles, queue: queueWithoutHistory(db.data.queue), jobs: db.data.jobs });
 
     await importer().run(saved.hash);
 
-    expect({ files: db.data.files, titles: db.data.titles, queue: db.data.queue, jobs: db.data.jobs }).toEqual(before);
+    expect({ files: db.data.files, titles: db.data.titles, queue: queueWithoutHistory(db.data.queue), jobs: db.data.jobs }).toEqual(before);
     expect(db.data.files[FILE]!.episodes).toEqual(newerCoverage);
     expect(db.data.queue[selectedId]).toMatchObject({ state: { kind: 'importing' }, manualMatch: { file: PATH, covers: newerCoverage }, completedAt: null, importResult: null });
     expect(db.data.queue[siblingId]).toEqual(before.queue[siblingId]);
@@ -208,7 +212,7 @@ describe('persistent mapping recovery', () => {
     await importer().run(saved.hash);
 
     expect(db.data.queue[selectedId]!.state.kind).toBe('available');
-    expect(db.data.queue[siblingId]).toEqual(sibling);
+    expect(queueWithoutHistory(db.data.queue)[siblingId]).toEqual(sibling);
     expect(db.data.queue[removedId]!.state).toMatchObject({ kind: 'blocked', at: 'importing' });
     expect(db.data.files[FILE]!.episodes).toEqual(coverage);
     expect(Object.keys(db.data.files)).toEqual([FILE]);
@@ -245,7 +249,7 @@ describe('persistent mapping recovery', () => {
     expect(db.data.files[FILE]!.episodes).toEqual(coverage);
     expect(db.data.titles[KEY]!.episodes.map((one) => one.fileId)).toEqual([null, FILE, FILE, FILE]);
     expect(db.data.queue[selectedId]!.state.kind).toBe('available');
-    expect(db.data.queue[siblingId]).toEqual(sibling);
+    expect(queueWithoutHistory(db.data.queue)[siblingId]).toEqual(sibling);
     expect(db.data.queue[removedId]!.state).toMatchObject({ kind: 'blocked', at: 'importing', problem: { code: 'file_unmapped' } });
     expect(db.data.queue[selectedId]!.attempts).toHaveLength(1);
     expect(db.data.queue[removedId]!.attempts).toHaveLength(1);
@@ -269,9 +273,9 @@ describe('persistent mapping recovery', () => {
     const journal = db.data.imports[saved.id]!;
     expect(journal.correction).toBeDefined();
     await recoverCorrection(journal, { queue });
-    const recovered = structuredClone({ files: db.data.files, queue: db.data.queue });
+    const recovered = structuredClone({ files: db.data.files, queue: queueWithoutHistory(db.data.queue) });
     await recoverCorrection(journal, { queue });
-    expect({ files: db.data.files, queue: db.data.queue }).toEqual(recovered);
+    expect({ files: db.data.files, queue: queueWithoutHistory(db.data.queue) }).toEqual(recovered);
     expectRecovered();
     const published = new Error('published before restart');
 
@@ -279,14 +283,14 @@ describe('persistent mapping recovery', () => {
     await reopen();
     expect(db.data.imports[saved.id]!.steps[0]!.sourceIdentity).toBeDefined();
     await importer().run(saved.hash);
-    const completed = structuredClone({ files: db.data.files, queue: db.data.queue });
+    const completed = structuredClone({ files: db.data.files, queue: queueWithoutHistory(db.data.queue) });
     await importer().run(saved.hash);
 
-    expect({ files: db.data.files, queue: db.data.queue }).toEqual(completed);
+    expect({ files: db.data.files, queue: queueWithoutHistory(db.data.queue) }).toEqual(completed);
     expect(db.data.queue[selectedId]!.state.kind).toBe('available');
     expect(db.data.queue[selectedId]!.attempts).toHaveLength(1);
     expect(db.data.queue[removedId]!.attempts).toHaveLength(1);
-    expect(db.data.queue[siblingId]).toEqual(sibling);
+    expect(queueWithoutHistory(db.data.queue)[siblingId]).toEqual(sibling);
     expect(Object.keys(db.data.files)).toEqual([FILE]);
     expect(db.data.imports).toEqual({});
   });
@@ -311,7 +315,7 @@ describe('persistent mapping recovery', () => {
     expect(db.data.queue[selectedId]!.state).toMatchObject({ kind: 'blocked', at: 'importing' });
     expect(db.data.queue[selectedId]!.completedAt).toBeNull();
     expect(db.data.queue[selectedId]!.importResult?.ok).not.toBe(true);
-    expect(db.data.queue[siblingId]).toEqual(sibling);
+    expect(queueWithoutHistory(db.data.queue)[siblingId]).toEqual(sibling);
     expect(counts().available).toBe(0);
     expect(db.data.files[FILE]!.association?.identity.ino).not.toBe(changed.ino);
   });

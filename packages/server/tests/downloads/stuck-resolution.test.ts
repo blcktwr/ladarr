@@ -425,7 +425,8 @@ describe.each(['movie', 'tv'] as const)('technical retry contract: %s', (mediaTy
     release.infoHash = hash;
     entry.transferHash = hash;
     entry.clientId = 'client-1';
-    entry.source = { torrent: makeTorrent(release.title).toString('base64') };
+    pipe!.db.data.torrents[hash] = makeTorrent(release.title).toString('base64');
+    entry.source = { torrent: true };
     const before = structuredClone({ release: entry.release, source: entry.source });
     pipe!.queue.resolve(entry, 'sending', 'fixture: send starts');
     const history = entry.history.length;
@@ -452,7 +453,8 @@ describe.each(['movie', 'tv'] as const)('technical retry contract: %s', (mediaTy
     entry.clientId = 'client-1';
     entry.transferHash = hashOf(entry.release!.title);
     entry.release!.infoHash = entry.transferHash;
-    entry.source = { torrent: makeTorrent(entry.release!.title).toString('base64') };
+    pipe!.db.data.torrents[entry.transferHash] = makeTorrent(entry.release!.title).toString('base64');
+    entry.source = { torrent: true };
     const before = structuredClone(entry);
     const deps = grabDeps();
     const download = vi.spyOn(deps.indexers, 'download');
@@ -515,9 +517,10 @@ describe.each(['movie', 'tv'] as const)('technical retry contract: %s', (mediaTy
     Object.assign(entry, {
       release: { ...entry.release!, title: name, guid: name, infoHash: hash, kind: 'single' },
       transferHash: hash,
-      source: { torrent: makeTorrent(name).toString('base64') },
+      source: { torrent: true },
       numbering: { revision: 2, ranges: [{ season: 1, from: 1, to: 1, releaseSeason: 1, releaseFrom: 1 }] },
     });
+    pipe!.db.data.torrents[hash] = makeTorrent(name).toString('base64');
     pipe!.queue.resolve(entry, stage, 'release chosen by the user');
     delete pipe!.db.data.jobs[job.id];
     const current = enqueue({ type, payload: { entryIds: [entry.id] }, dedupeKey: `selected:${entry.id}` });

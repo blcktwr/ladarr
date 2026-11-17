@@ -3,7 +3,7 @@ import { JobError } from '../../core/jobs.ts';
 import { catalog, itemFields } from '../../core/log.ts';
 import { inspectCoverage } from '../coverage.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
-import { addedByApp, isActive } from '../downloads/queue.ts';
+import { addedByApp, forgetSource, isActive } from '../downloads/queue.ts';
 import { hasFreeSlot } from '../downloads/slots.ts';
 import { isSample, isVideoFile, parseEpisodes } from '../parse.ts';
 import { NO_NUMBERING } from '../numbering.ts';
@@ -29,10 +29,15 @@ export function reasonOf(error: unknown) {
 
 type Source = { torrent: Buffer } | { magnet: string };
 
-// The torrent is one file, and the data file keeps text. The target keeps the source while it waits for a slot.
-const encode = (source: Source) => ('magnet' in source ? { magnet: source.magnet } : { torrent: source.torrent.toString('base64') });
-const decode = (entry: QueueEntry): Source | null =>
-  !entry.source ? null : 'magnet' in entry.source ? { magnet: entry.source.magnet } : { torrent: Buffer.from(entry.source.torrent, 'base64') };
+// The torrent is one file, and the data file keeps text. The target keeps the source while it waits for a slot: a
+// magnet stays in the target, and the file of a torrent stays once for each hash, in `Data.torrents`.
+const encode = (source: Source): NonNullable<QueueEntry['source']> => ('magnet' in source ? { magnet: source.magnet } : { torrent: true });
+const decode = (entry: QueueEntry): Source | null => {
+  if (!entry.source) return null;
+  if ('magnet' in entry.source) return { magnet: entry.source.magnet };
+  const saved = entry.transferHash ? db.data.torrents[entry.transferHash] : undefined;
+  return saved ? { torrent: Buffer.from(saved, 'base64') } : null;
+};
 
 // The chosen release is fetched first, and it waits for a slot of the client after that. The fetch and the send are two
 // steps: a full client must not stop the fetch, and the fetched torrent must not come from the indexer a second time.
@@ -114,7 +119,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
       if (!isActive(entry) || entry.state.kind === 'blocked' || entry.state.kind === 'paused') continue;
       entry.transferHash = found.hash;
       entry.clientId = connection.id;
-      entry.source = null;
+      forgetSource(entry);
       if (entry.release) {
         entry.release.infoHash = found.hash;
         // A torrent that ladarr did not send stays the user's, so a removal never deletes it.
@@ -247,8 +252,9 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
     }
 
     // The hash and the source are saved before the wait. After a crash, the target still knows which torrent to send,
-    // and the indexer is not asked again for it.
+    // and the indexer is not asked again for it. The file is one copy for the whole pack.
     const saved = encode(source);
+    if ('torrent' in source && hash) db.data.torrents[hash] = source.torrent.toString('base64');
     for (const entry of entries) {
       if (entry.state.kind === 'blocked' || !isActive(entry)) continue;
       entry.transferHash = hash;

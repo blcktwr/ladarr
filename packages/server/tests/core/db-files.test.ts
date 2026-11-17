@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { emptyData, open, SCHEMA_VERSION } from '../../src/core/db.ts';
 import type { Data, Job, QueueEntry } from '../../src/types.ts';
 
-const queueKeys = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq'];
+const queueKeys = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq', 'torrents'];
 
 const entry = {
   id: 'movie:603',
@@ -55,6 +55,7 @@ const queueWork = {
   jobs: { [job.id]: job },
   jobSeq: 3,
   prioritySeq: 2,
+  torrents: {},
 };
 
 const readJson = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
@@ -83,6 +84,27 @@ describe('database files', () => {
       expect(data.settings.naming.movie).toBe('DE');
       for (const key of queueKeys) expect(data).not.toHaveProperty(key);
       expect(readJson(join(dir, 'queue.json'))).toEqual(queueWork);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the history of a target out of the queue file, and starts the app with none', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ladarr-db-files-'));
+    const file = join(dir, 'db.json');
+    try {
+      vi.stubEnv('NODE_ENV', 'production');
+      const first = await open(file);
+      seed(first.data);
+      // A copy, so the fixture of the other tests keeps its empty history.
+      first.data.queue[entry.id] = { ...entry, history: [{ at: 5, state: { kind: 'queued' }, stage: 'queued', attempt: 1, cause: 'a cause' }] };
+      await first.write();
+
+      expect(readJson(join(dir, 'queue.json')).queue[entry.id].history).toEqual([]);
+
+      const db = await open(file);
+      expect(db.data.queue[entry.id]!.history).toEqual([]);
     } finally {
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });
@@ -177,7 +199,8 @@ describe('database files', () => {
       const db = await open(file);
       expect(db.data.queue[legacy.id]!.state).toEqual({ kind: 'blocked', at: 'importing', problem: { code: 'file_not_found' } });
       expect(db.data.queue[legacy.id]!.stateSince).toBe(4);
-      expect(db.data.queue[legacy.id]!.history[0]).toMatchObject({ state: { kind: 'importing' }, stage: 'importing' });
+      // The history is not kept: the migration reads it, and the file starts the app with none.
+      expect(db.data.queue[legacy.id]!.history).toEqual([]);
 
       await db.write();
       const saved = readJson(join(dir, 'queue.json')).queue[legacy.id];

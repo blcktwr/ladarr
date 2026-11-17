@@ -7,6 +7,7 @@ import { BackupError, createBackup, isBackupName, listBackups, pruneBackups, rea
 import { backupAutoHandler } from '../../src/jobs/backup-auto.ts';
 import { open, SCHEMA_VERSION } from '../../src/core/db.ts';
 import { startTestApp } from '../helpers/test-app.ts';
+import type { QueueEntry } from '../../src/types.ts';
 
 let dir: string;
 beforeAll(() => {
@@ -53,6 +54,39 @@ describe('backup file', () => {
     const target = fresh();
     const made = await createBackup(target, 'manual');
     expect(statSync(join(target, made.name)).mode & 0o777).toBe(0o600);
+  });
+
+  it('leaves the history of the targets out of the backup', async () => {
+    const db = await dbWithTitle();
+    const target = fresh();
+    db.data.queue['movie:1'] = {
+      id: 'movie:1',
+      titleKey: 'movie:1',
+      season: null,
+      number: null,
+      state: { kind: 'queued' },
+      revision: 1,
+      createdAt: 1,
+      stateSince: 1,
+      phaseSince: 1,
+      completedAt: null,
+      clearedAt: null,
+      priority: null,
+      attempt: 1,
+      attempts: [],
+      history: [{ at: 1, state: { kind: 'queued' }, stage: 'queued', attempt: 1, cause: 'a cause' }],
+      search: null,
+      release: null,
+      transferHash: null,
+      clientId: null,
+      manualMatch: null,
+      importResult: null,
+    } as unknown as QueueEntry;
+    const made = await createBackup(target, 'manual');
+    const { data } = await readBackup(readFileSync(join(target, made.name)));
+
+    expect(data.queue['movie:1']).toMatchObject({ id: 'movie:1', state: { kind: 'queued' } });
+    expect(data.queue['movie:1']!.history).toEqual([]);
   });
 
   it('keeps the data as it was when the backup started, even if the data changes while it is written', async () => {

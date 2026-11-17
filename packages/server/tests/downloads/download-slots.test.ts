@@ -106,6 +106,9 @@ describe('download slots', () => {
     expect(waiting.release).not.toBeNull();
     // The fetch of the waiting target is done, so the indexer is not asked for it again.
     expect(waiting.source).not.toBeNull();
+    // The target holds a mark, and the file of the torrent stays once for its hash.
+    expect(waiting.source).toEqual({ torrent: true });
+    expect(Object.keys(pipe!.db.data.torrents)).toEqual([waiting.transferHash]);
     expect(pipe!.qbit.torrents.size).toBe(1);
 
     // The waiting release stays held.

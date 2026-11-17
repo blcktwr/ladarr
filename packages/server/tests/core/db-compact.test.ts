@@ -31,6 +31,7 @@ const queueWork = {
   jobs: { [job.id]: job },
   jobSeq: 3,
   prioritySeq: 2,
+  torrents: {},
 };
 
 const seed = (data: Data) => {
@@ -83,7 +84,7 @@ describe('database files hold compact JSON', () => {
     try {
       const data = emptyData();
       seed(data);
-      const { queue: _queue, queueRev: _queueRev, queuePaused: _queuePaused, jobs: _jobs, jobSeq: _jobSeq, prioritySeq: _prioritySeq, ...app } = data;
+      const { queue: _queue, queueRev: _queueRev, queuePaused: _queuePaused, jobs: _jobs, jobSeq: _jobSeq, prioritySeq: _prioritySeq, torrents: _torrents, ...app } = data;
       writeFileSync(file, JSON.stringify(app, null, 2));
       writeFileSync(queueFile, JSON.stringify(queueWork, null, 2));
       expect(text(file)).toMatch(/\n {2}"/);

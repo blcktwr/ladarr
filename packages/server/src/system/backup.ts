@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { strFromU8, strToU8, unzip, zip } from 'fflate';
-import { SCHEMA_VERSION, db, emptyData } from '../core/db.ts';
+import { SCHEMA_VERSION, db, emptyData, queueForFile } from '../core/db.ts';
 import { APP_VERSION } from './version.ts';
 import type { Data, Db, Manifest } from '../types.ts';
 
@@ -77,9 +77,27 @@ export async function listBackups(dir: string): Promise<BackupRow[]> {
   return items.sort((a, b) => b.createdAt - a.createdAt);
 }
 
+// Reads the archive back, so a backup that the disk damaged is found now and not at a restore. The database is
+// checked as bytes: parsing it again would hold a second copy of it in memory.
+async function checkArchive(file: string, bytes: number, checksum: string): Promise<void> {
+  const archive = await readFile(file).catch(() => null);
+  if (archive === null) throw new BackupError('invalid_archive', 'The file is not a backup of this app.');
+  const files = await new Promise<Record<string, Uint8Array>>((resolve, reject) =>
+    unzip(
+      archive,
+      { filter: (entry) => entry.name === 'db.json' && entry.originalSize <= MAX_UNPACKED_BYTES },
+      (err, data) => (err ? reject(new BackupError('invalid_archive', 'The file is not a backup of this app.')) : resolve(data)),
+    ),
+  );
+  const saved = files['db.json'];
+  if (!saved || saved.length !== bytes || sha256(saved) !== checksum) throw new BackupError('checksum_mismatch', 'The backup is damaged.');
+}
+
 export async function createBackup(dir: string, kind: BackupKind, now = new Date()): Promise<BackupRow> {
-  // The snapshot is one synchronous step, so no change can land in the middle of it.
-  const json = strToU8(JSON.stringify({ ...db.data, sessions: {} }));
+  // The snapshot is one synchronous step, so no change can land in the middle of it. The history of the targets is
+  // not in it: the file of the data does not keep it either.
+  const json = strToU8(JSON.stringify({ ...db.data, queue: queueForFile(db.data.queue), sessions: {} }));
+  const checksum = sha256(json);
   const manifest: Manifest = {
     format: 1,
     app: 'ladarr',
@@ -87,7 +105,7 @@ export async function createBackup(dir: string, kind: BackupKind, now = new Date
     schemaVersion: SCHEMA_VERSION,
     createdAt: now.toISOString(),
     kind,
-    files: { 'db.json': { bytes: json.length, sha256: sha256(json) } },
+    files: { 'db.json': { bytes: json.length, sha256: checksum } },
     excludes: ['sessions', 'media'],
   };
   const archive = await zipAsync({ 'manifest.json': strToU8(JSON.stringify(manifest, null, 2)), 'db.json': json });
@@ -99,8 +117,7 @@ export async function createBackup(dir: string, kind: BackupKind, now = new Date
   await writeFile(`${file}.tmp`, archive, { mode: 0o600 });
   await rename(`${file}.tmp`, file);
   try {
-    // Read it back, so a backup that is damaged on the disk is found now and not at a restore.
-    await readBackup(await readFile(file));
+    await checkArchive(file, json.length, checksum);
   } catch (err) {
     await rm(file, { force: true });
     throw err;

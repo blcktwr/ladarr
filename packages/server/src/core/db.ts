@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { migrateQueue } from '../library/downloads/queue-migrate.ts';
 import { DEFAULT_NAMING } from '../library/naming.ts';
 import { defaultProfiles, defaultSizes, QUALITY_TABLE_VERSION, unlimitedSizes } from '../library/grab/quality.ts';
-import type { Data, Db, OneClient, Profile, QueueData, Settings } from '../types.ts';
+import type { Data, Db, OneClient, Profile, QueueData, QueueEntry, Settings } from '../types.ts';
 import type { SizeLimits } from '@ladarr/shared/types';
 
 // Change this number when a new version cannot read the file of an old one, or the other way round.
@@ -15,7 +15,8 @@ import type { SizeLimits } from '@ladarr/shared/types';
 // Version 6 splits the size limits of the qualities into one table for movies and one for series.
 // Version 7 keeps one state for each queue target, in place of the stage, the branch, and the reason.
 // Version 8 keeps the episode numbering of a series, and the snapshot that each acquisition uses.
-export const SCHEMA_VERSION = 8;
+// Version 9 keeps one copy of each fetched torrent, and leaves the history of the targets out of the file.
+export const SCHEMA_VERSION = 9;
 
 export const emptyData = (): Data => ({
   schemaVersion: SCHEMA_VERSION,
@@ -53,6 +54,7 @@ export const emptyData = (): Data => ({
   imports: {},
   releaseCoverage: {},
   sentTorrents: {},
+  torrents: {},
   calendarFeedToken: null,
   webhooks: [],
   compat: { commandSeq: 0, commands: {} },
@@ -178,25 +180,43 @@ export function withDefaults(data: Data): Data {
   }
   // The coverage of an older version came from a numbering that no longer exists. Read the files again.
   for (const [id, held] of Object.entries(next.releaseCoverage)) if (!Number.isInteger(held.numberingRevision)) delete next.releaseCoverage[id];
+  // An older file keeps the whole torrent in every target of the pack. Version 9 keeps one copy for each hash.
+  for (const entry of Object.values(next.queue)) {
+    const source = entry.source as { torrent?: unknown } | null | undefined;
+    if (!source || typeof source !== 'object' || typeof source.torrent !== 'string') continue;
+    if (entry.transferHash && !next.torrents[entry.transferHash]) next.torrents[entry.transferHash] = source.torrent;
+    entry.source = { torrent: true };
+  }
+  // A copy that no target waits for is of no use.
+  const waiting = new Set(Object.values(next.queue).flatMap((entry) => (entry.source && entry.transferHash ? [entry.transferHash] : [])));
+  for (const hash of Object.keys(next.torrents)) if (!waiting.has(hash)) delete next.torrents[hash];
+  // The history is not in the file. The run starts with none, and the log of each target keeps the events.
+  for (const entry of Object.values(next.queue)) entry.history = [];
   return next;
 }
 
 // The fields that hold the work of the queue. They live in a file of their own, separate from the app data.
-export const QUEUE_KEYS = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq'] as const satisfies readonly (keyof Data)[];
+export const QUEUE_KEYS = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq', 'torrents'] as const satisfies readonly (keyof Data)[];
 
 export const QUEUE_FILE = 'queue.json';
 
+// The history of a target stays in memory for the run. The file of the data and the backup leave it out: the log of the
+// item holds the same events, and a pack with thousands of targets would grow both with a list that no page reads.
+export const queueForFile = (queue: Record<string, QueueEntry>): Record<string, QueueEntry> =>
+  Object.fromEntries(Object.entries(queue).map(([id, entry]) => [id, { ...entry, history: [] }]));
+
 const queueDataOf = (data: Data): QueueData => ({
-  queue: data.queue,
+  queue: queueForFile(data.queue),
   queueRev: data.queueRev,
   queuePaused: data.queuePaused,
   jobs: data.jobs,
   jobSeq: data.jobSeq,
   prioritySeq: data.prioritySeq,
+  torrents: data.torrents,
 });
 
 const appDataOf = (data: Data): Omit<Data, keyof QueueData> => {
-  const { queue: _queue, queueRev: _queueRev, queuePaused: _queuePaused, jobs: _jobs, jobSeq: _jobSeq, prioritySeq: _prioritySeq, ...app } = data;
+  const { queue: _queue, queueRev: _queueRev, queuePaused: _queuePaused, jobs: _jobs, jobSeq: _jobSeq, prioritySeq: _prioritySeq, torrents: _torrents, ...app } = data;
   return app;
 };
 

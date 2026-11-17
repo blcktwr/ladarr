@@ -2,7 +2,7 @@ import { db } from '../core/db.ts';
 import { catalog, itemFields } from '../core/log.ts';
 import { withTitleLock } from '../core/title-lock.ts';
 import { ClientError } from '../library/downloads/qbittorrent.ts';
-import { isActive, phaseOfEntry } from '../library/downloads/queue.ts';
+import { forgetSource, isActive, phaseOfEntry } from '../library/downloads/queue.ts';
 import { readTitleFolder, scanTitle } from '../library/scan.ts';
 import type { Handler, QueueEntry, QueueRetryDeps, Title } from '../types.ts';
 
@@ -142,9 +142,10 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
   // starts again from the top of the journey.
   function fromSearch(entry: QueueEntry) {
     entry.release = null;
+    // The copy of the torrent goes with the hash that it belongs to.
+    forgetSource(entry);
     entry.transferHash = null;
     entry.clientId = null;
-    entry.source = null;
     entry.importTries = 0;
     entry.search = null;
     queue.enter(entry, 'queued', 'retry');

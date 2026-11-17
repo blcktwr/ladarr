@@ -139,6 +139,9 @@ export type Data = {
   // The torrents that ladarr sent to a client, keyed by info hash. A torrent in this record belongs to the app, also
   // when its target searches again or the target that sent it is gone. A torrent that the user added is not here.
   sentTorrents: Record<string, number>;
+  // The file of each torrent that waits for a slot of the client, keyed by info hash and kept as base64. One copy serves
+  // every target of the pack. The entry goes when the client has the torrent.
+  torrents: Record<string, string>;
   // The secret in the URL of the iCal feed. Null means that the feed is off.
   calendarFeedToken: string | null;
   // The destinations for events, one for each event type. See webhook.ts.
@@ -551,8 +554,9 @@ export type QueueEntry = {
   // The download client that has the torrent. Set with the hash.
   clientId: string | null;
   // The torrent source that the fetch got. The target keeps it while it waits for a slot of the client, so a wait,
-  // a retry, or a restart does not download the release from the indexer again. A torrent is a base64 file.
-  source?: { torrent: string } | { magnet: string } | null;
+  // a retry, or a restart does not download the release from the indexer again. The whole file is one copy for each
+  // hash in `Data.torrents`: a pack has one target for each episode, and a copy in every one of them is wasted.
+  source?: { torrent: true } | { magnet: string } | null;
   // The automatic import attempts that failed. It is separate from the attempts of the search. A manual retry does
   // not change it.
   importTries?: number;

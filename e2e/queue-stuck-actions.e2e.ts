@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:f
 import { dirname, join } from 'node:path';
 import type { Page, Request } from '@playwright/test';
 import type { Data, QueueEntry } from '../packages/server/src/types.ts';
-import { hashOf, makeTorrent } from '../packages/server/tests/helpers/test-pipeline.ts';
+import { hashOf } from '../packages/server/tests/helpers/test-pipeline.ts';
 import { expect, test } from './fixtures.ts';
 import { configure, MOVIE_RELEASE, startStack, URL_BASE, type Stack } from './stack.ts';
 
@@ -178,7 +178,7 @@ for (const scenario of [
     download(stopped, MOVIE_RELEASE, { 'Movie.mkv': 'video' });
     if (scenario.at !== 'importing') stack.qbit.torrents.clear();
     if (scenario.at === 'fetching' || scenario.at === 'sending') stopped.transferHash = null;
-    if (scenario.at === 'sending') stopped.source = { torrent: makeTorrent(MOVIE_RELEASE).toString('base64') };
+    if (scenario.at === 'sending') stopped.source = { torrent: true };
     await start([stopped, unrelated]);
     const before = await entry(unrelated.id);
 

@@ -8,7 +8,7 @@ import { explainProfile } from './quality.ts';
 import { enqueue as enqueueJob, JobError, prioritize } from '../../core/jobs.ts';
 import { isMonitored, movieEligibleAt } from '../library.ts';
 import { catalog, itemFields, titleFields } from '../../core/log.ts';
-import { entryId, isActive, phaseOfEntry } from '../downloads/queue.ts';
+import { entryId, forgetSource, isActive, phaseOfEntry } from '../downloads/queue.ts';
 import { createClients } from '../downloads/client-api.ts';
 import { importLocal } from '../imports/local.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
@@ -531,8 +531,9 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     for (const entry of entries) {
       entry.release = ref;
       entry.numbering = decision.numbering;
+      // The new release brings its own torrent, so the copy of the old one goes.
+      forgetSource(entry);
       entry.transferHash = decision.hash;
-      entry.source = null;
       entry.importTries = 0;
       entry.search && Object.assign(entry.search, { result: 'grabbed', accepted: 1 });
       const attempt = entry.attempts.at(-1);

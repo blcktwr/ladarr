@@ -17,6 +17,16 @@ export const isActive = (entry: QueueEntry) => isActiveState(entry.state);
 export const phaseOfEntry = (entry: QueueEntry) => phaseOf(entry.state);
 export const stageOf = phaseOfEntry;
 
+// A target that the client has does not wait for its torrent any more. The copy of the file goes when no other target
+// of the same hash waits for it.
+export function forgetSource(entry: QueueEntry) {
+  entry.source = null;
+  const hash = entry.transferHash;
+  if (!hash) return;
+  for (const other of Object.values(db.data.queue)) if (other !== entry && other.source && other.transferHash === hash) return;
+  delete db.data.torrents[hash];
+}
+
 // The problem of a stuck target, or the result of the search that keeps it waiting. A target that moves has none.
 const WAITING_REASON = { no_results: 'no_results', all_rejected: 'all_rejected', deferred: 'search_deferred', indexers_failed: 'indexers_failed' } as const;
 export const reasonOfEntry = (entry: QueueEntry) =>

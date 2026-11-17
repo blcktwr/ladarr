@@ -1,6 +1,6 @@
 import { db } from '../../core/db.ts';
 import { normalizeNumbering } from '../numbering.ts';
-import { isActive } from './queue.ts';
+import { forgetSource, isActive } from './queue.ts';
 import type { ClientHandle, Queue, QueueEntry, ReleaseRef, Torrent } from '../../types.ts';
 
 // Records the torrent of a target: the release that it shows, the hash, and the client that has it. The caller moves
@@ -28,7 +28,7 @@ export function recordTorrent(
   entry.transferHash = torrent.hash;
   entry.clientId = handle.id;
   // The torrent is in the client, so a source that waited for a slot is no longer needed.
-  entry.source = null;
+  forgetSource(entry);
   entry.importTries = 0;
 }
 
