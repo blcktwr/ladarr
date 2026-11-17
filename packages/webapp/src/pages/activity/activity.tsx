@@ -99,7 +99,6 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
         if (retryActions.has(action)) return null;
         const targets = entries.filter((target) => item.ids.includes(target.id));
         const target = targets[0] ?? entry;
-        const label = targets.map((target) => target.label).join(', ') || target.label;
         switch (action) {
           case 'edit_numbering':
             return <Button key={item.action} onClick={() => setNumbering(true)}>{t(item.label)}</Button>;
@@ -107,7 +106,7 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
           case 'use_existing':
             return <MatchDialog key={item.action} entry={target} ids={item.ids} label={item.label} fileSource={item.fileSource ?? (action === 'use_existing' ? 'library' : undefined)} fixedSource={action === 'use_existing'} onDone={refresh} />;
           case 'attach':
-            return <AttachDialog key={item.action} entry={target} ids={item.ids} label={label} onDone={refresh} />;
+            return <AttachDialog key={item.action} entry={target} ids={item.ids} onDone={refresh} />;
           case 'replace':
             return <ReplaceAllFix key={item.action} ids={item.ids} run={run} />;
           case 'settings':

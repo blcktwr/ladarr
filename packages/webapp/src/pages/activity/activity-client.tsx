@@ -3,7 +3,7 @@ import type { AttachCandidates, AttachPreview, QueueClientDetail, QueueEntryView
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, ApiError } from '../../lib/api.ts';
-import { Button, Dropdown, EmptyState, Modal, Section, Spinner } from 'nebula';
+import { Button, EmptyState, Modal, Section, Spinner, TagInput } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { formatBytes } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
@@ -83,7 +83,7 @@ export function ClientDetails({ entryId }: { entryId: string }) {
   );
 }
 
-export function AttachDialog({ entry, ids, label, onDone }: { entry: QueueEntryView; ids?: string[]; label?: string; onDone: () => void }) {
+export function AttachDialog({ entry, ids, onDone }: { entry: QueueEntryView; ids?: string[]; onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const [hash, setHash] = useState('');
   const [error, setError] = useState('');
@@ -131,7 +131,7 @@ export function AttachDialog({ entry, ids, label, onDone }: { entry: QueueEntryV
         }
         setOpen(next);
       }}
-      title={label ?? entry.label}
+      title={t('Attach download')}
       trigger={<Button>{t('Attach download')}</Button>}
       actions={
         <>
@@ -144,14 +144,19 @@ export function AttachDialog({ entry, ids, label, onDone }: { entry: QueueEntryV
       {!found && !shown && <Spinner label={t('Loading downloads')} />}
       {found && found.torrents.length === 0 && <EmptyState>{t('The client has no download for this search.')}</EmptyState>}
       {found && found.torrents.length > 0 && (
-        <Dropdown
+        // The list of a multiple combobox stays open after a pick, so a new key closes it and the actions stay usable.
+        <TagInput
+          key={hash}
           label={t('Download')}
-          value={hash || null}
-          disabled={busy}
-          onValueChange={(value) => {
-            setHash(value ?? '');
+          value={hash ? [hash] : []}
+          onValueChange={(values) => {
+            setHash(values.at(-1) ?? '');
             setError('');
           }}
+          disabled={busy}
+          width="full"
+          allowCustom={false}
+          emptyText={t('No options.')}
           options={found.torrents.map((torrent) => ({
             value: torrent.hash,
             label: `${torrent.name} (${formatBytes(torrent.sizeBytes)}, ${torrent.complete ? t('complete') : `${Math.round(torrent.progress * 100)}%`}${torrent.category ? `, ${torrent.category}` : ''})`,
