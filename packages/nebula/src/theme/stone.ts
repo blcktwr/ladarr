@@ -82,7 +82,7 @@ export const flatSmall = `${flatSurface} h-7 bg-field-small hover:not-data-disab
 // A field that holds a row of chips. It grows with the chips, and its focus ring shows for the input inside it.
 export const flatField = `${flatSurface} min-h-11 bg-field hover:not-data-disabled:bg-field-hover focus-within:inset-ring-3 focus-within:inset-ring-accent`;
 // A tag inside a field. It is flat, so it reads as a value and not as a key.
-export const chip = 'box-border inline-flex items-center gap-1.5 h-7 pl-2.5 pr-1 rounded-sm bg-haze/10 text-ink text-[13px]/none font-[550] whitespace-nowrap';
+export const chip = 'box-border inline-flex items-center gap-1.5 h-7 pl-2.5 pr-1 max-w-full min-w-0 rounded-sm bg-haze/10 text-ink text-[13px]/none font-[550] whitespace-nowrap';
 
 // A checkbox or a switch with its label. A disabled one fades. A deactivated one also is struck out, label too.
 // It aligns by its middle, so the line does not move when the check shows or the key is pressed.

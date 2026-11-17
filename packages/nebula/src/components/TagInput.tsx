@@ -97,13 +97,13 @@ export function TagInput({ label, value, onValueChange, options = [], allowCusto
               <>
                 {selected.map((item) => (
                   <Combobox.Chip key={item} className={chip}>
-                    {textOf(item)}
+                    <span className="truncate">{textOf(item)}</span>
                     <button
                       type="button"
                       aria-label={`Delete ${textOf(item)}`}
                       disabled={disabled}
                       onClick={() => onValueChange(value.filter((selected) => selected !== item))}
-                      className={`${key} ${ghost} flex items-center justify-center size-5 rounded-sm cursor-pointer disabled:cursor-not-allowed [&>svg]:size-3.5`}
+                      className={`${key} ${ghost} flex items-center justify-center size-5 shrink-0 rounded-sm cursor-pointer disabled:cursor-not-allowed [&>svg]:size-3.5`}
                     >
                       <X />
                     </button>
