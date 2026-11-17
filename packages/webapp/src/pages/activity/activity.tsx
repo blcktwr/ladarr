@@ -13,7 +13,6 @@ import { JobsPanel } from './activity-jobs.tsx';
 import { FinishedPanel } from './activity-finished.tsx';
 import { MatchDialog } from './activity-match.tsx';
 import { AttachDialog } from './activity-client.tsx';
-import { ReleasePicker } from './activity-releases.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { Link, LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
 import { NumberingDialog } from '../../components/numbering.tsx';
@@ -88,9 +87,6 @@ function ReplaceAllFix({ ids, run }: { ids: string[]; run: Run }) {
   return <Confirm label={t('Replace file')} title={t('Replace the file?')} confirm={t('Replace')} onConfirm={() => void run('replace', ids)} />;
 }
 
-// The target of a manual search: the title, and the season and the episode when the target has them.
-const targetOf = (entry: QueueEntryView) => ({ titleKey: entry.titleKey, ...(entry.season === null ? {} : { season: entry.season }), ...(entry.number === null ? {} : { number: entry.number }) });
-
 const retryActions = new Set<QueueResolution['action']>(['retry', 'retry_fetch', 'retry_send', 'check_download', 'retry_import']);
 
 // The server supplies each action and its explicit target scope.
@@ -112,8 +108,6 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
             return <MatchDialog key={item.action} entry={target} ids={item.ids} label={item.label} fileSource={item.fileSource ?? (action === 'use_existing' ? 'library' : undefined)} fixedSource={action === 'use_existing'} onDone={refresh} />;
           case 'attach':
             return <AttachDialog key={item.action} entry={target} ids={item.ids} label={label} onDone={refresh} />;
-          case 'search_releases':
-            return <ReleasePicker key={item.action} target={item.ids.length === 1 ? targetOf(target) : { titleKey: target.titleKey, ...(target.season === null ? {} : { season: target.season }) }} ids={item.ids} label={label} onDone={refresh} />;
           case 'replace':
             return <ReplaceAllFix key={item.action} ids={item.ids} run={run} />;
           case 'settings':
@@ -135,7 +129,7 @@ function GroupFix({ actions, stopped, run, refresh }: { actions: QueueResolution
   const groups = new Map<string, { entries: QueueEntryView[]; actions: QueueResolution[] }>();
   const common = new Map<string, QueueResolution>();
   for (const item of available) {
-    if (!['edit_numbering', 'match', 'apply_numbering', 'search_releases', 'replace'].includes(item.action)) continue;
+    if (!['edit_numbering', 'match', 'apply_numbering', 'replace'].includes(item.action)) continue;
     const current = common.get(item.action);
     common.set(item.action, { ...(current ?? item), ids: [...new Set([...(current?.ids ?? []), ...item.ids])] });
   }

@@ -133,7 +133,6 @@ export function actionsOf(entries: QueueEntry[]): QueueResolution[] {
       add('replace', 'Replace file');
     }
     if (['pack_partial', 'torrent_missing', 'torrent_exists', 'client_error', 'coverage_unknown'].includes(cause)) add('attach', 'Attach download');
-    if (['pack_partial', 'file_not_found', 'file_unmapped', 'coverage_unknown', 'file_unreadable', 'file_invalid', 'torrent_missing', 'client_error', 'grab_failed', 'no_download_link', 'invalid_torrent'].includes(cause)) add('search_releases', 'Search releases');
     if (phase === 'fetching' && entry.release && !['pack_partial', 'numbering_required', 'torrent_exists', 'file_invalid'].includes(cause)) add('retry_fetch', 'Retry fetch');
     if ((phase === 'sending' || phase === 'waiting_slot') && entry.release && cause !== 'file_invalid') add('retry_send', 'Retry send');
     if (['torrent_missing', 'client_error', 'client_unreachable'].includes(cause) && entry.transferHash) add('check_download', 'Check download');

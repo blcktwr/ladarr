@@ -237,7 +237,6 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   await open(page, 'group:tv:1:1');
   const main = page.getByRole('main');
   await expect(main.getByRole('table', { name: 'Episodes of season 1' })).toBeHidden();
-  await expect(main.getByRole('button', { name: 'Search releases', exact: true }).first()).toBeVisible();
   await expect(main.getByRole('button', { name: 'Attach download', exact: true })).toBeVisible();
   const maps = main.getByRole('button', { name: 'Map episodes', exact: true });
   await expect(maps).toHaveCount(1);
@@ -245,7 +244,6 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   const actions = maps.locator('..');
   await expect(actions.getByRole('button', { name: 'Map episodes', exact: true })).toHaveCount(1);
   await expect(actions.getByRole('button', { name: 'Attach download', exact: true })).toBeVisible();
-  await expect(actions.getByRole('button', { name: 'Search releases', exact: true })).toBeVisible();
   await expect(actions).toHaveCSS('justify-content', 'flex-start');
   await expect(main.getByText('The pack did not hold every episode of the season.', { exact: true })).toHaveCount(0);
 
@@ -294,33 +292,6 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   await expect.poll(async () => (await entry(first.id)).status, { timeout: 60_000 }).toBe('available');
   await expect.poll(async () => (await entry(second.id)).status, { timeout: 60_000 }).toBe('available');
   expect(await entry(absent.id)).toMatchObject({ status: 'stuck', phase: 'importing', reason: { code: 'pack_partial' } });
-});
-
-test('keeps a target stuck when Search releases only reads results', async ({ page }) => {
-  const stopped = blocked('movie:2', null, null, 'fetching', 'too_many_attempts');
-  download(stopped, MOVIE_RELEASE, { 'Movie.mkv': 'video' });
-  stopped.transferHash = null;
-  stack.qbit.torrents.clear();
-  stopped.state = { kind: 'blocked', at: 'fetching', problem: { code: 'too_many_attempts', detail: 'invalid_torrent' } };
-  await start([stopped]);
-  const before = await entry(stopped.id);
-  const searches = stack.tracker.state.searches.length;
-  const writes: string[] = [];
-  page.on('request', (request) => {
-    if (request.method() !== 'GET' && new URL(request.url()).pathname.startsWith('/api/queue')) writes.push(request.url());
-  });
-
-  await open(page, 'entry:movie:2');
-  await expect(page.getByRole('main').getByRole('button', { name: 'Retry fetch', exact: true })).toHaveCount(0);
-  await page.getByRole('main').getByRole('button', { name: 'Search releases', exact: true }).click();
-  const panel = page.getByRole('dialog');
-  await expect(panel.getByText(MOVIE_RELEASE, { exact: true })).toBeVisible({ timeout: 60_000 });
-  await expect(panel.getByRole('button', { name: 'Download', exact: true })).toBeVisible();
-  expect(stack.tracker.state.searches.length).toBeGreaterThan(searches);
-  expect(stack.tracker.state.downloads).toEqual([]);
-  expect(stack.qbit.torrents.size).toBe(0);
-  expect(writes).toEqual([]);
-  expect(await entry(stopped.id)).toMatchObject({ status: 'stuck', phase: 'fetching', revision: before.revision, reason: before.reason });
 });
 
 test('maps one blocked episode and preserves the library file coverage across seasons', async ({ page }) => {

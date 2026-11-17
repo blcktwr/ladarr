@@ -201,17 +201,6 @@ describe('queries for aliases', () => {
     await until(() => stageOf(entry!) === 'downloading');
     expect(asked()).toEqual(['Movie Name']);
   });
-
-  it('shows the releases of an alias in the interactive search', async () => {
-    pipe = await startPipeline();
-    api = await pipe.api();
-    const film = aliased(aliases);
-    pipe.db.data.titles[film.key] = film;
-    pipe.tracker.state.answer = (url) => (url.searchParams.get('q') === 'Film Alias Two' ? [{ title: 'Film.Alias.Two.2019.1080p.BluRay-GRP', size: 100 * 120 * MIB }] : []);
-    const { body } = await api.get(`/queue/releases?titleKey=${film.key}`);
-    expect(body.releases.map((r: { title: string }) => r.title)).toEqual(['Film.Alias.Two.2019.1080p.BluRay-GRP']);
-    expect(asked()).toEqual(['Movie Name', 'Le Nom du Film', 'Film Alias Two']);
-  });
 });
 
 describe('the languages of the aliases', () => {

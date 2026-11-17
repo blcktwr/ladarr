@@ -590,21 +590,12 @@ export const es: Record<string, string> = {
 
   // Releases
   'This release cannot be taken: it breaks a safety check.': 'Esta versión no se puede tomar: incumple una comprobación de seguridad.',
-  'Releases for {label}': 'Versiones de {label}',
   'Choose a release': 'Elegir una versión',
   'Choose a release for {label}': 'Elegir una versión para {label}',
   'Rejected releases': 'Versiones rechazadas',
-  'Search again': 'Buscar de nuevo',
-  'The search did not complete.': 'La búsqueda no se completó.',
-  '{answered} of {asked} indexers answered.': '{answered} de {asked} indexadores respondieron.',
-  'The indexers have no release for this target.': 'Los indexadores no tienen ninguna versión para este objetivo.',
-  'Download anyway': 'Descargar de todos modos',
   'Download this release?': '¿Descargar esta versión?',
   'Download {quality} {size}': 'Descargar {quality} {size}',
   'Unknown source': 'Fuente desconocida',
-  '{title} (full season)': '{title} (temporada completa)',
-  '{title} (several episodes)': '{title} (varios episodios)',
-  'Fits the preset.': 'Cumple con el perfil.',
 
   // Import a folder and rename
   'More actions': 'Más acciones',

@@ -1104,8 +1104,6 @@ describe('server resolution previews', () => {
   });
 
   it.each([
-    { name: 'title picker ids', path: '/queue/releases/grab', scope: { titleKey: 'tv:1', season: 1, ids: ['tv:1:1x1'] } },
-    { name: 'title picker number', path: '/queue/releases/grab', scope: { titleKey: 'tv:1', season: 1, number: 1 } },
     { name: 'entry picker ids', path: '/queue/entries/tv:1:1x1/releases/grab', scope: { ids: ['tv:1:1x1'] } },
     { name: 'entry picker target', path: '/queue/entries/tv:1:1x1/releases/grab', scope: {} },
   ])('limits pack authorization to the selected episode through $name', async ({ path, scope }) => {
@@ -1152,23 +1150,16 @@ describe('server resolution previews', () => {
 
 describe('first acquisition of a multi-season source', () => {
   async function source() {
-    const stages: { id: string; phase: string }[] = [];
-    pipe = await startPipeline({ onState: (entry) => stages.push({ id: entry.id, phase: stageOf(entry) }) });
+    pipe = await startPipeline();
     await pipe.worker.pause();
     pipe.poller.stop();
     api = await pipe.api();
     const series = title({ rootId: 'tv', episodes: [aired(1), episode(2, 1), episode(2, 2)] });
     pipe.db.data.titles[series.key] = series;
-    const entries = series.episodes.map((one) => entryOf({
-      id: `tv:1:${one.season}x${one.number}`, titleKey: series.key, season: one.season, number: one.number,
-      stage: 'importing', reason: { code: 'file_unmapped' },
-    }));
-    for (const entry of entries) pipe.db.data.queue[entry.id] = entry;
     const name = 'Show.Name.S01-S02.1080p.WEB-DL-GRP';
     const files = ['Show.Name.S01E01.mkv', 'Show.Name.S02E01.mkv'];
     pipe.tracker.state.items = [{ title: name, size: 2 * 60 * 45 * MIB, files }];
-    expect(pipe.db.data.releaseCoverage).toEqual({});
-    return { series, name, files, entries, stages };
+    return { series, name };
   }
 
   it.each([1, 2])('uses requested season %s for an unseen multi-season release', async (season) => {
@@ -1177,54 +1168,6 @@ describe('first acquisition of a multi-season source', () => {
     const want = pipe!.finder.wantForRelease(series, release(name), season);
 
     expect(want).toMatchObject({ kind: 'season', title: series, season });
-  });
-
-  it.each([
-    { name: 'season', query: 'season=2' },
-    { name: 'episode', query: 'season=2&number=1' },
-  ])('lists an unseen multi-season candidate for the requested $name without resolving any target', async ({ query }) => {
-    const { series, name } = await source();
-    const before = structuredClone({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs, files: pipe!.db.data.files });
-
-    const listing = await api!.get(`/queue/releases?titleKey=${series.key}&${query}`);
-
-    expect(listing.status).toBe(200);
-    expect(listing.body.releases).toEqual(expect.arrayContaining([
-      expect.objectContaining({ guid: name, kind: 'pack', accepted: true, rejections: [] }),
-    ]));
-    expect({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs, files: pipe!.db.data.files }).toEqual(before);
-    expect(pipe!.tracker.state.searches.some((url) => url.searchParams.get('season') === '2')).toBe(true);
-    expect(pipe!.tracker.state.downloads).toEqual([]);
-    expect(pipe!.qbit.calls.some((call) => call.path === 'torrents/add')).toBe(false);
-  });
-
-  it.each([
-    { name: 'identified and absent targets', ids: ['tv:1:2x1', 'tv:1:2x2'], sends: 1 },
-    { name: 'only an absent target', ids: ['tv:1:2x2'], sends: 0 },
-  ])('inspects the first manifest before client send for $name', async ({ ids, sends }) => {
-    const { series, name, entries, stages } = await source();
-    const unrelated = structuredClone(entries[0]!);
-    const identifiedBefore = structuredClone(entries[1]!);
-    const absent = entries[2]!;
-
-    const acquired = await api!.post('/queue/releases/grab', { titleKey: series.key, season: 2, ids, indexerId: 1, guid: name });
-
-    expect(acquired.status).toBe(202);
-    expect(acquired.body.started).toEqual(ids);
-    expect(entries[0]).toEqual(unrelated);
-    expect(Object.values(pipe!.db.data.jobs).some((job) => job.type === 'queue.grab')).toBe(true);
-    pipe!.worker.resume();
-    await until(() => !Object.values(pipe!.db.data.jobs).some((job) => ['queue.grab', 'queue.send'].includes(job.type) && ['waiting', 'running'].includes(job.state)));
-
-    expect(absent.state).toMatchObject({ kind: 'blocked', at: 'fetching', problem: { code: 'pack_partial' } });
-    expect(stages.filter((event) => event.id === absent.id).some((event) => ['waiting_slot', 'sending', 'downloading', 'available'].includes(event.phase))).toBe(false);
-    expect(pipe!.qbit.calls.filter((call) => call.path === 'torrents/add')).toHaveLength(sends);
-    expect(pipe!.tracker.state.downloads).toEqual([name]);
-    expect(entries[0]).toEqual(unrelated);
-    if (sends) expect(entries[1]!.state).toEqual({ kind: 'downloading' });
-    else expect(entries[1]).toEqual(identifiedBefore);
-    expect(series.episodes.every((episode) => episode.fileId === null)).toBe(true);
-    expect(Object.values(pipe!.db.data.files)).toEqual([]);
   });
 });
 

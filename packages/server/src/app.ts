@@ -107,8 +107,6 @@ import { queueJobRunPost } from './routes/queue/jobs/[id]/run/post.ts';
 import { queueJobsGet } from './routes/queue/jobs/get.ts';
 import { queuePausePost } from './routes/queue/pause/post.ts';
 import { queueRecentGet } from './routes/queue/recent/get.ts';
-import { queueReleaseGrabPost } from './routes/queue/releases/grab/post.ts';
-import { queueReleasesGet } from './routes/queue/releases/get.ts';
 import { queueSearchPost } from './routes/queue/search/post.ts';
 import { queueSummaryGet } from './routes/queue/summary/get.ts';
 import { enqueue as enqueueJob } from './core/jobs.ts';
@@ -281,8 +279,6 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
     api.get('/queue/recent', queueRecentGet(services.poller, importStatus));
     api.get('/queue/entries/:id', queueEntryGet(services.poller, importStatus));
     api.post('/queue/search', queueSearchPost(services.finder));
-    api.get('/queue/releases', queueReleasesGet(services.finder));
-    api.post('/queue/releases/grab', queueReleaseGrabPost(services.queue, services.finder));
     api.post('/queue/entries/:id/releases/grab', queueEntryReleaseGrabPost(services.queue, services.finder));
     api.post('/queue/actions', queueActionsPost(services.queue, services.finder, services.poller, services.clients, enqueue));
     api.get('/queue/entries/:id/files', queueEntryFilesGet(services.clients));

@@ -56,14 +56,12 @@ test('offers separate numbering and release actions on the card of the season', 
   await page.locator('[data-row="group:tv:1:1"]').click();
   const main = page.getByRole('main');
   await expect(main.getByText('The pack did not hold every episode of the season.')).toHaveCount(0);
-  await expect(main.getByRole('button', { name: 'Search releases', exact: true })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Attach download', exact: true })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Map episodes', exact: true })).toBeVisible();
   await expect(main.getByText(/^Show Name S01E/)).toHaveCount(0);
   const actions = main.getByRole('button', { name: 'Map episodes', exact: true }).locator('..');
   await expect(actions).toHaveCSS('justify-content', 'flex-start');
   await expect(actions.getByRole('button', { name: 'Attach download', exact: true })).toBeVisible();
-  await expect(actions.getByRole('button', { name: 'Search releases', exact: true })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Search individually', exact: true })).toHaveCount(0);
   await expect(main.getByRole('button', { name: 'Try again', exact: true })).toBeHidden();
 });

@@ -32,6 +32,5 @@ test('says why the last release failed on the card of the season', async ({ page
   await expect(main.getByText('The last release had a damaged .torrent file.')).toBeVisible();
 
   await expect(main.getByRole('button', { name: 'Retry fetch', exact: true })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Search releases', exact: true })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Try again', exact: true })).toBeHidden();
 });

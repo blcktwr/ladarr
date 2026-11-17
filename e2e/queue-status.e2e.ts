@@ -16,7 +16,7 @@ test.beforeAll(async () => {
   stack = await startStack();
   cookie = await stack.createOwner();
   await configure(stack);
-  // The pack covers two episodes. The third episode waits for an explicit release selection.
+  // The pack covers two episodes. The third episode needs its own download.
   stack.tracker.state.items = [
     { title: SERIES_PACK, size: 2 * 60 * 45 * MIB, files: ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'] },
     { title: SINGLE, size: 60 * 45 * MIB },
@@ -31,16 +31,21 @@ test.beforeEach(async ({ context }) => {
 
 test('shows the aggregate of the season in the row and in the inspector under every tab', async ({ page }) => {
   await expect.poll(async () => (await stack.call('GET', '/queue/entries/tv:1:1x3')).body.entry?.reason?.code, { timeout: 60_000 }).toBe('pack_partial');
-  const releases = await stack.call('GET', '/queue/releases?titleKey=tv%3A1&season=1&number=3');
-  expect(releases.status).toBe(200);
-  const release = releases.body.releases.find((item: { title: string }) => item.title === SINGLE);
-  expect(release).toBeDefined();
   expect((await stack.call('GET', '/queue/entries/tv:1:1x3')).body.entry.status).toBe('stuck');
-  const selected = await stack.call('POST', '/queue/releases/grab', { titleKey: 'tv:1', season: 1, number: 3, indexerId: release.indexerId, guid: release.guid, ids: ['tv:1:1x3'] });
-  expect(selected.status).toBe(202);
-  expect(selected.body.started).toEqual(['tv:1:1x3']);
+  // The third episode is not in the pack, and the client has its own release. The download attaches to it.
+  const single = hashOf(SINGLE);
+  stack.qbit.torrents.set(single, {
+    hash: single, name: SINGLE, size: 60 * 45 * 1024 * 1024, progress: 0.2, state: 'downloading', category: '', tags: '',
+    save_path: stack.folders.downloads, content_path: `${stack.folders.downloads}/${SINGLE}`,
+    dlspeed: 1000, eta: 100, num_seeds: 1, num_leechs: 1, added_on: Math.floor(Date.now() / 1000),
+  });
+  stack.qbit.setFiles(single, [{ name: `${SINGLE}/Show.Name.S01E03.mkv`, size: 1000, progress: 0.2 }]);
+  const preview = await stack.call('POST', '/queue/entries/tv:1:1x3/attach', { hash: single, preview: true });
+  expect(preview.status).toBe(200);
+  const attached = await stack.call('POST', '/queue/entries/tv:1:1x3/attach', { hash: single, confirmOwner: true, confirmTitle: true, version: preview.body.version });
+  expect(attached.status).toBe(200);
 
-  // The selected episode and the identified episodes of the pack now download together.
+  // The attached episode and the identified episodes of the pack now download together.
   await expect.poll(async () => Boolean(await torrent(SERIES_PACK)) && Boolean(await torrent(SINGLE)), { timeout: 60_000 }).toBe(true);
 
   // The destination of the first episode holds a file that the library does not know, so that episode stops. The

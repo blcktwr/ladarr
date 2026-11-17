@@ -796,18 +796,6 @@ export type WebhookView = { id: string; type: WebhookEventType; host: string };
 // A download client as the user sees it. The secrets stay on the server.
 export type ClientView = { id: string; name: string; type: 'qbittorrent'; host: string; port: number; auth: 'apiKey' | 'password'; username: string | null; enabled: boolean; maxDownloads: number };
 
-export type ReleaseRow = {
-  indexerId: number;
-  guid: string;
-  title: string;
-  indexer: string;
-  sizeBytes: number;
-  seeders: number | null;
-  kind: 'single' | 'multi' | 'pack';
-  accepted: boolean;
-  rejections: { code: string; message: string }[];
-};
-
 // --- Library filters, search on a selection, and calendar ----------------------------------
 
 // What a search on a selection will start. `planId` is null when nothing needs a search.

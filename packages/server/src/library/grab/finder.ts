@@ -217,10 +217,10 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   }
 
   // The indexers that can answer: the indexer manager pushed them for this media type, ladarr uses them, they allow automatic search, and they are not in a backoff.
-  function usableIndexers(title: Title, interactive = false) {
+  function usableIndexers(title: Title) {
     return indexersFor(title.mediaType).filter((indexer) => {
       const push = indexer.push[app(title)]!;
-      return !notUsedReason(indexer, app(title)) && (interactive ? push.enableInteractiveSearch : push.enableAutomaticSearch);
+      return !notUsedReason(indexer, app(title)) && push.enableAutomaticSearch;
     });
   }
 
@@ -287,8 +287,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   // Asks every usable indexer at the same time. Each one answers on its own: one failure does not stop the others.
   // `budget` counts the requests that go to an indexer, not the answers from the cache. A query that the budget stops
   // is incomplete, so the caller leaves its targets for the next run instead of ending them as an empty search.
-  async function queryAll(title: Title, scope: Scope, name: TitleName, entries: QueueEntry[], signal: AbortSignal, { forUser = false, fresh = false, quiet = false, budget }: { forUser?: boolean; fresh?: boolean; quiet?: boolean; budget?: { left: number } } = {}) {
-    const usable = usableIndexers(title, forUser);
+  async function queryAll(title: Title, scope: Scope, name: TitleName, entries: QueueEntry[], signal: AbortSignal, { fresh = false, quiet = false, budget }: { fresh?: boolean; quiet?: boolean; budget?: { left: number } } = {}) {
+    const usable = usableIndexers(title);
     // An indexer with preferred languages receives only an alias in one of them. No languages means every name.
     const list = usable.filter((indexer) => {
       const preferred = indexer.preferredLanguages ?? [];
@@ -1219,39 +1219,6 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     return number !== undefined && season !== undefined ? { kind: 'episode', title, season, number, numbering } : undefined;
   }
 
-  // Searches for the user to look at. It uses the interactive switch of the indexer and creates no queue entry.
-  async function interactive(titleKey: string, { season, number, fresh }: { season?: number; number?: number; fresh?: boolean }, signal: AbortSignal) {
-    const title = db.data.titles[titleKey];
-    if (!title) return;
-    const numbering = numberingOf(title);
-    let scopes: Scope[];
-    if (title.mediaType === 'movie') scopes = [{ kind: 'movie' }];
-    else if (number !== undefined && season !== undefined) {
-      const point = releasePoint(numbering, { season, number }) ?? { season, number };
-      scopes = [{ kind: 'episode', season: point.season, number: point.number }];
-    } else scopes = releaseSeasons(numbering, season ?? 1).map((releaseSeason) => ({ kind: 'season', season: releaseSeason }));
-    // The aliases are asked only when the names before gave no release.
-    const releases: RawRelease[] = [];
-    let asked = 0;
-    let answered = 0;
-    for (const scope of scopes) {
-      for (const name of titleNames(title)) {
-        const found = await queryAll(title, scope, name, [], signal, { forUser: true, fresh });
-        asked = Math.max(asked, found.asked);
-        answered += found.answered;
-        releases.push(...found.releases);
-        if (releases.length) break;
-      }
-    }
-    const ctx = decideContext();
-    const decisions = releases.flatMap((release) => {
-      const want = wantForRelease(title, release, season, number);
-      if (!want) return [];
-      return [{ decision: decide(release, want, ctx), want }];
-    });
-    return { decisions, asked, answered };
-  }
-
   // Grabs a release that the user chose. A person can take any release by hand, also one that the automatic search
   // rejected.
   function grabManual(entries: QueueEntry[], release: RawRelease, want: Want) {
@@ -1371,5 +1338,5 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     for (const group of bySeason.values()) enqueueSearch({ titleKey: group[0]!.titleKey, season: group[0]!.season, entryIds: group.map((e) => e.id) }, { afterRun: true });
   }
 
-  return { requestSearch, reserve, fallback, partial, startOtherSeasons, enqueueSearch, interactive, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
+  return { requestSearch, reserve, fallback, partial, startOtherSeasons, enqueueSearch, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
 }
