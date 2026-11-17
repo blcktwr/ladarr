@@ -607,6 +607,91 @@ describe('catalog-wide download mapping', () => {
     expect({ files: pipe!.db.data.files, queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs, imports: pipe!.db.data.imports }).toEqual(before);
   });
 
+  it('merges explicit targets from separate file mappings into the same waiting manual import job', async () => {
+    const { selected, sibling, series } = await source();
+    series.episodes.push(aired(3));
+    const second = entryOf({
+      id: 'tv:1:1x3', titleKey: series.key, season: 1, number: 3,
+      stage: 'importing', reason: { code: 'file_unmapped' }, transferHash: selected.transferHash, clientId: selected.clientId,
+    });
+    pipe!.db.data.queue[second.id] = second;
+    const siblingBefore = structuredClone(sibling);
+    const firstBody = { source: 'download', file: 'part-a.mkv', covers: [{ season: 1, number: 1 }], ids: [selected.id] };
+    const firstPath = `/queue/entries/${selected.id}/match`;
+    const before = structuredClone({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs });
+    const firstPreview = await api!.post(firstPath, { ...firstBody, preview: true });
+    expect(firstPreview.status).toBe(200);
+    expect(firstPreview.body.version).toEqual(expect.any(String));
+    expect({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs }).toEqual(before);
+    const unversioned = await api!.post(firstPath, firstBody);
+    expect(unversioned.status).toBe(409);
+    expect(unversioned.body.error).toBe('preview_required');
+    expect({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs }).toEqual(before);
+
+    expect((await api!.post(firstPath, { ...firstBody, version: firstPreview.body.version })).status).toBe(200);
+    const jobs = Object.values(pipe!.db.data.jobs).filter((job) => job.type === 'import.run');
+    expect(jobs).toHaveLength(1);
+    const job = jobs[0]!;
+    expect(job).toMatchObject({
+      state: 'waiting', dedupeKey: `import:${selected.transferHash}`,
+      payload: { hash: selected.transferHash, manual: true, entryIds: [selected.id] },
+    });
+
+    const secondBody = { source: 'download', file: 'part-b.mkv', covers: [{ season: 1, number: 3 }], ids: [second.id] };
+    const secondPath = `/queue/entries/${second.id}/match`;
+    const afterFirst = structuredClone({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs });
+    const secondPreview = await api!.post(secondPath, { ...secondBody, preview: true });
+    expect(secondPreview.status).toBe(200);
+    expect(secondPreview.body.version).toEqual(expect.any(String));
+    expect(secondPreview.body.version).not.toBe(firstPreview.body.version);
+    expect({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs }).toEqual(afterFirst);
+    const stale = await api!.post(secondPath, { ...secondBody, version: firstPreview.body.version });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toBe('preview_changed');
+    expect({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs }).toEqual(afterFirst);
+
+    expect((await api!.post(secondPath, { ...secondBody, version: secondPreview.body.version })).status).toBe(200);
+    expect(selected).toMatchObject({ state: { kind: 'importing' }, manualMatch: { file: firstBody.file, covers: firstBody.covers } });
+    expect(second).toMatchObject({ state: { kind: 'importing' }, manualMatch: { file: secondBody.file, covers: secondBody.covers } });
+    expect(sibling).toEqual(siblingBefore);
+    const merged = Object.values(pipe!.db.data.jobs).filter((item) => item.type === 'import.run');
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ id: job.id, state: 'waiting' });
+    expect(merged[0]!.payload).toEqual({ hash: selected.transferHash, manual: true, entryIds: [selected.id, second.id] });
+  });
+
+  it.each([
+    { name: 'a scoped automatic job', payload: { manual: false, entryIds: ['tv:1:2x1'] } },
+    { name: 'a scoped job without a manual mode', payload: { entryIds: ['tv:1:2x1'] } },
+    { name: 'an unscoped automatic job', payload: { manual: false } },
+    { name: 'an unscoped manual job', payload: { manual: true } },
+    { name: 'an unscoped job without a manual mode', payload: {} },
+  ])('keeps only the explicit mapping target when it replaces $name', async ({ payload }) => {
+    const { selected, sibling } = await source();
+    const siblingBefore = structuredClone(sibling);
+    const job = pipe!.worker.enqueue({
+      type: 'import.run', dedupeKey: `import:${selected.transferHash}`,
+      payload: { hash: selected.transferHash, ...payload },
+    });
+    const before = structuredClone({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs });
+    const path = `/queue/entries/${selected.id}/match`;
+    const body = { source: 'download', file: 'part-a.mkv', covers: [{ season: 1, number: 1 }], ids: [selected.id] };
+    const preview = await api!.post(path, { ...body, preview: true });
+    expect(preview.status).toBe(200);
+    expect(preview.body.version).toEqual(expect.any(String));
+    expect({ queue: pipe!.db.data.queue, jobs: pipe!.db.data.jobs }).toEqual(before);
+
+    const applied = await api!.post(path, { ...body, version: preview.body.version });
+
+    expect(applied.status).toBe(200);
+    const jobs = Object.values(pipe!.db.data.jobs).filter((item) => item.type === 'import.run');
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ id: job.id, state: 'waiting' });
+    expect(jobs[0]!.payload).toEqual({ hash: selected.transferHash, manual: true, entryIds: [selected.id] });
+    expect(selected).toMatchObject({ state: { kind: 'importing' }, manualMatch: { file: body.file, covers: body.covers } });
+    expect(sibling).toEqual(siblingBefore);
+  });
+
   it('lists library alternatives for a target that still has a torrent', async () => {
     const { selected, path } = await librarySource();
     pipe!.qbit.control.down = true;

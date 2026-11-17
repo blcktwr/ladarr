@@ -154,7 +154,10 @@ export function queueEntryMatchPost(queue: Queue, _finder: Finder, clients: Clie
         const entryIds = selected.filter((target) => target.state.kind !== 'available').map((target) => target.id);
         if (entryIds.length && selectedSource === 'download' && entry.transferHash) {
           const job = enqueue({ type: 'import.run', payload: { hash: entry.transferHash, entryIds, manual: true }, dedupeKey: `import:${entry.transferHash}`, priority: entry.priority !== null });
-          if (job.type === 'import.run' && job.state === 'waiting') job.payload = { hash: entry.transferHash, entryIds, manual: true };
+          if (job.type === 'import.run' && job.state === 'waiting') {
+            const previous = job.payload as { manual?: boolean; entryIds?: string[] };
+            job.payload = { hash: entry.transferHash, entryIds: [...new Set([...(previous.manual ? previous.entryIds ?? [] : []), ...entryIds])], manual: true };
+          }
         } else if (entryIds.length) {
           const root = db.data.roots[title.rootId]!;
           const identity = { sizeBytes: chosen.sizeBytes, mtimeMs: chosen.mtimeMs!, ino: chosen.ino!, dev: chosen.dev! };

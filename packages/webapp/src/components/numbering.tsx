@@ -103,7 +103,7 @@ export function NumberingDialog({
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      title={t('Edit numbering')}
+      title={t('Map episodes')}
       width="xl"
       actions={
         <>
@@ -111,7 +111,7 @@ export function NumberingDialog({
             {t('Cancel')}
           </Button>
           <Button type="button" pending={pending} onClick={() => void save()}>
-            {t('Save numbering')}
+            {t('Save')}
           </Button>
         </>
       }
@@ -120,7 +120,7 @@ export function NumberingDialog({
       {error && !data && <Alert tone="danger">{describeError(error)}</Alert>}
       <Form onSubmit={(event) => { event.preventDefault(); void save(); }}>
         <Table
-          aria-label={t('Edit numbering')}
+          aria-label={t('Map episodes')}
           columns={[
             { label: t('Catalog season'), width: '8rem' },
             { label: t('First catalog episode'), width: '9rem' },

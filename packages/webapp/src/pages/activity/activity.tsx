@@ -91,6 +91,8 @@ function ReplaceAllFix({ ids, run }: { ids: string[]; run: Run }) {
 // The target of a manual search: the title, and the season and the episode when the target has them.
 const targetOf = (entry: QueueEntryView) => ({ titleKey: entry.titleKey, ...(entry.season === null ? {} : { season: entry.season }), ...(entry.number === null ? {} : { number: entry.number }) });
 
+const retryActions = new Set<QueueResolution['action']>(['retry', 'retry_fetch', 'retry_send', 'check_download', 'retry_import']);
+
 // The server supplies each action and its explicit target scope.
 function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refresh }: { entry: QueueEntryView; entries?: QueueEntryView[]; actions?: QueueResolution[]; run: Run; refresh: () => void }) {
   const [numbering, setNumbering] = useState(false);
@@ -98,6 +100,7 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
     <>
       {actions?.map((item) => {
         const action = item.action;
+        if (retryActions.has(action)) return null;
         const targets = entries.filter((target) => item.ids.includes(target.id));
         const target = targets[0] ?? entry;
         const label = targets.map((target) => target.label).join(', ') || target.label;
@@ -126,46 +129,32 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
 
 // Each cause and source keeps its own affected episodes and actions.
 function GroupFix({ actions, stopped, run, refresh }: { actions: QueueResolution[]; stopped: QueueEntryView[]; run: Run; refresh: () => void }) {
+  const visible = actions.filter((item) => !retryActions.has(item.action));
+  const available = visible.some((item) => item.action === 'match') ? visible.filter((item) => item.action !== 'edit_numbering') : visible;
+  if (!available.length) return null;
   const groups = new Map<string, { entries: QueueEntryView[]; actions: QueueResolution[] }>();
   const common = new Map<string, QueueResolution>();
-  for (const item of actions) {
-    if (!['edit_numbering', 'apply_numbering', 'search_releases', 'replace'].includes(item.action)) continue;
+  for (const item of available) {
+    if (!['edit_numbering', 'match', 'apply_numbering', 'search_releases', 'replace'].includes(item.action)) continue;
     const current = common.get(item.action);
-    common.set(item.action, { ...item, ids: [...new Set([...(current?.ids ?? []), ...item.ids])] });
+    common.set(item.action, { ...(current ?? item), ids: [...new Set([...(current?.ids ?? []), ...item.ids])] });
   }
   for (const entry of stopped) {
-    const descriptors = actions.filter((item) => item.ids.includes(entry.id));
+    const descriptors = available.filter((item) => item.ids.includes(entry.id));
     const key = JSON.stringify([entry.phase, entry.reason?.code, entry.reason?.detail, descriptors[0]?.source ?? entry.release?.title ?? entry.file?.name]);
     const group = groups.get(key) ?? { entries: [], actions: descriptors };
     group.entries.push(entry);
     groups.set(key, group);
   }
   return (
-    <div className="grid gap-5 w-full">
+    <div className="flex flex-wrap justify-start gap-2 mt-2 w-full">
       {[...groups].map(([key, group]) => {
-        const entry = group.entries[0]!;
         const ids = group.entries.map((item) => item.id);
-        const source = entry.release?.title ?? entry.file?.name ?? group.actions[0]?.source;
         const local = group.actions.filter((item) => !common.has(item.action)).map((item) => ({ ...item, ids: item.ids.filter((id) => ids.includes(id)) }));
-        return (
-          <div key={key} className="grid gap-2 w-full">
-            <Text variant="small">{stageLabel(entry.phase)}</Text>
-            {entry.reason && <Text>{reasonText(entry.reason)}</Text>}
-            {source && <Text variant="small">{source}</Text>}
-            <Text variant="small">{group.entries.map((item) => item.label).join(', ')}</Text>
-            {local.length > 0 && <div className="flex flex-wrap justify-end gap-2 w-full">
-              <EntryFix entry={entry} entries={group.entries} actions={local} run={run} refresh={refresh} />
-            </div>}
-          </div>
-        );
+        return <EntryFix key={key} entry={group.entries[0]!} entries={group.entries} actions={local} run={run} refresh={refresh} />;
       })}
       {stopped[0] && [...common.values()].map((item) => (
-        <div key={item.action} className="grid gap-2 w-full">
-          <Text variant="small">{stopped.filter((entry) => item.ids.includes(entry.id)).map((entry) => entry.label).join(', ')}</Text>
-          <div className="flex flex-wrap justify-end gap-2 w-full">
-            <EntryFix entry={stopped[0]} entries={stopped} actions={[item]} run={run} refresh={refresh} />
-          </div>
-        </div>
+        <EntryFix key={item.action} entry={stopped[0]} entries={stopped} actions={[item]} run={run} refresh={refresh} />
       ))}
     </div>
   );
@@ -470,19 +459,17 @@ function downloadPercent(entry: QueueEntryView) {
 // One target. An episode keeps its indicator next to its name, above the fields of its file. The inspector of a movie
 // shows the indicator of its status and the reason that stops it above the progress of the work, under the name, then
 // the checks of the import while it imports, then the fields of its release. The label is off in the inspector of a
-// movie, where the heading of the panel says the name. The actions of an episode, such as the match of a file, follow
-// its indicator. An episode of a series shows the percent of its download in its name.
+// movie, where the heading of the panel says the name. An episode of a series shows the percent of its download in its name.
 function EntryDetails({ entry, label = true, inline = false, actions, fix }: { entry: QueueEntryView; label?: boolean; inline?: boolean; actions?: ReactNode; fix?: ReactNode }) {
   const percent = inline ? downloadPercent(entry) : null;
   const data = !inline && entry.release ? <ReleaseDetails entryId={entry.id} release={entry.release} /> : inline && entry.file ? <FileDetails file={entry.file} /> : null;
   const name = label && <Text>{percent === null ? entry.label : <>{entry.label} <strong>({percent}%)</strong></>}</Text>;
   const status = entry.status;
-  // The reason shows under the status of a movie, and under the status of an episode that a problem stops, above its
-  // file. The list keeps the status and the hint.
+  // The reason shows under the status of a movie. An episode keeps the reason in its status hint.
   const reason = entry.reason ? reasonText(entry.reason) : null;
   const checks = showsChecks(entry);
   // The container of the action is not rendered when the reason has no option to show.
-  const action = entry.actions?.length ? fix : undefined;
+  const action = entry.actions?.some((item) => !retryActions.has(item.action)) ? fix : undefined;
   if (inline) {
     return (
       <div className="grid gap-2 w-full min-w-0">
@@ -494,7 +481,6 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
             {actions}
           </div>
         </div>
-        {entry.status === 'stuck' && reason && <Text variant="small">{reason}</Text>}
         {data}
       </div>
     );
@@ -519,7 +505,7 @@ type Run = (action: QueueActionName, ids: string[], group?: { titleKey: string; 
 // result, take a retry: the phases of the target run again, from the file in the library to a new search.
 function entryMenu(entry: QueueEntryView, run: Run, openLogs: (entry: QueueEntryView) => void): { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] {
   const items: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] = [];
-  if (entry.status !== 'stuck' && RETRY_STATUSES.includes(entry.status)) items.push({ label: t('Try again'), onClick: () => run('retry', [entry.id]) });
+  if (RETRY_STATUSES.includes(entry.status)) items.push({ label: t('Try again'), onClick: () => run('retry', [entry.id]) });
   if (entry.lane !== null) items.push({ label: t('Delete priority'), onClick: () => run('unpriority', [entry.id]) });
   items.push({ label: t('Logs'), onClick: () => openLogs(entry) });
   return items;
@@ -606,7 +592,7 @@ function GroupLine({ group }: { group: QueueGroupRow }) {
 function groupMenu(group: QueueGroupRow, openLogs: (group: QueueGroupRow) => void, run: Run) {
   const items = [{ label: t('Logs'), onClick: () => openLogs(group) }];
   // The episodes that wait for their next search, or that a problem stops, start again together from the row.
-  if (group.status !== 'stuck' && RETRY_STATUSES.some((status) => status !== 'stuck' && (group.counts[status] ?? 0) > 0)) items.unshift({ label: t('Try again'), onClick: () => run('retry', [], { titleKey: group.titleKey, season: group.season }) });
+  if (RETRY_STATUSES.some((status) => (group.counts[status] ?? 0) > 0)) items.unshift({ label: t('Try again'), onClick: () => run('retry', [], { titleKey: group.titleKey, season: group.season }) });
   return items;
 }
 
@@ -634,7 +620,7 @@ function MasterRow({ row }: { row: QueueRow }) {
 const seasonColumns = [{ label: 'Season', hideLabel: true }, { label: 'Actions', hideLabel: true, align: 'end' as const }];
 
 // The episodes of a season, a page of them at a time.
-function SeasonEpisodes({ season, entries, run, refresh }: { season: number; entries: QueueEntryView[]; run: Run; refresh: () => void }) {
+function SeasonEpisodes({ season, entries }: { season: number; entries: QueueEntryView[] }) {
   const [page, setPage] = useState(1);
   const pages = Math.max(1, Math.ceil(entries.length / EPISODES));
   const current = Math.min(page, pages);
@@ -650,7 +636,6 @@ function SeasonEpisodes({ season, entries, run, refresh }: { season: number; ent
               key="detail"
               entry={entry}
               inline
-              fix={<EntryFix entry={entry} run={run} refresh={refresh} />}
             />,
           ],
         }))}
@@ -780,7 +765,7 @@ function GroupDetail({ group, filters, run, refresh }: { group: QueueGroupRow; f
         entries={entries}
         opened={season}
         onSeason={toggle}
-        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} run={run} refresh={refresh} />}
+        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} />}
       />
     </div>
   );
