@@ -21,11 +21,61 @@ async function bodyOf(body: BodyInit | null | undefined): Promise<unknown> {
 // A binary answer has no text, so the log shows its size and its type.
 const BINARY = /^(image|audio|video|font)\/|application\/(octet-stream|pdf|zip|x-bittorrent)/i;
 
+// The log keeps the start of a big answer only. The whole body holds memory, and the entry keeps 2000 characters of
+// it at most. The clone is cut, so the caller still reads the whole answer.
+const MAX_BODY_BYTES = 64_000;
+
+async function readStart(response: Response, limit: number) {
+  if (!response.body) return { text: '', bytes: 0, truncated: false };
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  let truncated = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const room = limit - bytes;
+      if (value.byteLength > room) {
+        chunks.push(value.subarray(0, room));
+        bytes = limit;
+        truncated = true;
+        break;
+      }
+      chunks.push(value);
+      bytes += value.byteLength;
+    }
+  } finally {
+    // A cancelled clone releases its side of the answer, so nothing waits in memory for a reader that never comes.
+    // The cancel of one side of a copy resolves only when the caller cancels its side, so it is not awaited.
+    if (truncated) void reader.cancel().catch(() => {});
+    else reader.releaseLock();
+  }
+  const all = new Uint8Array(bytes);
+  let at = 0;
+  for (const chunk of chunks) {
+    all.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return { text: new TextDecoder().decode(all), bytes, truncated };
+}
+
 async function bodyReceived(response: Response): Promise<unknown> {
   const type = response.headers.get('content-type') ?? '';
+  const clone = response.clone();
   try {
-    if (BINARY.test(type)) return `[${(await response.clone().arrayBuffer()).byteLength} bytes of ${type}]`;
-    return await response.clone().text();
+    if (BINARY.test(type)) {
+      // A missing header reads as 0, so the check has to tell it from a real 0.
+      const header = response.headers.get('content-length');
+      const length = header === null ? null : Number(header);
+      if (length !== null && Number.isFinite(length) && length >= 0) {
+        void clone.body?.cancel().catch(() => {});
+        return `[${length} bytes of ${type}]`;
+      }
+      const { bytes, truncated } = await readStart(clone, MAX_BODY_BYTES);
+      return `[${truncated ? `more than ${bytes}` : String(bytes)} bytes of ${type}]`;
+    }
+    return (await readStart(clone, MAX_BODY_BYTES)).text;
   } catch {
     return '[unreadable]';
   }

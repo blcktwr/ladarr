@@ -58,6 +58,45 @@ describe('outboundFetch', () => {
     expect(entries[0]).not.toHaveProperty('ms');
   });
 
+  it('keeps the start of a big answer in the log, and gives the whole answer to the caller', async () => {
+    useLog('big');
+    const big = JSON.stringify({ results: Array.from({ length: 4000 }, (_, i) => ({ id: i, title: `Release ${i}` })) });
+    const send = outboundFetch('Indexer', answer(new Response(big, { status: 200, headers: { 'content-type': 'application/json' } })));
+
+    const response = await send('https://indexer.test/api?t=search');
+    expect(await response.text()).toBe(big);
+
+    const [entry] = await readEntries();
+    const body = (entry!.response as { body?: unknown }).body;
+    expect(typeof body).toBe('string');
+    expect(String(body).length).toBeLessThan(2_100);
+    expect(String(body)).toContain('Release 0');
+    expect(JSON.stringify(entry)).not.toContain('Release 3999');
+  });
+
+  it('logs the size of a binary answer from its header, and leaves the whole answer to the caller', async () => {
+    useLog('binary');
+    const bytes = new Uint8Array(4_096).fill(7);
+    const headers = { 'content-type': 'application/x-bittorrent', 'content-length': '4096' };
+    const send = outboundFetch('Indexer', answer(new Response(bytes, { status: 200, headers })));
+
+    const response = await send('https://indexer.test/api?t=download');
+    expect((await response.arrayBuffer()).byteLength).toBe(4_096);
+
+    expect((await readEntries())[0]).toMatchObject({ response: { status: 200, body: '[4096 bytes of application/x-bittorrent]' } });
+  });
+
+  it('counts a binary answer with no length header, and leaves the whole answer to the caller', async () => {
+    useLog('binary-no-length');
+    const bytes = new Uint8Array(4_096).fill(7);
+    const send = outboundFetch('Indexer', answer(new Response(bytes, { status: 200, headers: { 'content-type': 'application/x-bittorrent' } })));
+
+    const response = await send('https://indexer.test/api?t=download');
+    expect((await response.arrayBuffer()).byteLength).toBe(4_096);
+
+    expect((await readEntries())[0]).toMatchObject({ response: { status: 200, body: '[4096 bytes of application/x-bittorrent]' } });
+  });
+
   it('takes the method and the body from the init', async () => {
     useLog('method');
     const send = outboundFetch('Download client qBittorrent', answer(new Response('Ok.', { status: 200 })));
