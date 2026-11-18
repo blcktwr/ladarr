@@ -2,7 +2,6 @@ import type { EpisodeRef, QueueEntryView, QueueGroupPage, QueueMatchPreview, Que
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Dropdown, EmptyState, Modal, Spinner, Table, Text } from 'nebula';
-import { Alert } from '../../components/alert.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { formatBytes, groupName, seasonName } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
@@ -66,11 +65,14 @@ export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone
   // first download of the dialog.
   const targetOf = (point: EpisodeRef) => entries.find((item) => item.id === `${entry.titleKey}:${point.season}x${point.number}`) ?? [...anchors.values()][0]!;
   const fileOf = (point: EpisodeRef) => chosen[pointKey(point)] ?? '';
+  // The file that covers the episode now. An episode that a file covers needs no mapping, so the row says Matched.
+  const currentFileOf = (point: EpisodeRef) =>
+    packOf(targetOf(point))?.files.find((file) => file.current?.some((cover) => cover.season === point.season && cover.number === point.number))?.rel;
   const optionsOf = (point: EpisodeRef) => {
-    const pack = packOf(targetOf(point));
+    const pack = packOf(targetOf(point))?.files ?? [];
     return [
       { value: '', label: t('Unassigned') },
-      ...(pack?.files ?? []).map((file) => ({ value: file.rel, label: `${file.rel} (${formatBytes(file.sizeBytes)})` })),
+      ...(pack.length ? pack : files).map((file) => ({ value: file.rel, label: `${file.rel} (${formatBytes(file.sizeBytes)})` })),
     ];
   };
 
@@ -158,18 +160,19 @@ export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone
         }
         setOpen(next);
       }}
-      title={series ? groupName(entry) : entry.label}
+      title={series ? groupName({ ...entry, season: null }) : entry.label}
       trigger={<Button>{text}</Button>}
       width="lg"
       actions={
-        <Button disabled={!count || loading || busy} pending={busy} onClick={() => void save()}>{t('Apply mapping')}</Button>
+        <>
+          {shown && <p role="alert" className="text-error mr-auto">{shown}</p>}
+          <Button disabled={busy || (!series && (!movie || loading))} pending={busy} onClick={() => void save()}>{t('Apply mapping')}</Button>
+        </>
       }
     >
       {open && <div className="grid grid-cols-[minmax(0,1fr)] justify-items-start gap-5 w-full">
-        {shown && <Alert tone="danger">{shown}</Alert>}
         {series && seasons.length > 0 && (
           <Dropdown
-            label={t('Season')}
             value={current === null ? '' : String(current)}
             options={seasons.map((number) => ({ value: String(number), label: seasonName(number) }))}
             onValueChange={(value) => setSeason(Number(value))}
@@ -180,23 +183,26 @@ export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone
             aria-label={t('Map episodes')}
             loading={loading}
             columns={[
-              { label: t('Episodes'), width: '5rem' },
+              { label: t('Episodes'), width: 'clamp(5rem, 20vw, 9rem)' },
               { label: t('Matches') },
             ]}
             rows={rows.map((point) => ({
               key: pointKey(point),
               cells: [
                 <Text key="episode">{pointText(point)}</Text>,
-                <Dropdown
-                  key="match"
-                  size="sm"
-                  width="full"
-                  reserve={false}
-                  value={fileOf(point)}
-                  disabled={busy || !(packOf(targetOf(point))?.files.length)}
-                  options={optionsOf(point)}
-                  onValueChange={(value) => change(pointKey(point), value)}
-                />,
+                currentFileOf(point) ? (
+                  <Text key="match" variant="small">{t('Matched')}</Text>
+                ) : (
+                  <Dropdown
+                    key="match"
+                    size="sm"
+                    width="full"
+                    reserve={false}
+                    value={fileOf(point)}
+                    options={optionsOf(point)}
+                    onValueChange={(value) => change(pointKey(point), value)}
+                  />
+                ),
               ],
             }))}
           />
@@ -206,7 +212,6 @@ export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone
           <Dropdown
             label={t('File')}
             value={movie}
-            disabled={busy}
             options={[
               { value: '', label: t('Unassigned') },
               ...(moviePack?.files ?? []).map((file) => ({ value: file.rel, label: `${file.rel} (${formatBytes(file.sizeBytes)})` })),

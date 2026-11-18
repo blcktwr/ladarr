@@ -250,12 +250,12 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   const requests = matchRequests(page);
   await maps.click();
   const panel = page.getByRole('dialog');
-  await expect(panel).toHaveAccessibleName(/Show Name.*Season 1/);
+  await expect(panel).toHaveAccessibleName(/Show Name/);
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
   await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(4);
   for (const label of ['S01E01', 'S01E02', 'S01E03']) await expect(table.getByText(label, { exact: true })).toHaveCount(1);
-  await expect(panel.getByRole('combobox', { name: 'Season', exact: true })).toContainText('Season 1');
+  await expect(panel.getByRole('combobox').first()).toContainText('Season 1');
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('combobox', { name: 'Library', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
@@ -266,7 +266,7 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   }
   const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
   await expect(apply).toHaveCount(1);
-  await expect(apply).toBeDisabled();
+  await expect(apply).toBeEnabled();
   await expect(panel.locator(':scope > :last-child > button', { hasText: 'Apply mapping' })).toBeVisible();
   await expect.poll(async () => {
     const box = await panel.boundingBox();
@@ -274,7 +274,7 @@ test('shows source-scoped actions in one row without episode or reason lists', a
     return box ? Math.abs(box.x + box.width / 2 - viewport.width / 2) : Infinity;
   }).toBeLessThan(2);
   const rowOf = (episode: string) => table.getByRole('row').filter({ hasText: episode });
-  await expect(rowOf('S01E03').getByRole('combobox')).toBeDisabled();
+  await expect(rowOf('S01E03').getByRole('combobox')).toBeEnabled();
   for (const [index, file] of ['Source A.mkv', 'Source B.mkv'].entries()) {
     await rowOf(`S01E0${index + 1}`).getByRole('combobox').click();
     await expect(page.getByRole('option', { name: new RegExp(file.replace('.', '\\.')) })).toBeVisible();
@@ -329,13 +329,16 @@ test('maps one blocked episode and preserves the library file coverage across se
   await open(page, 'group:tv:3:1');
   await page.getByRole('main').getByRole('button', { name: 'Map episodes', exact: true }).click();
   const panel = page.getByRole('dialog');
-  await expect(panel).toHaveAccessibleName(/Two Seasons.*Season 1/);
+  await expect(panel).toHaveAccessibleName(/Two Seasons/);
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
   await expect(table.getByRole('row')).toHaveCount(3);
   for (const label of ['S01E01', 'S01E02']) {
     await expect(table.getByText(label, { exact: true })).toHaveCount(1);
   }
   await expect(table.getByText('S02E03', { exact: true })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
+  await expect(table.getByRole('row').filter({ hasText: 'S01E02' }).getByText('Matched', { exact: true })).toBeVisible();
+  await expect(table.getByRole('row').filter({ hasText: 'S01E02' }).getByRole('combobox')).toHaveCount(0);
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
   await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('combobox').click();
@@ -489,7 +492,7 @@ for (const shared of [false, true]) {
     await expect(table.getByRole('row')).toHaveCount(4);
     await expect(table.getByRole('combobox')).toHaveCount(3);
     const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
-    await expect(apply).toBeDisabled();
+    await expect(apply).toBeEnabled();
     for (const [label, file] of [
       ['S01E01', /Part A\.mkv/],
       ['S01E02', shared ? /Part A\.mkv/ : /Part B\.mkv/],
@@ -595,7 +598,7 @@ test('keeps the season and existing associations unchanged when a file choice is
     await page.getByRole('main').getByRole('button', { name: 'Map episodes', exact: true }).click();
     const panel = page.getByRole('dialog');
     const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
-    await expect(apply).toBeDisabled();
+    await expect(apply).toBeEnabled();
     const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
     await expect(table.getByRole('row')).toHaveCount(3);
     await expect(table.getByText('S01E02', { exact: true })).toHaveCount(1);
@@ -714,6 +717,29 @@ test('attaches the download to both descriptor targets when a stuck group saves'
   await expect(modal).toBeHidden();
   await expect.poll(async () => (await entry(first.id)).status, { timeout: 60_000 }).toBe('available');
   await expect.poll(async () => (await entry(second.id)).status, { timeout: 60_000 }).toBe('available');
+});
+
+test('shows the failure of Apply mapping inside the dialog', async ({ page }) => {
+  const stopped = blocked('tv:3', 1, 1, 'importing', 'file_unmapped');
+  const title = data.titles['tv:3']!;
+  title.folder = 'Two Seasons (2021)';
+  const folder = join(stack.folders.tv, title.folder, 'Season 01');
+  mkdirSync(folder, { recursive: true });
+  for (const name of ['Episode one.mkv', 'Episode two.mkv']) writeFileSync(join(folder, name), 'video');
+  await start([stopped]);
+  await page.route(`**/queue/entries/${stopped.id}/match`, (route) =>
+    route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'download_not_found' }) }),
+  );
+
+  await open(page, 'group:tv:3:1');
+  await page.getByRole('main').getByRole('button', { name: 'Map episodes', exact: true }).click();
+  const panel = page.getByRole('dialog');
+  await panel.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('combobox').click();
+  await page.getByRole('option', { name: /Episode one\.mkv/ }).click();
+  await panel.getByRole('button', { name: 'Apply mapping', exact: true }).click();
+  await expect(panel.getByRole('alert')).toHaveText('The download folder is not the same as configured as media.');
+  await expect(panel).toBeVisible();
+  expect((await entry(stopped.id)).status).toBe('stuck');
 });
 
 test('shows one attach action for the two downloads of a stuck season', async ({ page }) => {
