@@ -10,7 +10,7 @@ export const PORT = Number(process.env.LADARR_E2E_PORT ?? 3111);
 export const URL_BASE = `http://127.0.0.1:${PORT}`;
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const MIB = 1024 * 1024;
-export const OWNER = { password: 'correct horse' };
+export const OWNER = { password: 'admin' };
 
 // The names and sizes fit the default preset (1080p).
 export const MOVIE_RELEASE = 'Movie.Name.2019.1080p.BluRay.x264-GRP';
