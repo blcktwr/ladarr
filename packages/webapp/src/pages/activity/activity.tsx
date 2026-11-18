@@ -15,7 +15,6 @@ import { MatchDialog } from './activity-match.tsx';
 import { AttachDialog } from './activity-client.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { Link, LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
-import { NumberingDialog } from '../../components/numbering.tsx';
 import { catalogPath, formatBytes, groupName, posterUrl, reasonText, seasonName, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
@@ -91,7 +90,6 @@ const retryActions = new Set<QueueResolution['action']>(['retry', 'retry_fetch',
 
 // The server supplies each action and its explicit target scope.
 function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refresh }: { entry: QueueEntryView; entries?: QueueEntryView[]; actions?: QueueResolution[]; run: Run; refresh: () => void }) {
-  const [numbering, setNumbering] = useState(false);
   return (
     <>
       {actions?.map((item) => {
@@ -100,8 +98,6 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
         const targets = entries.filter((target) => item.ids.includes(target.id));
         const target = targets[0] ?? entry;
         switch (action) {
-          case 'edit_numbering':
-            return <Button key={item.action} onClick={() => setNumbering(true)}>{t(item.label)}</Button>;
           case 'match':
           case 'use_existing':
             return <MatchDialog key={item.action} entry={target} ids={item.ids} label={item.label} fileSource={item.fileSource ?? (action === 'use_existing' ? 'library' : undefined)} fixedSource={action === 'use_existing'} onDone={refresh} />;
@@ -115,20 +111,18 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
             return <Button key={`${action}:${item.label}`} onClick={() => void run(action, item.ids, undefined, item.label)}>{t(item.label)}</Button>;
         }
       })}
-      <NumberingDialog titleKey={entry.titleKey} open={numbering} onOpenChange={setNumbering} onSaved={refresh} />
     </>
   );
 }
 
 // Each cause and source keeps its own affected episodes and actions.
 function GroupFix({ actions, stopped, run, refresh }: { actions: QueueResolution[]; stopped: QueueEntryView[]; run: Run; refresh: () => void }) {
-  const visible = actions.filter((item) => !retryActions.has(item.action));
-  const available = visible.some((item) => item.action === 'match') ? visible.filter((item) => item.action !== 'edit_numbering') : visible;
+  const available = actions.filter((item) => !retryActions.has(item.action));
   if (!available.length) return null;
   const groups = new Map<string, { entries: QueueEntryView[]; actions: QueueResolution[] }>();
   const common = new Map<string, QueueResolution>();
   for (const item of available) {
-    if (!['edit_numbering', 'match', 'apply_numbering', 'replace'].includes(item.action)) continue;
+    if (!['match', 'apply_numbering', 'replace'].includes(item.action)) continue;
     const current = common.get(item.action);
     common.set(item.action, { ...(current ?? item), ids: [...new Set([...(current?.ids ?? []), ...item.ids])] });
   }

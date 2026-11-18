@@ -658,6 +658,7 @@ export const es: Record<string, string> = {
   '{total} episodes in total': '{total} episodios en total',
   'No episodes.': 'Sin episodios.',
   'Episodes': 'Episodios',
+  'Matches': 'Coincidencias',
   'Air date': 'Fecha de emisión',
   '{minutes} min': '{minutes} min',
   'Add {season}': 'Agregar {season}',

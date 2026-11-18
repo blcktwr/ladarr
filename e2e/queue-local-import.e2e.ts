@@ -60,7 +60,7 @@ test('offers the file of the folder and maps the episode with it', async ({ page
   const panel = page.getByRole('dialog');
   await expect(panel).toHaveAccessibleName(/Show Name.*Season 1/);
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
-  await expect(table.getByRole('columnheader')).toHaveText(['Episode']);
+  await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(4);
   await expect(table.getByRole('combobox')).toHaveCount(3);
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
@@ -68,7 +68,7 @@ test('offers the file of the folder and maps the episode with it', async ({ page
   const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
   await expect(apply).toBeDisabled();
   await expect(panel.locator(':scope > :last-child > button', { hasText: 'Apply mapping' })).toBeVisible();
-  await table.getByRole('combobox', { name: 'Show Name S01E01', exact: true }).click();
+  await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('combobox').click();
   await page.getByRole('option', { name: /Clip A\.mkv/ }).click();
   await expect(panel.getByRole('button', { name: 'Preview changes', exact: true })).toHaveCount(0);
   await expect(apply).toBeEnabled();

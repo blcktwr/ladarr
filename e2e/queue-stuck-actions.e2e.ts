@@ -252,11 +252,10 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   const panel = page.getByRole('dialog');
   await expect(panel).toHaveAccessibleName(/Show Name.*Season 1/);
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
-  await expect(table.getByRole('columnheader')).toHaveText(['Episode']);
-  await expect(table.getByRole('row')).toHaveCount(3);
-  await expect(table).toContainText('Show Name S01E01');
-  await expect(table).toContainText('Show Name S01E02');
-  await expect(table).not.toContainText('Show Name S01E03');
+  await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Matches']);
+  await expect(table.getByRole('row')).toHaveCount(4);
+  for (const label of ['S01E01', 'S01E02', 'S01E03']) await expect(table.getByText(label, { exact: true })).toHaveCount(1);
+  await expect(panel.getByRole('combobox', { name: 'Season', exact: true })).toContainText('Season 1');
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('combobox', { name: 'Library', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
@@ -274,8 +273,10 @@ test('shows source-scoped actions in one row without episode or reason lists', a
     const viewport = page.viewportSize()!;
     return box ? Math.abs(box.x + box.width / 2 - viewport.width / 2) : Infinity;
   }).toBeLessThan(2);
+  const rowOf = (episode: string) => table.getByRole('row').filter({ hasText: episode });
+  await expect(rowOf('S01E03').getByRole('combobox')).toBeDisabled();
   for (const [index, file] of ['Source A.mkv', 'Source B.mkv'].entries()) {
-    await table.getByRole('row').filter({ hasText: `Show Name S01E0${index + 1}` }).getByRole('combobox').click();
+    await rowOf(`S01E0${index + 1}`).getByRole('combobox').click();
     await expect(page.getByRole('option', { name: new RegExp(file.replace('.', '\\.')) })).toBeVisible();
     await expect(page.getByRole('option', { name: index === 0 ? /Source B\.mkv/ : /Source A\.mkv/ })).toHaveCount(0);
     await page.getByRole('option', { name: new RegExp(file.replace('.', '\\.')) }).click();
@@ -330,14 +331,14 @@ test('maps one blocked episode and preserves the library file coverage across se
   const panel = page.getByRole('dialog');
   await expect(panel).toHaveAccessibleName(/Two Seasons.*Season 1/);
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
-  await expect(table.getByRole('row')).toHaveCount(2);
-  await expect(table).toContainText('Two Seasons S01E01');
-  for (const label of ['Two Seasons S01E02', 'Two Seasons S02E03', 'Two Seasons S02E04']) {
-    await expect(table.getByText(label, { exact: true })).toHaveCount(0);
+  await expect(table.getByRole('row')).toHaveCount(3);
+  for (const label of ['S01E01', 'S01E02']) {
+    await expect(table.getByText(label, { exact: true })).toHaveCount(1);
   }
+  await expect(table.getByText('S02E03', { exact: true })).toHaveCount(0);
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
-  await table.getByRole('row').filter({ hasText: 'Two Seasons S01E01' }).getByRole('combobox').click();
+  await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('combobox').click();
   await page.getByRole('option', { name: /Segments\.mkv/ }).click();
   await expect(panel.getByRole('button', { name: 'Preview changes', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
@@ -444,7 +445,7 @@ test('offers download files without a library source for one target that already
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
   await expect(table.getByRole('row')).toHaveCount(3);
-  await panel.getByRole('combobox', { name: 'Two Seasons S01E01', exact: true }).click();
+  await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('combobox').click();
   await expect(page.getByRole('option', { name: /Library alternative\.mkv/ })).toHaveCount(0);
   await page.getByRole('option', { name: /Download alternative\.mkv/ }).click();
   await expect(panel.getByRole('button', { name: 'Preview changes', exact: true })).toHaveCount(0);
@@ -490,10 +491,10 @@ for (const shared of [false, true]) {
     const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
     await expect(apply).toBeDisabled();
     for (const [label, file] of [
-      ['Show Name S01E01', /Part A\.mkv/],
-      ['Show Name S01E02', shared ? /Part A\.mkv/ : /Part B\.mkv/],
+      ['S01E01', /Part A\.mkv/],
+      ['S01E02', shared ? /Part A\.mkv/ : /Part B\.mkv/],
     ] as const) {
-      await table.getByRole('combobox', { name: label, exact: true }).click();
+      await table.getByRole('row').filter({ hasText: label }).getByRole('combobox').click();
       await page.getByRole('option', { name: file }).click();
     }
     await expect(apply).toBeEnabled();
@@ -596,11 +597,11 @@ test('keeps the season and existing associations unchanged when a file choice is
     const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
     await expect(apply).toBeDisabled();
     const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
-    await expect(table.getByRole('row')).toHaveCount(2);
-    await expect(table.getByText('Two Seasons S01E02', { exact: true })).toHaveCount(0);
+    await expect(table.getByRole('row')).toHaveCount(3);
+    await expect(table.getByText('S01E02', { exact: true })).toHaveCount(1);
     await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
     await expect(panel.getByRole('checkbox')).toHaveCount(0);
-    await panel.getByRole('combobox', { name: 'Two Seasons S01E01', exact: true }).click();
+    await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('combobox').click();
     await page.getByRole('option', { name: /Existing association\.mkv/ }).click();
     await expect(apply).toBeEnabled();
     expect(writes).toEqual([]);
