@@ -23,7 +23,6 @@ type FileSource = QueuePackFiles['source'];
 // season, and each one takes the file of its download that holds it.
 export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone }: { entry: QueueEntryView; ids?: string[]; label?: string; fileSource?: FileSource; fixedSource?: boolean; onDone: () => void }) {
   const [open, setOpen] = useState(false);
-  const [season, setSeason] = useState<number | null>(entry.season);
   const [chosen, setChosen] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,7 +30,7 @@ export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone
   const series = entry.mediaType === 'tv';
   const affected = ids ?? [entry.id];
   const targets = useQuery<QueueGroupPage>({
-    queryKey: [`/queue/groups/${entry.titleKey}?season=${season ?? entry.season}`],
+    queryKey: [`/queue/groups/${entry.titleKey}?season=${entry.season}`],
     enabled: open && series,
   });
   const entries = series ? targets.data?.items ?? [entry] : [entry];
@@ -55,8 +54,7 @@ export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone
   const base = packs.find((query) => query.data)?.data;
   const files = base?.files ?? [];
   const targetsOfTitle = (base?.entries ?? []).filter((target): target is EpisodeRef & { id: string; label: string } => target.season !== null && target.number !== null);
-  const seasons = [...new Set(targetsOfTitle.map((target) => target.season))].sort((a, b) => a - b);
-  const current = season !== null && seasons.includes(season) ? season : seasons[0] ?? null;
+  const current = entry.season;
   const rows = targetsOfTitle.filter((target) => target.season === current).sort((a, b) => a.number - b.number);
   const loading = (series && targets.isPending) || packs.some((query) => query.isPending);
   const failed = targets.error ?? packs.find((query) => query.error)?.error;
@@ -160,7 +158,7 @@ export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone
         }
         setOpen(next);
       }}
-      title={series ? groupName({ ...entry, season: null }) : entry.label}
+      title={series && entry.season !== null ? `${groupName({ ...entry, season: null })} / ${seasonName(entry.season)}` : entry.label}
       trigger={<Button>{text}</Button>}
       width="lg"
       actions={
@@ -171,13 +169,6 @@ export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone
       }
     >
       {open && <div className="grid grid-cols-[minmax(0,1fr)] justify-items-start gap-5 w-full">
-        {series && seasons.length > 0 && (
-          <Dropdown
-            value={current === null ? '' : String(current)}
-            options={seasons.map((number) => ({ value: String(number), label: seasonName(number) }))}
-            onValueChange={(value) => setSeason(Number(value))}
-          />
-        )}
         {series ? (
           <Table
             aria-label={t('Map episodes')}

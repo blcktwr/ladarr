@@ -255,7 +255,7 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(4);
   for (const label of ['S01E01', 'S01E02', 'S01E03']) await expect(table.getByText(label, { exact: true })).toHaveCount(1);
-  await expect(panel.getByRole('combobox').first()).toContainText('Season 1');
+  await expect(panel).toHaveAccessibleName('Show Name (2020) / Season 1');
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('combobox', { name: 'Library', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
