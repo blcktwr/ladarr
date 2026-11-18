@@ -255,7 +255,7 @@ export const es: Record<string, string> = {
   'Installed version': 'Versión instalada',
   'Version {version} is available.': 'La versión {version} está disponible.',
   'Install update': 'Instalar actualización',
-  'Version {version} installed, the server will restart...': 'Versión {version} instalada, el servidor se reiniciará...',
+  'Version {version} installed, the server will restart in {seconds}s...': 'Versión {version} instalada, el servidor se reiniciará en {seconds}s...',
   'Installing update': 'Instalando actualización',
   'New version {version}': 'Nueva versión {version}',
   'You have the latest version.': 'Tienes la última versión.',

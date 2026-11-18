@@ -1,6 +1,6 @@
 import type { BackupsResponse, UpdateCheck, VersionInfo } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, apiUrl } from '../../lib/api.ts';
 import { Badge, Button, Details, Divider, EmptyState, List, Row, Section, Spinner, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
@@ -18,6 +18,23 @@ export function SystemVersion() {
   const [pending, setPending] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [installed, setInstalled] = useState('');
+  const [seconds, setSeconds] = useState(6);
+
+  // The page waits for the server, and a reload brings the page of the new version.
+  useEffect(() => {
+    if (!installed) return;
+    let left = 6;
+    setSeconds(left);
+    const id = setInterval(() => {
+      left -= 1;
+      setSeconds(left);
+      if (left <= 0) {
+        clearInterval(id);
+        location.reload();
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [installed]);
 
   async function check() {
     setFailed(false);
@@ -79,7 +96,7 @@ export function SystemVersion() {
           {result.notes && <pre>{result.notes}</pre>}
         </>
       ) : null}
-      {installed && <Text variant="body" className="w-full text-center text-success">{t('Version {version} installed, the server will restart...', { version: installed })}</Text>}
+      {installed && <Text variant="body" className="w-full text-center text-success">{t('Version {version} installed, the server will restart in {seconds}s...', { version: installed, seconds })}</Text>}
       {failed && <Alert tone="danger">{t('The request did not complete.')}</Alert>}
     </Section>
   );
