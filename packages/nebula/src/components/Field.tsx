@@ -1,6 +1,6 @@
 import { Field as BaseField } from '@base-ui/react/field';
 import { CircleAlert } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { flat, flatSmall } from '../theme/stone.ts';
 
 const widths = { xs: 'w-12', sm: 'w-32', md: 'w-80 max-w-full', full: 'w-full' };
@@ -32,10 +32,21 @@ type FieldProps = Omit<BaseField.Control.Props, 'className' | 'size'> & {
 // A small field has no place for the error when there is none, so it stays compact in a row.
 export function Field({ label, hideLabel, description, error, width = 'md', size = 'md', deactivated, action, suffix, ...props }: FieldProps) {
   const disabled = props.disabled || deactivated;
+  const { ref, ...controlProps } = props;
+  const controlRef = useRef<HTMLElement>(null);
   const look = sizes[size];
+  // A disabled control takes no focus. The browser keeps the focus of a control that becomes disabled, so the field drops it.
+  useEffect(() => {
+    if (disabled) controlRef.current?.blur();
+  }, [disabled]);
+  const setControl = (element: HTMLElement | null) => {
+    controlRef.current = element;
+    if (typeof ref === 'function') ref(element as HTMLInputElement | null);
+    else if (ref) ref.current = element as HTMLInputElement | null;
+  };
   // A small field sits in a row of values, so the arrows of a number input do not match the stone.
   const spin = size === 'sm' ? '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none' : '';
-  const control = <BaseField.Control {...props} disabled={disabled} data-deactivated={deactivated || undefined} className={suffix ? `w-full min-w-0 bg-transparent ${look.text} ${spin} outline-none placeholder:text-fog placeholder:opacity-60 disabled:cursor-not-allowed` : `${look.surface} w-full min-w-0 ${look.pad} ${look.text} ${spin}`} />;
+  const control = <BaseField.Control {...controlProps} ref={setControl} disabled={disabled} data-deactivated={deactivated || undefined} className={suffix ? `w-full min-w-0 bg-transparent ${look.text} ${spin} outline-none placeholder:text-fog placeholder:opacity-60 disabled:cursor-not-allowed` : `${look.surface} w-full min-w-0 ${look.pad} ${look.text} ${spin}`} />;
   const field = suffix ? (
     <div data-invalid={error ? '' : undefined} data-disabled={disabled ? '' : undefined} data-deactivated={deactivated || undefined} className={`${look.surface} flex items-center gap-2 w-full min-w-0 ${look.pad} focus-within:inset-ring-3 focus-within:inset-ring-accent`}>
       {control}
