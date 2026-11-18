@@ -715,3 +715,26 @@ test('attaches the download to both descriptor targets when a stuck group saves'
   await expect.poll(async () => (await entry(first.id)).status, { timeout: 60_000 }).toBe('available');
   await expect.poll(async () => (await entry(second.id)).status, { timeout: 60_000 }).toBe('available');
 });
+
+test('shows one attach action for the two downloads of a stuck season', async ({ page }) => {
+  const first = blocked('tv:3', 1, 1, 'sending', 'torrent_exists');
+  const second = blocked('tv:3', 1, 2, 'sending', 'torrent_exists');
+  const files = { 'Two.Seasons.S01E01.mkv': 'one', 'Two.Seasons.S01E02.mkv': 'two' };
+  download(first, 'Two.Seasons.S01.1080p.WEB-DL-GRP', files);
+  download(second, 'Two.Seasons.S01.1080p.WEB-DL-GRP.copy', files);
+  await start([first, second]);
+
+  await open(page, 'group:tv:3:1');
+  const attach = page.getByRole('main').getByRole('button', { name: 'Attach download', exact: true });
+  await expect(attach).toHaveCount(1);
+  await attach.click();
+  const modal = page.getByRole('dialog');
+  await modal.getByRole('combobox', { name: 'Download', exact: true }).click();
+  await page.getByRole('option', { name: /Two\.Seasons\.S01\.1080p\.WEB-DL-GRP \(/ }).click();
+  const [preview] = await Promise.all([
+    page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/queue/entries/${first.id}/attach` && response.request().postDataJSON().preview === true),
+    modal.getByRole('button', { name: 'Save', exact: true }).click(),
+  ]);
+  expect(preview.request().postDataJSON()).toMatchObject({ ids: [second.id], preview: true });
+  expect((await preview.json()).affected.map((item: { id: string }) => item.id)).toEqual([first.id, second.id]);
+});

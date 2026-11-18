@@ -115,33 +115,25 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
   );
 }
 
-// Each cause and source keeps its own affected episodes and actions.
+// The fixes of a season. The server scopes each action by cause and source, but a fix changes every target that it
+// covers, so the row shows each action once, with all of its targets. The settings link keeps one button for each page
+// that it opens.
+const fixKey = (item: QueueResolution) => (item.action === 'settings' ? `settings:${item.settings === 'library' ? 'media' : 'connections'}` : item.action);
+
 function GroupFix({ actions, stopped, run, refresh }: { actions: QueueResolution[]; stopped: QueueEntryView[]; run: Run; refresh: () => void }) {
-  const available = actions.filter((item) => !retryActions.has(item.action));
-  if (!available.length) return null;
-  const groups = new Map<string, { entries: QueueEntryView[]; actions: QueueResolution[] }>();
-  const common = new Map<string, QueueResolution>();
-  for (const item of available) {
-    if (!['match', 'apply_numbering', 'replace'].includes(item.action)) continue;
-    const current = common.get(item.action);
-    common.set(item.action, { ...(current ?? item), ids: [...new Set([...(current?.ids ?? []), ...item.ids])] });
+  const fixes = new Map<string, QueueResolution>();
+  for (const item of actions) {
+    if (retryActions.has(item.action)) continue;
+    const key = fixKey(item);
+    const current = fixes.get(key);
+    fixes.set(key, { ...(current ?? item), ids: [...new Set([...(current?.ids ?? []), ...item.ids])] });
   }
-  for (const entry of stopped) {
-    const descriptors = available.filter((item) => item.ids.includes(entry.id));
-    const key = JSON.stringify([entry.phase, entry.reason?.code, entry.reason?.detail, descriptors[0]?.source ?? entry.release?.title ?? entry.file?.name]);
-    const group = groups.get(key) ?? { entries: [], actions: descriptors };
-    group.entries.push(entry);
-    groups.set(key, group);
-  }
+  const entry = stopped[0];
+  if (!fixes.size || !entry) return null;
   return (
     <div className="flex flex-wrap justify-start gap-2 mt-2 w-full">
-      {[...groups].map(([key, group]) => {
-        const ids = group.entries.map((item) => item.id);
-        const local = group.actions.filter((item) => !common.has(item.action)).map((item) => ({ ...item, ids: item.ids.filter((id) => ids.includes(id)) }));
-        return <EntryFix key={key} entry={group.entries[0]!} entries={group.entries} actions={local} run={run} refresh={refresh} />;
-      })}
-      {stopped[0] && [...common.values()].map((item) => (
-        <EntryFix key={item.action} entry={stopped[0]} entries={stopped} actions={[item]} run={run} refresh={refresh} />
+      {[...fixes].map(([key, item]) => (
+        <EntryFix key={key} entry={entry} entries={stopped} actions={[item]} run={run} refresh={refresh} />
       ))}
     </div>
   );
