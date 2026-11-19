@@ -187,6 +187,7 @@ export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone
                     <TagInput
                       key={hash}
                       label={t('Torrent')}
+                      hideLabel
                       width="full"
                       allowCustom={false}
                       emptyText={t('No options.')}

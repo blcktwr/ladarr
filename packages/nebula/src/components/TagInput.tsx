@@ -9,6 +9,8 @@ export type TagOption = string | { value: string; label?: string; disabled?: boo
 
 type TagInputProps = {
   label: string;
+  // The label is for a screen reader only. The field keeps no space for an empty error row.
+  hideLabel?: boolean;
   value: string[];
   onValueChange: (value: string[]) => void;
   // The tags that a person can select. A typed text that is not in the list becomes a tag of its own.
@@ -29,7 +31,7 @@ const normalize = (options: TagOption[]) => options.map((option) => (typeof opti
 // An input with tags. A tag has a cross that removes it. The list of options filters as the person types, and Enter
 // adds the highlighted option or the one that matches the text. Without a match, the text itself becomes a tag,
 // unless allowCustom is false.
-export function TagInput({ label, value, onValueChange, options = [], allowCustom = true, placeholder, description, error, emptyText = 'No options.', disabled, width = 'md' }: TagInputProps) {
+export function TagInput({ label, hideLabel, value, onValueChange, options = [], allowCustom = true, placeholder, description, error, emptyText = 'No options.', disabled, width = 'md' }: TagInputProps) {
   const id = useId();
   const descriptionId = useId();
   const errorId = useId();
@@ -66,7 +68,7 @@ export function TagInput({ label, value, onValueChange, options = [], allowCusto
 
   return (
     <div className={`grid gap-2 ${widths[width]}`}>
-      <label htmlFor={id} className="text-ink text-[13px]/none font-[550]">
+      <label htmlFor={id} className={hideLabel ? 'sr-only' : 'text-ink text-[13px]/none font-[550]'}>
         {label}
       </label>
       <Combobox.Root
@@ -154,14 +156,16 @@ export function TagInput({ label, value, onValueChange, options = [], allowCusto
           {description}
         </p>
       )}
-      <div className="grid min-h-3.5">
-        {error && (
-          <p id={errorId} className="flex items-center gap-1.5 min-h-4 -mt-0.5 text-error text-[13px]/4 font-medium">
-            <CircleAlert className="size-3.5 shrink-0" />
-            {error}
-          </p>
-        )}
-      </div>
+      {(!hideLabel || error) && (
+        <div className="grid min-h-3.5">
+          {error && (
+            <p id={errorId} className="flex items-center gap-1.5 min-h-4 -mt-0.5 text-error text-[13px]/4 font-medium">
+              <CircleAlert className="size-3.5 shrink-0" />
+              {error}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
