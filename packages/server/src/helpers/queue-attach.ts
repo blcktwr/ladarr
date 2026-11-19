@@ -5,7 +5,7 @@ import { db } from '../core/db.ts';
 import { inside, torrentVideos } from '../library/imports/importer.ts';
 import { titleFiles } from '../library/imports/local.ts';
 import { isActive, phaseOfEntry } from '../library/downloads/queue.ts';
-import type { AttachCache, ClientHandle, Clients, QueueEntry } from '../types.ts';
+import type { AttachCache, ClientHandle, Clients, QueueEntry, Torrent } from '../types.ts';
 
 export const HASH = /^[0-9a-f]{40}$/;
 export const MAX_TORRENTS = 100;
@@ -20,7 +20,24 @@ export function attachRefusal(entry: QueueEntry): string | null {
   return 'This target is not waiting for a download.';
 }
 
-export async function matchSource(entry: QueueEntry, clients: Clients, source: 'library' | 'download' = entry.transferHash ? 'download' : 'library') {
+export const torrentInUse = (entry: QueueEntry, hash: string) =>
+  Object.values(db.data.queue).some((other) => other.transferHash === hash && isActive(other) && other.titleKey !== entry.titleKey);
+
+async function findDownload(entry: QueueEntry, clients: Clients, hash: string | undefined): Promise<{ handle: ClientHandle; torrent: Torrent } | { error: 'torrent_in_use' | 'download_not_found' | 'client_missing' | 'torrent_not_found' }> {
+  if (hash && torrentInUse(entry, hash)) return { error: 'torrent_in_use' };
+  const transfer = hash ?? entry.transferHash;
+  if (!transfer) return { error: 'download_not_found' };
+  const owner = hash ? Object.values(db.data.queue).find((other) => other.transferHash === hash && other.clientId && isActive(other)) : entry;
+  const handles = owner ? [clients.get(owner.clientId)].filter((handle): handle is ClientHandle => Boolean(handle)) : clients.all();
+  if (!handles.length) return { error: 'client_missing' };
+  for (const handle of handles) {
+    const torrent = await handle.api.find(transfer);
+    if (torrent && (!hash || torrent.complete)) return { handle, torrent };
+  }
+  return { error: hash ? 'torrent_not_found' : 'download_not_found' };
+}
+
+export async function matchSource(entry: QueueEntry, clients: Clients, source: 'library' | 'download' = entry.transferHash ? 'download' : 'library', hash?: string) {
   const title = db.data.titles[entry.titleKey]!;
   if (source === 'library') {
     const folder = await titleFiles(title);
@@ -32,21 +49,23 @@ export async function matchSource(entry: QueueEntry, clients: Clients, source: '
       const info = inside(root.path, abs) ? await stat(abs).catch(() => undefined) : undefined;
       return { ...file, abs, mtimeMs: info?.mtimeMs ?? null, ino: info?.ino ?? null, dev: info?.dev ?? null };
     }));
-    return { files, manifest: files };
+    return { files, manifest: files, download: null };
   }
-  if (!entry.transferHash) return { error: 'download_not_found' } as const;
-  const handle = clients.get(entry.clientId);
-  if (!handle) return { error: 'client_missing' } as const;
-  const torrent = await handle.api.find(entry.transferHash);
-  if (!torrent) return { error: 'download_not_found' } as const;
-  const manifest = (await handle.api.files(entry.transferHash)).map(({ name, sizeBytes }) => ({ name, sizeBytes })).sort((a, b) => a.name.localeCompare(b.name));
+  const download = await findDownload(entry, clients, hash);
+  if ('error' in download) return download;
+  const { handle, torrent } = download;
+  const manifest = (await handle.api.files(torrent.hash)).map(({ name, sizeBytes }) => ({ name, sizeBytes })).sort((a, b) => a.name.localeCompare(b.name));
   const found = await torrentVideos(handle, torrent);
   if (!found) return { error: 'download_not_found' } as const;
   const files = await Promise.all(found.map(async (file) => {
     const info = await stat(file.abs).catch(() => undefined);
     return { ...file, mtimeMs: info?.mtimeMs ?? null, ino: info?.ino ?? null, dev: info?.dev ?? null };
   }));
-  return { files, manifest };
+  return {
+    download,
+    files,
+    manifest: hash ? { clientId: handle.id, savePath: torrent.savePath, contentPath: torrent.contentPath, manifest, files } : manifest,
+  };
 }
 
 const hostOf = (address: string) => {

@@ -13,7 +13,8 @@ export function queueEntryExternalGet(clients: Clients): RequestHandler<{ id: st
     const entry = db.data.queue[req.params.id];
     const handles = clients.all();
     if (!entry || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
-    const refusal = attachRefusal(entry);
+    const mapping = req.query.mapping === 'true' && entry.season !== null && entry.state.kind === 'blocked';
+    const refusal = mapping ? null : attachRefusal(entry);
     if (refusal) return void res.status(409).json({ error: 'attach_not_supported', reason: refusal });
     if (!handles.length) return void res.status(409).json({ error: 'client_missing' });
     const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
@@ -21,7 +22,9 @@ export function queueEntryExternalGet(clients: Clients): RequestHandler<{ id: st
     try {
       // A torrent that two clients have shows once.
       const byHash = new Map<string, Torrent>();
-      for (const list of await Promise.all(handles.map((handle) => handle.api.listAll()))) for (const torrent of list) if (!byHash.has(torrent.hash)) byHash.set(torrent.hash, torrent);
+      for (const list of await Promise.all(handles.map((handle) => handle.api.listAll()))) {
+        for (const torrent of list) if ((!mapping || torrent.complete) && !byHash.has(torrent.hash)) byHash.set(torrent.hash, torrent);
+      }
       all = [...byHash.values()];
     } catch (error) {
       if (error instanceof ClientError) return void res.status(502).json({ error: 'client_unreachable' });
@@ -32,12 +35,12 @@ export function queueEntryExternalGet(clients: Clients): RequestHandler<{ id: st
     for (const other of Object.values(db.data.queue)) if (other.transferHash && isActive(other) && other.titleKey !== entry.titleKey) busy.add(other.transferHash);
     const free = all.filter((torrent) => !busy.has(torrent.hash) && (!q || torrent.name.toLowerCase().includes(q))).sort((a, b) => b.addedAt - a.addedAt);
     const siblings =
-      entry.season === null
+      mapping || entry.season === null
         ? []
         : Object.values(db.data.queue).filter((other) => other.id !== entry.id && other.titleKey === entry.titleKey && other.season === entry.season && shown(other) && attachRefusal(other) === null);
     const body: AttachCandidates = {
       total: free.length,
-      torrents: free.slice(0, MAX_TORRENTS).map((torrent) => ({
+      torrents: (mapping ? free : free.slice(0, MAX_TORRENTS)).map((torrent) => ({
         hash: torrent.hash,
         name: torrent.name,
         sizeBytes: torrent.sizeBytes,
