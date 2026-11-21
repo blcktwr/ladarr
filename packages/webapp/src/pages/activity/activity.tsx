@@ -3,7 +3,7 @@ import { RETRY_STATUSES } from '@ladarr/shared/queue';
 import type { LogEntry, LogsResponse, Numbering, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueResolution, QueueRow, QueueSummary, QueueTorrent } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, FileText, FileVideo, Info, LoaderCircle, Pause, Play, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
 import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal, Pagination, Pane, Panel, Progress, Row, Section, Spinner, SubMenu, Table, Text, Thumbnail, Tree, type TreeNode } from 'nebula';
@@ -11,7 +11,7 @@ import { Alert } from '../../components/alert.tsx';
 import { Confirm } from '../../components/confirm.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
 import { FinishedPanel } from './activity-finished.tsx';
-import { MatchDialog } from './activity-match.tsx';
+import { MatchDialog, type MatchRequest } from './activity-match.tsx';
 import { AttachDialog } from './activity-client.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { Link, LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
@@ -87,9 +87,11 @@ function ReplaceAllFix({ ids, run }: { ids: string[]; run: Run }) {
 }
 
 const retryActions = new Set<QueueResolution['action']>(['retry', 'retry_fetch', 'retry_send', 'check_download', 'retry_import']);
+const OpenMatch = createContext<(request: MatchRequest) => void>(() => {});
 
 // The server supplies each action and its explicit target scope.
 function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refresh }: { entry: QueueEntryView; entries?: QueueEntryView[]; actions?: QueueResolution[]; run: Run; refresh: () => void }) {
+  const openMatch = useContext(OpenMatch);
   return (
     <>
       {actions?.map((item) => {
@@ -100,7 +102,7 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
         switch (action) {
           case 'match':
           case 'use_existing':
-            return <MatchDialog key={item.action} entry={target} ids={item.ids} label={item.label} fileSource={item.fileSource ?? (action === 'use_existing' ? 'library' : undefined)} fixedSource={action === 'use_existing'} onDone={refresh} />;
+            return <Button key={action} aria-haspopup="dialog" onClick={() => openMatch({ entry: target, ids: item.ids, fileSource: item.fileSource, fixedSource: action === 'use_existing' })}>{t(item.label)}</Button>;
           case 'attach':
             return <AttachDialog key={item.action} entry={target} ids={item.ids} onDone={refresh} />;
           case 'replace':
@@ -947,6 +949,7 @@ function QueueView() {
   const [preview, setPreview] = useState<{ body: Parameters<typeof send>[0]; data: QueueActionPreview; label?: string } | null>(null);
   const [deletion, setDeletion] = useState<{ request: PlanRequest; subject: string } | null>(null);
   const [logs, setLogs] = useState<QueueEntryView | null>(null);
+  const [match, setMatch] = useState<MatchRequest | null>(null);
   const [groupLogs, setGroupLogs] = useState<QueueGroupRow | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const [viewNote, setViewNote] = useState('');
@@ -1194,7 +1197,9 @@ function QueueView() {
                 <>
                   <div ref={detailsBox} className="w-full">
                     <Pane className="w-full">
-                      <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(request, subject) => setDeletion({ request, subject })} onBack={back} backRef={backButton} />
+                      <OpenMatch.Provider value={setMatch}>
+                        <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(request, subject) => setDeletion({ request, subject })} onBack={back} backRef={backButton} />
+                      </OpenMatch.Provider>
                     </Pane>
                   </div>
                   {chosen.kind === 'group' ? (
@@ -1214,6 +1219,7 @@ function QueueView() {
           </div>
         </div>
       )}
+      {match && <MatchDialog {...match} onClose={() => setMatch(null)} onDone={() => { setMatch(null); refresh(); }} />}
       {/* The log of a target is a side panel, so it needs no place on the page. */}
       {logs && (
         <Panel open onOpenChange={(open) => !open && setLogs(null)} label={t('Logs of {label}', { label: logs.label })} title={t('Logs of {label}', { label: logs.label })} size="xl">

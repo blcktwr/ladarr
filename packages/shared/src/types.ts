@@ -602,7 +602,12 @@ export type QueuePage = { cursor: number; total: number; items: QueueRow[] };
 // filtered items, so the row and the header show the same status.
 export type QueueGroupSummary = Pick<QueueGroupRow, 'status' | 'counts' | 'tabs' | 'total' | 'reached' | 'download' | 'problem' | 'otherSeasons' | 'actions'>;
 
-export type QueueGroupPage = { cursor: number; group: QueueGroupSummary; items: QueueEntryView[] };
+export type QueueMappingEpisode = EpisodeRef & {
+  id: string;
+  match: { file: string; hash: string | null; torrent: string | null } | null;
+};
+
+export type QueueGroupPage = { cursor: number; group: QueueGroupSummary; items: QueueEntryView[]; mapping?: QueueMappingEpisode[] };
 
 export type QueueSummary = {
   cursor: number;

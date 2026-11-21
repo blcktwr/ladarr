@@ -1,8 +1,23 @@
 import { db } from '../../../../core/db.ts';
-import type { QueueGroupPage } from '@ladarr/shared/types';
+import type { QueueGroupPage, QueueMappingEpisode } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { bySeasonNumber, filtersOf, groupAggregate, lanePositions, reachedOf, shown, view } from '../../../../helpers/queue.ts';
-import type { ImportStatus, Poller } from '../../../../types.ts';
+import type { ImportStatus, Poller, Title } from '../../../../types.ts';
+
+// Read the saved associations before the client sends the files of a torrent.
+function mappingOf(title: Title): QueueMappingEpisode[] {
+  return title.episodes.map(({ season, number, fileId }) => {
+    const id = `${title.key}:${season}x${number}`;
+    const entry = db.data.queue[id];
+    const record = fileId ? db.data.files[fileId] : undefined;
+    const file = record && !record.missing ? record : undefined;
+    const manual = entry?.manualMatch?.covers.some((point) => point.season === season && point.number === number) ? entry.manualMatch.file : undefined;
+    const name = file?.association?.originalName ?? manual ?? file?.path.split('/').pop();
+    const hash = file?.download?.hash ?? (file?.association ? null : entry?.transferHash ?? null);
+    const torrent = hash && entry?.transferHash === hash ? entry.release?.title ?? null : null;
+    return { id, season, number, match: name ? { file: name, hash, torrent } : null };
+  }).sort((a, b) => a.season - b.season || a.number - b.number);
+}
 
 // The episodes of one season of a series, in the order of the season and the number. Without a season, it shows every
 // season of the series. `group` covers every member of the season before the tab filter, so the inspector header and
@@ -26,6 +41,7 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
       download = download === null ? transfer.progress : Math.min(download, transfer.progress);
     }
     const summary = groupAggregate(all);
+    const title = db.data.titles[req.params.titleKey];
     res.json({
       cursor: db.data.queueRev,
       group: {
@@ -40,6 +56,7 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
         otherSeasons: summary.otherSeasons,
       },
       items: items.map((entry) => view(poller, importStatus, entry, lane)),
+      ...(req.query.mapping === 'true' && title ? { mapping: mappingOf(title) } : {}),
     } satisfies QueueGroupPage);
   };
 }

@@ -8,6 +8,8 @@ const widths = { sm: 'w-32', md: 'w-80 max-w-full', full: 'w-full' };
 type SearchableDropdownProps = {
   label: string;
   hideLabel?: boolean;
+  disabled?: boolean;
+  placeholder?: string;
   value: string;
   onValueChange: (value: string) => void;
   options: { value: string; label?: string; disabled?: boolean }[];
@@ -15,7 +17,7 @@ type SearchableDropdownProps = {
   width?: keyof typeof widths;
 };
 
-export function SearchableDropdown({ label, hideLabel, value, onValueChange, options, emptyText = 'No options.', width = 'md' }: SearchableDropdownProps) {
+export function SearchableDropdown({ label, hideLabel, disabled, placeholder, value, onValueChange, options, emptyText = 'No options.', width = 'md' }: SearchableDropdownProps) {
   const id = useId();
   const anchorRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
@@ -30,14 +32,19 @@ export function SearchableDropdown({ label, hideLabel, value, onValueChange, opt
       <Combobox.Root
         items={items}
         value={value || null}
-        onValueChange={(next) => onValueChange(next ?? '')}
+        onValueChange={(next, details) => {
+          if (details.reason === 'escape-key') details.allowPropagation();
+          onValueChange(next ?? '');
+        }}
         itemToStringLabel={textOf}
-        open={open}
+        disabled={disabled}
+        open={open && !disabled}
         onOpenChange={setOpen}
       >
         <Combobox.Input
           id={id}
           ref={anchorRef}
+          placeholder={placeholder}
           onFocus={() => setOpen(true)}
           onClick={() => setOpen(true)}
           className={`${flat} w-full min-w-0 px-3.5 text-[15px]/none`}

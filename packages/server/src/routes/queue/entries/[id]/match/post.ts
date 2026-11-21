@@ -34,7 +34,7 @@ export function queueEntryMatchPost(queue: Queue, _finder: Finder, clients: Clie
     for (const id of (ids ?? [entry.id]) as string[]) {
       const target = db.data.queue[id];
       if (!target || !shown(target) || target.state.kind === 'cancelled' || target.state.kind === 'paused' || target.titleKey !== entry.titleKey) return void res.status(400).json({ error: 'invalid_request' });
-      if (hash !== undefined ? target.season !== entry.season : selectedSource === 'download' && (target.transferHash !== entry.transferHash || target.clientId !== entry.clientId)) return void res.status(400).json({ error: 'invalid_request' });
+      if (hash !== undefined ? target.season === null : selectedSource === 'download' && (target.transferHash !== entry.transferHash || target.clientId !== entry.clientId)) return void res.status(400).json({ error: 'invalid_request' });
       if (!selected.includes(target)) selected.push(target);
     }
     if (hash !== undefined && !selected.includes(entry)) return void res.status(400).json({ error: 'invalid_request' });

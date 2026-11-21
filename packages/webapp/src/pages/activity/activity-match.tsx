@@ -1,7 +1,7 @@
 import type { AttachCandidates, EpisodeRef, QueueEntryView, QueueGroupPage, QueueMatchPreview, QueuePackFiles } from '@ladarr/shared/types';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button, Dropdown, EmptyState, Modal, SearchableDropdown, Spinner, Table, Text } from 'nebula';
+import { Button, Dropdown, EmptyState, Modal, SearchableDropdown, Spinner, Table } from 'nebula';
 import { api, ApiError } from '../../lib/api.ts';
 import { formatBytes, groupName, seasonName } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
@@ -19,228 +19,209 @@ const errorText = (err: unknown) =>
 
 const pad = (value: number) => String(value).padStart(2, '0');
 const pointText = (point: EpisodeRef) => `S${pad(point.season)}E${pad(point.number)}`;
-const pointKey = (point: EpisodeRef) => `${point.season}:${point.number}`;
-
 type FileSource = QueuePackFiles['source'];
+type PackFile = QueuePackFiles['files'][number];
+type Draft = { hash?: string; file?: PackFile };
+type Change = { id: string; source: FileSource; hash?: string; file: string; ids: string[]; covers?: EpisodeRef[] };
+export type MatchRequest = { entry: QueueEntryView; ids: string[]; fileSource?: FileSource; fixedSource: boolean };
 
-// A file choice authorizes only its episode. Existing file coverage stays intact.
-export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone }: { entry: QueueEntryView; ids?: string[]; label?: string; fileSource?: FileSource; fixedSource?: boolean; onDone: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [chosen, setChosen] = useState<Record<string, string>>({});
-  const [torrents, setTorrents] = useState<Record<string, string>>({});
+const fileOptions = (files: PackFile[]) => [
+  { value: '', label: t('Unassigned') },
+  ...files.map((file) => ({ value: file.rel, label: `${file.rel} (${formatBytes(file.sizeBytes)})` })),
+];
+
+function sourceOf(item: QueueEntryView, hash?: string, fixed?: FileSource) {
+  const action = item.actions.find((action) => action.action === 'match');
+  const source = fixed ?? action?.fileSource ?? (item.hasTorrent ? 'download' : 'library');
+  const own = source === 'download' ? action?.source ?? '' : '';
+  const selected = hash && hash !== own ? hash : undefined;
+  const type = selected ? 'download' : source;
+  const key = selected || own || (type === 'library' ? 'library' : item.id);
+  const path = `/queue/entries/${item.id}/files?source=${type}${selected ? `&hash=${selected}` : ''}`;
+  return { own, hash: selected, type, key, path: hash === '' && own ? null : path };
+}
+
+async function apply({ id, ...body }: Change) {
+  const path = `/queue/entries/${id}/match`;
+  const preview = await api<QueueMatchPreview>(path, { method: 'POST', body: { ...body, preview: true } });
+  if (!preview.version || preview.effects.conflicts.length || preview.effects.lostAvailability.length) throw new ApiError(409, 'mapping_changed');
+  await api(path, { method: 'POST', body: { ...body, version: preview.version } });
+}
+
+const readout = (text: string) => <div className="overflow-hidden" title={text}>{text}</div>;
+
+export function MatchDialog({ entry, ids, fileSource, fixedSource, onClose, onDone }: MatchRequest & { onClose: () => void; onDone: () => void }) {
+  const series = entry.mediaType === 'tv';
+  const mapSeries = series && !fixedSource;
+  const fixed = fixedSource ? fileSource ?? 'library' : undefined;
+  const [season, setSeason] = useState(entry.season);
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [movie, setMovie] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const series = entry.mediaType === 'tv';
-  const torrentColumn = series && !fixedSource;
-  const affected = ids ?? [entry.id];
-  const targets = useQuery<QueueGroupPage>({
-    queryKey: [`/queue/groups/${entry.titleKey}?season=${entry.season}`],
-    enabled: open && series,
-  });
-  const entries = series ? targets.data?.items ?? [entry] : [entry];
-  const sourceOf = (item: QueueEntryView) =>
-    fixedSource ? fileSource ?? 'library' : item.actions?.find((action) => action.action === 'match')?.fileSource ?? (item.hasTorrent ? 'download' : 'library');
-  const ownTorrent = (item: QueueEntryView) => sourceOf(item) === 'download' ? item.actions?.find((action) => action.action === 'match')?.source ?? '' : '';
-  const sourceKey = (item: QueueEntryView) =>
-    sourceOf(item) === 'library' ? 'library' : ownTorrent(item) || item.id;
-  // The episodes of the dialog, and the first target of each download, which asks for the files of that download.
-  const rowsOfEntries = entries.filter((item) => affected.includes(item.id));
-  const anchors = new Map<string, QueueEntryView>();
-  for (const item of rowsOfEntries) if (!anchors.has(sourceKey(item))) anchors.set(sourceKey(item), item);
-  if (!anchors.size) anchors.set(sourceKey(entry), entry);
-  const candidates = useQuery<AttachCandidates>({
-    queryKey: [`/queue/entries/${entry.id}/external?mapping=true`],
-    enabled: open && torrentColumn,
+  const group = useQuery<QueueGroupPage>({
+    queryKey: [`/queue/groups/${entry.titleKey}?mapping=true${mapSeries ? '' : `&season=${entry.season}`}`],
+    enabled: series,
     gcTime: 0,
   });
-  const torrentOptions = (candidates.data?.torrents ?? []).map(({ hash, name }) => ({ value: hash, label: name }));
-  const selectedTorrents = [...new Set(Object.values(torrents).filter(Boolean))];
-  const fileQueries = new Map([...anchors].map(([key, item]) => [key, `/queue/entries/${item.id}/files?source=${sourceOf(item)}`]));
-  for (const hash of selectedTorrents) fileQueries.set(`torrent:${hash}`, `/queue/entries/${entry.id}/files?source=download&hash=${hash}`);
-  const packs = useQueries({
-    queries: [...fileQueries.values()].map((path) => ({ queryKey: [path], queryFn: () => api<QueuePackFiles>(path), enabled: open, gcTime: 0 })),
+  const candidates = useQuery<AttachCandidates>({
+    queryKey: [`/queue/entries/${entry.id}/external?mapping=true`],
+    enabled: mapSeries,
+    gcTime: 0,
   });
-  const packsBySource = new Map([...fileQueries.keys()].map((key, index) => [key, packs[index]]));
-  const packOf = (item: QueueEntryView) => packsBySource.get(sourceKey(item))?.data;
-  const base = packs.find((query) => query.data)?.data;
-  const targetsOfTitle = (base?.entries ?? entries).filter((target): target is EpisodeRef & { id: string; label: string } => target.season !== null && target.number !== null);
-  const current = entry.season;
-  const rows = targetsOfTitle.filter((target) => target.season === current).sort((a, b) => a.number - b.number);
-  const loading = (series && targets.isPending) || [...anchors.keys()].some((key) => packsBySource.get(key)?.isPending);
-  const failed = targets.error ?? selectedTorrents.map((hash) => packsBySource.get(`torrent:${hash}`)?.error).find(Boolean)
-    ?? (torrentColumn && torrentOptions.length ? null : packs.find((query) => query.error)?.error);
-  const shown = error || (failed ? errorText(failed) : '');
-  // The target of an episode, and the download that the episode belongs to. An episode without a target takes the
-  // first download of the dialog.
-  const targetOf = (point: EpisodeRef) => entries.find((item) => item.id === `${entry.titleKey}:${point.season}x${point.number}`) ?? [...anchors.values()][0]!;
-  const fileOf = (point: EpisodeRef) => chosen[pointKey(point)] ?? '';
-  const selectedPack = (point: EpisodeRef, item: QueueEntryView) => {
-    const hash = torrents[pointKey(point)];
-    if (hash) return packsBySource.get(`torrent:${hash}`)?.data;
-    if (hash === '' && ownTorrent(item)) return undefined;
-    return packOf(item);
+  const options = (candidates.data?.torrents ?? []).map(({ hash, name }) => ({ value: hash, label: name }));
+  const items = new Map(group.data?.items.map((item) => [item.id, item]));
+  const editable = new Set(mapSeries ? group.data?.group.actions.filter((action) => action.action === 'match').flatMap((action) => action.ids) : ids);
+  const episodes = group.data?.mapping ?? [];
+  const rows = episodes.filter((point) => point.season === season);
+  const seasons = [...new Set(episodes.length ? episodes.map((point) => point.season) : season === null ? [] : [season])];
+  const sources = new Map<string, string>();
+  const addSource = (item: QueueEntryView, draft?: Draft) => {
+    const { key, path } = sourceOf(item, draft?.hash, fixed);
+    if (path && !sources.has(key)) sources.set(key, path);
   };
+  if (!series || fixedSource) addSource(entry);
+  else for (const point of episodes) {
+    if (point.season !== season && !drafts[point.id]?.file) continue;
+    const item = items.get(point.id);
+    if (item && editable.has(point.id) && !point.match) addSource(item, drafts[point.id]);
+  }
+  const packs = useQueries({
+    queries: [...sources].map(([key, path]) => ({
+      queryKey: ['mapping-files', entry.titleKey, key], queryFn: () => api<QueuePackFiles>(path), gcTime: 0,
+    })),
+  });
+  const lists = new Map([...sources.keys()].map((key, i) => {
+    const files = packs[i]!.data?.files;
+    return [key, { files, options: fileOptions(files ?? []) }];
+  }));
+  const movieList = lists.get(sourceOf(entry, undefined, fixed).key);
+  const failed = group.error ?? packs.find((pack) => pack.error)?.error;
+  const shown = error || (failed ? errorText(failed) : '');
 
-  const change = (key: string, value: string | null) => {
-    setChosen((state) => ({ ...state, [key]: value ?? '' }));
+  const change = (id: string, draft: Draft) => {
+    setDrafts((state) => ({ ...state, [id]: draft }));
     setError('');
   };
 
-  // The episodes of the season, in one request for each file. A file that holds several episodes names all of them.
-  const groups = new Map<string, { entry: QueueEntryView; hash?: string; source: FileSource; file: string; covers: EpisodeRef[]; ids: string[] }>();
-  for (const point of rows) {
-    const file = fileOf(point);
-    if (!file) continue;
-    const item = targetOf(point);
-    const hash = torrents[pointKey(point)] || undefined;
-    const selected = selectedPack(point, item)?.files.find((found) => found.rel === file);
-    if (!selected) continue;
-    const source = hash ? 'download' : sourceOf(item);
-    const key = JSON.stringify([hash ?? sourceKey(item), file]);
-    const group = groups.get(key) ?? { entry: item, hash, source, file, covers: [...(selected.current ?? [])], ids: [] };
-    const covered = group.covers.some((cover) => pointKey(cover) === pointKey(point));
-    if (!covered) group.covers.push({ season: point.season, number: point.number });
-    if ((!covered || hash) && affected.includes(point.id)) {
-      group.hash ??= hash;
-      if (group.hash && !group.ids.includes(group.entry.id)) group.entry = item;
-      group.ids.push(point.id);
+  // Group the choices from every season by source and file. Keep the episodes that the file already covers.
+  function changes(): Change[] {
+    if (!series) return movie ? [{ id: entry.id, source: sourceOf(entry, undefined, fixed).type, file: movie, ids: [entry.id] }] : [];
+    const groups = new Map<string, Change & { covers: EpisodeRef[] }>();
+    for (const point of episodes) {
+      const draft = drafts[point.id];
+      if (!draft?.file || point.match || (mapSeries && !editable.has(point.id))) continue;
+      const item = items.get(point.id) ?? entry;
+      const source = sourceOf(item, draft.hash, fixed);
+      const key = JSON.stringify([source.key, draft.file.rel]);
+      const group = groups.get(key) ?? {
+        id: item.id, source: source.type, file: draft.file.rel, covers: [...(draft.file.current ?? [])], ids: [],
+      };
+      if (!group.covers.some((p) => p.season === point.season && p.number === point.number)) group.covers.push({ season: point.season, number: point.number });
+      if (editable.has(point.id)) {
+        group.ids.push(point.id);
+        if (source.hash || group.ids.length === 1) group.id = item.id;
+        if (source.hash) group.hash = source.hash;
+      }
+      groups.set(key, group);
     }
-    groups.set(key, group);
+    return [...groups.values()].filter((group) => group.ids.length);
   }
-  const changes = [...groups.values()].filter((group) => group.ids.length);
-  const moviePack = packOf(entry);
-  const movie = chosen[entry.id] ?? '';
-  const count = series ? changes.length : movie ? 1 : 0;
-  const text = t(label ?? (series ? 'Map episodes' : 'Select file'));
 
   async function save() {
-    if (busy || !count) return;
+    if (busy) return;
+    const posts = changes();
+    if (!posts.length) return;
     setBusy(true);
     setError('');
     try {
-      const posts = series
-        ? changes
-        : [{ entry, hash: undefined, source: sourceOf(entry), file: movie, covers: undefined, ids: [entry.id] }];
-      for (const post of posts) {
-        const path = `/queue/entries/${post.entry.id}/match`;
-        const body = { source: post.source, file: post.file, ids: post.ids, ...(post.covers ? { covers: post.covers } : {}), ...(post.hash ? { hash: post.hash } : {}) };
-        const preview = await api<QueueMatchPreview>(path, { method: 'POST', body: { ...body, preview: true } });
-        if (!preview.version || preview.effects.conflicts.length || preview.effects.lostAvailability.length) throw new ApiError(409, 'mapping_changed');
-        await api(path, { method: 'POST', body: { ...body, version: preview.version } });
-      }
-      setOpen(false);
+      for (const post of posts) await apply(post);
       onDone();
     } catch (err) {
       setError(errorText(err));
+      if (series) void group.refetch();
     } finally {
       setBusy(false);
     }
   }
 
+  const title = groupName({ ...entry, season: null });
   return (
     <Modal
-      open={open}
-      onOpenChange={(next) => {
-        if (busy) return;
-        if (next) {
-          setChosen({});
-          setTorrents({});
-          setError('');
-        }
-        setOpen(next);
-      }}
-      title={series && entry.season !== null ? `${groupName({ ...entry, season: null })} / ${seasonName(entry.season)}` : entry.label}
-      trigger={<Button>{text}</Button>}
+      open
+      onOpenChange={(next) => { if (!next && !busy) onClose(); }}
+      title={mapSeries ? title : series && season !== null ? `${title} / ${seasonName(season)}` : entry.label}
       width="lg"
       actions={
         <>
-          {shown && <p role="alert" className="text-error mr-auto">{shown}</p>}
-          <Button disabled={busy || (!series && (!movie || loading))} pending={busy} onClick={() => void save()}>{t('Apply mapping')}</Button>
+          {mapSeries && (
+            <div className="mr-auto min-w-0 max-w-40 flex-1">
+              <Dropdown
+                label={t('Season')} hideLabel width="full" size="sm" reserve={false} disabled={busy}
+                value={String(season)} options={seasons.map((n) => ({ value: String(n), label: seasonName(n) }))}
+                onValueChange={(next) => { if (next !== null) setSeason(Number(next)); }}
+              />
+            </div>
+          )}
+          <Button disabled={busy || (!series && !movie)} pending={busy} onClick={() => void save()}>{t('Apply mapping')}</Button>
         </>
       }
     >
-      {open && <div className="grid grid-cols-[minmax(0,1fr)] justify-items-start gap-5 w-full">
-        {series ? (
-          <Table
-            aria-label={t('Map episodes')}
-            loading={loading}
-            minWidth={torrentColumn ? '30rem' : undefined}
-            columns={[
-              { label: t('Episodes'), width: 'clamp(5rem, 20vw, 9rem)' },
-              ...(torrentColumn ? [{ label: t('Torrent') }] : []),
-              { label: t('Matches') },
-            ]}
-            rows={rows.map((point) => {
-              const key = pointKey(point);
-              const item = targetOf(point);
-              const own = ownTorrent(item);
-              const hash = torrents[key] ?? own;
-              const options = own && !torrentOptions.some(({ value }) => value === own) ? [...torrentOptions, { value: own, label: item.release?.title ?? own }] : torrentOptions;
-              const pack = selectedPack(point, item);
-              const matched = entries.some((target) => target.id === point.id && target.status === 'available')
-                || packOf(item)?.files.some((file) => file.current?.some((cover) => pointKey(cover) === key));
-              return {
-                key,
-                cells: [
-                  <Text key="episode">{pointText(point)}</Text>,
-                  ...(torrentColumn ? [!matched && affected.includes(point.id) ? (
-                    <SearchableDropdown
-                      key="torrent"
-                      label={t('Torrent')}
-                      hideLabel
-                      width="full"
-                      emptyText={t('No options.')}
-                      options={options}
-                      value={hash}
-                      onValueChange={(next) => {
-                        setTorrents((state) => {
-                          const choices = { ...state };
-                          if (next === own) delete choices[key];
-                          else choices[key] = next;
-                          return choices;
-                        });
-                        change(key, '');
-                      }}
-                    />
-                  ) : null] : []),
-                  matched ? (
-                    <Text key="match" variant="small">{t('Matched')}</Text>
-                  ) : (
-                    <Dropdown
-                      key="match"
-                      size="sm"
-                      width="full"
-                      reserve={false}
-                      disabled={!pack}
-                      value={fileOf(point)}
-                      options={[
-                        { value: '', label: t('Unassigned') },
-                        ...(pack?.files ?? []).map((file) => ({ value: file.rel, label: `${file.rel} (${formatBytes(file.sizeBytes)})` })),
-                      ]}
-                      onValueChange={(value) => change(key, value)}
-                    />
-                  ),
-                ],
-              };
-            })}
-          />
-        ) : loading ? (
-          <Spinner label={t('Loading files')} />
-        ) : (moviePack?.files.length ?? 0) > 0 ? (
-          <Dropdown
-            label={t('File')}
-            value={movie}
-            options={[
-              { value: '', label: t('Unassigned') },
-              ...(moviePack?.files ?? []).map((file) => ({ value: file.rel, label: `${file.rel} (${formatBytes(file.sizeBytes)})` })),
-            ]}
-            onValueChange={(value) => change(entry.id, value)}
-          />
-        ) : null}
-        {!loading && !shown && !packs.some((query) => query.isPending || query.data?.files.length) && (
-          <EmptyState>{t('No video file is available.')}</EmptyState>
-        )}
-      </div>}
+      {series ? (
+        <Table
+          aria-label={t('Map episodes')}
+          loading={group.isPending}
+          minWidth={mapSeries ? '52rem' : undefined}
+          columns={[
+            { label: t('Episodes'), width: '9rem' },
+            ...(mapSeries ? [{ label: t('Torrent'), width: '22rem' }] : []),
+            { label: t('Matches'), width: mapSeries ? '21rem' : undefined },
+          ]}
+          rows={rows.map((point) => {
+            const item = items.get(point.id);
+            const draft = drafts[point.id];
+            const source = sourceOf(item ?? entry, draft?.hash, fixed);
+            const list = source.path ? lists.get(source.key) : undefined;
+            const hash = draft?.hash ?? source.own;
+            const canEdit = !point.match && (editable.has(point.id) || fixedSource) && item?.status !== 'available';
+            const torrentName = options.find((option) => option.value === point.match?.hash)?.label ?? point.match?.torrent ?? point.match?.hash
+              ?? (!point.match && item?.hasTorrent ? item.release?.title : null) ?? '—';
+            const selectFile = (value: string | null) => change(point.id, { ...draft, file: list?.files?.find((file) => file.rel === value) });
+            return {
+              key: point.id,
+              cells: [
+                pointText(point),
+                ...(mapSeries ? [canEdit ? (
+                  <SearchableDropdown
+                    key="torrent" label={t('Torrent')} hideLabel width="full" value={hash}
+                    disabled={busy} emptyText={t('No options.')}
+                    options={source.own && !options.some((option) => option.value === source.own)
+                      ? [...options, { value: source.own, label: item?.release?.title ?? source.own }] : options}
+                    onValueChange={(next) => change(point.id, { hash: next === source.own ? undefined : next })}
+                  />
+                ) : readout(torrentName)] : []),
+                !canEdit ? readout(point.match?.file ?? item?.file?.name ?? '—') : mapSeries ? (
+                  <SearchableDropdown
+                    key={`file:${source.key}`} label={t('Matches')} hideLabel width="full"
+                    placeholder={t('Unassigned')} emptyText={t('No options.')} disabled={busy || !list?.files}
+                    value={draft?.file?.rel ?? ''} options={list?.options ?? []}
+                    onValueChange={selectFile}
+                  />
+                ) : (
+                  <Dropdown key="file" size="sm" width="full" reserve={false} disabled={busy || !list?.files}
+                    value={draft?.file?.rel ?? ''} options={list?.options ?? []} onValueChange={selectFile} />
+                ),
+              ],
+            };
+          })}
+        />
+      ) : packs[0]?.isPending ? (
+        <Spinner label={t('Loading files')} />
+      ) : movieList?.files?.length ? (
+        <Dropdown label={t('File')} value={movie} options={movieList.options} onValueChange={(value) => setMovie(value ?? '')} />
+      ) : null}
+      {!shown && packs.length > 0 && packs.every((pack) => pack.data?.files.length === 0) && <EmptyState>{t('No video file is available.')}</EmptyState>}
+      {shown && <p role="alert">{shown}</p>}
     </Modal>
   );
 }

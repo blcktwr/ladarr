@@ -43,6 +43,17 @@ describe('SearchableDropdown', () => {
     expect(input.value).toBe('second.part');
   });
 
+  it('keeps the selected label visible and skips the disabled input on focus', () => {
+    const { input, onValueChange } = renderDropdown({ disabled: true, value: 'a1b2c3' });
+
+    expect(input.disabled).toBe(true);
+    expect(input.value).toBe('Show.Name.First.Part');
+    input.focus();
+    expect(document.activeElement).not.toBe(input);
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
   it('sends the hash of a selected label and closes the list', async () => {
     const { onValueChange, input } = renderDropdown();
 

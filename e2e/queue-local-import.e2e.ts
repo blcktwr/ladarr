@@ -58,7 +58,7 @@ test('offers the file of the folder and maps the episode with it', async ({ page
   await expect(map).toHaveCount(1);
   await map.click();
   const panel = page.getByRole('dialog');
-  await expect(panel).toHaveAccessibleName(/Show Name.*Season 1/);
+  await expect(panel).toHaveAccessibleName('Show Name (2020)');
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
   await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Torrent', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(4);
@@ -66,12 +66,14 @@ test('offers the file of the folder and maps the episode with it', async ({ page
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
   const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
-  await expect(panel.locator(':scope > :last-child > button', { hasText: 'Apply mapping' })).toBeVisible();
+  await expect(panel.getByRole('combobox').filter({ hasText: 'Season 1' })).toBeVisible();
   await apply.click();
   await expect(panel).toBeVisible();
   expect(writes).toEqual([]);
   expect(await reason('tv:1:1x1')).toBe('file_unmapped');
-  await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('cell').last().getByRole('combobox').click();
+  const matches = table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('cell').last().getByRole('combobox');
+  await matches.fill('clip a');
+  await expect(page.getByRole('option', { name: /Clip B\.mkv/ })).toHaveCount(0);
   await page.getByRole('option', { name: /Clip A\.mkv/ }).click();
   await expect(panel.getByRole('button', { name: 'Preview changes', exact: true })).toHaveCount(0);
   await expect(apply).toBeEnabled();

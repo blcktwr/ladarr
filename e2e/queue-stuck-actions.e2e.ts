@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { Page, Request } from '@playwright/test';
+import type { Locator, Page, Request } from '@playwright/test';
 import type { Data, QueueEntry } from '../packages/server/src/types.ts';
 import { hashOf } from '../packages/server/tests/helpers/test-pipeline.ts';
 import { expect, test } from './fixtures.ts';
@@ -109,19 +109,37 @@ function matchRequests(page: Page) {
   return requests;
 }
 
+const seasonPicker = (panel: Locator) => panel.getByRole('combobox').filter({ hasText: /^Season \d+$/ });
+
+async function expectFooter(panel: Locator) {
+  const season = seasonPicker(panel);
+  const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
+  await expect(season).toBeInViewport({ ratio: 1 });
+  await expect(apply).toBeInViewport({ ratio: 1 });
+  const [left, right, table, dialog] = await Promise.all([
+    season.boundingBox(), apply.boundingBox(), panel.getByRole('table').boundingBox(), panel.boundingBox(),
+  ]);
+  expect(left!.x + left!.width).toBeLessThanOrEqual(right!.x + 1);
+  expect(left!.x).toBeLessThan(dialog!.x + dialog!.width / 2);
+  expect(Math.abs(left!.y + left!.height / 2 - right!.y - right!.height / 2)).toBeLessThanOrEqual(2);
+  expect(left!.y).toBeGreaterThanOrEqual(table!.y + table!.height - 1);
+}
+
 async function expectMappings(requests: Request[], groups: { id: string | string[]; source: string; file: string; ids: string[]; hash?: string; covers?: { season: number; number: number }[] }[]) {
   expect(requests).toHaveLength(groups.length * 2);
-  for (const [index, { id, covers, ...body }] of groups.entries()) {
+  for (const [index, { id, covers, ids, ...body }] of groups.entries()) {
     const preview = requests[index * 2]!;
     const applied = requests[index * 2 + 1]!;
     expect([id].flat().map((anchor) => `/api/queue/entries/${anchor}/match`)).toContain(new URL(preview.url()).pathname);
     expect(new URL(applied.url()).pathname).toBe(new URL(preview.url()).pathname);
     expect(preview.postDataJSON()).toMatchObject({ ...body, preview: true });
+    expect(preview.postDataJSON().ids.toSorted()).toEqual(ids.toSorted());
     const response = await preview.response();
     expect(response?.status()).toBe(200);
     const version = (await response!.json()).version;
     expect(version).toEqual(expect.any(String));
     expect(applied.postDataJSON()).toMatchObject({ ...body, version });
+    expect(applied.postDataJSON().ids.toSorted()).toEqual(ids.toSorted());
     expect(applied.postDataJSON().preview).not.toBe(true);
     if (body.hash === undefined) {
       expect(preview.postDataJSON()).not.toHaveProperty('hash');
@@ -259,12 +277,11 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   const requests = matchRequests(page);
   await maps.click();
   const panel = page.getByRole('dialog');
-  await expect(panel).toHaveAccessibleName(/Show Name/);
+  await expect(panel).toHaveAccessibleName('Show Name (2020)');
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
   await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Torrent', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(4);
   for (const label of ['S01E01', 'S01E02', 'S01E03']) await expect(table.getByText(label, { exact: true })).toHaveCount(1);
-  await expect(panel).toHaveAccessibleName('Show Name (2020) / Season 1');
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('combobox', { name: 'Library', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
@@ -276,7 +293,7 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
   await expect(apply).toHaveCount(1);
   await expect(apply).toBeEnabled();
-  await expect(panel.locator(':scope > :last-child > button', { hasText: 'Apply mapping' })).toBeVisible();
+  await expectFooter(panel);
   await expect.poll(async () => {
     const box = await panel.boundingBox();
     const viewport = page.viewportSize()!;
@@ -286,7 +303,7 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   await expect(rowOf('S01E03').getByRole('cell').last().getByRole('combobox')).toBeEnabled();
   for (const [index, file] of ['Source A.mkv', 'Source B.mkv'].entries()) {
     const cells = rowOf(`S01E0${index + 1}`).getByRole('cell');
-    await expect(cells.nth(1)).toContainText(sources[index]!);
+    await expect(cells.nth(1).getByRole('combobox')).toHaveValue(sources[index]!);
     await cells.last().getByRole('combobox').click();
     await expect(page.getByRole('option', { name: new RegExp(file.replace('.', '\\.')) })).toBeVisible();
     await expect(page.getByRole('option', { name: index === 0 ? /Source B\.mkv/ : /Source A\.mkv/ })).toHaveCount(0);
@@ -327,17 +344,22 @@ test('maps selected episodes from a completed torrent with different season numb
       release: structuredClone(available[0]!.release),
     });
     const id = `imported-${episode.number}`;
-    const path = `${folder}/Show Name - ${episodeLabel(episode.number)}.mkv`;
+    const name = `Show.Name.${episodeLabel(episode.number)}.mkv`;
+    const path = `${folder}/${name}`;
     const abs = join(stack.folders.tv, path);
     writeFileSync(abs, `first-part-${episode.number}`);
     const { size, mtimeMs } = statSync(abs);
     data.files[id] = {
       id, titleKey: title.key, path, sizeBytes: size, mtimeMs, episodes: [{ season: 1, number: episode.number }],
       missing: false, addedAt: Date.now(),
+      download: { hash: available[0]!.transferHash!, clientId: available[0]!.clientId!, external: false },
+      association: { source: 'automatic', originalName: name, numberingRevision: 0, identity: { sizeBytes: size, mtimeMs } },
     };
     episode.fileId = id;
   }
-  const secondFiles = Object.fromEntries(firstPart.map(({ number }) => [`Show.Name.S02E0${number}.mkv`, `second-part-${number}`]));
+  const secondFiles = Object.fromEntries(firstPart.map(({ number }) => [
+    `Show.Name.S02E0${number}.${'Extra'.repeat(24)}.mkv`, `second-part-${number}`,
+  ]));
   const longName = `Show.Name.S02.Second.Part.${'LongReleaseName'.repeat(10)}.1080p.WEB-DL-GRP`;
   const hash = completeTorrent(longName, secondFiles, '');
   const missing = title.episodes.slice(5).map(({ number }) => blocked(title.key, 1, number, 'fetching', 'pack_partial'));
@@ -354,7 +376,7 @@ test('maps selected episodes from a completed torrent with different season numb
   await open(page, `group:${title.key}:1`);
   await page.getByRole('main').getByRole('button', { name: 'Map episodes', exact: true }).click();
   const panel = page.getByRole('dialog');
-  await expect(panel).toHaveAccessibleName('Show Name (2020) / Season 1');
+  await expect(panel).toHaveAccessibleName('Show Name (2020)');
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
   await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Torrent', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(11);
@@ -362,11 +384,15 @@ test('maps selected episodes from a completed torrent with different season numb
     has: page.getByRole('cell', { name: episodeLabel(number), exact: true }),
   }).getByRole('cell');
   for (const { number } of firstPart) {
-    await expect(cellsOf(number).last().getByText('Matched', { exact: true })).toBeVisible();
-    await expect(cellsOf(number).last().getByRole('combobox')).toHaveCount(0);
+    const cells = cellsOf(number);
+    await expect(cells.nth(1)).toHaveText('Show.Name.S01.1080p.WEB-DL-GRP');
+    await expect(cells.last()).toContainText(`Show.Name.${episodeLabel(number)}.mkv`);
+    await expect(cells.locator('input, button, select, [role="combobox"]')).toHaveCount(0);
   }
   const files = Object.keys(secondFiles);
-  const tableWidth = (await table.boundingBox())!.width;
+  const widths = () => table.getByRole('columnheader').evaluateAll((headers) => headers.map((header) => header.clientWidth));
+  const initialWidths = await widths();
+  await expect(table).toHaveCSS('table-layout', 'fixed');
   for (const [index, target] of missing.entries()) {
     const cells = cellsOf(target.number!);
     const input = cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true });
@@ -377,18 +403,23 @@ test('maps selected episodes from a completed torrent with different season numb
     await torrent.click();
     await expect(input).toHaveValue(longName);
     await expect(cells.nth(1).getByRole('button', { name: /delete/i })).toHaveCount(0);
-    expect((await table.boundingBox())!.width).toBeLessThanOrEqual(tableWidth + 1);
-    expect((await input.boundingBox())!.width).toBeLessThanOrEqual((await cells.nth(1).boundingBox())!.width);
     const matches = cells.last().getByRole('combobox');
+    await expect(matches).toBeEnabled();
     if (target.id === unselected.id) {
-      await expect(matches).toHaveText('Unassigned');
+      await expect(matches).not.toHaveValue(/\.mkv/);
       continue;
     }
-    await matches.click();
+    await matches.fill(`s02e0${index + 1}`);
     const options = page.getByRole('option', { name: /\.mkv/ });
-    await expect(options).toHaveCount(5);
-    for (const file of files) await expect(options.filter({ hasText: file })).toHaveCount(1);
+    await expect(options).toHaveCount(1);
     await options.filter({ hasText: files[index]! }).click();
+    await expect(matches).toHaveValue(new RegExp(`S02E0${index + 1}`));
+    expect(await widths()).toEqual(initialWidths);
+    for (const [field, cell] of [[input, cells.nth(1)], [matches, cells.last()]] as const) {
+      const [control, bounds] = await Promise.all([field.boundingBox(), cell.boundingBox()]);
+      expect(control!.x).toBeGreaterThanOrEqual(bounds!.x - 1);
+      expect(control!.x + control!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width + 1);
+    }
   }
   expect(requests).toEqual([]);
   expect(await entry(unselected.id)).toEqual(unselectedBefore);
@@ -418,6 +449,112 @@ test('maps selected episodes from a completed torrent with different season numb
   }
   expect(stack.tracker.state.downloads).toEqual([]);
   expect(stack.qbit.calls.filter((call) => call.path === 'torrents/add')).toEqual([]);
+});
+
+test('applies one external file to two seasons and a separate file to one episode', async ({ page }) => {
+  const first = blocked('tv:3', 1, 1, 'fetching', 'pack_partial');
+  const second = blocked('tv:3', 2, 3, 'fetching', 'pack_partial');
+  const third = blocked('tv:3', 2, 4, 'fetching', 'pack_partial');
+  const blank = blocked('tv:3', 1, 2, 'fetching', 'pack_partial');
+  const unrelated = blocked('tv:1', 1, 1, 'fetching', 'pack_partial');
+  const name = 'Two.Seasons.Complete.1080p.WEB-DL-GRP';
+  const shared = 'Combined chapters.mkv';
+  const separate = 'Closing chapter.mkv';
+  const hash = completeTorrent(name, { [shared]: 'combined-video', [separate]: 'closing-video' }, '');
+  data.queuePaused = true;
+  await start([first, second, third, blank, unrelated]);
+  const untouched = () => Promise.all([entry(blank.id), entry(unrelated.id)]);
+  const before = await untouched();
+  const requests = matchRequests(page);
+  const posts: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && /^\/api\/(queue|library|mapping)\//.test(new URL(request.url()).pathname)) posts.push(request.url());
+  });
+
+  await open(page, 'group:tv:3:2');
+  await page.getByRole('button', { name: 'Map episodes', exact: true }).click();
+  const panel = page.getByRole('dialog', { name: 'Two Seasons (2021)', exact: true });
+  const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
+  const season = seasonPicker(panel);
+  const row = (label: string) => table.getByRole('row').filter({ has: page.getByRole('cell', { name: label, exact: true }) });
+  const matches = (label: string) => row(label).getByRole('cell').last().getByRole('combobox');
+  const torrent = (label: string) => row(label).getByRole('cell').nth(1).getByRole('combobox');
+  const switchTo = async (number: number) => {
+    await season.click();
+    await page.getByRole('option', { name: `Season ${number}`, exact: true }).click();
+    await expect(season).toHaveText(`Season ${number}`);
+    await expect(table.getByRole('row')).toHaveCount(3);
+  };
+  const selectTorrent = async (label: string) => {
+    await torrent(label).fill('complete');
+    await page.getByRole('option', { name, exact: true }).click();
+  };
+  const selectFile = async (label: string, file: string) => {
+    await matches(label).fill(file.split(' ')[0]!);
+    await expect(page.getByRole('option', { name: /\.mkv/ })).toHaveCount(1);
+    await page.getByRole('option').filter({ hasText: file }).click();
+  };
+  await expect(season).toHaveText('Season 2');
+  await expectFooter(panel);
+
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const externalFiles = (url: URL) => url.pathname.endsWith('/files') && url.searchParams.get('hash') === hash;
+  await page.route(externalFiles, async (route) => { await held; await route.continue(); }, { times: 1 });
+  try {
+    await Promise.all([page.waitForRequest((req) => externalFiles(new URL(req.url()))), selectTorrent('S02E03')]);
+    const field = matches('S02E03');
+    await expect(field).toBeVisible();
+    await expect(field).toBeDisabled();
+    await expect(field).toHaveCSS('border-image-source', 'none');
+    await expect(field).not.toHaveCSS('text-decoration-line', /line-through/);
+  } finally {
+    release();
+  }
+  await selectFile('S02E03', shared);
+  await selectTorrent('S02E04');
+  await selectFile('S02E04', separate);
+  await switchTo(1);
+  await expect(row('S02E03')).toHaveCount(0);
+  await selectTorrent('S01E01');
+  await selectFile('S01E01', shared);
+  await switchTo(2);
+  await expect(torrent('S02E03')).toHaveValue(name);
+  await expect(matches('S02E03')).toHaveValue(/Combined chapters\.mkv/);
+  await expect(matches('S02E04')).toHaveValue(/Closing chapter\.mkv/);
+  await switchTo(1);
+  await expect(torrent('S01E01')).toHaveValue(name);
+  await expect(matches('S01E01')).toHaveValue(/Combined chapters\.mkv/);
+  await expect(matches('S01E02')).not.toHaveValue(/\.mkv/);
+  expect(posts).toEqual([]);
+  const filesPath = '/library/tv:3/files';
+  expect((await stack.call('GET', filesPath)).body.files).toHaveLength(0);
+
+  await panel.getByRole('button', { name: 'Apply mapping', exact: true }).click();
+  await expect(panel).toBeHidden();
+  const both = [{ season: 1, number: 1 }, { season: 2, number: 3 }];
+  const last = [{ season: 2, number: 4 }];
+  expect(requests).toHaveLength(4);
+  const forFile = (file: string) => requests.filter((request) => request.postDataJSON().file === file);
+  const sharedRequests = forFile(shared);
+  const ids = [first.id, second.id];
+  await expectMappings(sharedRequests, [{
+    id: ids, source: 'download', hash, file: shared, covers: both, ids,
+  }]);
+  await expectMappings(forFile(separate), [{ id: third.id, source: 'download', hash, file: separate, covers: last, ids: [third.id] }]);
+  expect((await stack.call('POST', '/queue/pause', { paused: false })).status).toBe(200);
+  for (const target of [first, second, third]) {
+    await expect.poll(async () => (await entry(target.id)).status, { timeout: 60_000 }).toBe('available');
+  }
+  const files = (await stack.call('GET', filesPath)).body.files as Data['files'][string][];
+  expect(files).toHaveLength(2);
+  for (const [contents, coverage] of [['combined-video', both], ['closing-video', last]] as const) {
+    const file = files.find((item) => readFileSync(join(stack.folders.tv, item.path), 'utf8') === contents);
+    expect(file?.episodes).toHaveLength(coverage.length);
+    expect(file!.episodes).toEqual(expect.arrayContaining(coverage));
+  }
+  expect(await untouched()).toEqual(before);
+  expect((await stack.call('GET', '/library/tv:1/files')).body.files).toHaveLength(0);
 });
 
 test('maps one blocked episode and preserves the library file coverage across seasons', async ({ page }) => {
@@ -454,7 +591,7 @@ test('maps one blocked episode and preserves the library file coverage across se
   await open(page, 'group:tv:3:1');
   await page.getByRole('main').getByRole('button', { name: 'Map episodes', exact: true }).click();
   const panel = page.getByRole('dialog');
-  await expect(panel).toHaveAccessibleName(/Two Seasons/);
+  await expect(panel).toHaveAccessibleName('Two Seasons (2021)');
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
   await expect(table.getByRole('row')).toHaveCount(3);
   for (const label of ['S01E01', 'S01E02']) {
@@ -462,8 +599,10 @@ test('maps one blocked episode and preserves the library file coverage across se
   }
   await expect(table.getByText('S02E03', { exact: true })).toHaveCount(0);
   await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
-  await expect(table.getByRole('row').filter({ hasText: 'S01E02' }).getByText('Matched', { exact: true })).toBeVisible();
-  await expect(table.getByRole('row').filter({ hasText: 'S01E02' }).getByRole('cell').last().getByRole('combobox')).toHaveCount(0);
+  const mapped = table.getByRole('row').filter({ hasText: 'S01E02' });
+  await expect(mapped.getByRole('cell').nth(1)).toHaveText(/^[—–-]?$/);
+  await expect(mapped.getByRole('cell').last()).toContainText('Segments.mkv');
+  await expect(mapped.locator('input, button, select, [role="combobox"]')).toHaveCount(0);
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
   await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('cell').last().getByRole('combobox').click();
@@ -636,47 +775,25 @@ for (const shared of [false, true]) {
       try {
         for (const width of [320, 375, 414, 768]) {
           await page.setViewportSize({ width, height: viewport.height });
-          await expect.poll(() => panel.evaluate((element) => {
-            const bounds = element.getBoundingClientRect();
-            const table = element.querySelector('table')!;
-            const tableBounds = table.getBoundingClientRect();
-            const scrollArea = table.parentElement!;
-            const scrolls = scrollArea.scrollWidth > scrollArea.clientWidth + 1;
-            const controls = [scrollArea, ...element.querySelectorAll('table, [role="combobox"], button')];
-            return Math.max(
-              0, -bounds.left, bounds.right - document.documentElement.clientWidth,
-              ...[element, ...element.children].map((child) => child.scrollWidth - child.clientWidth),
-              ...controls.flatMap((control) => {
-                const box = control.getBoundingClientRect();
-                if (scrolls && scrollArea.contains(control)) {
-                  if (control === scrollArea) return [bounds.left - box.left, box.right - bounds.right];
-                  return [tableBounds.left - box.left, Math.max(box.right, box.left + control.scrollWidth) - tableBounds.right];
-                }
-                return [bounds.left - box.left, box.right - bounds.right, control.scrollWidth - control.clientWidth];
-              }),
-            );
-          })).toBeLessThanOrEqual(1);
-          await expect.poll(() => table.evaluate((element) => [...element.querySelectorAll('tbody tr')].flatMap((row) => {
-            const torrent = row.querySelector('td:nth-child(2) input[role="combobox"]')!;
-            const match = row.querySelector('td:last-child button[role="combobox"]')!;
-            const overlap = torrent.getBoundingClientRect().right - match.getBoundingClientRect().left;
-            return overlap > 1 ? [{ episode: row.getAttribute('data-row'), overlap }] : [];
-          }))).toEqual([]);
-          await expect(apply).toBeInViewport({ ratio: 1 });
+          await expect(panel).toBeInViewport({ ratio: 1 });
+          await expectFooter(panel);
+          const inputs = table.getByRole('combobox');
+          await expect(inputs).toHaveCount(6);
+          expect(await inputs.evaluateAll((fields) => fields.every((field) => {
+            const bounds = field.closest('td')!.getBoundingClientRect();
+            const input = field.getBoundingClientRect();
+            return input.width > 0 && input.left >= bounds.left - 1 && input.right <= bounds.right + 1;
+          }))).toBe(true);
           if (width === 320) {
             await expect(scroller).toHaveCSS('overflow-x', 'auto');
             await expect.poll(() => scroller.evaluate((element) => {
-              const range = element.scrollWidth - element.clientWidth;
               element.scrollLeft = element.scrollWidth;
               const bounds = element.getBoundingClientRect();
-              return {
-                atRightEdge: range > 0 && Math.abs(element.scrollLeft - range) <= 1,
-                matchesInBounds: [...element.querySelectorAll('td:last-child button[role="combobox"]')].every((match) => {
-                  const box = match.getBoundingClientRect();
-                  return box.left >= bounds.left - 1 && box.right <= bounds.right + 1;
-                }),
-              };
-            })).toEqual({ atRightEdge: true, matchesInBounds: true });
+              return [...element.querySelectorAll('td:last-child [role="combobox"]')].every((match) => {
+                const right = match.getBoundingClientRect().right;
+                return right > bounds.left && right <= bounds.right + 1;
+              });
+            })).toBe(true);
           }
         }
       } finally {
@@ -783,6 +900,37 @@ test('keeps the season and existing associations unchanged when a file choice is
   expect(statSync(path).ino).toBe(info.ino);
   expect(stack.tracker.state.downloads).toEqual([]);
   expect(stack.qbit.calls.filter((call) => call.path === 'torrents/add')).toEqual([]);
+});
+
+test('keeps Use existing file scoped to the original season and library source', async ({ page }) => {
+  const stopped = blocked('tv:3', 1, 1, 'importing', 'destination_exists');
+  const other = blocked('tv:3', 2, 3, 'importing', 'destination_exists');
+  download(stopped, 'Two.Seasons.Complete.1080p.WEB-DL-GRP', { 'Download alternative.mkv': 'download-video' });
+  const title = data.titles['tv:3']!;
+  title.folder = 'Two Seasons (2021)';
+  const rel = `${title.folder}/Season 01/Existing file.mkv`;
+  const path = join(stack.folders.tv, rel);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, 'library-video');
+  data.queuePaused = true;
+  await start([stopped, other]);
+  const before = await entry(other.id);
+  const requests = matchRequests(page);
+  await open(page, 'group:tv:3:1');
+  await page.getByRole('button', { name: 'Use existing file', exact: true }).click();
+  const panel = page.getByRole('dialog');
+  const table = panel.getByRole('table');
+  await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Matches']);
+  await expect(seasonPicker(panel)).toHaveCount(0);
+  await expect(table.getByRole('row')).toHaveCount(3);
+  await expect(table.getByText('S02E03', { exact: true })).toHaveCount(0);
+  await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('combobox').click();
+  await expect(page.getByRole('option', { name: /Download alternative\.mkv/ })).toHaveCount(0);
+  await page.getByRole('option', { name: /Existing file\.mkv/ }).click();
+  await panel.getByRole('button', { name: 'Apply mapping', exact: true }).click();
+  await expect(panel).toBeHidden();
+  await expectMappings(requests, [{ id: stopped.id, file: rel, source: 'library', covers: [{ season: 1, number: 1 }], ids: [stopped.id] }]);
+  expect(await entry(other.id)).toEqual(before);
 });
 
 test('restricts Use existing file to library files when the destination exists', async ({ page }) => {

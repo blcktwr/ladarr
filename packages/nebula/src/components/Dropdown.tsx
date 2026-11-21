@@ -13,6 +13,7 @@ const widths = { md: 'justify-items-start', full: 'w-full min-w-0 grid-cols-[min
 type DropdownProps = Omit<Select.Root.Props<string>, 'children' | 'items'> & {
   options: { value: string; label?: ReactNode; disabled?: boolean }[];
   label?: string;
+  hideLabel?: boolean;
   size?: keyof typeof sizes;
   width?: keyof typeof widths;
   // The dropdown keeps the place of the error row of a Field under its trigger, so it aligns with a Field beside it.
@@ -27,12 +28,12 @@ type DropdownProps = Omit<Select.Root.Props<string>, 'children' | 'items'> & {
 // Thus a Field and a Dropdown side by side have the same height, and their controls align. reserve=false leaves that row out, for a dropdown that stands alone.
 // size is sm or md. The default is md, the height of a key.
 // width is md, the width of its content, or full for the width of its container.
-export function Dropdown({ options, label, size = 'md', width = 'md', reserve = true, ...props }: DropdownProps) {
+export function Dropdown({ options, label, hideLabel, size = 'md', width = 'md', reserve = true, ...props }: DropdownProps) {
   const look = sizes[size];
   return (
     <Select.Root {...props} items={options.map(option => ({ value: option.value, label: option.label ?? option.value }))}>
       <div className={`grid content-start gap-2 ${widths[width]}`}>
-        {label && <Select.Label className="text-ink text-[13px]/none font-[550]">{label}</Select.Label>}
+        {label && <Select.Label className={hideLabel ? 'sr-only' : 'text-ink text-[13px]/none font-[550]'}>{label}</Select.Label>}
         <Select.Trigger className={({ open }) => `${key} ${open ? sunk : raised} inline-flex items-center justify-between ${width === 'full' ? 'w-full min-w-0' : look.minWidth} ${look.trigger} rounded-md cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-3 data-disabled:opacity-35 data-disabled:struck data-disabled:cursor-not-allowed`}>
           <Select.Value className="min-w-0 truncate" />
           <Select.Icon className={`flex shrink-0 text-fog transition-[rotate] duration-200 ease-stone data-popup-open:rotate-180 ${look.icon}`}>
