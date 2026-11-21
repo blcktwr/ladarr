@@ -297,7 +297,7 @@ const Sheet = () => {
           <section className={card}>
             <h1 className={h1}>Dropdown</h1>
             <Pane>
-              <div className="flex flex-wrap items-end gap-6"><Dropdown label="Label" options={options} defaultValue="Option 1" /><Dropdown label="Label" size="sm" options={options} defaultValue="Option 1" /><Dropdown label="Label" options={many} defaultValue="Option 30" /></div>
+              <div className="flex flex-wrap items-end gap-6"><Dropdown label="Label" options={options} defaultValue="Option 1" /><Dropdown label="Label" options={options} defaultValue="Option 1" /><Dropdown label="Label" options={many} defaultValue="Option 30" /></div>
             </Pane>
           </section>
           <section className={wide}>

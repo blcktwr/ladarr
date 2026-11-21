@@ -157,7 +157,7 @@ export function MatchDialog({ entry, ids, fileSource, fixedSource, onClose, onDo
           {mapSeries && (
             <div className="mr-auto min-w-0 max-w-40 flex-1">
               <Dropdown
-                label={t('Season')} hideLabel width="full" size="sm" reserve={false} disabled={busy}
+                label={t('Season')} hideLabel width="full" reserve={false} disabled={busy}
                 value={String(season)} options={seasons.map((n) => ({ value: String(n), label: seasonName(n) }))}
                 onValueChange={(next) => { if (next !== null) setSeason(Number(next)); }}
               />
@@ -208,7 +208,7 @@ export function MatchDialog({ entry, ids, fileSource, fixedSource, onClose, onDo
                     onValueChange={selectFile}
                   />
                 ) : (
-                  <Dropdown key="file" size="sm" width="full" reserve={false} disabled={busy || !list?.files}
+                  <Dropdown key="file" width="full" reserve={false} disabled={busy || !list?.files}
                     value={draft?.file?.rel ?? ''} options={list?.options ?? []} onValueChange={selectFile} />
                 ),
               ],

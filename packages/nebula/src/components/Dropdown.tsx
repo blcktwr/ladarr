@@ -3,18 +3,12 @@ import { Check, ChevronDown } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ghost, key, raised, sunk } from '../theme/stone.ts';
 
-const sizes = {
-  sm: { minWidth: 'min-w-40', trigger: 'h-9 px-3 gap-3', icon: '[&>svg]:size-3.5', item: 'h-9 px-2.5' },
-  md: { minWidth: 'min-w-50', trigger: 'h-11 px-3.5 gap-4', icon: '[&>svg]:size-4', item: 'h-10 px-3' },
-};
-
 const widths = { md: 'justify-items-start', full: 'w-full min-w-0 grid-cols-[minmax(0,1fr)] justify-items-stretch' };
 
 type DropdownProps = Omit<Select.Root.Props<string>, 'children' | 'items'> & {
   options: { value: string; label?: ReactNode; disabled?: boolean }[];
   label?: string;
   hideLabel?: boolean;
-  size?: keyof typeof sizes;
   width?: keyof typeof widths;
   // The dropdown keeps the place of the error row of a Field under its trigger, so it aligns with a Field beside it.
   reserve?: boolean;
@@ -26,17 +20,16 @@ type DropdownProps = Omit<Select.Root.Props<string>, 'children' | 'items'> & {
 // options is a list of { value, label, disabled }. The label is the value when there is no label, and it can hold a node, such as a flag and a name.
 // label is a visible label above the trigger, as the label of a field. With a label, the dropdown also keeps the place of the error row of a Field.
 // Thus a Field and a Dropdown side by side have the same height, and their controls align. reserve=false leaves that row out, for a dropdown that stands alone.
-// size is sm or md. The default is md, the height of a key.
+// The trigger has the height of a key, as a button, so the two align side by side.
 // width is md, the width of its content, or full for the width of its container.
-export function Dropdown({ options, label, hideLabel, size = 'md', width = 'md', reserve = true, ...props }: DropdownProps) {
-  const look = sizes[size];
+export function Dropdown({ options, label, hideLabel, width = 'md', reserve = true, ...props }: DropdownProps) {
   return (
     <Select.Root {...props} items={options.map(option => ({ value: option.value, label: option.label ?? option.value }))}>
       <div className={`grid content-start gap-2 ${widths[width]}`}>
         {label && <Select.Label className={hideLabel ? 'sr-only' : 'text-ink text-[13px]/none font-[550]'}>{label}</Select.Label>}
-        <Select.Trigger className={({ open }) => `${key} ${open ? sunk : raised} inline-flex items-center justify-between ${width === 'full' ? 'w-full min-w-0' : look.minWidth} ${look.trigger} rounded-md cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-3 data-disabled:opacity-35 data-disabled:struck data-disabled:cursor-not-allowed`}>
+        <Select.Trigger className={({ open }) => `${key} ${open ? sunk : raised} inline-flex items-center justify-between ${width === 'full' ? 'w-full min-w-0' : 'min-w-50'} h-11 px-3.5 gap-4 rounded-md cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-3 data-disabled:opacity-35 data-disabled:struck data-disabled:cursor-not-allowed`}>
           <Select.Value className="min-w-0 truncate" />
-          <Select.Icon className={`flex shrink-0 text-fog transition-[rotate] duration-200 ease-stone data-popup-open:rotate-180 ${look.icon}`}>
+          <Select.Icon className={`flex shrink-0 text-fog transition-[rotate] duration-200 ease-stone data-popup-open:rotate-180 [&>svg]:size-4`}>
             <ChevronDown />
           </Select.Icon>
         </Select.Trigger>
@@ -50,10 +43,10 @@ export function Dropdown({ options, label, hideLabel, size = 'md', width = 'md',
                 key={value}
                 value={value}
                 disabled={disabled}
-                className={({ selected }) => `${key} ${selected ? sunk : ghost} flex items-center justify-between gap-6 w-full ${look.item} rounded-[5px] cursor-pointer data-disabled:opacity-35 data-disabled:cursor-not-allowed`}
+                className={({ selected }) => `${key} ${selected ? sunk : ghost} flex items-center justify-between gap-6 w-full h-10 px-3 rounded-[5px] cursor-pointer data-disabled:opacity-35 data-disabled:cursor-not-allowed`}
               >
                 <Select.ItemText>{text}</Select.ItemText>
-                <Select.ItemIndicator className={`flex text-accent ${look.icon}`}>
+                <Select.ItemIndicator className={`flex text-accent [&>svg]:size-4`}>
                   <Check />
                 </Select.ItemIndicator>
               </Select.Item>
