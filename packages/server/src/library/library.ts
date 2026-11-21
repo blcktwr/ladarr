@@ -1,5 +1,5 @@
 import type { Availability, MediaType } from '@ladarr/shared/enums';
-import { episodeEligibleAt, startOfDay } from '../core/dates.ts';
+import { endOfDay, episodeEligibleAt, startOfDay } from '../core/dates.ts';
 import type { Clock, Episode, EpisodeMeta, Title } from '../types.ts';
 
 export const titleKey = (mediaType: MediaType, tmdbId: number) => `${mediaType}:${tmdbId}`;
@@ -14,9 +14,8 @@ export function isMonitored(title: Title, episode: Episode) {
   // Specials are outside the policy. The user selects them one by one.
   if (episode.season === 0) return false;
   if (title.policy === 'future') {
-    const airs = episodeEligibleAt(episode.airDate);
-    // An episode without a date has not aired, so it is in the future.
-    return airs === null || airs >= title.futureFrom;
+    // Include episodes with no air date and those that air on the day monitoring starts.
+    return !episode.airDate || endOfDay(episode.airDate.slice(0, 10)) >= title.futureFrom;
   }
   return true;
 }

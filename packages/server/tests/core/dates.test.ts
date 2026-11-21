@@ -15,8 +15,8 @@ describe('eligibility times', () => {
     expect(episodeEligibleAt(null)).toBeNull();
   });
 
-  it('turns an air date into the end of that date', () => {
-    expect(iso(episodeEligibleAt('2008-01-20'))).toBe('2008-01-20T23:59:59.999Z');
+  it('makes an episode eligible at the start of its UTC air date', () => {
+    expect(iso(episodeEligibleAt('2008-01-20'))).toBe('2008-01-20T00:00:00.000Z');
   });
 
   it('treats a midnight UTC release as a date, and another time as an instant', () => {

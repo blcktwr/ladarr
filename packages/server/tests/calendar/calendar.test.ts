@@ -117,10 +117,11 @@ describe('calendar events', () => {
     expect(events.map((e) => e.at)).toEqual([null, Date.UTC(2024, 5, 1, 22)]);
   });
 
-  it('shows an episode as released at the end of its date', async () => {
+  it('shows an episode as missing from midnight on its air date', async () => {
     await dbWith(show('tv:1', { episodes: [episode(1, 1, '2024-06-14'), episode(1, 2, '2024-06-15')] }));
-    // 2024-06-15 12:00 UTC is before the end of the date of episode 2.
-    expect(calendarEvents(all, NOW).events.map((e) => e.availability)).toEqual(['missing', 'waiting']);
+    const midnight = Date.UTC(2024, 5, 15);
+    expect(calendarEvents(all, midnight - 1).events.map((e) => e.availability)).toEqual(['missing', 'waiting']);
+    expect(calendarEvents(all, midnight).events.map((e) => e.availability)).toEqual(['missing', 'missing']);
   });
 
   it('shows a file as available and a missing file as missing', async () => {

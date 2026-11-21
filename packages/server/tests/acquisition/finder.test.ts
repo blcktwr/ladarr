@@ -157,6 +157,38 @@ describe('bad releases', () => {
 });
 
 describe('the sweep', () => {
+  it('searches a new episode from midnight and retries it hourly without advancing older episodes', async () => {
+    const midnight = Date.UTC(2026, 10, 21);
+    const hour = 3_600_000;
+    let now = midnight - 1;
+    using clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    pipe = await startPipeline();
+    const series = title({ rootId: 'tv', episodes: [episode(1, 1, '2026-11-20'), episode(1, 2, '2026-11-21'), episode(1, 3, null)] });
+    pipe.db.data.titles[series.key] = series;
+    const job = () => Object.values(pipe!.db.data.jobs).find((job) => job.type === 'queue.search' && job.state === 'waiting');
+
+    pipe.finder.sweep();
+    expect(pipe.queue.get('tv:1:1x2')).toBeUndefined();
+    now = midnight;
+    pipe.finder.sweep();
+    const today = pipe.queue.get('tv:1:1x2');
+    expect(today).toBeDefined();
+    expect(pipe.queue.get('tv:1:1x3')).toBeUndefined();
+    await expect.poll(() => job()?.runAt).toBe(midnight + hour);
+    const older = pipe.queue.get('tv:1:1x1')!;
+    expect(older.search!.nextAt).toBe(midnight + 12 * hour);
+    expect(today!.search!.nextAt).toBe(midnight + hour);
+
+    now += hour;
+    await expect.poll(() => today!.search!.nextAt).toBe(now + hour);
+    expect(older.search!.at).toBe(midnight);
+
+    now += hour;
+    pipe.tracker.state.items = [{ title: 'Show.Name.S01E02.1080p.WEB-DL-GRP', size: 60 * 45 * MIB }];
+    await expect.poll(() => today!.state.kind).toBe('downloading');
+    expect(job()).toMatchObject({ runAt: midnight + 12 * hour, payload: { entryIds: [older.id] } });
+  });
+
   it('searches a season again with one request, so a pack that arrived later is taken', async () => {
     pipe = await startPipeline();
     const series = title({ rootId: 'tv', episodes: [1, 2, 3].map((n) => episode(1, n, '2020-01-01')) });
@@ -522,4 +554,3 @@ describe('manual reservation', () => {
     expect(pipe!.tracker.state.downloads).toEqual([]);
   });
 });
-

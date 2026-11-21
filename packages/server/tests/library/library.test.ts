@@ -64,7 +64,7 @@ describe('monitoring', () => {
   });
 
   it('monitors only episodes that air from the boundary with the Future policy', () => {
-    const show = title({ policy: 'future', futureFrom: NOW });
+    const show = title({ policy: 'future', futureFrom: Date.UTC(2024, 5, 1, 12) });
     expect([past, today, later, unknown].map((e) => isMonitored(show, e))).toEqual([false, true, true, true]);
   });
 

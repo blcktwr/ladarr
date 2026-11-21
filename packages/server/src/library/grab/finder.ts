@@ -24,16 +24,21 @@ import type { IndexerApp } from '@ladarr/shared/enums';
 export const OTHER_SEASONS_REASON = 'search other seasons';
 
 // How long a waiting entry waits before the next search. The RSS sync finds new releases in between.
-export const RESEARCH_MS = 12 * 60 * 60_000;
+const HOUR_MS = 60 * 60_000;
+const DAY_MS = 24 * HOUR_MS;
+export const RESEARCH_MS = 12 * HOUR_MS;
+const episodeOf = (title: Title, entry: QueueEntry) => title.episodes.find((episode) => episode.season === entry.season && episode.number === entry.number);
 // A title that waits for its release is searched again when that date comes, not after a few hours.
-const nextSearchAt = (title: Title, at: number) => {
-  if (title.mediaType !== 'movie') return at + RESEARCH_MS;
+const nextSearchAt = (title: Title, entry: QueueEntry, at: number) => {
+  if (title.mediaType !== 'movie') {
+    const start = episodeEligibleAt(episodeOf(title, entry)?.airDate ?? null);
+    return at + (start !== null && start <= at && at < start + DAY_MS ? HOUR_MS : RESEARCH_MS);
+  }
   const release = movieEligibleAt(title);
   return release !== null && release > at ? release : at + RESEARCH_MS;
 };
 const CACHE_MS = 5 * 60_000;
 const CACHE_MAX = 200;
-const DAY_MS = 24 * 60 * 60_000;
 // The most search requests that one automatic search run sends for one title. A run that reaches the budget leaves
 // the rest of its work for the next run.
 const SEARCH_BUDGET = 12;
@@ -132,7 +137,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       // A continuation is valid only for the same targets. A new target starts the search from the first phase. A fresh
       // search starts from the first phase too, because the user asked for the search from the top.
       const sameTargets = current.entryIds.length === ids.size && current.entryIds.every((id) => ids.has(id));
-      const resume = sameTargets && !payload.fresh ? (payload.resume ?? current.resume) : undefined;
+      // A continuation can share a job with later retries: those targets stay asleep when it runs.
+      const resume = payload.fresh ? undefined : sameTargets ? (payload.resume ?? current.resume) : runAt < primary.runAt ? payload.resume : undefined;
       const merged: SearchPayload = { ...payload, entryIds, ...(resume ? { resume } : {}), ...(manual ? { manual: true } : {}) };
       if (!resume) delete merged.resume;
       if (!manual) delete merged.manual;
@@ -389,7 +395,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
 
   // --- Search -----------------------------------------------------------------------------
 
-  const fileOf = (title: Title, entry: QueueEntry) => (title.mediaType === 'movie' ? title.fileId : (title.episodes.find((e) => e.season === entry.season && e.number === entry.number)?.fileId ?? null));
+  const fileOf = (title: Title, entry: QueueEntry) => (title.mediaType === 'movie' ? title.fileId : (episodeOf(title, entry)?.fileId ?? null));
 
   const numberingOf = (title: Title): Numbering => normalizeNumbering(title.numbering);
 
@@ -411,6 +417,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
 
   function noResult(entries: QueueEntry[], title: Title, decisionsOf: (entry: QueueEntry) => Decision[], asked: number, answered: number, found: number, profiles: ReturnType<typeof profilesFor>, { partial = false }: { partial?: boolean } = {}) {
     const shownProfiles = profiles.map(explainProfile);
+    const at = now();
     for (const entry of entries) {
       // One release can come from more than one query, as a pack and as a single episode. The closest decision of the
       // release stays, so the reasons and the counts do not repeat it.
@@ -455,7 +462,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
             sizeRejection: sizeCode && sizeLimit != null && decision.mibPerMinute !== null ? { code: sizeCode, value: decision.mibPerMinute, limit: sizeLimit } : null,
           };
         });
-      Object.assign(entry.search!, { result: code === 'no_indexers' ? 'no_results' : code, accepted: 0, candidates: decisions.length, topRejections: rejections, nextAt: nextSearchAt(title, now()), rejected });
+      Object.assign(entry.search!, { result: code === 'no_indexers' ? 'no_results' : code, accepted: 0, candidates: decisions.length, topRejections: rejections, nextAt: nextSearchAt(title, entry, at), rejected });
       // The releases that came closest to acceptance first: the fewest reasons, then the most seeders. A person sees
       // what the indexers offered and which rule stopped each one.
       const explained = decisions.map((decision) =>
@@ -560,12 +567,19 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     const title = db.data.titles[payload.titleKey];
     if (!title || title.paused) return;
     // A search job can run for targets that wait for their next search, so the job itself opens those targets.
-    const entries = payload.entryIds
+    const targets = payload.entryIds
       .map((id) => queue.get(id))
       .filter((entry): entry is QueueEntry => Boolean(entry) && isActive(entry) && (entry!.state.kind === 'waiting' || entry!.state.kind === 'queued' || entry!.state.kind === 'searching'));
-    if (!entries.length) return;
-    for (const entry of entries) if (entry.state.kind === 'waiting') queue.enter(entry, 'queued', 'search again');
+    if (!targets.length) return;
     const startedAt = now();
+    const due = targets.filter((entry) => entry.state.kind !== 'waiting' || (entry.search?.nextAt ?? 0) <= startedAt);
+    // If no target is due, the user started the scheduled job early.
+    const entries = due.length ? due : targets;
+    if (entries.length < targets.length) {
+      const later = targets.filter((entry) => entry.state.kind === 'waiting' && (entry.search?.nextAt ?? 0) > startedAt);
+      enqueueSearch({ titleKey: title.key, season: payload.season, entryIds: later.map((entry) => entry.id) }, { runAt: Math.min(...later.map((entry) => entry.search!.nextAt!)), afterRun: true });
+    }
+    for (const entry of entries) if (entry.state.kind === 'waiting') queue.enter(entry, 'queued', 'search again');
     const ctx = decideContext();
     const numbering = numberingOf(title);
     const profiles = profilesFor(ctx.quality, title);
@@ -710,7 +724,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
 
     // An episode in the recent window keeps its individual query. The season query covers an older season only.
     const recentEpisode = (entry: QueueEntry) => {
-      const episode = title.episodes.find((item) => item.season === entry.season && item.number === entry.number);
+      const episode = episodeOf(title, entry);
       const at = episodeEligibleAt(episode?.airDate ?? null);
       return at !== null && at <= now() && now() - at < recentAirMs;
     };
