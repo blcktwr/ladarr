@@ -572,6 +572,7 @@ export const es: Record<string, string> = {
   'Frame rate': 'Velocidad de fotogramas',
   'Dolby Vision': 'Dolby Vision',
   'Yes': 'Sí',
+  'Does every episode in season {season} match the correct file?': '¿Cada episodio de la temporada {season} tiene asignado el archivo correcto?',
   'No': 'No',
   'Audio {n}': 'Audio {n}',
   'Subtitles {n}': 'Subtítulos {n}',

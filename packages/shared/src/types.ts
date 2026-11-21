@@ -604,7 +604,7 @@ export type QueueGroupSummary = Pick<QueueGroupRow, 'status' | 'counts' | 'tabs'
 
 export type QueueMappingEpisode = EpisodeRef & {
   id: string;
-  match: { file: string; hash: string | null; torrent: string | null } | null;
+  match: { file: string; path: string | null; hash: string | null; torrent: string | null } | null;
 };
 
 export type QueueGroupPage = { cursor: number; group: QueueGroupSummary; items: QueueEntryView[]; mapping?: QueueMappingEpisode[] };

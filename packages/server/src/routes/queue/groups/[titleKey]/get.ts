@@ -15,7 +15,7 @@ function mappingOf(title: Title): QueueMappingEpisode[] {
     const name = file?.association?.originalName ?? manual ?? file?.path.split('/').pop();
     const hash = file?.download?.hash ?? (file?.association ? null : entry?.transferHash ?? null);
     const torrent = hash && entry?.transferHash === hash ? entry.release?.title ?? null : null;
-    return { id, season, number, match: name ? { file: name, hash, torrent } : null };
+    return { id, season, number, match: name ? { file: name, path: file?.path ?? null, hash, torrent } : null };
   }).sort((a, b) => a.season - b.season || a.number - b.number);
 }
 

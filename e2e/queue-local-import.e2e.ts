@@ -68,6 +68,9 @@ test('offers the file of the folder and maps the episode with it', async ({ page
   const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
   await expect(panel.getByRole('combobox').filter({ hasText: 'Season 1' })).toBeVisible();
   await apply.click();
+  const question = page.getByRole('dialog', { name: 'Does every episode in season 1 match the correct file?', exact: true });
+  await question.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(question).toBeHidden();
   await expect(panel).toBeVisible();
   expect(writes).toEqual([]);
   expect(await reason('tv:1:1x1')).toBe('file_unmapped');
@@ -80,16 +83,18 @@ test('offers the file of the folder and maps the episode with it', async ({ page
   expect(writes).toEqual([]);
   expect(await reason('tv:1:1x1')).toBe('file_unmapped');
   const path = '/api/queue/entries/tv:1:1x1/match';
+  await apply.click();
   const [preview, applied] = await Promise.all([
     page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === path && response.request().postDataJSON().preview === true),
     page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === path && response.request().postDataJSON().preview !== true),
-    apply.click(),
+    question.getByRole('button', { name: 'Yes', exact: true }).click(),
   ]);
   const body = { source: 'library', file: 'Show Name (2020)/Season 01/Clip A.mkv', covers: [{ season: 1, number: 1 }], ids: ['tv:1:1x1'] };
   expect(preview.status()).toBe(200);
   expect(preview.request().postDataJSON()).toMatchObject({ ...body, preview: true });
   expect(applied.status()).toBe(200);
   expect(applied.request().postDataJSON()).toMatchObject({ ...body, version: (await preview.json()).version });
+  await expect(question).toBeHidden();
   await expect(panel).toBeHidden();
 
   // The episode that the user matched is in the library, and the file keeps the path of its folder.
