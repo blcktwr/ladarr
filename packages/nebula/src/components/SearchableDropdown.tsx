@@ -45,9 +45,10 @@ export function SearchableDropdown({ label, hideLabel, disabled, placeholder, va
           id={id}
           ref={anchorRef}
           placeholder={placeholder}
+          title={value ? textOf(value) : undefined}
           onFocus={() => setOpen(true)}
           onClick={() => setOpen(true)}
-          className={`${flat} w-full min-w-0 px-3.5 text-[15px]/none`}
+          className={`${flat} w-full min-w-0 px-3.5 text-[15px]/none text-ellipsis`}
         />
         <Combobox.Portal>
           <Combobox.Positioner anchor={anchorRef} align="start" sideOffset={8}>
@@ -62,7 +63,7 @@ export function SearchableDropdown({ label, hideLabel, disabled, placeholder, va
                       disabled={option?.disabled}
                       className={({ selected }) => `${key} ${selected ? sunk : ghost} group flex items-center justify-between gap-6 w-full h-10 px-3 rounded-[5px] cursor-pointer data-disabled:opacity-35 data-disabled:cursor-not-allowed`}
                     >
-                      <span className="truncate">{textOf(item)}</span>
+                      <span className="truncate" title={textOf(item)}>{textOf(item)}</span>
                       <Combobox.ItemIndicator keepMounted className="flex shrink-0 text-accent invisible group-data-selected:visible [&>svg]:size-4">
                         <Check />
                       </Combobox.ItemIndicator>

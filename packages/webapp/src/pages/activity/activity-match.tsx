@@ -33,7 +33,7 @@ const fileOptions = (files: PackFile[]) => [
 function sourceOf(item: QueueEntryView, hash?: string, fixed?: FileSource) {
   const action = item.actions.find((action) => action.action === 'match');
   const source = fixed ?? action?.fileSource ?? (item.hasTorrent ? 'download' : 'library');
-  const own = source === 'download' ? action?.source ?? '' : '';
+  const own = source === 'download' ? action?.source ?? item.transfer?.hash ?? item.release?.title ?? '' : '';
   const selected = hash && hash !== own ? hash : undefined;
   const type = selected ? 'download' : source;
   const key = selected || own || (type === 'library' ? 'library' : item.id);
@@ -48,7 +48,7 @@ async function apply({ id, ...body }: Change) {
   await api(path, { method: 'POST', body: { ...body, version: preview.version } });
 }
 
-const readout = (text: string) => <div className="overflow-hidden" title={text}>{text}</div>;
+const readout = (text: string) => <div className="truncate" title={text}>{text}</div>;
 
 export function MatchDialog({ entry, ids, fileSource, fixedSource, onClose, onDone }: MatchRequest & { onClose: () => void; onDone: () => void }) {
   const series = entry.mediaType === 'tv';
@@ -76,27 +76,43 @@ export function MatchDialog({ entry, ids, fileSource, fixedSource, onClose, onDo
   const rows = episodes.filter((point) => point.season === season);
   const seasons = [...new Set(episodes.length ? episodes.map((point) => point.season) : season === null ? [] : [season])];
   const sources = new Map<string, string>();
+  // A pack that only fills the Matches of a row that a person can not edit is a reading: its failure is not an answer.
+  const quiet = new Set<string>();
+  const essential = new Set<string>();
   const addSource = (item: QueueEntryView, draft?: Draft) => {
     const { key, path } = sourceOf(item, draft?.hash, fixed);
     if (path && !sources.has(key)) sources.set(key, path);
+    return key;
   };
-  if (!series || fixedSource) addSource(entry);
+  if (!series || fixedSource) essential.add(addSource(entry));
   else for (const point of episodes) {
     if (point.season !== season && !drafts[point.id]?.file) continue;
     const item = items.get(point.id);
-    if (item && editable.has(point.id) && !point.match) addSource(item, drafts[point.id]);
+    const edit = editable.has(point.id);
+    // The pack of a season names the file of each episode. A row that is not editable shows that file too.
+    if (item && !point.match && (edit || (point.season === season && item.hasTorrent))) {
+      const key = addSource(item, edit ? drafts[point.id] : undefined);
+      if (edit) essential.add(key);
+      else quiet.add(key);
+    }
   }
   const packs = useQueries({
     queries: [...sources].map(([key, path]) => ({
       queryKey: ['mapping-files', entry.titleKey, key], queryFn: () => api<QueuePackFiles>(path), gcTime: 0,
     })),
   });
-  const lists = new Map([...sources.keys()].map((key, i) => {
+  const keys = [...sources.keys()];
+  const lists = new Map(keys.map((key, i) => {
     const files = packs[i]!.data?.files;
     return [key, { files, options: fileOptions(files ?? []) }];
   }));
+  const covers = (point: EpisodeRef, file: PackFile) =>
+    file.current?.some((cover) => cover.season === point.season && cover.number === point.number) ||
+    file.proposal?.episodes.some((cover) => cover.season === point.season && cover.number === point.number);
+  // The file that the matcher of the server gives to the episode, from the names and the metadata of the pack.
+  const proposed = (point: EpisodeRef, key: string) => lists.get(key)?.files?.find((file) => covers(point, file));
   const movieList = lists.get(sourceOf(entry, undefined, fixed).key);
-  const failed = group.error ?? packs.find((pack) => pack.error)?.error;
+  const failed = group.error ?? packs.find((pack, i) => (!quiet.has(keys[i]!) || essential.has(keys[i]!)) && pack.error)?.error;
   const shown = error || (failed ? errorText(failed) : '');
 
   const change = (id: string, draft: Draft) => {
@@ -110,12 +126,15 @@ export function MatchDialog({ entry, ids, fileSource, fixedSource, onClose, onDo
     const groups = new Map<string, Change & { covers: EpisodeRef[] }>();
     for (const point of episodes) {
       const draft = drafts[point.id];
-      if (!draft?.file || point.match || (mapSeries && !editable.has(point.id))) continue;
+      if (point.match || (mapSeries && !editable.has(point.id))) continue;
       const item = items.get(point.id) ?? entry;
-      const source = sourceOf(item, draft.hash, fixed);
-      const key = JSON.stringify([source.key, draft.file.rel]);
+      const source = sourceOf(item, draft?.hash, fixed);
+      const suggested = mapSeries && point.season === season && !draft?.file ? proposed(point, source.key) : undefined;
+      const file = draft?.file ?? suggested;
+      if (!file) continue;
+      const key = JSON.stringify([source.key, file.rel]);
       const group = groups.get(key) ?? {
-        id: item.id, source: source.type, file: draft.file.rel, covers: [...(draft.file.current ?? [])], ids: [],
+        id: item.id, source: source.type, file: file.rel, covers: [...(file.current ?? [])], ids: [],
       };
       if (!group.covers.some((p) => p.season === point.season && p.number === point.number)) group.covers.push({ season: point.season, number: point.number });
       if (editable.has(point.id)) {
@@ -183,9 +202,13 @@ export function MatchDialog({ entry, ids, fileSource, fixedSource, onClose, onDo
             const source = sourceOf(item ?? entry, draft?.hash, fixed);
             const list = source.path ? lists.get(source.key) : undefined;
             const hash = draft?.hash ?? source.own;
-            const canEdit = !point.match && (editable.has(point.id) || fixedSource) && item?.status !== 'available';
-            const torrentName = options.find((option) => option.value === point.match?.hash)?.label ?? point.match?.torrent ?? point.match?.hash
-              ?? (!point.match && item?.hasTorrent ? item.release?.title : null) ?? '—';
+            // What the matcher found is a match: it shows as text. Only what it did not find offers the selectors.
+            const suggested = !point.match && mapSeries ? proposed(point, source.key) : undefined;
+            const canEdit = !point.match && !suggested && (editable.has(point.id) || fixedSource) && item?.status !== 'available';
+            const shown = point.match?.file ?? item?.file?.name ?? (suggested ? suggested.originalName || suggested.rel : undefined) ?? '—';
+            const torrentName = (draft?.hash ? options.find((option) => option.value === draft.hash)?.label ?? draft.hash : undefined)
+              ?? options.find((option) => option.value === point.match?.hash)?.label ?? point.match?.torrent ?? point.match?.hash
+              ?? (!point.match && (item?.hasTorrent || source.own) ? item?.release?.title ?? options.find((option) => option.value === source.own)?.label ?? source.own : null) ?? '—';
             const selectFile = (value: string | null) => change(point.id, { ...draft, file: list?.files?.find((file) => file.rel === value) });
             return {
               key: point.id,
@@ -200,7 +223,7 @@ export function MatchDialog({ entry, ids, fileSource, fixedSource, onClose, onDo
                     onValueChange={(next) => change(point.id, { hash: next === source.own ? undefined : next })}
                   />
                 ) : readout(torrentName)] : []),
-                !canEdit ? readout(point.match?.file ?? item?.file?.name ?? '—') : mapSeries ? (
+                !canEdit ? readout(shown) : mapSeries ? (
                   <SearchableDropdown
                     key={`file:${source.key}`} label={t('Matches')} hideLabel width="full"
                     placeholder={t('Unassigned')} emptyText={t('No options.')} disabled={busy || !list?.files}
