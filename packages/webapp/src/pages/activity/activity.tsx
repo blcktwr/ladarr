@@ -102,7 +102,7 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
         switch (action) {
           case 'match':
           case 'use_existing':
-            return <Button key={action} aria-haspopup="dialog" onClick={() => openMatch({ entry: target, ids: item.ids, fileSource: item.fileSource, fixedSource: action === 'use_existing' })}>{t(item.label)}</Button>;
+            return <Button key={action} aria-haspopup="dialog" onClick={() => openMatch({ entry: target, ids: item.ids, entries, fileSource: item.fileSource, fixedSource: action === 'use_existing' })}>{t(item.label)}</Button>;
           case 'attach':
             return <AttachDialog key={item.action} entry={target} ids={item.ids} onDone={refresh} />;
           case 'replace':
