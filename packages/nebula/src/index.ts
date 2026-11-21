@@ -38,6 +38,7 @@ export { Panel } from './components/Panel.tsx';
 export { Progress } from './components/Progress.tsx';
 export { Row } from './components/Row.tsx';
 export { SearchField } from './components/SearchField.tsx';
+export { SearchableDropdown } from './components/SearchableDropdown.tsx';
 export { Section } from './components/Section.tsx';
 export { SideMenu } from './components/SideMenu.tsx';
 export { Slider } from './components/Slider.tsx';

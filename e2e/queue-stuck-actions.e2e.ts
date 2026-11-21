@@ -338,7 +338,8 @@ test('maps selected episodes from a completed torrent with different season numb
     episode.fileId = id;
   }
   const secondFiles = Object.fromEntries(firstPart.map(({ number }) => [`Show.Name.S02E0${number}.mkv`, `second-part-${number}`]));
-  const hash = completeTorrent('Show.Name.S02.Second.Part.1080p.WEB-DL-GRP', secondFiles, '');
+  const longName = `Show.Name.S02.Second.Part.${'LongReleaseName'.repeat(10)}.1080p.WEB-DL-GRP`;
+  const hash = completeTorrent(longName, secondFiles, '');
   const missing = title.episodes.slice(5).map(({ number }) => blocked(title.key, 1, number, 'fetching', 'pack_partial'));
   const unselected = missing.at(-1)!;
   data.queuePaused = true;
@@ -365,13 +366,19 @@ test('maps selected episodes from a completed torrent with different season numb
     await expect(cellsOf(number).last().getByRole('combobox')).toHaveCount(0);
   }
   const files = Object.keys(secondFiles);
+  const tableWidth = (await table.boundingBox())!.width;
   for (const [index, target] of missing.entries()) {
     const cells = cellsOf(target.number!);
-    await cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true }).fill('Second.Part');
+    const input = cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true });
+    await input.fill('Second.Part');
     const torrent = page.getByRole('option', { name: /Show\.Name\.S02\.Second\.Part\./ });
     await expect(torrent).toBeVisible();
     await expect(page.getByRole('option', { name: /Show\.Name\.S01\./ })).toHaveCount(0);
     await torrent.click();
+    await expect(input).toHaveValue(longName);
+    await expect(cells.nth(1).getByRole('button', { name: /delete/i })).toHaveCount(0);
+    expect((await table.boundingBox())!.width).toBeLessThanOrEqual(tableWidth + 1);
+    expect((await input.boundingBox())!.width).toBeLessThanOrEqual((await cells.nth(1).boundingBox())!.width);
     const matches = cells.last().getByRole('combobox');
     if (target.id === unselected.id) {
       await expect(matches).toHaveText('Unassigned');

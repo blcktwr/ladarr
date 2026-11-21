@@ -1,7 +1,7 @@
 import type { AttachCandidates, EpisodeRef, QueueEntryView, QueueGroupPage, QueueMatchPreview, QueuePackFiles } from '@ladarr/shared/types';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button, Dropdown, EmptyState, Modal, Spinner, Table, TagInput, Text } from 'nebula';
+import { Button, Dropdown, EmptyState, Modal, SearchableDropdown, Spinner, Table, Text } from 'nebula';
 import { api, ApiError } from '../../lib/api.ts';
 import { formatBytes, groupName, seasonName } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
@@ -166,7 +166,7 @@ export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone
             loading={loading}
             minWidth={torrentColumn ? '30rem' : undefined}
             columns={[
-              { label: t('Episodes'), ...(torrentColumn ? {} : { width: 'clamp(5rem, 20vw, 9rem)' }) },
+              { label: t('Episodes'), width: 'clamp(5rem, 20vw, 9rem)' },
               ...(torrentColumn ? [{ label: t('Torrent') }] : []),
               { label: t('Matches') },
             ]}
@@ -184,17 +184,15 @@ export function MatchDialog({ entry, ids, label, fileSource, fixedSource, onDone
                 cells: [
                   <Text key="episode">{pointText(point)}</Text>,
                   ...(torrentColumn ? [!matched && affected.includes(point.id) ? (
-                    <TagInput
-                      key={hash}
+                    <SearchableDropdown
+                      key="torrent"
                       label={t('Torrent')}
                       hideLabel
                       width="full"
-                      allowCustom={false}
                       emptyText={t('No options.')}
                       options={options}
-                      value={hash ? [hash] : []}
-                      onValueChange={(values) => {
-                        const next = values.at(-1) ?? '';
+                      value={hash}
+                      onValueChange={(next) => {
                         setTorrents((state) => {
                           const choices = { ...state };
                           if (next === own) delete choices[key];
