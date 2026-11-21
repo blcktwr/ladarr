@@ -1,7 +1,7 @@
 import type { CalendarEvent, CalendarUndated } from '@ladarr/shared/types';
 import { db } from '../../core/db.ts';
 import { episodeEligibleAt, isDateOnly, releaseInstant } from '../../core/dates.ts';
-import { availability, isMonitored, movieEligibleAt } from '../library.ts';
+import { availability, isMonitored } from '../library.ts';
 import type { CalendarQuery, Db, Title } from '../../types.ts';
 
 export const MAX_EVENTS = 5_000;
@@ -18,9 +18,10 @@ export function dayOf(at: number) {
 
 // The first digital or physical release in any region, as a day. The day has a time only when TMDB gave one.
 function movieRelease(title: Title) {
-  const at = movieEligibleAt(title);
-  if (at === null) return null;
-  const raw = title.meta.releaseDates.find((date) => (date.kind === 'digital' || date.kind === 'physical') && releaseInstant(date.date) === at)!.date;
+  const dates = title.meta.releaseDates.filter((date) => date.kind === 'digital' || date.kind === 'physical');
+  if (!dates.length) return null;
+  const at = Math.min(...dates.map((date) => releaseInstant(date.date)));
+  const raw = dates.find((date) => releaseInstant(date.date) === at)!.date;
   return isDateOnly(raw) ? { day: raw.slice(0, 10), at: null } : { day: dayOf(at), at };
 }
 

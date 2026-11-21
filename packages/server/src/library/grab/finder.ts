@@ -27,7 +27,7 @@ export const OTHER_SEASONS_REASON = 'search other seasons';
 export const RESEARCH_MS = 12 * 60 * 60_000;
 // A title that waits for its release is searched again when that date comes, not after a few hours.
 const nextSearchAt = (title: Title, at: number) => {
-  if (title.mediaType !== 'movie' || title.manualRelease) return at + RESEARCH_MS;
+  if (title.mediaType !== 'movie') return at + RESEARCH_MS;
   const release = movieEligibleAt(title);
   return release !== null && release > at ? release : at + RESEARCH_MS;
 };
@@ -65,7 +65,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   function wantedMovie(title: Title) {
     if (title.paused || present(title.fileId)) return false;
     const at = movieEligibleAt(title);
-    return title.manualRelease || (at !== null && at <= now());
+    return at !== null ? at <= now() : title.manualRelease;
   }
 
   function decideContext(manual = false): DecideContext {

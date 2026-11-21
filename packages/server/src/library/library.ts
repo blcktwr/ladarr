@@ -1,5 +1,5 @@
 import type { Availability, MediaType } from '@ladarr/shared/enums';
-import { episodeEligibleAt, releaseInstant } from '../core/dates.ts';
+import { episodeEligibleAt, startOfDay } from '../core/dates.ts';
 import type { Clock, Episode, EpisodeMeta, Title } from '../types.ts';
 
 export const titleKey = (mediaType: MediaType, tmdbId: number) => `${mediaType}:${tmdbId}`;
@@ -47,17 +47,15 @@ const aired = (episode: Episode, clock: Clock) => {
   return airs !== null && airs <= clock.now;
 };
 
-// The earliest known digital or physical release in any region. A theatrical release alone gives no date.
 export function movieEligibleAt(title: Title) {
-  const times = title.meta.releaseDates.filter((date) => date.kind === 'digital' || date.kind === 'physical').map((date) => releaseInstant(date.date));
-  return times.length ? Math.min(...times) : null;
+  return title.meta.date ? startOfDay(title.meta.date.slice(0, 10)) : null;
 }
 
 export function availability(title: Title, clock: Clock): Availability {
   if (title.mediaType === 'movie') {
     if (present(clock, title.fileId)) return 'available';
     const at = movieEligibleAt(title);
-    return title.manualRelease || (at !== null && at <= clock.now) ? 'missing' : 'waiting';
+    return at !== null ? (at <= clock.now ? 'missing' : 'waiting') : title.manualRelease ? 'missing' : 'waiting';
   }
   const { eligible, available } = seriesCounts(title, clock);
   // A series is upcoming only while no episode has aired. Monitoring decides what is missing, not whether it is out.

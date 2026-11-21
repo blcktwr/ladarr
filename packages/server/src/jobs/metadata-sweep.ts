@@ -9,7 +9,7 @@ const IDLE_REFRESH_MS = 7 * 24 * 60 * 60_000;
 const SWEEP_EVERY_MS = 60 * 60_000;
 const DONE_STATUSES = ['Ended', 'Canceled', 'Released'];
 
-// A title changes more while it is not finished. A movie that waits for a digital release is not finished either.
+// A title changes more while it is not finished. A movie that waits for its release is not finished either.
 function isActive(title: Title, now: number) {
   if (title.paused) return false;
   if (title.mediaType === 'movie') {
