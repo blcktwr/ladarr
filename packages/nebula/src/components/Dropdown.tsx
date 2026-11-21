@@ -4,11 +4,11 @@ import type { ReactNode } from 'react';
 import { ghost, key, raised, sunk } from '../theme/stone.ts';
 
 const sizes = {
-  sm: { trigger: 'min-w-40 h-9 px-3 gap-3', icon: '[&>svg]:size-3.5', item: 'h-9 px-2.5' },
-  md: { trigger: 'min-w-50 h-11 px-3.5 gap-4', icon: '[&>svg]:size-4', item: 'h-10 px-3' },
+  sm: { minWidth: 'min-w-40', trigger: 'h-9 px-3 gap-3', icon: '[&>svg]:size-3.5', item: 'h-9 px-2.5' },
+  md: { minWidth: 'min-w-50', trigger: 'h-11 px-3.5 gap-4', icon: '[&>svg]:size-4', item: 'h-10 px-3' },
 };
 
-const widths = { md: 'justify-items-start', full: 'w-full justify-items-stretch' };
+const widths = { md: 'justify-items-start', full: 'w-full min-w-0 grid-cols-[minmax(0,1fr)] justify-items-stretch' };
 
 type DropdownProps = Omit<Select.Root.Props<string>, 'children' | 'items'> & {
   options: { value: string; label?: ReactNode; disabled?: boolean }[];
@@ -33,8 +33,8 @@ export function Dropdown({ options, label, size = 'md', width = 'md', reserve = 
     <Select.Root {...props} items={options.map(option => ({ value: option.value, label: option.label ?? option.value }))}>
       <div className={`grid content-start gap-2 ${widths[width]}`}>
         {label && <Select.Label className="text-ink text-[13px]/none font-[550]">{label}</Select.Label>}
-        <Select.Trigger className={({ open }) => `${key} ${open ? sunk : raised} inline-flex items-center justify-between ${look.trigger} rounded-md cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-3 data-disabled:opacity-35 data-disabled:struck data-disabled:cursor-not-allowed`}>
-          <Select.Value />
+        <Select.Trigger className={({ open }) => `${key} ${open ? sunk : raised} inline-flex items-center justify-between ${width === 'full' ? 'w-full min-w-0' : look.minWidth} ${look.trigger} rounded-md cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-3 data-disabled:opacity-35 data-disabled:struck data-disabled:cursor-not-allowed`}>
+          <Select.Value className="min-w-0 truncate" />
           <Select.Icon className={`flex shrink-0 text-fog transition-[rotate] duration-200 ease-stone data-popup-open:rotate-180 ${look.icon}`}>
             <ChevronDown />
           </Select.Icon>
