@@ -90,10 +90,18 @@ describe('the acquisition of a mapped episode', () => {
 
     const entry = entryOf({ id: `${item.key}:1x13`, titleKey: item.key, season: 1, number: 13, stage: 'fetching', reason: { code: 'pack_partial' } });
     pipe.db.data.queue[entry.id] = entry;
+    const earlier = entryOf({ id: `${item.key}:1x12`, titleKey: item.key, season: 1, number: 12, stage: 'available' });
+    pipe.db.data.queue[earlier.id] = earlier;
     api = await pipe.api();
     const saved = await api.patch(`/library/${item.key}`, { episodeSeasons: { revision: 0, edits: [{ season: 1, number: 13, releaseSeason: 2, search: true }] } });
     expect(saved.status).toBe(200);
     await until(() => stageOf(entry!) === 'downloading');
+    const page = await api.get('/queue?stage=downloading');
+    expect(page.body.items).toMatchObject([{ key: `${item.key}:2`, season: 2, total: 1, reached: { imported: 0 } }]);
+    const group = await api.get(`/queue/groups/${item.key}?season=2`);
+    expect(group.body.items).toMatchObject([{ id: entry.id, season: 1, number: 13, label: 'Show Name S02E01' }]);
+    const previous = await api.get(`/queue/groups/${item.key}?season=1`);
+    expect(previous.body.items).toMatchObject([{ id: earlier.id, status: 'available' }]);
 
     // The indexers get the release coordinates of the target. The catalog coordinates are never asked for.
     const asked = pipe.tracker.state.searches;

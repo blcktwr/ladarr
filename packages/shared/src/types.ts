@@ -199,6 +199,8 @@ export type PlanRequest = {
   deleteFiles?: boolean;
   // For `remove` on a series: only this season.
   season?: number;
+  // With a revision, season uses the release numbering of the preview.
+  numberingRevision?: number;
   // For `preset`: a preset ID, or null for the default.
   preset?: string | null;
   // For `delete_files` with one title: only these files.
@@ -512,6 +514,7 @@ export type QueueEntryView = {
   posterPath: string | null;
   season: number | null;
   number: number | null;
+  releaseEpisode: EpisodeRef | null;
   episodeName: string | null;
   label: string;
   // The derived status, tab, and phase of the state of the target.
@@ -561,6 +564,7 @@ export type QueueGroupRow = {
   posterPath: string | null;
   // A group is one season of a series.
   season: number | null;
+  numberingRevision?: number;
   // The status of the whole group, from all of its targets, independent of the selected tab.
   status: Status | null;
   total: number;

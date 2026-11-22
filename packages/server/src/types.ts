@@ -1008,7 +1008,7 @@ export type FoldersDeps = { tmdb?: Tmdb; events: Events; enqueue: (input: Enqueu
 export type PlansDeps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job; queue?: Queue; cancelJob?: (id: string) => void; clients?: Clients };
 export type Failure = { status: number; body: Record<string, unknown> };
 // What the preview saw. The apply checks that the library and the disk are still the same.
-export type Stored = { preview: PlanPreview; seen: Map<string, Seen>; ids: Map<string, string[]> };
+export type Stored = { preview: PlanPreview; seen: Map<string, Seen>; ids: Map<string, string[]>; points?: Set<string> };
 // What the preview saw on the disk. Null: the file was not there.
 export type Seen = { sizeBytes: number; mtimeMs: number } | null;
 export type Retired = { ok: true; how: 'deleted' | 'gone' } | { ok: false; reason: string };

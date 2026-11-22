@@ -7,7 +7,7 @@ import { deprioritize, prioritize } from '../../../core/jobs.ts';
 import { ClientError } from '../../../library/downloads/qbittorrent.ts';
 import { addedByApp, isActive, phaseOfEntry } from '../../../library/downloads/queue.ts';
 import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts';
-import { actionsOf, associationState, bySeasonNumber, label, lanePositions, otherSeasonsTargets, resolutionCurrent, resolutionVersion, shown, statusOf } from '../../../helpers/queue.ts';
+import { actionsOf, associationState, bySeasonNumber, label, lanePositions, otherSeasonsTargets, queueEpisode, resolutionCurrent, resolutionVersion, shown, statusOf } from '../../../helpers/queue.ts';
 import { canRetry, needsOtherSeasons } from '@ladarr/shared/queue';
 import type { ClientHandle, Clients, EnqueueInput, Finder, Job, Poller, Queue, QueueEntry, Torrent } from '../../../types.ts';
 
@@ -152,7 +152,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
 
   // The entries of a group in the order that they have now, for an action on a group. A null season takes every season.
   function groupEntries(titleKey: string, season: number | null) {
-    return Object.values(db.data.queue).filter((entry) => entry.titleKey === titleKey && (season === null || entry.season === season) && shown(entry)).sort((a, b) => a.createdAt - b.createdAt || bySeasonNumber(a, b));
+    return Object.values(db.data.queue).filter((entry) => entry.titleKey === titleKey && (season === null || queueEpisode(entry)?.season === season) && shown(entry)).sort((a, b) => a.createdAt - b.createdAt || bySeasonNumber(a, b));
   }
 
   return async (req, res) => {

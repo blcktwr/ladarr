@@ -4,7 +4,7 @@ import { REJECTION_TEXT } from '../library/grab/decide.ts';
 import { aggregate, describe, needsOtherSeasons, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
 import { createHash } from 'node:crypto';
 import type { QueueGroupRow, QueuePage, QueueResolution, QueueRow } from '@ladarr/shared/types';
-import { normalizeNumbering } from '../library/numbering.ts';
+import { normalizeNumbering, releasePoint } from '../library/numbering.ts';
 import { db } from '../core/db.ts';
 import { seasonOf } from '../core/jobs.ts';
 import { reasonInfo } from '../core/reasons.ts';
@@ -175,10 +175,16 @@ export const titleOf = (entry: QueueEntry): Title | undefined => db.data.titles[
 export const shown = (entry: QueueEntry) => entry.attempt > 0 && Boolean(titleOf(entry));
 export const titleName = (title: Title) => `${title.meta.title}${title.meta.year ? ` (${title.meta.year})` : ''}`;
 
+export function queueEpisode(entry: QueueEntry) {
+  if (entry.season === null || entry.number === null) return null;
+  const point = { season: entry.season, number: entry.number };
+  return releasePoint(normalizeNumbering(titleOf(entry)?.numbering), point) ?? point;
+}
+
 export function label(entry: QueueEntry) {
   const title = titleOf(entry)!;
-  if (entry.season === null) return titleName(title);
-  return `${title.meta.title} S${pad(entry.season)}E${pad(entry.number!)}`;
+  const point = queueEpisode(entry);
+  return point ? `${title.meta.title} S${pad(point.season)}E${pad(point.number)}` : titleName(title);
 }
 
 // The target of a job. A job without a target has no entry.
@@ -207,7 +213,11 @@ export function jobLabel(job: Job): string | null {
   // A search covers a whole season. Its label names the season, so the row does not look like one episode.
   if (job.type === 'queue.search' && typeof payload?.season === 'number' && (payload.entryIds?.length ?? 0) > 1) {
     const title = payload.titleKey ? db.data.titles[payload.titleKey] : undefined;
-    if (title) return `${titleName(title)} S${pad(payload.season)}`;
+    if (title) {
+      const seasons = new Set(payload.entryIds!.flatMap((id) => db.data.queue[id] ? queueEpisode(db.data.queue[id]!)?.season ?? [] : []));
+      if (seasons.size > 1) return titleName(title);
+      return `${titleName(title)} S${pad(seasons.values().next().value ?? payload.season)}`;
+    }
   }
   const entry = jobEntry(job);
   if (entry && titleOf(entry)) return label(entry);
@@ -326,6 +336,7 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
     posterPath: title.meta.posterPath,
     season: entry.season,
     number: entry.number,
+    releaseEpisode: queueEpisode(entry),
     episodeName: episode?.name ?? null,
     label: label(entry),
     status: description.status,
@@ -416,7 +427,11 @@ export function matches(entry: QueueEntry, f: Filters) {
   return true;
 }
 
-export const bySeasonNumber = (a: QueueEntry, b: QueueEntry) => (a.season ?? 0) - (b.season ?? 0) || (a.number ?? 0) - (b.number ?? 0);
+export const bySeasonNumber = (a: QueueEntry, b: QueueEntry) => {
+  const left = queueEpisode(a);
+  const right = queueEpisode(b);
+  return (left?.season ?? 0) - (right?.season ?? 0) || (left?.number ?? 0) - (right?.number ?? 0);
+};
 
 // The rows of the queue, before the page and after the filters. The counters read the same rows, so a badge and the
 // rows of its tab always agree.
@@ -425,11 +440,12 @@ function groupsOf(f: Filters, poller?: Poller): RowGroup[] {
   for (const entry of Object.values(db.data.queue)) {
     if (!shown(entry) || (!f.cleared && entry.clearedAt)) continue;
     const title = titleOf(entry)!;
-    const key = entry.season === null ? entry.id : `${entry.titleKey}:${entry.season}`;
+    const season = queueEpisode(entry)?.season ?? null;
+    const key = season === null ? entry.id : `${entry.titleKey}:${season}`;
     const group = groups.get(key) ?? {
       key,
       title,
-      season: entry.season,
+      season,
       entries: [],
       matching: 0,
       first: entry.createdAt,
@@ -537,6 +553,8 @@ function groupRow(group: RowGroup): QueueGroupRow {
     year: group.title.meta.year,
     posterPath: group.title.meta.posterPath,
     season: group.season,
+    ...(group.title.numbering?.ranges.some((range) => range.season !== range.releaseSeason && (range.season === group.season || range.releaseSeason === group.season))
+      ? { numberingRevision: group.title.numbering.revision } : {}),
     status: summary.status,
     total: summary.total,
     reached: reachedOf(group.entries),

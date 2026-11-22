@@ -465,6 +465,13 @@ test('maps selected episodes from a completed torrent with different season numb
     id: selected.map(({ id }) => id), source: 'download', hash, file: files[index]!,
     covers: [{ season: 1, number: target.number! }], ids: [target.id],
   })));
+  const secondSeason = page.locator(`[data-row="group:${title.key}:2"]`);
+  await expect(secondSeason).toContainText('Season 2');
+  await secondSeason.click();
+  await page.getByRole('button', { name: 'Show episodes of Season 2', exact: true }).click();
+  const releaseEpisodes = page.getByRole('table', { name: 'Episodes of season 2', exact: true });
+  await expect(releaseEpisodes.getByText('Show Name S02E01', { exact: true })).toBeVisible();
+  await expect(releaseEpisodes.getByRole('row')).toHaveCount(selected.length + 1);
   expect((await stack.call('POST', '/queue/pause', { paused: false })).status).toBe(200);
   for (const target of selected) {
     await expect.poll(async () => (await entry(target.id)).status, { timeout: 60_000 }).toBe('available');
@@ -766,29 +773,6 @@ test('changes the torrent of a mapped episode without a queue entry', async ({ p
     .find((point: { id: string }) => point.id === 'tv:3:2x3')).toMatchObject({ torrent: { hash: alternate }, match: { file: 'Replacement.mkv' } });
 });
 
-test('discards an episode from its row and leaves it unassigned', async ({ page }) => {
-  const title = data.titles['tv:3']!;
-  title.folder = 'Two Seasons (2021)';
-  const first = blocked('tv:3', 2, 3, 'fetching', 'pack_partial');
-  const second = blocked('tv:3', 2, 4, 'fetching', 'pack_partial');
-  download(first, 'Two.Seasons.S02.1080p.WEB-DL-GRP', { 'Two.Seasons.S02E03.mkv': 'third', 'Two.Seasons.S02E04.mkv': 'fourth' });
-  Object.assign(second, { transferHash: first.transferHash, clientId: first.clientId, release: structuredClone(first.release) });
-  data.queuePaused = true;
-  await start([first, second]);
-
-  await open(page, 'group:tv:3:2');
-  await page.getByRole('main').getByRole('button', { name: 'Map episodes', exact: true }).click();
-  const table = page.getByRole('dialog').getByRole('table', { name: 'Map episodes', exact: true });
-  const cells = table.getByRole('row').filter({ hasText: 'S02E04' }).getByRole('cell');
-  await cells.last().getByRole('button', { name: 'Discard episode S02E04', exact: true }).click();
-  await expect(cells.getByRole('combobox', { name: 'Torrent', exact: true })).toHaveValue('');
-  await expect(cells.getByRole('combobox', { name: 'Torrent', exact: true })).toHaveAttribute('placeholder', 'No torrent selected');
-  await expect(cells.last().getByRole('combobox')).toHaveValue('');
-  await expect.poll(async () => (await stack.call('GET', '/queue/entries/tv:3:2x4')).status).toBe(404);
-  const episodes = (await stack.call('GET', '/library/tv:3/episodes?season=2')).body.episodes;
-  expect(episodes.find((episode: { number: number }) => episode.number === 4).override).toBe('unmonitored');
-});
-
 test('applies the file that the matcher gives to each episode of a stopped season', async ({ page }) => {
   const first = blocked('tv:3', 2, 3, 'fetching', 'pack_partial');
   const second = blocked('tv:3', 2, 4, 'fetching', 'pack_partial');
@@ -805,6 +789,7 @@ test('applies the file that the matcher gives to each episode of a stopped seaso
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
   const cells = (label: string) => table.getByRole('row').filter({ hasText: label }).getByRole('cell');
   await expect(cells('S02E03').getByRole('combobox', { name: 'Torrent', exact: true })).toHaveValue(name);
+  await expect(table.getByRole('button', { name: /^Discard episode / })).toHaveCount(0);
   const third = cells('S02E03').getByRole('combobox', { name: 'Matches' });
   await expect(third).toHaveValue(/Two\.Seasons\.S02E03\.mkv/);
   await expect(cells('S02E04').getByRole('combobox', { name: 'Matches' })).toHaveValue(/Two\.Seasons\.S02E04\.mkv/);

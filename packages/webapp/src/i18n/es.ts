@@ -71,7 +71,6 @@ export const es: Record<string, string> = {
   // Search
   'No options.': 'No hay opciones.',
   'No torrent selected': 'Ningún torrent seleccionado',
-  'Discard episode {episode}': 'Descartar episodio {episode}',
   'Type a title in the search box.': 'Escribe un título en el cuadro de búsqueda.',
   'This ID does not match exactly one series. Select the right one.': 'Este ID no coincide con una sola serie. Selecciona la correcta.',
   'No titles match.': 'Ningún título coincide.',

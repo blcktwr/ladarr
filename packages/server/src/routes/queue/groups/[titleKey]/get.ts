@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { db } from '../../../../core/db.ts';
 import type { QueueGroupPage, QueueMappingEpisode } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import { bySeasonNumber, filtersOf, groupAggregate, lanePositions, reachedOf, shown, view } from '../../../../helpers/queue.ts';
+import { bySeasonNumber, filtersOf, groupAggregate, lanePositions, queueEpisode, reachedOf, shown, view } from '../../../../helpers/queue.ts';
 import { inside, torrentVideos } from '../../../../library/imports/importer.ts';
 import { normalizeNumbering, releasePoint } from '../../../../library/numbering.ts';
 import type { Clients, ImportStatus, Poller, Title, Torrent } from '../../../../types.ts';
@@ -80,8 +80,9 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
     const f = filtersOf(req.query);
     const lane = lanePositions();
     const season = req.query.season === undefined ? null : Number(req.query.season);
+    const mappingRequested = req.query.mapping === 'true';
     const all = Object.values(db.data.queue).filter(
-      (entry) => entry.titleKey === req.params.titleKey && entry.season !== null && (season === null || entry.season === season) && shown(entry) && (f.cleared || !entry.clearedAt),
+      (entry) => entry.titleKey === req.params.titleKey && entry.season !== null && (season === null || (mappingRequested ? entry.season : queueEpisode(entry)?.season) === season) && shown(entry) && (f.cleared || !entry.clearedAt),
     );
     const items = [...all].sort(bySeasonNumber);
     // The download of the group is the part of the least advanced torrent that the client reports.
@@ -95,7 +96,7 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
     const summary = groupAggregate(all);
     const title = db.data.titles[req.params.titleKey];
     const numberingRevision = title?.numbering?.revision ?? 0;
-    const mapping = req.query.mapping === 'true' && title ? await mappingOf(title, clients, season) : undefined;
+    const mapping = mappingRequested && title ? await mappingOf(title, clients, season) : undefined;
     res.json({
       cursor: db.data.queueRev,
       group: {

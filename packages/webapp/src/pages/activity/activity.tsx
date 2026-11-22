@@ -626,7 +626,7 @@ function SeasonEpisodes({ season, entries }: { season: number; entries: QueueEnt
 // The seasons of a series, with the part of each one that is in the library. A click on a row or on its button opens the
 // episodes of the season under its row, and a second click closes them.
 function SeasonTable({ titleKey, entries, opened, onSeason, detail }: { titleKey: string; entries: QueueEntryView[]; opened: number | null; onSeason: (season: number) => void; detail: (season: number) => ReactNode }) {
-  const seasons = [...new Set(entries.map((entry) => entry.season).filter((season): season is number => season !== null))].sort((a, b) => a - b);
+  const seasons = [...new Set(entries.flatMap((entry) => entry.releaseEpisode?.season ?? []))].sort((a, b) => a - b);
   if (seasons.length === 0) return <EmptyState>{t('No target fits these filters.')}</EmptyState>;
   return (
     <Table
@@ -634,7 +634,7 @@ function SeasonTable({ titleKey, entries, opened, onSeason, detail }: { titleKey
       columns={seasonColumns.map((column) => ({ ...column, label: t(column.label) }))}
       rows={seasons.map((season) => {
         const name = seasonName(season);
-        const episodes = entries.filter((entry) => entry.season === season).length;
+        const episodes = entries.filter((entry) => entry.releaseEpisode?.season === season).length;
         return {
           key: `season:${titleKey}|${season}`,
           onClick: () => onSeason(season),
@@ -743,7 +743,7 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
         entries={entries}
         opened={season}
         onSeason={toggle}
-        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} />}
+        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.releaseEpisode?.season === number)} />}
       />
     </div>
   );
@@ -776,7 +776,7 @@ function Inspector({ row, filters, run, openLogs, openGroupLogs, onDelete, onBac
     row.kind === 'entry'
       ? { request: { action: 'remove', keys: [row.titleKey] }, subject: row.title }
       : row.kind === 'group' && row.season !== null
-        ? { request: { action: 'remove', keys: [row.titleKey], season: row.season }, subject: seasonName(row.season) }
+        ? { request: { action: 'remove', keys: [row.titleKey], season: row.season, numberingRevision: row.numberingRevision }, subject: seasonName(row.season) }
         : null;
   const items: { label: string; onClick: () => void; danger?: boolean }[] =
     row.kind === 'pending'

@@ -7,7 +7,8 @@ import { Router } from 'express';
 import { db } from '../../core/db.ts';
 import { inside, listFiles } from '../imports/folder-files.ts';
 import { filesByTitle } from './files.ts';
-import { dropSeason, dropTitle, forgetFile, retireFile, sameSeen, seeFile, pruneEmpty, torrentsForRemoval } from './remove.ts';
+import { dropSeason, dropTitle, forgetFile, inSeason, retireFile, sameSeen, seeFile, pruneEmpty, torrentsForRemoval } from './remove.ts';
+import { normalizeNumbering, releasePoint } from '../numbering.ts';
 import { refreshJob } from '../metadata.ts';
 import { log } from '../../core/log.ts';
 import { isActive } from '../downloads/queue.ts';
@@ -36,6 +37,10 @@ function parse(body: unknown): PlanRequest | Failure {
   if (!ACTIONS.includes(action as PlanAction)) return fail(400, 'invalid_action');
   if (!Array.isArray(keys) || keys.length < 1 || keys.length > MAX_KEYS || !keys.every((key) => typeof key === 'string' && KEY.test(key))) return fail(400, 'invalid_keys');
   const request: PlanRequest = { action: action as PlanAction, keys: [...new Set(keys as string[])] };
+  if (body.numberingRevision !== undefined) {
+    if (request.action !== 'remove' || body.season === undefined || typeof body.numberingRevision !== 'number' || !Number.isSafeInteger(body.numberingRevision) || body.numberingRevision < 0) return fail(400, 'invalid_plan');
+    request.numberingRevision = body.numberingRevision;
+  }
   if (request.action === 'remove') {
     if (body.deleteFiles !== undefined && typeof body.deleteFiles !== 'boolean') return fail(400, 'invalid_plan');
     request.deleteFiles = body.deleteFiles === true;
@@ -110,8 +115,13 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
       let records = groups.get(title.key) ?? [];
       if (request.action === 'remove' && request.season !== undefined) {
         const season = request.season;
-        if (title.mediaType !== 'tv' || !title.episodes.some((episode) => episode.season === season)) return fail(400, 'invalid_season');
-        records = records.filter((file) => file.episodes.length > 0 && file.episodes.every((episode) => episode.season === season));
+        if (request.numberingRevision !== undefined) {
+          const numbering = normalizeNumbering(title.numbering);
+          if (numbering.revision !== request.numberingRevision) return fail(409, 'plan_changed');
+          stored.points = new Set(title.episodes.filter((ep) => (releasePoint(numbering, ep)?.season ?? ep.season) === season).map((ep) => `${ep.season}x${ep.number}`));
+        }
+        if (title.mediaType !== 'tv' || !title.episodes.some((episode) => inSeason(episode, season, stored.points))) return fail(400, 'invalid_season');
+        records = records.filter((file) => file.episodes.length > 0 && file.episodes.every((episode) => inSeason(episode, season, stored.points)));
       }
       stored.ids.set(title.key, records.map((file) => file.id));
       if (request.fileIds) {
@@ -178,7 +188,7 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
         const season = plan.request.season;
         const before = new Set(stored.ids.get(row.key));
         const current = groups.get(row.key) ?? [];
-        const now = season === undefined ? current : current.filter((file) => file.episodes.length > 0 && file.episodes.every((episode) => episode.season === season));
+        const now = season === undefined ? current : current.filter((file) => file.episodes.length > 0 && file.episodes.every((episode) => inSeason(episode, season, stored.points)));
         if (now.length !== before.size || now.some((file) => !before.has(file.id))) changed.add(row.key);
       }
       const root = await rootOf(title.rootId);
@@ -264,7 +274,7 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
           // The torrents of these files go with them. The records leave before the torrent calls.
           if (request.action === 'remove') {
             removedFiles = Object.values(db.data.files).filter(
-              (file) => file.titleKey === row.key && (season === undefined || (file.episodes.length > 0 && file.episodes.every((episode) => episode.season === season))),
+              (file) => file.titleKey === row.key && (season === undefined || (file.episodes.length > 0 && file.episodes.every((episode) => inSeason(episode, season, stored.points)))),
             );
           }
           kept = (await retireTitle(stored, row.key, root, result)) > 0;
@@ -276,12 +286,12 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
           }
         }
         if (season !== undefined) {
-          const removed = Object.values(db.data.queue).filter((entry) => entry.titleKey === row.key && entry.season === season);
+          const removed = Object.values(db.data.queue).filter((entry) => entry.titleKey === row.key && inSeason(entry, season, stored.points));
           const ids = new Set(removed.map((entry) => entry.id));
           const refs = torrentsForRemoval(removed, Object.values(db.data.queue).filter((entry) => !ids.has(entry.id)), removedFiles);
-          dropSeason(row.key, season, queue, cancelJob);
-          title.seasonOverrides[String(season)] = 'unmonitored';
-          for (const episode of title.episodes) if (episode.season === season) episode.override = null;
+          dropSeason(row.key, season, queue, cancelJob, stored.points);
+          if (!stored.points) title.seasonOverrides[String(season)] = 'unmonitored';
+          for (const episode of title.episodes) if (inSeason(episode, season, stored.points)) episode.override = stored.points ? 'unmonitored' : null;
           if (!kept && request.deleteFiles === true) await removeTorrents(refs, true);
         } else if (request.action === 'remove' && !kept) {
           const removed = Object.values(db.data.queue).filter((entry) => entry.titleKey === row.key);
@@ -318,6 +328,8 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
     if (!stored || stored.preview.expiresAt < Date.now()) return void res.status(404).json({ error: 'plan_not_found' });
     // The plan is spent at once, so the same plan cannot run twice.
     plans.delete(req.params.id);
+    const { numberingRevision, keys: titles } = stored.preview.request;
+    if (numberingRevision !== undefined && normalizeNumbering(db.data.titles[titles[0]!]?.numbering).revision !== numberingRevision) return void res.status(409).json({ error: 'plan_changed', keys: titles });
     const keys = destructive(stored.preview.request) ? await changedSince(stored) : [];
     if (keys.length) return void res.status(409).json({ error: 'plan_changed', keys });
     res.json(await apply(stored));

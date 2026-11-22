@@ -66,17 +66,26 @@ export function dropTitle(key: string, queue?: Queue, cancelJob?: (id: string) =
   deleteItemLog(key);
 }
 
+export function inSeason(episode: { season: number | null; number: number | null }, season: number, points?: Set<string>) {
+  return points ? points.has(`${episode.season}x${episode.number}`) : episode.season === season;
+}
+
 // Removes one season of a series, its targets, their logs, and its jobs. The title, the other seasons, and the files on
 // the disk stay where they are. The caller clears the choices of the episodes and saves the database.
 // `cancelJob` stops a job that runs now. Without it, the record goes and a running handler ends at its next check.
-export function dropSeason(key: string, season: number, queue?: Queue, cancelJob?: (id: string) => void) {
-  const entries = Object.values(db.data.queue).filter((entry) => entry.titleKey === key && entry.season === season);
+export function dropSeason(key: string, season: number, queue?: Queue, cancelJob?: (id: string) => void, points?: Set<string>) {
+  const entries = Object.values(db.data.queue).filter((entry) => entry.titleKey === key && inSeason(entry, season, points));
   const ids = new Set(entries.map((entry) => entry.id));
   // A search of a season holds the title key and the season. The jobs of one target hold its ID.
   const own = (job: Job) => {
     const payload = job.payload as { titleKey?: unknown; season?: unknown; entryIds?: unknown } | null;
-    if (job.type === 'queue.search' && payload?.titleKey === key && payload.season === season) return true;
-    if (Array.isArray(payload?.entryIds) && payload.entryIds.some((id) => typeof id === 'string' && ids.has(id))) return true;
+    if (!points && job.type === 'queue.search' && payload?.titleKey === key && payload.season === season) return true;
+    if (Array.isArray(payload?.entryIds) && payload.entryIds.some((id) => ids.has(id))) {
+      if (!points) return true;
+      const remaining = payload.entryIds.filter((id) => !ids.has(id));
+      if (!remaining.length) return true;
+      payload.entryIds = remaining;
+    }
     return false;
   };
   for (const job of Object.values(db.data.jobs)) {
@@ -96,7 +105,17 @@ export function dropSeason(key: string, season: number, queue?: Queue, cancelJob
     delete db.data.queue[entry.id];
   }
   // The episodes that the files of a release of this season held go with the season.
-  for (const [id, held] of Object.entries(db.data.releaseCoverage)) if (held.titleKey === key && held.season === season) delete db.data.releaseCoverage[id];
+  for (const [id, held] of Object.entries(db.data.releaseCoverage)) {
+    if (held.titleKey !== key) continue;
+    if (!points) {
+      if (held.season === season) delete db.data.releaseCoverage[id];
+    } else {
+      const remaining = held.numbers.filter((number) => !inSeason({ season: held.season, number }, season, points));
+      if (remaining.length === held.numbers.length) continue;
+      if (remaining.length) held.numbers = remaining;
+      else delete db.data.releaseCoverage[id];
+    }
+  }
 }
 
 // Counts the file records that a deletion removed, for each title. A scan that began before a deletion must not record what it read.

@@ -462,6 +462,25 @@ describe('removal of one season', () => {
     expect(body.stays).toEqual([]);
   });
 
+  it('removes only the episodes assigned to a release season in Activity', async () => {
+    await seedTwoSeasons();
+    const show = app.db.data.titles['tv:1']!;
+    show.numbering = { revision: 1, ranges: [{ season: 1, from: 2, to: 2, releaseSeason: 3, releaseFrom: 1 }] };
+    const queue = createQueue(createEvents(), () => {});
+    const first = queue.ensure(show.key, 1, 1);
+    const second = queue.ensure(show.key, 1, 2);
+    const job = enqueue({ type: 'queue.search', payload: { titleKey: show.key, season: 1, entryIds: [first.id, second.id] } });
+    const request = { action: 'remove', keys: [show.key], season: 3, numberingRevision: 1, deleteFiles: true };
+    const plan = await preview(request);
+    expect(plan.files.map((file) => file.path)).toEqual(['Show/Season 01/Show.S01E02.mkv']);
+    expect((await apply(plan.planId)).body).toMatchObject({ changed: 1, deleted: 1 });
+    expect(show.episodes.map((ep) => ep.override)).toEqual([null, 'unmonitored', null]);
+    expect(app.db.data.queue[first.id]).toBeDefined();
+    expect(app.db.data.queue[second.id]).toBeUndefined();
+    expect(app.db.data.jobs[job.id]?.payload).toMatchObject({ entryIds: [first.id] });
+    expect(readFileSync(join(tv, 'Show', 'Season 01', 'Show.S01E01.mkv'), 'utf8')).toBe('one');
+  });
+
   it('deletes the files of the season, keeps the title, and keeps the other seasons', async () => {
     await seedTwoSeasons();
     const body = await preview({ action: 'remove', keys: ['tv:1'], season: 1, deleteFiles: true });

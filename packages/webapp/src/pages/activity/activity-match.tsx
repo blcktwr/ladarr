@@ -1,6 +1,5 @@
 import type { AttachCandidates, EpisodeRef, FileRow, QueueEntryView, QueueGroupPage, QueueMappingEpisode, QueueMatchPreview, QueuePackFiles } from '@ladarr/shared/types';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button, Dropdown, EmptyState, Modal, SearchableDropdown, Spinner, Table } from 'nebula';
 import { Confirm } from '../../components/confirm.tsx';
@@ -65,8 +64,6 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   const [movie, setMovie] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [discarding, setDiscarding] = useState('');
-  const [discarded, setDiscarded] = useState<Set<string>>(new Set());
   const client = useQueryClient();
   const group = useQuery<QueueGroupPage>({
     queryKey: [`/queue/groups/${entry.titleKey}?mapping=true${mapSeries ? '' : `&season=${entry.season}`}`],
@@ -105,11 +102,9 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   const initial = new Set<string>();
   const essential = new Set<string>();
   const rowSource = (point: QueueMappingEpisode) => {
-    const dropped = discarded.has(point.id);
-    const item = dropped ? undefined : items.get(point.id);
+    const item = items.get(point.id);
     const draft = drafts[point.id];
-    const torrent = dropped ? null : point.torrent;
-    const match = dropped ? null : point.match;
+    const { torrent, match } = point;
     const hash = draft?.hash ?? torrent?.hash ?? '';
     const path = draft?.hash === undefined ? match?.path : undefined;
     const source = mapSeries ? torrentSource(point.id, torrent?.hash ?? '', hash) : sourceOf(item ?? entry, fixed);
@@ -164,32 +159,6 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     setDrafts((state) => ({ ...state, [id]: draft }));
     setError('');
   };
-
-  // The episode leaves the series: it is unmonitored, it has no file, and its target leaves the queue.
-  async function discard(point: QueueMappingEpisode) {
-    if (busy || discarding) return;
-    setDiscarding(point.id);
-    setError('');
-    try {
-      await api(`/library/${entry.titleKey}/episodes/${point.season}/${point.number}`, { method: 'DELETE' });
-      setDrafts((state) => {
-        const next = { ...state };
-        delete next[point.id];
-        return next;
-      });
-      setDiscarded((state) => new Set(state).add(point.id));
-      setSeasons((state) => {
-        const next = { ...state };
-        delete next[point.id];
-        return next;
-      });
-      await Promise.all([group.refetch(), client.invalidateQueries({ queryKey: [`/library/${entry.titleKey}/files`] })]);
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setDiscarding('');
-    }
-  }
 
   // Keep existing coverage when a file also contains episodes from another season.
   function changes(corrected: Map<string, EpisodeRef[]>): Change[] {
@@ -275,7 +244,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
       actions={mapSeries ? (
         <Confirm label={t('Apply mapping')} title={t('Apply this episode mapping?')}
           confirm={t('Yes')} onConfirm={() => void save()}
-          disabled={busy || !!discarding || invalidSeason || !group.data || (rows.some((point) => point.match?.path) && !library.data) || packs.some((pack, i) => essential.has(keys[i]!) && pack.isPending)} />
+          disabled={busy || invalidSeason || !group.data || (rows.some((point) => point.match?.path) && !library.data) || packs.some((pack, i) => essential.has(keys[i]!) && pack.isPending)} />
       ) : <Button disabled={busy || (!series && !movie)} pending={busy} onClick={() => void save()}>{t('Apply mapping')}</Button>}
     >
       {series ? (
@@ -289,7 +258,6 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
             { label: t('Matches'), width: mapSeries ? '21rem' : undefined },
           ]}
           rows={rows.map((point) => {
-            const dropped = discarded.has(point.id);
             const { item, draft, torrent: verified, source, hash, match, path } = rowSource(point);
             const list = source.path ? lists.get(source.key) : undefined;
             const own = verified?.hash ?? '';
@@ -319,7 +287,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
                 pointText(point),
                 ...(mapSeries ? [(
                   <SearchableDropdown key="season" label={t('Season')} hideLabel width="full" allowCustom options={seasonOptions} emptyText={t('No options.')}
-                    disabled={busy || dropped} value={seasons[point.id] ?? String(point.releaseSeason)}
+                    disabled={busy} value={seasons[point.id] ?? String(point.releaseSeason)}
                     onValueChange={(value) => setSeasons((state) => ({ ...state, [point.id]: value }))} />
                 ), (
                   <SearchableDropdown
@@ -329,14 +297,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
                     onValueChange={(next) => change(point.id, { hash: next === own ? undefined : next })}
                   />
                 )] : []),
-                <div key="match" className="flex items-center gap-2">
-                  <div className="min-w-0 flex-1">{matches}</div>
-                  <Button variant="ghost-danger" iconOnly
-                    aria-label={t('Discard episode {episode}', { episode: pointText(point) })}
-                    pending={discarding === point.id} disabled={busy || dropped} onClick={() => void discard(point)}>
-                    {discarding === point.id ? null : <Trash2 />}
-                  </Button>
-                </div>,
+                matches,
               ],
             };
           })}
