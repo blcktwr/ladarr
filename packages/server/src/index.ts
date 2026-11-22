@@ -1,3 +1,4 @@
+import { existsSync, unlinkSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { dirname } from 'node:path';
 import { loadConfig } from '@ladarr/shared/config';
@@ -39,6 +40,13 @@ await open();
 if (db.data.schemaVersion > SCHEMA_VERSION) {
   console.error(`The data file ${config.dbFile} has schema version ${db.data.schemaVersion}. This version reads schema version ${SCHEMA_VERSION} at most. Start a newer version, or restore a backup from this version.`);
   process.exit(1);
+}
+// Only the update bundle contains this file. Remove it after saving so a normal restart keeps a manual pause.
+const resumeAfterUpdate = new URL('../../../.resume-queue', import.meta.url);
+if (existsSync(resumeAfterUpdate)) {
+  db.data.queuePaused = false;
+  await db.write();
+  unlinkSync(resumeAfterUpdate);
 }
 // The log of each target in the queue has a file of its own, as the settings say.
 configureItemLogs();

@@ -73,7 +73,8 @@ jobs:
             npm ci
             npm run build
             npm ci --omit=dev --workspace @ladarr/server
-            tar -czf ladarr-'"${{ steps.version.outputs.version }}"'.tar.gz package.json .npmrc packages node_modules
+            touch .resume-queue
+            tar -czf ladarr-'"${{ steps.version.outputs.version }}"'.tar.gz package.json .npmrc packages node_modules .resume-queue
           '
           sha256sum "ladarr-${{ steps.version.outputs.version }}.tar.gz" > "ladarr-${{ steps.version.outputs.version }}.tar.gz.sha256"
 
