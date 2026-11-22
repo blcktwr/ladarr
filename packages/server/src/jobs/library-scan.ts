@@ -4,9 +4,9 @@ import { log } from '../core/log.ts';
 import { withTitleLock } from '../core/title-lock.ts';
 import { reconcile } from '../library/imports/reconcile.ts';
 import { scanTitle } from '../library/scan.ts';
-import type { Events, Handler, Queue } from '../types.ts';
+import type { Clients, Events, Handler, Queue } from '../types.ts';
 
-export function libraryScanHandler({ events, queue }: { events: Events; queue: Queue }): Handler {
+export function libraryScanHandler({ events, queue, clients }: { events: Events; queue: Queue; clients?: Clients }): Handler {
   return {
     concurrency: 1,
     run: async (job) => {
@@ -14,7 +14,7 @@ export function libraryScanHandler({ events, queue }: { events: Events; queue: Q
       // The scan and the verification read the same folder. One of them holds the title, so a file that one links
       // is not removed or searched by the other.
       const result = await withTitleLock(key, async () => {
-        const scan = await scanTitle(key);
+        const scan = await scanTitle(key, clients);
         if (scan.status === 'ok') await reconcile(queue, key);
         return scan;
       });

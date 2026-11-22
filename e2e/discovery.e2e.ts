@@ -19,6 +19,32 @@ test.beforeAll(async () => {
 });
 test.afterAll(() => stack.stop());
 
+test('filters a global search in Discovery and keeps the filter when the query changes', async ({ page, context }) => {
+  await context.addCookies([{ ...cookie, url: URL_BASE }]);
+  await page.goto(`${URL_BASE}/catalog`);
+  const search = page.getByRole('searchbox', { name: 'Search', exact: true });
+  await search.fill('Name');
+  await expect(page).toHaveURL(/\/discovery\?q=Name$/);
+  const main = page.getByRole('main');
+  const movie = main.getByRole('link', { name: /Movie Name/ });
+  const show = main.getByRole('link', { name: /Show Name/ });
+  await expect(movie).toBeVisible();
+  await expect(show).toBeVisible();
+  await page.getByRole('button', { name: 'Filters' }).click();
+  await page.getByRole('combobox', { name: 'Genre' }).click();
+  await page.getByRole('option', { name: 'Comedy', exact: true }).click();
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(movie).toHaveCount(0);
+  await expect(show).toBeVisible();
+  await expect(search).toHaveValue('Name');
+
+  await search.fill('Movie');
+  await search.press('Enter');
+  await expect(main.getByText('No titles match.', { exact: true })).toBeVisible();
+  await expect(movie).toHaveCount(0);
+  await expect(show).toHaveCount(0);
+});
+
 test('the Discovery item opens the page with a row for each list', async ({ page, context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
   await page.goto(`${URL_BASE}/catalog`);

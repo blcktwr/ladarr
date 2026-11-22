@@ -23,7 +23,7 @@ import type { Handler, IndexDeps } from '../types.ts';
 export function jobHandlers({ backupDir, events, save, tmdb, enqueue, clients, queue, finder, indexers, importStatus }: IndexDeps): Record<string, Handler> {
   return {
     'backup.auto': backupAutoHandler(backupDir),
-    'library.scan': libraryScanHandler({ events, queue }),
+    'library.scan': libraryScanHandler({ events, queue, clients }),
     'library.verify': libraryVerifyHandler({ queue, clients, finder, events, enqueue }),
     'library.verify.sweep': verifySweepHandler({ enqueue }),
     ...(tmdb ? { 'metadata.refresh': metadataRefreshHandler({ tmdb, events }), 'metadata.sweep': metadataSweepHandler(), 'migration.import': migrationImportHandler({ tmdb, events, save, enqueue }) } : {}),

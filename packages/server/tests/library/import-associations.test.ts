@@ -1,4 +1,4 @@
-import { mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, linkSync, mkdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { libraryScanHandler } from '../../src/jobs/library-scan.ts';
@@ -65,6 +65,82 @@ async function setup(item: Title, files: Record<string, string>, options: Pick<I
 }
 
 describe('import association provenance', () => {
+  it('restores verified legacy episode links on scan and keeps them without the torrent on the next scan', async () => {
+    const item = title({ rootId: 'tv', episodes: [episode(1, 1), episode(1, 2), episode(1, 3)] });
+    const { importer, hash, target } = await setup(item, {
+      'Show.S01E01.mkv': 'one', 'Show.S01E02.mkv': 'two', 'Show.S01E03.mkv': 'three',
+    });
+    const entries = item.episodes.map((one) => target(one.season, one.number));
+    await importer.run(hash);
+    expect(entries.map((entry) => entry.importResult?.method)).toEqual(['hardlink', 'hardlink', 'hardlink']);
+    const files = item.episodes.map((one) => pipe!.db.data.files[one.fileId!]!);
+    for (const file of files) {
+      delete file.association;
+      file.episodes = [];
+    }
+    for (const one of item.episodes) one.fileId = null;
+
+    // This file has the same name, size, and contents as the import but is no longer the torrent's hardlink.
+    const replaced = join(pipe!.folders.tv, files[2]!.path);
+    copyFileSync(replaced, `${replaced}.part`);
+    renameSync(`${replaced}.part`, replaced);
+    const scan = () => libraryScanHandler(pipe!).run({ payload: { key: item.key } } as never, { signal: new AbortController().signal });
+    await scan();
+
+    expect(item.episodes.map((one) => one.fileId)).toEqual([files[0]!.id, files[1]!.id, null]);
+    for (const [index, file] of files.slice(0, 2).entries()) {
+      const stat = statSync(join(pipe!.folders.tv, file.path));
+      expect(file.episodes).toEqual([ref(1, index + 1)]);
+      expect(file.association?.identity).toMatchObject({ dev: stat.dev, ino: stat.ino });
+    }
+    expect(files[2]!.episodes).toEqual([]);
+    pipe!.qbit.torrents.delete(hash);
+    await scan();
+    expect(item.episodes.map((one) => one.fileId)).toEqual([files[0]!.id, files[1]!.id, null]);
+    expect(seriesCounts(item, { now: Date.now(), files: pipe!.db.data.files }).available).toBe(2);
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+    expect(pipe!.qbit.calls.filter((call) => call.path === 'torrents/add')).toEqual([]);
+  });
+
+  it.each(['hash', 'client', 'path', 'outcome'] as const)('does not recover an episode from a hardlink with a different import %s', async (mismatch) => {
+    const item = title({ rootId: 'tv', episodes: [episode(1, 1)] });
+    const { importer, hash, target } = await setup(item, { 'Show.S01E01.mkv': 'episode' });
+    const entry = target(1, 1);
+    await importer.run(hash);
+    const one = item.episodes[0]!;
+    const file = pipe!.db.data.files[one.fileId!]!;
+    delete file.association;
+    file.episodes = [];
+    one.fileId = null;
+    if (mismatch === 'hash') entry.transferHash = hashOf('Another release');
+    if (mismatch === 'client') entry.clientId = 'another-client';
+    if (mismatch === 'path') entry.importResult!.path = 'another.mkv';
+    if (mismatch === 'outcome') entry.importResult = null;
+
+    await libraryScanHandler(pipe!).run({ payload: { key: item.key } } as never, { signal: new AbortController().signal });
+    expect(one.fileId).toBeNull();
+    expect(file.episodes).toEqual([]);
+  });
+
+  it('does not assign another episode from the same torrent to the old import destination', async () => {
+    const item = title({ rootId: 'tv', episodes: [episode(1, 1), episode(1, 2)] });
+    const { importer, hash, target } = await setup(item, { 'Show.S01E01.mkv': 'one', 'Show.S01E02.mkv': 'two' });
+    target(1, 1);
+    await importer.run(hash);
+    const one = item.episodes[0]!;
+    const file = pipe!.db.data.files[one.fileId!]!;
+    const destination = join(pipe!.folders.tv, file.path);
+    linkSync(join(pipe!.folders.downloads, NAME, 'Show.S01E02.mkv'), `${destination}.part`);
+    renameSync(`${destination}.part`, destination);
+    file.episodes = [];
+    delete file.association;
+    one.fileId = null;
+
+    await libraryScanHandler(pipe!).run({ payload: { key: item.key } } as never, { signal: new AbortController().signal });
+    expect(one.fileId).toBeNull();
+    expect(file.episodes).toEqual([]);
+  });
+
   it.each(['automatic', 'numbering', 'manual'] as const)('persists %s evidence with the source name, map revision, and file identity', async (source) => {
     const sourceName = `Original/Show.Name.S${source === 'automatic' ? '01' : '02'}E01.1080p.mkv`;
     const item = title({

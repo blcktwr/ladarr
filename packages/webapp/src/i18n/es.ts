@@ -161,6 +161,8 @@ export const es: Record<string, string> = {
   'Failed': 'Fallido',
   'Queued': 'En cola',
   'Searching': 'Buscando',
+  'Missing association': 'Falta asociación',
+  'The import is complete, but no library file is associated with this episode.': 'La importación terminó, pero ningún archivo de biblioteca está asociado con este episodio.',
   'Not found': 'Faltante',
   'No match': 'Sin coincidencia',
   'Stuck': 'Atascado',

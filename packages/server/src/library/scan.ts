@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
 import { db } from '../core/db.ts';
 import { filesVersion } from './tools/remove.ts';
@@ -9,7 +9,9 @@ import { libraryVersion } from './mapping.ts';
 import { normalizeTitle, parseRelease } from './grab/release.ts';
 import { isSample, isVideoFile, releaseEpisodes } from './parse.ts';
 import { checkRoot } from './roots.ts';
-import type { Db, FolderInventory, InventoryFile, MediaFile, ScanFound, ScanResult, Title } from '../types.ts';
+import { createClients } from './downloads/client-api.ts';
+import { torrentVideos } from './imports/importer.ts';
+import type { Clients, Db, FolderInventory, InventoryFile, MediaFile, QueueEntry, ScanFound, ScanResult, Title } from '../types.ts';
 
 export const scanJob = (key: string) => ({ type: 'library.scan', payload: { key }, dedupeKey: `scan:${key}` });
 
@@ -18,6 +20,7 @@ const MAX_DEPTH = 6;
 const MAX_FILES = 5_000;
 // These problems mean that the root cannot be trusted now. A scan then records nothing.
 const UNTRUSTED = ['not_found', 'not_directory', 'not_readable', 'mount_changed'];
+const scanClients = createClients();
 
 const empty = (status: ScanResult['status']): ScanResult => ({ status, added: 0, updated: 0, missing: 0, unmatched: [], duplicates: [], unknownEpisodes: [], extraFiles: [] });
 const inventory = (status: FolderInventory['status']): FolderInventory => ({ status, rootReal: null, files: [] });
@@ -76,9 +79,94 @@ export async function readTitleFolder(title: Title, { guessedFolder = false }: {
   return { status: 'ok', rootReal, files: files.map((file) => ({ ...file, parsed: ambiguous.has(file.path) ? undefined : releaseEpisodes(file.path, title.episodes, title.numbering, null, title.meta.title) })) };
 }
 
-// Looks at the folder of a title and updates the file records. It only reads the disk.
+async function legacyImports(title: Title, folder: FolderInventory, clients: Clients) {
+  const recovered = new Map<string, { episodes: MediaFile['episodes']; association: NonNullable<MediaFile['association']> }>();
+  const evidenceOf = (entry: QueueEntry) => ({
+    revision: entry.revision, attempt: entry.attempt, state: entry.state.kind,
+    titleKey: entry.titleKey, season: entry.season, number: entry.number,
+    clientId: entry.clientId, transferHash: entry.transferHash,
+    release: entry.release ? { title: entry.release.title, infoHash: entry.release.infoHash } : null,
+    importResult: entry.importResult,
+    manualMatch: entry.manualMatch, manualMatchRevision: entry.manualMatchRevision,
+    numbering: entry.numbering ?? null,
+  });
+  const snapshots: { entry: QueueEntry; signature: string }[] = [];
+  const current = () => snapshots.every(({ entry, signature }) => db.data.queue[entry.id] === entry && JSON.stringify(evidenceOf(entry)) === signature);
+  if (title.mediaType !== 'tv' || folder.status !== 'ok') return { recovered, current };
+  const files = Object.values(db.data.files).filter((file) => file.titleKey === title.key && file.download && !file.association);
+  if (!files.length) return { recovered, current };
+  const candidates = Object.values(db.data.queue).filter((entry) =>
+    entry.titleKey === title.key && entry.state.kind === 'available' && entry.season !== null && entry.number !== null &&
+    entry.release && entry.clientId && entry.transferHash && (!entry.release.infoHash || entry.release.infoHash === entry.transferHash) &&
+    entry.importResult?.ok && entry.importResult.method === 'hardlink' &&
+    title.episodes.some((episode) => {
+      if (episode.season !== entry.season || episode.number !== entry.number) return false;
+      const current = episode.fileId ? db.data.files[episode.fileId] : undefined;
+      return current?.association?.source !== 'manual';
+    }) &&
+    files.some((file) => file.path === entry.importResult!.path && file.download!.clientId === entry.clientId && file.download!.hash === entry.transferHash),
+  ).map((entry) => {
+    const evidence = structuredClone(evidenceOf(entry));
+    snapshots.push({ entry, signature: JSON.stringify(evidence) });
+    return evidence;
+  });
+  const groups = new Map<string, typeof candidates>();
+  for (const entry of candidates) groups.set(entry.clientId!, [...(groups.get(entry.clientId!) ?? []), entry]);
+  for (const [clientId, entries] of groups) {
+    const handle = clients.get(clientId);
+    if (!handle) continue;
+    const torrents = await clients.byHashes(handle, [...new Set(entries.map((entry) => entry.transferHash!))]).catch(() => []);
+    for (const torrent of torrents) {
+      const videos = await torrentVideos(handle, torrent).catch(() => undefined);
+      if (!videos) continue;
+      const identities = await Promise.all(videos.map(async (video) => ({ video, info: await lstat(video.abs).catch(() => undefined) })));
+      const coverages = new Map<string, Map<string, ReturnType<typeof inspectCoverage>>>();
+      for (const entry of entries.filter((entry) => entry.transferHash === torrent.hash)) {
+        const found = folder.files.find((file) => file.path === entry.importResult?.path && file.sizeBytes > 0);
+        if (!found) continue;
+        const file = files.find((file) => file.path === found.path && file.download!.clientId === entry.clientId && file.download!.hash === entry.transferHash);
+        if (!file) continue;
+        const matches = identities.filter(({ info }) => info?.isFile() && info.dev === found.dev && info.ino === found.ino && info.size === found.sizeBytes && info.mtimeMs === found.mtimeMs);
+        if (matches.length !== 1) continue;
+        const source = matches[0]!.video.rel;
+        const covers = (episode: { season: number; number: number }) => episode.season === entry.season && episode.number === entry.number;
+        if (entry.manualMatch) {
+          if (entry.manualMatch.file !== source || !entry.manualMatch.covers.some(covers)) continue;
+        } else {
+          const seasonHint = parseRelease(entry.release!.title).season ?? parseRelease(basename(torrent.contentPath)).season;
+          const key = JSON.stringify([entry.numbering, seasonHint]);
+          let coverage = coverages.get(key);
+          if (!coverage) {
+            const ambiguous = new Set(inspectCoverage(videos.map((video) => video.rel), title, entry.numbering, seasonHint).ambiguous);
+            coverage = new Map(videos.filter((video) => !ambiguous.has(video.rel)).map((video) =>
+              [video.rel, inspectCoverage([video.rel], title, entry.numbering, seasonHint)],
+            ));
+            coverages.set(key, coverage);
+          }
+          const sources = [...coverage].filter(([, item]) => item.episodes.some(covers));
+          if (sources.length !== 1 || sources[0]![0] !== source) continue;
+        }
+        const current = recovered.get(file.id);
+        const episodes = current?.episodes ?? [];
+        if (!episodes.some((episode) => episode.season === entry.season && episode.number === entry.number)) episodes.push({ season: entry.season!, number: entry.number! });
+        recovered.set(file.id, {
+          episodes,
+          association: {
+            source: entry.manualMatch ? 'manual' : entry.numbering?.ranges.length ? 'numbering' : 'automatic',
+            originalName: matches[0]!.video.rel,
+            numberingRevision: entry.numbering?.revision ?? 0,
+            identity: { sizeBytes: found.sizeBytes, mtimeMs: found.mtimeMs, dev: found.dev, ino: found.ino },
+          },
+        });
+      }
+    }
+  }
+  return { recovered, current };
+}
+
+// Looks at the folder of a title and updates the file records. It reads the disk and the client inventory.
 // It never deletes a file, a title or an episode. A file that is gone is marked missing, and only when the root is healthy.
-export async function scanTitle(key: string): Promise<ScanResult> {
+export async function scanTitle(key: string, clients: Clients = scanClients): Promise<ScanResult> {
   const title = db.data.titles[key];
   const root = title && db.data.roots[title.rootId];
   if (!title || !root || !title.folder) return empty('no_folder');
@@ -88,11 +176,13 @@ export async function scanTitle(key: string): Promise<ScanResult> {
   const folder = await readTitleFolder(title);
   if (folder.status === 'root_unavailable') return empty('root_unavailable');
   if (folder.status === 'no_folder') return empty('no_folder');
+  const legacyImportsResult = await legacyImports(title, folder, clients);
+  const { recovered } = legacyImportsResult;
 
   // The user can remove the title while the scan reads the disk. A file record must not outlive its title.
   if (db.data.titles[key] !== title) return empty('no_folder');
   // A deletion of files during the read makes the list of files old. The scan must run again.
-  if (filesVersion(key) !== version || libraryVersion(key) !== associations) return empty('changed');
+  if (filesVersion(key) !== version || libraryVersion(key) !== associations || !legacyImportsResult.current()) return empty('changed');
 
   // No await from here on, so the changes land in one step.
   const result = empty(folder.status === 'ok' ? 'ok' : 'folder_missing');
@@ -166,8 +256,10 @@ export async function scanTitle(key: string): Promise<ScanResult> {
   } else {
     for (const found of videos) {
       const own = ownOf(found);
+      const legacy = own && !own.association ? recovered.get(own.id) : undefined;
+      if (legacy) own!.association = legacy.association;
       if (own && sameIdentity(own, found)) {
-        const file = record(found, own.episodes);
+        const file = record(found, legacy?.episodes ?? own.episodes);
         for (const episode of title.episodes) {
           if (!file.episodes.some((item) => item.season === episode.season && item.number === episode.number)) continue;
           const current = episode.fileId ? db.data.files[episode.fileId] : undefined;
@@ -176,9 +268,10 @@ export async function scanTitle(key: string): Promise<ScanResult> {
         continue;
       }
       // An import-generated name cannot identify replacement data or approve a legacy import.
-      if (own && (own.download || own.source !== undefined || (own.association && own.association.originalName !== own.path))) {
+      if (own && (own.download || own.source !== undefined || (own.association && (own.association.source === 'manual' || own.association.originalName !== own.path)))) {
+        const association = own.association;
         const file = record(found, []);
-        delete file.association;
+        file.association = association;
         result.unmatched.push(found.path);
         continue;
       }

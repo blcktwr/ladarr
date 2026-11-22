@@ -43,8 +43,8 @@ export function libraryVerifyHandler({ queue, clients, finder, events, enqueue }
 
     applyEpisodes(title, state);
 
-    // The folder decides which targets already have a file. The scan must run before the client is read.
-    const scan = await scanTitle(key);
+    // The folder decides which targets already have a file.
+    const scan = await scanTitle(key, clients);
     if (scan.status === 'root_unavailable' || scan.status === 'changed') throw new JobError('outage', 'The folder of the title cannot be read.');
 
     // The torrents that the backup records: only the ones that are still in a client.

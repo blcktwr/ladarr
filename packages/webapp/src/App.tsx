@@ -2,7 +2,7 @@ import type { PresetRow, QueueRow, QueueSummary, RootRow, SettingsData } from '@
 import { useQuery } from '@tanstack/react-query';
 import { Activity as ActivityLine, Background, Navbar, Pane, SearchField, Spinner } from 'nebula';
 import { Check, Compass, Pause } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useHref, useLocation, useNavigate } from 'react-router';
 import { AuthGate } from './pages/auth/auth.tsx';
 import { AlertsFeed, AlertsIcon, CatalogIcon, LoadFailed, SettingsIcon } from './components/index.ts';
@@ -10,7 +10,6 @@ import { Alerts } from './pages/alerts/alerts.tsx';
 import { Discovery } from './pages/discovery/discovery.tsx';
 import { Library } from './pages/library/library.tsx';
 import { Activity } from './pages/activity/activity.tsx';
-import { SearchPage } from './pages/search/search.tsx';
 import { Settings } from './pages/settings/settings.tsx';
 import { Setup } from './pages/setup/setup.tsx';
 import { groupName, stageLabel } from './lib/format.ts';
@@ -78,26 +77,30 @@ function QueueStatus({ href, onOpen }: { href: string; onOpen: () => void }) {
 const SEARCH_DELAY_MS = 300;
 
 function Shell() {
-  const { pathname } = useLocation();
+  const { pathname, search: locationSearch, hash } = useLocation();
   const navigate = useNavigate();
   // The links point inside the URL base of the app, so a new tab opens the right page.
   const base = useHref('/').replace(/\/$/, '');
-  const [query, setQuery] = useState('');
-  // A search starts while the person types. It opens at once with Enter, and after the pause with a letter.
-  // On the results page each new search replaces the address, so Back leaves the search in one step.
-  const search = (value: string) => {
-    const text = value.trim();
-    if (!text) return;
-    const onResults = window.location.pathname.startsWith(`${base}/search`);
-    void navigate(`/search?q=${encodeURIComponent(text)}`, { replace: onResults });
-  };
+  const onDiscovery = pathname === '/discovery' || pathname === '/discovery/';
+  const term = onDiscovery ? new URLSearchParams(locationSearch).get('q')?.trim() ?? '' : '';
+  const [draft, setDraft] = useState<string | null>(null);
   useEffect(() => {
-    if (!query.trim()) return;
-    const timer = setTimeout(() => search(query), SEARCH_DELAY_MS);
+    setDraft((value) => onDiscovery && value?.trim() === term ? value : null);
+  }, [onDiscovery, pathname, term]);
+  const search = useCallback((value: string) => {
+    const text = value.trim();
+    if (text === term) return;
+    const params = new URLSearchParams(onDiscovery ? locationSearch : '');
+    if (text) params.set('q', text);
+    else params.delete('q');
+    void navigate({ pathname: '/discovery', search: params.toString() }, { replace: Boolean(term) });
+  }, [term, onDiscovery, locationSearch, navigate]);
+  useEffect(() => {
+    if (draft === null) return;
+    const timer = setTimeout(() => search(draft), SEARCH_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [draft, search]);
   const onActivity = pathname.startsWith('/activity');
-  const onSearch = pathname.startsWith('/search');
   // The page of a title has the address of the catalog, whatever section opened it, so the menu keeps the section that
   // the person was on while the page is open.
   const onTitle = titlePage.test(pathname);
@@ -106,8 +109,7 @@ function Shell() {
   useEffect(() => {
     if (section && section !== '/alerts') lastSection.current = section;
   }, [section]);
-  // No menu link is selected on the Activity page, on the search results, or on the Alerts page, whose item is an icon only.
-  const selected = onActivity || onSearch || pathname.startsWith('/alerts') ? '' : (section ?? (onTitle ? lastSection.current : '/catalog'));
+  const selected = onActivity || pathname.startsWith('/alerts') ? '' : (section ?? (onTitle ? lastSection.current : '/catalog'));
 
   return (
     <>
@@ -122,8 +124,8 @@ function Shell() {
       >
         <SearchField
           aria-label={t('Search')}
-          value={query}
-          onChange={setQuery}
+          value={draft ?? term}
+          onChange={setDraft}
           onSubmit={search}
           placeholder={t('Search...')}
         />
@@ -131,7 +133,7 @@ function Shell() {
       {/* flow-root keeps the bottom margin of the last section inside the background. The bottom margin holds the space of the alerts, so the last content goes above them when the page scrolls to the end. */}
       <main className="flow-root mb-48">
         <Routes>
-          <Route path="/search" element={<SearchPage />} />
+          <Route path="/search" element={<Navigate to={{ pathname: '/discovery', search: locationSearch, hash }} replace />} />
           <Route path="/activity/*" element={<Activity />} />
           {sections.map((s) => (
             <Route key={s.path} path={`${s.path}/*`} element={s.page} />

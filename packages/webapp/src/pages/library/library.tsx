@@ -250,11 +250,12 @@ const seasonOrder = <T extends { seasonNumber: number }>(seasons: T[]) =>
 
 function EpisodeStatus({ episode }: { episode: EpisodeItem }) {
   if (episode.hasFile) return <StatusText small status={statusLabel('available')} icon="available" />;
-  if (episode.queue && episode.queue !== 'available') {
+  if (episode.queue === 'available') return <StatusText small status={t('Missing association')} icon="stuck" help={t('The import is complete, but no library file is associated with this episode.')} />;
+  if (episode.queue) {
     return <StatusText small status={statusLabel(episode.queue)} icon={episode.queue} />;
   }
   if (episode.monitored === false) return <Text variant="small">{t('N/A')}</Text>;
-  return <StatusText small status={statusLabel('searching')} icon="searching" />;
+  return <StatusText small status={statusLabel('queued')} icon="queued" />;
 }
 
 // The table of the episodes of a season. A series in the library shows the status of each episode. A series that is not in it shows the facts only.

@@ -41,6 +41,16 @@ function searchResult(raw: TmdbRaw, mediaType: MediaType): SearchResult {
   };
 }
 
+function discoveryResult(raw: TmdbRaw, mediaType: MediaType) {
+  return {
+    ...searchResult(raw, mediaType),
+    date: textOrNull(mediaType === 'movie' ? raw.release_date : raw.first_air_date),
+    genreIds: list(raw.genre_ids ?? list(raw.genres).map((genre) => genre.id)).filter((id): id is number => typeof id === 'number'),
+    popularity: numberOrNull(raw.popularity),
+    rating: numberOrNull(raw.vote_average),
+  };
+}
+
 // The certification belongs to a country, and TMDB has one for each. The title shows the one of its country of origin.
 // A movie keeps it with the release dates of each country, and a series in its content ratings.
 function certificationOf(raw: TmdbRaw, mediaType: MediaType): string | null {
@@ -189,6 +199,9 @@ export function createTmdb({
   // ok is null before the first request.
   const status = () => ({ ok: health ? health.error === null : null, code: health?.error?.code });
 
+  const searchPage = (query: string, page = 1, language?: string) =>
+    get('/search/multi', { query, page: String(page), include_adult: 'false', ...(language ? { language } : {}) }, 10 * 60_000);
+
   return {
     status,
 
@@ -210,6 +223,26 @@ export function createTmdb({
     async discoverResults(mediaType: MediaType, params: Record<string, string> = {}): Promise<DiscoverPage> {
       const raw = (await get(`/discover/${mediaType}`, params)) as TmdbRaw;
       return { results: list(raw?.results).map((item) => searchResult(item, mediaType)), totalPages: numberOrNull(raw?.total_pages) ?? 1 };
+    },
+
+    discoverySearch: {
+      async page(query: string, page: number) {
+        const raw = await searchPage(query, page) as TmdbRaw;
+        const results = list(raw?.results).flatMap((item) =>
+          item?.media_type === 'movie' || item?.media_type === 'tv' ? [discoveryResult(item, item.media_type)] : []);
+        return { results, totalPages: Math.min(500, numberOrNull(raw?.total_pages) ?? 1) };
+      },
+      async details(mediaType: MediaType, id: number) {
+        return discoveryResult(await get(`/${mediaType}/${id}`), mediaType);
+      },
+      async findSeriesByTvdb(id: number) {
+        const raw = await get(`/find/${id}`, { external_source: 'tvdb_id' }) as TmdbRaw;
+        return list(raw?.tv_results).map((item) => discoveryResult(item, 'tv'));
+      },
+      async providers(mediaType: MediaType, id: number, region: string) {
+        const raw = await get(`/${mediaType}/${id}/watch/providers`) as TmdbRaw;
+        return Object.values(raw?.results?.[region] ?? {}).flatMap(list).map((provider) => String(provider.provider_id));
+      },
     },
 
     // The genres of a media type, in the order of TMDB.
@@ -247,9 +280,7 @@ export function createTmdb({
     },
 
     // The raw TMDB methods below serve the Seerr compatibility API. They return the TMDB answer as it is.
-    searchPage(query: string, page = 1, language?: string): Promise<unknown> {
-      return get('/search/multi', { query, page: String(page), include_adult: 'false', ...(language ? { language } : {}) }, 10 * 60_000);
-    },
+    searchPage,
 
     discover(mediaType: MediaType, params: Record<string, string>): Promise<unknown> {
       return get(`/discover/${mediaType}`, params);

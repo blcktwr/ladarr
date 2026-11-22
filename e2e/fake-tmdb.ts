@@ -3,8 +3,8 @@ import type { AddressInfo } from 'node:net';
 
 // A small TMDB for tests. It knows one movie and one series, and it speaks the part of API v3 that ladarr uses.
 // The benchmark also asks for movies 900001 to 900026. Each one is a movie with a name from this list.
-const MOVIE = { id: 2, title: 'Movie Name', original_title: 'Movie Name', release_date: '2019-06-01', overview: 'A movie for the end-to-end tests.', original_language: 'en', poster_path: null };
-const SERIES = { id: 1, name: 'Show Name', original_name: 'Show Name', first_air_date: '2020-01-01', overview: 'A series for the end-to-end tests.', original_language: 'en', poster_path: null };
+const MOVIE = { id: 2, title: 'Movie Name', original_title: 'Movie Name', release_date: '2019-06-01', overview: 'A movie for the end-to-end tests.', original_language: 'en', poster_path: null, genre_ids: [28] };
+const SERIES = { id: 1, name: 'Show Name', original_name: 'Show Name', first_air_date: '2020-01-01', overview: 'A series for the end-to-end tests.', original_language: 'en', poster_path: null, genre_ids: [35] };
 const TWO_SEASONS = { id: 3, name: 'Two Seasons', original_name: 'Two Seasons', first_air_date: '2021-01-01', overview: 'A series with two seasons for the end-to-end tests.', original_language: 'en', poster_path: null };
 export const BENCH_MOVIE_ID = 900_000;
 export const BENCH_NAMES = 'Alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliet Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray Yankee Zulu'.split(' ');

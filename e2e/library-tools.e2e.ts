@@ -28,6 +28,25 @@ test.beforeEach(async ({ context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
 });
 
+test('an imported episode without a linked file does not show as searching', async ({ page }) => {
+  await page.route(/\/library\/tv:1\/episodes\?season=1$/, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const [unlinked, searching, linked] = body.episodes;
+    Object.assign(unlinked, { monitored: true, hasFile: false, queue: 'available' });
+    Object.assign(searching, { monitored: true, hasFile: false, queue: 'searching' });
+    Object.assign(linked, { monitored: true, hasFile: true, queue: 'available' });
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto(`${URL_BASE}/catalog/tv/1`);
+  await page.getByRole('button', { name: 'Show episodes of Season 1' }).click();
+  const table = page.getByRole('region', { name: 'Season 1', exact: true }).getByRole('table', { name: 'Episodes' });
+  const status = (name: string) => table.getByRole('row').filter({ has: page.getByText(name, { exact: true }) }).getByRole('cell').last();
+  await expect(status('Episode 1')).toHaveText(/link|associat|match|map/i);
+  await expect(status('Episode 2')).toHaveText('Searching');
+  await expect(status('Episode 3')).toHaveText('Available');
+});
+
 test('a search on the selected titles', async ({ page }) => {
   await page.goto(URL_BASE);
   await expect(page.getByRole('button', { name: 'Search', exact: true })).toHaveCount(0);
@@ -106,7 +125,7 @@ test('the catalog shows the type of a title on its poster', async ({ page }) => 
 });
 
 test('Search results can be selected, many at once, and a new search clears the selection', async ({ page }) => {
-  await page.goto(`${URL_BASE}/search?q=Name`);
+  await page.goto(`${URL_BASE}/discovery?q=Name`);
   const movie = page.getByRole('checkbox', { name: 'Movie Name', exact: true });
   const show = page.getByRole('checkbox', { name: 'Show Name', exact: true });
   await movie.click();
@@ -125,31 +144,33 @@ test('Search results can be selected, many at once, and a new search clears the 
 test('a search starts while the person types, without Enter', async ({ page }) => {
   await page.goto(`${URL_BASE}/catalog`);
   await page.getByRole('searchbox', { name: 'Search' }).fill('Movie');
-  await expect(page).toHaveURL(/\/search\?q=Movie$/);
+  await expect(page).toHaveURL(/\/discovery\?q=Movie$/);
   await expect(page.getByRole('checkbox', { name: 'Movie Name', exact: true })).toBeVisible();
 });
 
-test('a bare TMDB ID of a movie opens its page', async ({ page }) => {
+test('an old movie ID search opens its result in Discovery', async ({ page }) => {
   await page.goto(`${URL_BASE}/search?q=2`);
-  await expect(page).toHaveURL(/\/catalog\/movie\/2$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'Movie Name (2019)' })).toBeVisible();
+  await expect(page).toHaveURL(/\/discovery\?q=2$/);
+  await expect(page.getByRole('link', { name: /Movie Name/ })).toBeVisible();
 });
 
-test('a bare TMDB ID of a series opens its page', async ({ page }) => {
-  await page.goto(`${URL_BASE}/search?q=1`);
-  await expect(page).toHaveURL(/\/catalog\/tv\/1$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'Show Name (2020)' })).toBeVisible();
+test('a series ID shows its result in Discovery', async ({ page }) => {
+  await page.goto(`${URL_BASE}/discovery?q=1`);
+  await expect(page.getByRole('link', { name: /Show Name/ })).toBeVisible();
+  await expect(page).toHaveURL(/\/discovery\?q=1$/);
 });
 
-test('a number that is no TMDB ID stays on the search page', async ({ page }) => {
+test('a number that is no TMDB ID stays in Discovery', async ({ page }) => {
   await page.goto(`${URL_BASE}/search?q=9999`);
-  await expect(page).toHaveURL(/\/search\?q=9999$/);
+  await expect(page).toHaveURL(/\/discovery\?q=9999$/);
   await expect(page.getByText('No titles match.', { exact: true })).toBeVisible();
 });
 
-test('a bare TMDB ID typed in the search box opens its page', async ({ page }) => {
+test('a bare TMDB ID typed in the search box opens Discovery until a title is selected', async ({ page }) => {
   await page.goto(`${URL_BASE}/catalog`);
   await page.getByRole('searchbox', { name: 'Search' }).fill('2');
+  await expect(page).toHaveURL(/\/discovery\?q=2$/);
+  await page.getByRole('link', { name: /Movie Name/ }).getByText('Movie Name', { exact: true }).click();
   await expect(page).toHaveURL(/\/catalog\/movie\/2$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Movie Name (2019)' })).toBeVisible();
 });

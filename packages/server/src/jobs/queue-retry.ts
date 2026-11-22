@@ -176,7 +176,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
         if (!title) continue;
         // The folder is read once for the title, and the search and the scan share the lock of the title.
         await withTitleLock(key, async () => {
-          const scan = await scanTitle(key);
+          const scan = await scanTitle(key, clients);
           if (scan.added || scan.updated || scan.missing) events.publish('library.changed', { key });
           const fresh = scan.status === 'ok' || scan.status === 'folder_missing';
           for (const entry of group) {
