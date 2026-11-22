@@ -689,16 +689,9 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
     status === 'no_match'
       ? t('The indexers have releases, but none fits your selected qualities.')
       : t('{count} / {total} episodes', { count: completed, total });
-  // The bar of the whole series: the part of its episodes that is complete, or the part of its download that the
-  // client reports while it downloads. A series that waits for its turn, that searches, that the search did not find,
-  // that found no match, or that is stuck has no work to fill.
-  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-  const bar =
-    status === 'queued' || status === 'searching' || status === 'not_found' || status === 'no_match' || status === 'stuck' ? undefined : status === 'downloading' ? (
-      <Progress value={Math.round((download ?? 0) * 100)} label={`${groupName(group)} ${t('Download')}`} />
-    ) : (
-      <Progress value={percent} label={t('{count} / {total} episodes', { count: completed, total })} />
-    );
+  const bar = status === 'downloading' ? (
+    <Progress value={Math.round((download ?? 0) * 100)} label={`${groupName(group)} ${t('Download')}`} />
+  ) : undefined;
   return (
     <div className="grid min-w-0">
       <div className="grid gap-4">
