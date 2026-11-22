@@ -604,11 +604,12 @@ export type QueueGroupSummary = Pick<QueueGroupRow, 'status' | 'counts' | 'tabs'
 
 export type QueueMappingEpisode = EpisodeRef & {
   id: string;
+  releaseSeason: number;
   torrent: { hash: string; name: string } | null;
   match: { file: string; path: string | null } | null;
 };
 
-export type QueueGroupPage = { cursor: number; group: QueueGroupSummary; items: QueueEntryView[]; mapping?: QueueMappingEpisode[] };
+export type QueueGroupPage = { cursor: number; group: QueueGroupSummary; items: QueueEntryView[]; mapping?: QueueMappingEpisode[]; numberingRevision?: number };
 
 export type QueueSummary = {
   cursor: number;

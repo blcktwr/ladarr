@@ -1,7 +1,7 @@
 import { ApiError } from './api.ts';
 import { t } from '../i18n/index.ts';
 import type { Availability, MediaType, RootProblem } from '@ladarr/shared/enums';
-import type { EpisodeCounts, QueueGroupRow, TitleSummary } from '@ladarr/shared/types';
+import type { EpisodeCounts, NumberingRange, QueueGroupRow, TitleSummary } from '@ladarr/shared/types';
 import type { ThumbnailState } from 'nebula';
 
 // A map of labels. The text goes through t() when a page reads it, so a map made at import time follows the language.
@@ -11,6 +11,14 @@ export const labels = <Key extends string>(map: Record<Key, string>) =>
 // shortcut: posters load from the TMDB image host, so the browser contacts TMDB. Cache them on the server if that matters.
 // A title key is "movie:603". The page of the title is /catalog/movie/603.
 export const catalogPath = (key: string) => `/catalog/${key.replace(':', '/')}`;
+
+export function numberingRangeText(range: NumberingRange) {
+  const span = (season: number, from: number, to: number) => {
+    const episode = (number: number) => `S${String(season).padStart(2, '0')}E${String(number).padStart(2, '0')}`;
+    return from === to ? episode(from) : `${episode(from)}–${episode(to)}`;
+  };
+  return `${span(range.season, range.from, range.to)} → ${span(range.releaseSeason, range.releaseFrom, range.releaseFrom + range.to - range.from)}`;
+}
 
 export const posterUrl = (path: string | null, size: 'w92' | 'w185' | 'w342' | 'w1280' | 'h632' | 'original' = 'w185') => (path ? `https://image.tmdb.org/t/p/${size}${path}` : undefined);
 

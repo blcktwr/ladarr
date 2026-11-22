@@ -1184,7 +1184,7 @@ export type Genre = { id: number; name: string };
 export type PostDeps = { enqueue: (input: EnqueueInput) => Job; status: ImportStatus; configDir?: string };
 export type SourceDeps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job; status: ImportStatus; configDir?: string };
 export type DeleteDeps = { events: Events; queue?: Queue; cancelJob?: (id: string) => void };
-export type PatchDeps = { events: Events; enqueue: (input: EnqueueInput) => Job };
+export type PatchDeps = { events: Events; enqueue: (input: EnqueueInput) => Job; finder?: Finder };
 export type RefreshDeps = { tmdb?: Tmdb; enqueue: (input: EnqueueInput) => Job };
 export type RescanDeps = { enqueue: (input: EnqueueInput) => Job };
 export type LibraryDeps = { tmdb?: Tmdb; events: Events; enqueue: (input: EnqueueInput) => Job };

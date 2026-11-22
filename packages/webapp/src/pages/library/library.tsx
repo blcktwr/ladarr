@@ -10,7 +10,7 @@ import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, Empty
 import { Alert } from '../../components/alert.tsx';
 import { Link, LoadFailed, LoadingGallery, pageWidth, pageWidthContent } from '../../components/index.ts';
 import { ModalActions } from '../../components/modal-actions.tsx';
-import { availabilityLabel, catalogPath, contentType, posterUrl, describeError, posterState, statusLabel } from '../../lib/format.ts';
+import { availabilityLabel, catalogPath, contentType, numberingRangeText, posterUrl, describeError, posterState, statusLabel } from '../../lib/format.ts';
 import { t, getLanguage } from '../../i18n/index.ts';
 import { useLive } from '../../lib/live.ts';
 import { StatusText } from '../../lib/status.tsx';
@@ -721,6 +721,12 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
       {series && (
         <>
           <div className={`${pageWidth} grid gap-6`}>
+            {!!title?.numbering.ranges.length && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Text variant="small">{t('Manual mapping')}</Text>
+                {title.numbering.ranges.map((range) => <Badge key={`${range.season}:${range.from}`}>{numberingRangeText(range)}</Badge>)}
+              </div>
+            )}
             {title && !addLoading ? <Seasons title={title} onAddSeason={(season) => void run(() => addSeason(title.key, season))} onRemoveSeason={(season) => setPlan({ request: { action: 'remove', keys: [title.key], season }, subject: seasonName(season) })} /> : <PreviewSeasons tmdbId={header.tmdbId} onAddSeason={startAdd} pending={addLoading && pendingAdd?.kind === 'series' ? pendingAdd : null} />}
           </div>
         </>

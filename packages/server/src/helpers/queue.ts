@@ -121,7 +121,7 @@ export function actionsOf(entries: QueueEntry[]): QueueResolution[] {
       result.set(key, item);
     };
     const title = titleOf(entry);
-    if (['file_not_found', 'file_unmapped', 'coverage_unknown', 'file_unreadable', 'file_invalid', 'destination_exists'].includes(cause) || (title?.mediaType === 'tv' && cause === 'pack_partial')) {
+    if (['file_not_found', 'file_unmapped', 'coverage_unknown', 'file_unreadable', 'file_invalid', 'destination_exists'].includes(cause) || (title?.mediaType === 'tv' && ['pack_partial', 'numbering_required'].includes(cause))) {
       add('match', title?.mediaType === 'movie' ? 'Select file' : 'Map episodes', undefined, entry.transferHash ? 'download' : 'library');
     }
     if (cause === 'destination_exists') {

@@ -199,7 +199,7 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   api.post('/library', libraryAdd({ tmdb, events, enqueue }));
   api.get('/library/:key', titleParam(), libraryTitleGet());
   api.get('/library/:key/upgrades', titleParam(), libraryUpgrades());
-  api.patch('/library/:key', titleParam(), libraryTitleUpdate({ events, enqueue }));
+  api.patch('/library/:key', titleParam(), libraryTitleUpdate({ events, enqueue, finder: services?.finder }));
   api.delete('/library/:key', titleParam(), libraryTitleDelete({ events, queue: services?.queue, cancelJob }));
   api.post('/library/:key/refresh', titleParam(), libraryRefresh({ tmdb, enqueue }));
   api.post('/library/:key/rescan', titleParam(), libraryRescan({ enqueue }));

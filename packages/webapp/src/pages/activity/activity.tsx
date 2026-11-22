@@ -14,7 +14,7 @@ import { FinishedPanel } from './activity-finished.tsx';
 import { MatchDialog, type MatchRequest } from './activity-match.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { Link, LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
-import { catalogPath, formatBytes, groupName, posterUrl, reasonText, seasonName, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
+import { catalogPath, formatBytes, groupName, numberingRangeText, posterUrl, reasonText, seasonName, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { LogRow } from '../../lib/log-row.tsx';
 import { commentParts } from '../../lib/links.ts';
@@ -829,10 +829,7 @@ function StageMenu({ summary, filters, setFilters }: { summary: QueueSummary | u
   );
 }
 
-const numberingText = (numbering: Numbering) => numbering.ranges.map((range) => {
-  const episode = (season: number, number: number) => `S${String(season).padStart(2, '0')}E${String(number).padStart(2, '0')}`;
-  return `${episode(range.season, range.from)}–${episode(range.season, range.to)} → ${episode(range.releaseSeason, range.releaseFrom)}–${episode(range.releaseSeason, range.releaseFrom + range.to - range.from)}`;
-}).join(', ') || t('Catalog numbering');
+const numberingText = (numbering: Numbering) => numbering.ranges.map(numberingRangeText).join(', ') || t('Catalog numbering');
 
 // The question shows in a modal, and the action runs after the second click.
 function ConfirmAction({ preview, label = actionLabel[preview.action], onCancel, onConfirm }: { preview: QueueActionPreview; label?: string; onCancel: () => void; onConfirm: () => void }) {

@@ -60,7 +60,7 @@ test('does not map local files without a torrent', async ({ page }) => {
   const panel = page.getByRole('dialog');
   await expect(panel).toHaveAccessibleName('Show Name (2020)');
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
-  await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Torrent', 'Matches']);
+  await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Season', 'Torrent', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(4);
   const matches = table.getByRole('combobox', { name: 'Matches' });
   await expect(matches).toHaveCount(3);
@@ -71,9 +71,9 @@ test('does not map local files without a torrent', async ({ page }) => {
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
   const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
-  await expect(panel.getByRole('combobox').filter({ hasText: 'Season 1' })).toBeVisible();
+  await expect(table.getByRole('spinbutton', { name: 'Season' }).first()).toHaveValue('1');
   await apply.click();
-  const question = page.getByRole('dialog', { name: 'Does every episode in season 1 match the correct file?', exact: true });
+  const question = page.getByRole('dialog', { name: 'Apply this episode mapping?', exact: true });
   await question.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(question).toBeHidden();
   await expect(panel).toBeVisible();

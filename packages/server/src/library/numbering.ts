@@ -88,6 +88,65 @@ export function sameNumbering(a: Numbering, b: Numbering): boolean {
   return a.revision === b.revision && JSON.stringify(a.ranges) === JSON.stringify(b.ranges);
 }
 
+// Keep the release numbers of untouched episodes. Give each moved episode the first free number in its new season.
+export function assignSeasons(current: Numbering, episodes: Point[], edits: unknown) {
+  if (!Array.isArray(edits) || edits.length > episodes.length) return null;
+  const key = ({ season, number }: Point) => `${season}x${number}`;
+  const catalog = new Set(episodes.map(key));
+  const changes = new Map<string, number>();
+  const search = new Set<string>();
+  let changed = false;
+  for (const edit of edits) {
+    if (!edit || !integer(edit.season) || !integer(edit.number) || !integer(edit.releaseSeason) || edit.releaseSeason < 0 || typeof edit.search !== 'boolean') return null;
+    const id = key(edit);
+    if (!catalog.has(id) || changes.has(id)) return null;
+    changes.set(id, edit.releaseSeason);
+    if (releasePoint(current, edit)?.season !== edit.releaseSeason) {
+      changed = true;
+      if (edit.search) search.add(id);
+    }
+  }
+  if (!changed) return { numbering: current, search };
+  const ordered = [...episodes].sort((a, b) => a.season - b.season || a.number - b.number);
+  const occupied = new Set<string>();
+  const mapped = new Map<string, Point>();
+  const moved: Point[] = [];
+  for (const point of ordered) {
+    const id = key(point);
+    const next = changes.get(id);
+    const release = releasePoint(current, point);
+    if (next !== undefined && next !== release?.season && next !== point.season) {
+      moved.push(point);
+      continue;
+    }
+    const reset = next === point.season && next !== release?.season;
+    const keep = reset ? point : release;
+    if (!keep) continue;
+    if (occupied.has(key(keep))) return null;
+    occupied.add(key(keep));
+    if (!reset && rangeOfCatalog(current, point.season, point.number)) mapped.set(id, keep);
+  }
+  const nextNumber = new Map<number, number>();
+  for (const point of moved) {
+    const season = changes.get(key(point))!;
+    let number = nextNumber.get(season) ?? 1;
+    while (occupied.has(key({ season, number }))) number++;
+    mapped.set(key(point), { season, number });
+    nextNumber.set(season, number + 1);
+  }
+  const ranges: NumberingRange[] = [];
+  for (const point of ordered) {
+    const release = mapped.get(key(point));
+    if (!release) continue;
+    const last = ranges.at(-1);
+    if (last && last.season === point.season && last.to + 1 === point.number && point.number - last.from < MAX_SPAN
+      && last.releaseSeason === release.season && releaseTo(last) + 1 === release.number) last.to = point.number;
+    else ranges.push({ season: point.season, from: point.number, to: point.number, releaseSeason: release.season, releaseFrom: release.number });
+  }
+  const check = validateNumbering({ revision: current.revision, ranges });
+  return check.ok ? { numbering: check.numbering, search } : null;
+}
+
 export type NumberingProblem = { error: 'invalid_numbering'; index?: number; field?: string };
 export type NumberingCheck = { ok: true; numbering: Numbering } | ({ ok: false } & NumberingProblem);
 

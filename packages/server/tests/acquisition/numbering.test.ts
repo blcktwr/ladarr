@@ -82,14 +82,17 @@ describe('the reading of a file name', () => {
 describe('the acquisition of a mapped episode', () => {
   it('asks for the release number and imports the file as the catalog episode', async () => {
     pipe = await startPipeline();
-    const item = title({ rootId: 'tv', episodes: range(1, 23).map((number) => episode(1, number, '2020-01-01')), numbering: numbering() });
+    const item = title({ rootId: 'tv', episodes: range(1, 23).map((number) => episode(1, number, '2020-01-01')) });
     pipe.db.data.titles[item.key] = item;
     const name = 'Show.Name.S02E01.1080p.WEB-DL-GRP';
     const files = ['Show.Name.S02E01.mkv'];
     pipe.tracker.state.items = [{ title: name, size: 60 * 45 * MIB, files }];
 
-    const [entry] = pipe.finder.requestSearch(item.key, { season: 1, number: 13 });
-    expect(entry).toBeDefined();
+    const entry = entryOf({ id: `${item.key}:1x13`, titleKey: item.key, season: 1, number: 13, stage: 'fetching', reason: { code: 'pack_partial' } });
+    pipe.db.data.queue[entry.id] = entry;
+    api = await pipe.api();
+    const saved = await api.patch(`/library/${item.key}`, { episodeSeasons: { revision: 0, edits: [{ season: 1, number: 13, releaseSeason: 2, search: true }] } });
+    expect(saved.status).toBe(200);
     await until(() => stageOf(entry!) === 'downloading');
 
     // The indexers get the release coordinates of the target. The catalog coordinates are never asked for.

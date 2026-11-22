@@ -2,10 +2,10 @@ import type { AttachCandidates, EpisodeRef, FileRow, QueueEntryView, QueueGroupP
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { Button, Dropdown, EmptyState, Modal, SearchableDropdown, Spinner, Table } from 'nebula';
+import { Button, Dropdown, EmptyState, Field, Modal, SearchableDropdown, Spinner, Table } from 'nebula';
 import { Confirm } from '../../components/confirm.tsx';
 import { api, ApiError } from '../../lib/api.ts';
-import { formatBytes, groupName, seasonName } from '../../lib/format.ts';
+import { describeError, formatBytes, groupName, seasonName } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 
 const errorText = (err: unknown) =>
@@ -17,7 +17,8 @@ const errorText = (err: unknown) =>
         ? t('A target of another title uses this download.')
         : err instanceof ApiError && err.message === 'torrent_not_found'
           ? t('The client does not have this download now.')
-          : t('The request did not complete.');
+          : err instanceof ApiError && ['invalid_numbering', 'numbering_changed'].includes(err.message)
+            ? describeError(err) : t('The request did not complete.');
 
 const pad = (value: number) => String(value).padStart(2, '0');
 const pointText = (point: EpisodeRef) => `S${pad(point.season)}E${pad(point.number)}`;
@@ -58,7 +59,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   const series = entry.mediaType === 'tv';
   const mapSeries = series && !fixedSource;
   const fixed = fixedSource ? fileSource ?? 'library' : undefined;
-  const [season, setSeason] = useState(entry.season);
+  const [seasons, setSeasons] = useState<Record<string, string>>({});
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [movie, setMovie] = useState('');
   const [error, setError] = useState('');
@@ -90,8 +91,9 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     const match = matchesByPath.get(file.path);
     return !file.missing && match ? [{ value: file.path, ...match }] : [];
   });
-  const rows = episodes.filter((point) => point.season === season);
-  const seasons = [...new Set(episodes.length ? episodes.map((point) => point.season) : season === null ? [] : [season])];
+  const rows = mapSeries ? episodes : episodes.filter((point) => point.season === entry.season);
+  const seasonChanged = (point: QueueMappingEpisode) => seasons[point.id] !== undefined && Number(seasons[point.id]) !== point.releaseSeason;
+  const invalidSeason = Object.values(seasons).some((value) => !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)));
   const sources = new Map<string, string>();
   const initial = new Set<string>();
   const essential = new Set<string>();
@@ -141,11 +143,11 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     const files = packs[i]!.data?.files;
     return [key, { files, options: fileOptions(files ?? []) }];
   }));
-  const proposed = (point: EpisodeRef, key: string, name?: string) => {
+  const proposed = (point: QueueMappingEpisode, key: string, name?: string) => {
     const files = lists.get(key)?.files;
     if (name) return files?.find((file) => file.rel === name) ?? files?.find((file) => file.originalName === name);
     return files?.find((file) => file.current?.some((cover) => sameEpisode(cover, point)))
-      ?? files?.find((file) => file.proposal?.episodes.some((cover) => sameEpisode(cover, point)));
+      ?? (seasonChanged(point) ? undefined : files?.find((file) => file.proposal?.episodes.some((cover) => sameEpisode(cover, point))));
   };
   const movieList = lists.get(sourceOf(entry, fixed).key);
   const failed = group.error ?? library.error ?? packs.find((pack, i) => essential.has(keys[i]!) && pack.error)?.error;
@@ -169,6 +171,11 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
         return next;
       });
       setDiscarded((state) => new Set(state).add(point.id));
+      setSeasons((state) => {
+        const next = { ...state };
+        delete next[point.id];
+        return next;
+      });
       await Promise.all([group.refetch(), client.invalidateQueries({ queryKey: [`/library/${entry.titleKey}/files`] })]);
     } catch (err) {
       setError(errorText(err));
@@ -206,7 +213,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   }
 
   async function save() {
-    if (busy) return;
+    if (busy || invalidSeason) return;
     const corrected = new Map<string, EpisodeRef[]>();
     const confirmedIds: string[] = [];
     const coverage = (path: string) => corrected.get(path) ?? library.data?.files.find((file) => file.path === path)?.episodes ?? [];
@@ -226,6 +233,15 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     setBusy(true);
     setError('');
     try {
+      const assigned = new Set([...confirmedIds, ...posts.flatMap((post) => post.ids)]);
+      const edits = rows.filter(seasonChanged).map((point) => ({
+        season: point.season, number: point.number, releaseSeason: Number(seasons[point.id]),
+        search: !assigned.has(point.id) && !rowSource(point).match,
+      }));
+      if (edits.length) {
+        await api(`/library/${entry.titleKey}`, { method: 'PATCH', body: { episodeSeasons: { revision: group.data!.numberingRevision, edits } } });
+        await client.invalidateQueries({ queryKey: [`/library/${entry.titleKey}`] });
+      }
       if (corrected.size) {
         const body = { titleKey: entry.titleKey, entries: [...corrected].map(([path, episodes]) => ({ path, episodes })), ids: confirmedIds };
         const preview = await api<{ version: string; counts: { blocked: number; review: number } }>('/mapping/preview', { method: 'POST', body });
@@ -233,11 +249,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
         await api('/mapping/apply', { method: 'POST', body: { ...body, version: preview.version } });
       }
       for (const post of posts) await apply(post);
-      const remaining = Object.fromEntries(episodes.filter((point) => point.season !== season && drafts[point.id]).map(({ id }) => [id, drafts[id]!]));
-      if (Object.keys(remaining).length) {
-        setDrafts(remaining);
-        await Promise.all([group.refetch(), client.invalidateQueries({ queryKey: ['mapping-files', entry.titleKey] }), client.invalidateQueries({ queryKey: [`/library/${entry.titleKey}/files`] })]);
-      } else onDone();
+      onDone();
     } catch (err) {
       setError(errorText(err));
       if (series) void group.refetch();
@@ -251,35 +263,22 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     <Modal
       open
       onOpenChange={(next) => { if (!next && !busy) onClose(); }}
-      title={mapSeries ? title : series && season !== null ? `${title} / ${seasonName(season)}` : entry.label}
+      title={mapSeries ? title : series && entry.season !== null ? `${title} / ${seasonName(entry.season)}` : entry.label}
       width={mapSeries ? 'xl' : 'lg'}
-      actions={
-        <>
-          {mapSeries && (
-            <div className="mr-auto min-w-0 max-w-40 flex-1">
-              <Dropdown
-                label={t('Season')} hideLabel width="full" reserve={false}
-                value={String(season)} options={seasons.map((n) => ({ value: String(n), label: seasonName(n) }))}
-                onValueChange={(next) => { if (next !== null) setSeason(Number(next)); }}
-              />
-            </div>
-          )}
-          {mapSeries ? (
-            <Confirm label={t('Apply mapping')} title={t('Does every episode in season {season} match the correct file?', { season: season! })}
-              confirm={t('Yes')} onConfirm={() => void save()}
-              disabled={busy || !group.data || (rows.some((point) => point.match?.path) && !library.data) || packs.some((pack, i) => essential.has(keys[i]!) && pack.isPending)} />
-          ) : <Button disabled={busy || (!series && !movie)} pending={busy} onClick={() => void save()}>{t('Apply mapping')}</Button>}
-        </>
-      }
+      actions={mapSeries ? (
+        <Confirm label={t('Apply mapping')} title={t('Apply this episode mapping?')}
+          confirm={t('Yes')} onConfirm={() => void save()}
+          disabled={busy || !!discarding || invalidSeason || !group.data || (rows.some((point) => point.match?.path) && !library.data) || packs.some((pack, i) => essential.has(keys[i]!) && pack.isPending)} />
+      ) : <Button disabled={busy || (!series && !movie)} pending={busy} onClick={() => void save()}>{t('Apply mapping')}</Button>}
     >
       {series ? (
         <Table
           aria-label={t('Map episodes')}
           loading={loading}
-          minWidth={mapSeries ? '52rem' : undefined}
+          minWidth={mapSeries ? '57rem' : undefined}
           columns={[
             { label: t('Episodes'), width: '9rem' },
-            ...(mapSeries ? [{ label: t('Torrent'), width: '22rem' }] : []),
+            ...(mapSeries ? [{ label: t('Season'), width: '5rem' }, { label: t('Torrent'), width: '22rem' }] : []),
             { label: t('Matches'), width: mapSeries ? '21rem' : undefined },
           ]}
           rows={rows.map((point) => {
@@ -312,6 +311,13 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
               cells: [
                 pointText(point),
                 ...(mapSeries ? [(
+                  <Field key="season" label={t('Season')} hideLabel type="number" min={0} step={1} size="sm" width="full"
+                    disabled={busy || dropped} value={seasons[point.id] ?? String(point.releaseSeason)}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setSeasons((state) => ({ ...state, [point.id]: value }));
+                    }} />
+                ), (
                   <SearchableDropdown
                     key="torrent" label={t('Torrent')} hideLabel width="full" value={hash}
                     placeholder={t('No torrent selected')} emptyText={t('No options.')}

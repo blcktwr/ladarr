@@ -168,7 +168,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   // Puts the targets in the queue and starts their search. A target that is in the journey already is left as it is.
   // `only` takes the targets of that set, so a search that the sweep starts does not touch a target that is not due.
   // Returns the entries that the request started.
-  function requestSearch(titleKey: string, { season, number, reason = 'search requested', fresh = false, manual = false, only }: { season?: number; number?: number; reason?: string; fresh?: boolean; manual?: boolean; only?: ReadonlySet<string> } = {}): QueueEntry[] {
+  function requestSearch(titleKey: string, { season, number, reason = 'search requested', fresh = false, manual = false, only, remapped = false }: { season?: number; number?: number; reason?: string; fresh?: boolean; manual?: boolean; only?: ReadonlySet<string>; remapped?: boolean } = {}): QueueEntry[] {
     const title = db.data.titles[titleKey];
     if (!title) return [];
     const started: QueueEntry[] = [];
@@ -178,6 +178,16 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     const open = (targetSeason: number | null, targetNumber: number | null): QueueEntry | undefined => {
       if (only && !only.has(entryId(titleKey, targetSeason, targetNumber))) return undefined;
       const entry = queue.ensure(titleKey, targetSeason, targetNumber);
+      if (remapped) {
+        if (entry.state.kind === 'cancelled' || entry.state.kind === 'paused') return;
+        if (entry.state.kind === 'blocked') {
+          queue.retryAttempt(entry, 'episode season changed');
+          Object.assign(entry, { release: null, transferHash: null, clientId: null, source: null, manualMatch: null, importResult: null, importTries: 0, numbering: title.numbering });
+          queue.resolve(entry, 'queued', 'episode season changed');
+          return entry;
+        }
+        if (entry.state.kind === 'waiting' || entry.state.kind === 'queued') entry.numbering = title.numbering;
+      }
       // An entry that waits for a release searches again now. Any other active entry already has work.
       if (entry.state.kind === 'waiting') {
         queue.enter(entry, 'queued', reason);
@@ -868,7 +878,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       if (season !== null && open.length > 1 && resume?.phase !== 'absolute') {
         for (const releaseSeason of releaseSeasons(numbering, season)) {
           for (const [nameIndex, name] of names.entries()) {
-            const group = open;
+            const group = open.filter((entry) => releaseTarget(numbering, entry)?.season === releaseSeason);
             if (!group.length || open.length <= 1) break;
             if (budget && budget.left <= 0) {
               defer();
