@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Locator, Page, Request } from '@playwright/test';
 import type { Data, QueueEntry } from '../packages/server/src/types.ts';
@@ -658,7 +658,59 @@ test('shows the map dialog only after every torrent and its match load', async (
   }
 });
 
-test('keeps the torrent and the file of a mapped episode editable without a queue entry', async ({ page }) => {
+test('shows verified torrent matches and ignores a torrent that never reached the client', async ({ page }) => {
+  const title = data.titles['tv:1']!;
+  title.folder = 'Show Name (2020)';
+  const imported = blocked(title.key, 1, 1, 'fetching', 'pack_partial');
+  const local = blocked(title.key, 1, 2, 'fetching', 'pack_partial');
+  const stopped = blocked(title.key, 1, 3, 'fetching', 'pack_partial');
+  const name = 'Show.Name.S01.1080p.WEB-DL-GRP';
+  download(imported, name, { 'Show.Name.S01E01.mkv': 'first' });
+  Object.assign(local, { transferHash: imported.transferHash, clientId: imported.clientId, release: structuredClone(imported.release) });
+  const missing = 'Show.Name.S01.Missing.1080p.WEB-DL-GRP';
+  Object.assign(stopped, { transferHash: hashOf(missing), clientId: imported.clientId, release: { ...imported.release!, title: missing, infoHash: hashOf(missing) } });
+  const alternate = completeTorrent('Show.Name.S01.Alternate.1080p.WEB-DL-GRP', { 'Show.Name.S01E03.mkv': 'third' });
+  mkdirSync(join(stack.folders.tv, title.folder), { recursive: true });
+  for (const target of [imported, local]) {
+    const file = `Show.Name.S01E0${target.number}.mkv`;
+    const path = `${title.folder}/${file}`;
+    const abs = join(stack.folders.tv, path);
+    if (target === imported) linkSync(join(stack.folders.downloads, name, file), abs);
+    else writeFileSync(abs, 'local');
+    target.importResult = { at: Date.now(), ok: true, method: 'hardlink', path, validation: 'basic' };
+    target.state = { kind: 'available' };
+    const { size, mtimeMs } = statSync(abs);
+    data.files[file] = { id: file, titleKey: title.key, path, sizeBytes: size, mtimeMs, episodes: [{ season: 1, number: target.number! }], missing: false, addedAt: Date.now(),
+      association: { source: 'automatic', originalName: path, numberingRevision: 0, identity: { sizeBytes: size, mtimeMs } } };
+    title.episodes.find((episode) => episode.number === target.number)!.fileId = file;
+  }
+  data.queuePaused = true;
+  await start([imported, local, stopped]);
+  const requests = matchRequests(page);
+
+  await open(page, `group:${title.key}:1`);
+  await page.getByRole('main').getByRole('button', { name: 'Map episodes', exact: true }).click();
+  const panel = page.getByRole('dialog');
+  const row = (episode: string) => panel.getByRole('row').filter({ hasText: episode });
+  const torrent = (episode: string) => row(episode).getByRole('combobox', { name: 'Torrent' });
+  const match = (episode: string) => row(episode).getByRole('combobox', { name: 'Matches' });
+  await expect(torrent('S01E01')).toHaveValue(name);
+  await expect(match('S01E01')).toHaveValue(/Show\.Name\.S01E01\.mkv/);
+  await expect(torrent('S01E02')).toHaveValue('');
+  await expect(match('S01E02')).toHaveValue('');
+  await expect(torrent('S01E03')).toHaveValue('');
+  await expect(torrent('S01E03')).toBeEnabled();
+  await expect(match('S01E03')).toBeDisabled();
+  await torrent('S01E03').fill('Alternate');
+  await page.getByRole('option', { name: /S01\.Alternate/ }).click();
+  await expect(match('S01E03')).toHaveValue(/Show\.Name\.S01E03\.mkv/);
+  await expect(match('S01E03')).toBeEnabled();
+  await applySeason(page, panel, 1);
+  await expect(panel).toBeHidden();
+  await expectMappings(requests, [{ id: stopped.id, hash: alternate, source: 'download', file: 'Show.Name.S01E03.mkv', covers: [{ season: 1, number: 3 }], ids: [stopped.id] }]);
+});
+
+test('shows the torrent and keeps the file of a mapped episode editable without a queue entry', async ({ page }) => {
   const title = data.titles['tv:3']!;
   title.folder = 'Two Seasons (2021)';
   const name = 'Two.Seasons.S02.1080p.WEB-DL-GRP';
@@ -686,8 +738,10 @@ test('keeps the torrent and the file of a mapped episode editable without a queu
   const cells = table.getByRole('row').filter({ hasText: 'S02E03' }).getByRole('cell');
   const torrent = cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true });
   await expect(torrent).toHaveValue(name);
-  await expect(torrent).toBeEnabled();
-  await expect(cells.last().getByRole('combobox', { name: 'Matches' })).toHaveValue(/Two\.Seasons\.S02E03\.mkv/);
+  await expect(torrent).toBeDisabled();
+  const match = cells.last().getByRole('combobox', { name: 'Matches' });
+  await expect(match).toHaveValue(/Two\.Seasons\.S02E03\.mkv/);
+  await expect(match).toBeEnabled();
 });
 
 test('discards an episode from its row and leaves it unassigned', async ({ page }) => {
@@ -706,7 +760,7 @@ test('discards an episode from its row and leaves it unassigned', async ({ page 
   const cells = table.getByRole('row').filter({ hasText: 'S02E04' }).getByRole('cell');
   await cells.last().getByRole('button', { name: 'Discard episode S02E04', exact: true }).click();
   await expect(cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true })).toHaveValue('');
-  await expect(cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true })).toHaveAttribute('placeholder', '—');
+  await expect(cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true })).toHaveAttribute('placeholder', 'No torrent selected');
   await expect(cells.last().getByRole('combobox')).toHaveValue('');
   await expect.poll(async () => (await stack.call('GET', '/queue/entries/tv:3:2x4')).status).toBe(404);
   const episodes = (await stack.call('GET', '/library/tv:3/episodes?season=2')).body.episodes;
@@ -770,6 +824,7 @@ test('maps one blocked episode and preserves the library file coverage across se
   };
   title.episodes.find((episode) => episode.season === 1 && episode.number === 2)!.fileId = 'segments';
   title.episodes.find((episode) => episode.season === 2 && episode.number === 3)!.fileId = 'segments';
+  download(stopped, 'Two.Seasons.S01.1080p.WEB-DL-GRP', { 'New segment.mkv': 'first episode' });
   await start([stopped, available, outside]);
   const outsideBefore = await entry(outside.id);
   const availableBefore = await entry(available.id);
@@ -789,11 +844,11 @@ test('maps one blocked episode and preserves the library file coverage across se
   await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
   const mapped = table.getByRole('row').filter({ hasText: 'S01E02' });
   await expect(mapped.getByRole('cell').nth(1).getByRole('combobox', { name: 'Torrent', exact: true })).toHaveValue('');
-  await expect(mapped.getByRole('combobox', { name: 'Matches' })).toHaveValue(/Segments\.mkv/);
+  await expect(mapped.getByRole('combobox', { name: 'Matches' })).toHaveValue('');
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
   await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('cell').last().getByRole('combobox').click();
-  await page.getByRole('option', { name: /Segments\.mkv/ }).click();
+  await page.getByRole('option', { name: /New segment\.mkv/ }).click();
   await expect(panel.getByRole('button', { name: 'Preview changes', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
   expect(requests).toEqual([]);
@@ -801,14 +856,14 @@ test('maps one blocked episode and preserves the library file coverage across se
   expect((await entry(stopped.id)).status).toBe('stuck');
   await applySeason(page, panel, 1);
   await expect(panel).toBeHidden();
-  const covers = [{ season: 1, number: 1 }, { season: 1, number: 2 }, { season: 2, number: 3 }];
-  await expectMappings(requests, [{ id: stopped.id, source: 'library', file: rel, covers, ids: [stopped.id] }]);
+  const covers = [{ season: 1, number: 1 }];
+  await expectMappings(requests, [{ id: stopped.id, source: 'download', file: 'New segment.mkv', covers, ids: [stopped.id] }]);
 
   await expect.poll(async () => (await entry(stopped.id)).status, { timeout: 60_000 }).toBe('available');
   const files = (await stack.call('GET', '/library/tv:3/files')).body.files;
-  expect(files).toHaveLength(1);
-  expect(files[0].episodes).toHaveLength(covers.length);
-  expect(files[0].episodes).toEqual(expect.arrayContaining(covers));
+  expect(files).toHaveLength(2);
+  expect(files.find((file: { path: string }) => file.path === rel)).toEqual(before[0]);
+  expect(files.find((file: { path: string }) => file.path !== rel).episodes).toEqual(covers);
   expect(await entry(available.id)).toEqual(availableBefore);
   expect(await entry(outside.id)).toEqual(outsideBefore);
   const episodes = (await Promise.all([1, 2].map(async (season) => {
@@ -824,7 +879,7 @@ test('maps one blocked episode and preserves the library file coverage across se
   }
   expect(stack.tracker.state.searches.filter((url) => url.searchParams.get('t') !== 'search' || url.searchParams.has('q'))).toEqual([]);
   expect(stack.tracker.state.downloads).toEqual([]);
-  expect(stack.qbit.torrents.size).toBe(0);
+  expect(stack.qbit.torrents.size).toBe(1);
 });
 
 test('releases a fully mapped season when the user confirms its existing matches', async ({ page }) => {
@@ -839,7 +894,8 @@ test('releases a fully mapped season when the user confirms its existing matches
   const info = statSync(join(stack.folders.tv, path));
   data.files.first = { id: 'first', titleKey: title.key, path, sizeBytes: info.size, mtimeMs: info.mtimeMs, episodes: [{ season: 1, number: 1 }], missing: false, addedAt: Date.now() };
   title.episodes.find((ep) => ep.season === 1 && ep.number === 1)!.fileId = 'first';
-  download(second, 'Two.Seasons.S01.1080p.WEB-DL-GRP', { 'Clip.mkv': 'second' });
+  download(second, 'Two.Seasons.S01.1080p.WEB-DL-GRP', { 'First.mkv': 'first', 'Clip.mkv': 'second' });
+  data.files.first.download = { hash: second.transferHash!, clientId: second.clientId!, external: false };
   second.manualMatch = { file: 'Clip.mkv', covers: [{ season: 1, number: 2 }] };
   data.queuePaused = true;
   await start([first, second, other]);
@@ -861,6 +917,7 @@ test('releases a fully mapped season when the user confirms its existing matches
 test('corrects two saved matches without reimporting the files', async ({ page }) => {
   const title = data.titles['tv:1']!;
   title.folder = 'Show Name (2020)';
+  const hash = completeTorrent('Show.Name.S01.1080p.WEB-DL-GRP', { 'A.mkv': 'A.mkv', 'B.mkv': 'B.mkv' });
   for (const [index, file] of ['A.mkv', 'B.mkv'].entries()) {
     const episode = title.episodes[index]!;
     const path = `${title.folder}/${file}`;
@@ -868,6 +925,7 @@ test('corrects two saved matches without reimporting the files', async ({ page }
     writeFileSync(join(stack.folders.tv, path), file);
     const info = statSync(join(stack.folders.tv, path));
     data.files[file] = { id: file, titleKey: title.key, path, sizeBytes: info.size, mtimeMs: info.mtimeMs, episodes: [{ season: 1, number: episode.number }], missing: false, addedAt: Date.now() };
+    data.files[file]!.download = { hash, clientId: data.downloadClients[0]!.id, external: false };
     episode.fileId = file;
   }
   const stopped = blocked(title.key, 1, 3, 'fetching', 'pack_partial');
@@ -1100,6 +1158,7 @@ test('keeps the season and existing associations unchanged when a file choice is
     addedAt: Date.now(),
   };
   title.episodes.find((episode) => episode.season === 1 && episode.number === 2)!.fileId = 'incorrect';
+  download(stopped, 'Two.Seasons.S01.1080p.WEB-DL-GRP', { 'Existing association.mkv': 'download-video' });
   await start([stopped]);
   const before = await entry(stopped.id);
   const filesBefore = (await stack.call('GET', '/library/tv:3/files')).body.files;
@@ -1230,11 +1289,7 @@ test('restricts Use existing file to library files when the destination exists',
 
 test('shows the failure of Apply mapping inside the dialog', async ({ page }) => {
   const stopped = blocked('tv:3', 1, 1, 'importing', 'file_unmapped');
-  const title = data.titles['tv:3']!;
-  title.folder = 'Two Seasons (2021)';
-  const folder = join(stack.folders.tv, title.folder, 'Season 01');
-  mkdirSync(folder, { recursive: true });
-  for (const name of ['Episode one.mkv', 'Episode two.mkv']) writeFileSync(join(folder, name), 'video');
+  download(stopped, 'Two.Seasons.S01.1080p.WEB-DL-GRP', { 'Episode one.mkv': 'first', 'Episode two.mkv': 'second' });
   await start([stopped]);
   await page.route(`**/queue/entries/${stopped.id}/match`, (route) =>
     route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'download_not_found' }) }),

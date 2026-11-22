@@ -1,30 +1,75 @@
+import { lstat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { db } from '../../../../core/db.ts';
 import type { QueueGroupPage, QueueMappingEpisode } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { bySeasonNumber, filtersOf, groupAggregate, lanePositions, reachedOf, shown, view } from '../../../../helpers/queue.ts';
-import type { ImportStatus, Poller, Title } from '../../../../types.ts';
+import { inside, torrentVideos } from '../../../../library/imports/importer.ts';
+import type { Clients, ImportStatus, Poller, Title, Torrent } from '../../../../types.ts';
 
-// Read the saved associations before the client sends the files of a torrent.
-function mappingOf(title: Title): QueueMappingEpisode[] {
-  return title.episodes.map(({ season, number, fileId }) => {
+async function identity(path: string) {
+  const info = await lstat(path).catch(() => undefined);
+  return info?.isFile() ? `${info.dev}:${info.ino}` : undefined;
+}
+
+async function mappingOf(title: Title, clients: Clients, fixedSeason: number | null): Promise<QueueMappingEpisode[]> {
+  const rows = title.episodes.map(({ season, number, fileId }) => {
     const id = `${title.key}:${season}x${number}`;
     const entry = db.data.queue[id];
     const record = fileId ? db.data.files[fileId] : undefined;
-    const file = record && !record.missing ? record : undefined;
+    return { id, season, number, entry, file: record?.titleKey === title.key && !record.missing ? record : undefined };
+  });
+  const hashes = new Map<string, Set<string>>();
+  const add = (id: string | null | undefined, hash: string | null | undefined) => {
+    if (id && hash) (hashes.get(id) ?? hashes.set(id, new Set()).get(id)!).add(hash);
+  };
+  if (fixedSeason === null) for (const { entry, file } of rows) {
+    add(entry?.clientId, entry?.transferHash);
+    add(file?.download?.clientId, file?.download?.hash);
+  }
+  const handles = new Map(clients.all().filter(({ id }) => hashes.has(id)).map((handle) => [handle.id, handle]));
+  const inventory = new Map(await Promise.all([...handles.values()].map(async ({ id, api }) => {
+    const torrents = await api.byHashes([...hashes.get(id)!]).catch(() => []);
+    return [id, new Map(torrents.map((torrent) => [torrent.hash, torrent]))] as const;
+  })));
+  const find = (id: string | null | undefined, hash: string | null | undefined) => id && hash ? inventory.get(id)?.get(hash) : undefined;
+  const root = db.data.roots[title.rootId]?.path;
+  const links = new Map<Torrent, Promise<Set<string | undefined>>>();
+  async function linked(clientId: string, torrent: Torrent, path: string) {
+    if (!root) return false;
+    const abs = join(root, path);
+    if (!inside(root, abs)) return false;
+    const inode = await identity(abs);
+    if (!inode) return false;
+    let found = links.get(torrent);
+    if (!found) {
+      found = torrentVideos(handles.get(clientId)!, torrent).catch(() => undefined)
+        .then(async (files) => new Set(await Promise.all((files ?? []).map((file) => identity(file.abs)))));
+      links.set(torrent, found);
+    }
+    return (await found).has(inode);
+  }
+  const mapping = await Promise.all(rows.map(async ({ id, season, number, entry, file }) => {
+    const current = find(entry?.clientId, entry?.transferHash);
+    const imported = entry?.importResult;
+    const origin = file?.download ? find(file.download.clientId, file.download.hash)
+      : file && current && entry?.clientId && imported?.ok && imported.path === file.path
+        && (imported.method === 'copy' || (imported.method === 'hardlink' && await linked(entry.clientId, current, file.path))) ? current : undefined;
+    const saved = origin || fixedSeason !== null ? file : undefined;
     const manual = entry?.manualMatch?.covers.some((point) => point.season === season && point.number === number) ? entry.manualMatch.file : undefined;
-    const name = file?.association?.originalName ?? manual ?? file?.path.split('/').pop();
-    const hash = file?.download?.hash ?? (file?.association ? null : entry?.transferHash ?? null);
-    const torrent = hash && entry?.transferHash === hash ? entry.release?.title ?? null : null;
-    return { id, season, number, match: name ? { file: name, path: file?.path ?? null, hash, torrent } : null };
-  }).sort((a, b) => a.season - b.season || a.number - b.number);
+    const torrent = origin ?? (file && entry?.state.kind === 'available' ? undefined : current);
+    const name = saved?.association?.originalName ?? (saved ? saved.path.split('/').pop() : (torrent || fixedSeason !== null ? manual : undefined));
+    return { id, season, number, torrent: torrent ? { hash: torrent.hash, name: torrent.name } : null, match: name ? { file: name, path: saved?.path ?? null } : null };
+  }));
+  return mapping.sort((a, b) => a.season - b.season || a.number - b.number);
 }
 
 // The episodes of one season of a series, in the order of the season and the number. Without a season, it shows every
 // season of the series. `group` covers every member of the season before the tab filter, so the inspector header and
 // the row show the same aggregate. `items` holds every episode of the season: the tab of the page filters the rows,
 // not the children.
-export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undefined): RequestHandler<{ titleKey: string }> {
-  return (req, res) => {
+export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undefined, clients: Clients): RequestHandler<{ titleKey: string }> {
+  return async (req, res) => {
     const f = filtersOf(req.query);
     const lane = lanePositions();
     const season = req.query.season === undefined ? null : Number(req.query.season);
@@ -42,6 +87,7 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
     }
     const summary = groupAggregate(all);
     const title = db.data.titles[req.params.titleKey];
+    const mapping = req.query.mapping === 'true' && title ? await mappingOf(title, clients, season) : undefined;
     res.json({
       cursor: db.data.queueRev,
       group: {
@@ -56,7 +102,7 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
         otherSeasons: summary.otherSeasons,
       },
       items: items.map((entry) => view(poller, importStatus, entry, lane)),
-      ...(req.query.mapping === 'true' && title ? { mapping: mappingOf(title) } : {}),
+      ...(mapping ? { mapping } : {}),
     } satisfies QueueGroupPage);
   };
 }

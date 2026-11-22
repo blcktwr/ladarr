@@ -34,7 +34,7 @@ test('stops the season on its own files instead of a download', async () => {
   expect(stack.tracker.state.downloads).toEqual([]);
 });
 
-test('offers the file of the folder and maps the episode with it', async ({ page }) => {
+test('does not map local files without a torrent', async ({ page }) => {
   for (const id of ['tv:1:1x1', 'tv:1:1x2', 'tv:1:1x3']) {
     await expect.poll(() => reason(id), { timeout: 60_000 }).toBe('file_unmapped');
   }
@@ -62,7 +62,12 @@ test('offers the file of the folder and maps the episode with it', async ({ page
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
   await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Torrent', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(4);
-  await expect(table.locator('td:last-child').getByRole('combobox')).toHaveCount(3);
+  const matches = table.getByRole('combobox', { name: 'Matches' });
+  await expect(matches).toHaveCount(3);
+  for (const match of await matches.all()) {
+    await expect(match).toHaveValue('');
+    await expect(match).toBeDisabled();
+  }
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
   const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
@@ -74,33 +79,14 @@ test('offers the file of the folder and maps the episode with it', async ({ page
   await expect(panel).toBeVisible();
   expect(writes).toEqual([]);
   expect(await reason('tv:1:1x1')).toBe('file_unmapped');
-  const matches = table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('cell').last().getByRole('combobox');
-  await matches.fill('clip a');
-  await expect(page.getByRole('option', { name: /Clip B\.mkv/ })).toHaveCount(0);
-  await page.getByRole('option', { name: /Clip A\.mkv/ }).click();
-  await expect(panel.getByRole('button', { name: 'Preview changes', exact: true })).toHaveCount(0);
-  await expect(apply).toBeEnabled();
-  expect(writes).toEqual([]);
-  expect(await reason('tv:1:1x1')).toBe('file_unmapped');
-  const path = '/api/queue/entries/tv:1:1x1/match';
   await apply.click();
-  const [preview, applied] = await Promise.all([
-    page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === path && response.request().postDataJSON().preview === true),
-    page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === path && response.request().postDataJSON().preview !== true),
-    question.getByRole('button', { name: 'Yes', exact: true }).click(),
-  ]);
-  const body = { source: 'library', file: 'Show Name (2020)/Season 01/Clip A.mkv', covers: [{ season: 1, number: 1 }], ids: ['tv:1:1x1'] };
-  expect(preview.status()).toBe(200);
-  expect(preview.request().postDataJSON()).toMatchObject({ ...body, preview: true });
-  expect(applied.status()).toBe(200);
-  expect(applied.request().postDataJSON()).toMatchObject({ ...body, version: (await preview.json()).version });
+  await question.getByRole('button', { name: 'Yes', exact: true }).click();
   await expect(question).toBeHidden();
   await expect(panel).toBeHidden();
 
-  // The episode that the user matched is in the library, and the file keeps the path of its folder.
-  await expect.poll(() => reason('tv:1:1x1'), { timeout: 60_000 }).toBeUndefined();
-  const file = await stack.call('GET', '/library/tv:1/files');
-  expect(file.body.files.map((item: { path: string }) => item.path)).toContain('Show Name (2020)/Season 01/Clip A.mkv');
+  expect(writes).toEqual([]);
+  expect(await reason('tv:1:1x1')).toBe('file_unmapped');
+  expect((await stack.call('GET', '/library/tv:1/files')).body.files).toEqual([]);
   expect(await Promise.all(['tv:1:1x2', 'tv:1:1x3'].map(async (id) => (await stack.call('GET', `/queue/entries/${id}`)).body.entry))).toEqual(siblings);
   expect(stack.tracker.state.searches).toEqual([]);
   expect(stack.tracker.state.downloads).toEqual([]);
