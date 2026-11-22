@@ -621,12 +621,42 @@ test('reads the files of the torrent while the map dialog loads its mapping', as
       const url = new URL(request.url());
       return url.pathname.endsWith('/files') && url.searchParams.get('source') === 'download';
     });
+    const library = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/library/tv:3/files');
     await page.getByRole('main').getByRole('button', { name: 'Map episodes', exact: true }).click();
-    await files;
+    await Promise.all([files, library]);
   } finally {
     release();
   }
   await expect(page.getByRole('dialog').getByRole('table', { name: 'Map episodes', exact: true })).toBeVisible();
+});
+
+test('shows the map dialog only after every torrent and its match load', async ({ page }) => {
+  const first = blocked('tv:3', 2, 3, 'fetching', 'pack_partial');
+  const second = blocked('tv:3', 2, 4, 'fetching', 'pack_partial');
+  download(first, 'Two.Seasons.S02E03.1080p.WEB-DL-GRP', { 'Two.Seasons.S02E03.mkv': 'third' });
+  download(second, 'Two.Seasons.S02E04.1080p.WEB-DL-GRP', { 'Two.Seasons.S02E04.mkv': 'fourth' });
+  data.queuePaused = true;
+  await start([first, second]);
+
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const files = (url: URL) => url.pathname === `/api/queue/entries/${second.id}/files`;
+  let requested = false;
+  await page.route(files, async (route) => { requested = true; await held; await route.continue(); }, { times: 1 });
+  try {
+    await open(page, 'group:tv:3:2');
+    await page.getByRole('main').getByRole('button', { name: 'Map episodes', exact: true }).click();
+    const table = page.getByRole('dialog').getByRole('table', { name: 'Map episodes', exact: true });
+    await expect(table).toBeVisible();
+    await expect.poll(() => requested).toBe(true);
+    await expect(table.getByText('S02E03', { exact: true })).toHaveCount(0);
+    release();
+    const cells = table.getByRole('row').filter({ hasText: 'S02E04' }).getByRole('cell');
+    await expect(cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true })).toHaveValue('Two.Seasons.S02E04.1080p.WEB-DL-GRP');
+    await expect(cells.last().getByRole('combobox', { name: 'Matches' })).toHaveValue(/Two\.Seasons\.S02E04\.mkv/);
+  } finally {
+    release();
+  }
 });
 
 test('keeps the torrent and the file of a mapped episode editable without a queue entry', async ({ page }) => {

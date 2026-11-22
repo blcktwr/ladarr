@@ -81,7 +81,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   const episodes = group.data?.mapping ?? [];
   const library = useQuery<{ files: FileRow[] }>({
     queryKey: [`/library/${entry.titleKey}/files`],
-    enabled: mapSeries && episodes.some((point) => point.match?.path),
+    enabled: mapSeries,
     gcTime: 0,
   });
   const names = new Map(episodes.flatMap(({ match }) => match?.path ? [[match.path, match.file] as const] : []));
@@ -91,20 +91,27 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   const rows = episodes.filter((point) => point.season === season);
   const seasons = [...new Set(episodes.length ? episodes.map((point) => point.season) : season === null ? [] : [season])];
   const sources = new Map<string, string>();
+  const initial = new Set<string>();
   const essential = new Set<string>();
   const addSource = (item: QueueEntryView, draft?: Draft) => {
     const { key, path } = sourceOf(item, draft?.hash, fixed);
     if (path && !sources.has(key)) sources.set(key, path);
     return key;
   };
-  if (!series || fixedSource) essential.add(addSource(entry));
-  // The files of each torrent start with the skeleton, not after the mapping arrives.
-  else if (group.isPending) for (const item of entries.filter((item) => ids.includes(item.id))) addSource(item);
+  if (!series || fixedSource) {
+    const key = addSource(entry);
+    initial.add(key);
+    essential.add(key);
+  }
+  // The files of every torrent start with the skeleton, not after the mapping arrives.
+  else if (group.isPending) for (const item of entries) initial.add(addSource(item));
   else for (const point of rows) {
     const item = items.get(point.id);
     const edit = editable.has(point.id);
     if (item && !point.match?.path && (edit || item.hasTorrent || point.match || item.file)) {
-      const key = addSource(item, drafts[point.id]);
+      const draft = drafts[point.id];
+      const key = addSource(item, draft);
+      if (!draft?.hash) initial.add(key);
       if (edit) essential.add(key);
     }
   }
@@ -114,6 +121,9 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     })),
   });
   const keys = [...sources.keys()];
+  // A row shows its matches at once, so the table waits for each torrent of the dialog and for the library.
+  const loading = group.isPending || (mapSeries && (candidates.isPending || library.isPending))
+    || packs.some((pack, index) => initial.has(keys[index]!) && pack.isPending);
   const lists = new Map(keys.map((key, i) => {
     const files = packs[i]!.data?.files;
     return [key, { files, options: fileOptions(files ?? []) }];
@@ -250,7 +260,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
       {series ? (
         <Table
           aria-label={t('Map episodes')}
-          loading={group.isPending}
+          loading={loading}
           minWidth={mapSeries ? '52rem' : undefined}
           columns={[
             { label: t('Episodes'), width: '9rem' },
@@ -312,7 +322,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
                   <Button variant="ghost-danger" iconOnly
                     aria-label={t('Discard episode {episode}', { episode: pointText(point) })}
                     pending={discarding === point.id} disabled={busy || dropped} onClick={() => void discard(point)}>
-                    <Trash2 />
+                    {discarding === point.id ? null : <Trash2 />}
                   </Button>
                 </div>,
               ],
