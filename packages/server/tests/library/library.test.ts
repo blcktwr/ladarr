@@ -540,6 +540,32 @@ describe('library API', () => {
     expect((await app.get('/library/tv:1396')).body.title).toMatchObject({ availability: 'missing', counts: { eligible: 2, available: 0 } });
   });
 
+  it('discards an episode and its target from the series', async () => {
+    const title = app.db.data.titles['tv:1396']!;
+    const episode = title.episodes.find((one) => one.season === 1 && one.number === 2)!;
+    const before = { override: episode.override, fileId: episode.fileId };
+    const id = 'tv:1396:1x2';
+    app.db.data.files['discard-file'] = {
+      id: 'discard-file', titleKey: title.key, path: 'Breaking Bad/S01E02.mkv', sizeBytes: 1, mtimeMs: 1,
+      episodes: [{ season: 1, number: 2 }, { season: 1, number: 3 }], missing: true, addedAt: Date.now(),
+    } as never;
+    episode.fileId = 'discard-file';
+    app.db.data.queue[id] = entryOf({ id, titleKey: title.key, season: 1, number: 2 }) as never;
+    try {
+      expect((await app.del('/library/tv:1396/episodes/1/2')).status).toBe(200);
+      expect(episode).toMatchObject({ override: 'unmonitored', fileId: null });
+      expect(isMonitored(title, episode)).toBe(false);
+      expect(app.db.data.queue[id]).toBeUndefined();
+      expect(app.db.data.files['discard-file']!.episodes).toEqual([{ season: 1, number: 3 }]);
+    } finally {
+      delete app.db.data.queue[id];
+      delete app.db.data.files['discard-file'];
+      episode.override = before.override;
+      episode.fileId = before.fileId;
+    }
+    expect((await app.del('/library/tv:1396/episodes/1/99')).status).toBe(404);
+  });
+
   it('keeps the saved episodes when TMDB is down during a refresh', async () => {
     const before = structuredClone(app.db.data.titles['tv:1396']!);
     tmdbDown = true;

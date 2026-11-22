@@ -599,7 +599,7 @@ test('shows the file that matches each episode of a season that is not the stopp
   const shown = cell('S02E03');
   await expect(shown.getByRole('combobox')).toHaveValue(/Two\.Seasons\.S02E03\.mkv/);
   await expect(shown.getByRole('combobox')).toBeEnabled();
-  await expect(cell('S02E04')).toHaveText(/^[—–-]$/);
+  await expect(cell('S02E04').getByRole('combobox')).toHaveValue('');
 });
 
 test('reads the files of the torrent while the map dialog loads its mapping', async ({ page }) => {
@@ -659,6 +659,29 @@ test('keeps the torrent and the file of a mapped episode editable without a queu
   await expect(torrent).toHaveValue(name);
   await expect(torrent).toBeEnabled();
   await expect(cells.last().getByRole('combobox', { name: 'Matches' })).toHaveValue(/Two\.Seasons\.S02E03\.mkv/);
+});
+
+test('discards an episode from its row and leaves it unassigned', async ({ page }) => {
+  const title = data.titles['tv:3']!;
+  title.folder = 'Two Seasons (2021)';
+  const first = blocked('tv:3', 2, 3, 'fetching', 'pack_partial');
+  const second = blocked('tv:3', 2, 4, 'fetching', 'pack_partial');
+  download(first, 'Two.Seasons.S02.1080p.WEB-DL-GRP', { 'Two.Seasons.S02E03.mkv': 'third', 'Two.Seasons.S02E04.mkv': 'fourth' });
+  Object.assign(second, { transferHash: first.transferHash, clientId: first.clientId, release: structuredClone(first.release) });
+  data.queuePaused = true;
+  await start([first, second]);
+
+  await open(page, 'group:tv:3:2');
+  await page.getByRole('main').getByRole('button', { name: 'Map episodes', exact: true }).click();
+  const table = page.getByRole('dialog').getByRole('table', { name: 'Map episodes', exact: true });
+  const cells = table.getByRole('row').filter({ hasText: 'S02E04' }).getByRole('cell');
+  await cells.last().getByRole('button', { name: 'Discard episode S02E04', exact: true }).click();
+  await expect(cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true })).toHaveValue('');
+  await expect(cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true })).toHaveAttribute('placeholder', 'No torrent selected');
+  await expect(cells.last().getByRole('combobox')).toHaveValue('');
+  await expect.poll(async () => (await stack.call('GET', '/queue/entries/tv:3:2x4')).status).toBe(404);
+  const episodes = (await stack.call('GET', '/library/tv:3/episodes?season=2')).body.episodes;
+  expect(episodes.find((episode: { number: number }) => episode.number === 4).override).toBe('unmonitored');
 });
 
 test('applies the file that the matcher gives to each episode of a stopped season', async ({ page }) => {
@@ -736,7 +759,7 @@ test('maps one blocked episode and preserves the library file coverage across se
   await expect(table.getByText('S02E03', { exact: true })).toHaveCount(0);
   await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
   const mapped = table.getByRole('row').filter({ hasText: 'S01E02' });
-  await expect(mapped.getByRole('cell').nth(1)).toHaveText(/^[—–-]?$/);
+  await expect(mapped.getByRole('cell').nth(1).getByRole('combobox', { name: 'Torrent', exact: true })).toHaveValue('');
   await expect(mapped.getByRole('combobox', { name: 'Matches' })).toHaveValue(/Segments\.mkv/);
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);

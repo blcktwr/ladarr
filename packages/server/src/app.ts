@@ -122,6 +122,7 @@ import { libraryRescan } from './routes/library/[key]/rescan/post.ts';
 import { libraryEpisodes } from './routes/library/[key]/episodes/get.ts';
 import { librarySeasonUpdate } from './routes/library/[key]/seasons/[season]/patch.ts';
 import { libraryEpisodeUpdate } from './routes/library/[key]/episodes/[season]/[number]/patch.ts';
+import { libraryEpisodeDiscard } from './routes/library/[key]/episodes/[season]/[number]/delete.ts';
 import { libraryToolsRouter } from './library/tools/tools.ts';
 
 import { log, traffic } from './core/log.ts';
@@ -205,6 +206,7 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   api.get('/library/:key/episodes', titleParam(), libraryEpisodes());
   api.patch('/library/:key/seasons/:season', titleParam(), librarySeasonUpdate({ events }));
   api.patch('/library/:key/episodes/:season/:number', titleParam(), libraryEpisodeUpdate({ events }));
+  api.delete('/library/:key/episodes/:season/:number', titleParam(), libraryEpisodeDiscard({ events, queue: services?.queue }));
   api.get('/settings', settingsGet());
   api.patch('/settings', settingsPatch());
   api.post('/settings/complete-setup', settingsCompleteSetup());
