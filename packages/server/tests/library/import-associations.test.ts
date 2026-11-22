@@ -161,7 +161,7 @@ describe('import association provenance', () => {
     const info = statSync(join(pipe!.folders.tv, file!.path));
     expect(file).toMatchObject({
       episodes: [ref(1, source === 'numbering' ? 21 : 1)],
-      download: { clientId: 'client-1', hash },
+      download: { clientId: 'client-1', hash, name: NAME, file: sourceName },
       association: {
         source,
         originalName: expect.stringContaining(sourceName),

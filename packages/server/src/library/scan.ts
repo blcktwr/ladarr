@@ -11,7 +11,7 @@ import { isSample, isVideoFile, releaseEpisodes } from './parse.ts';
 import { checkRoot } from './roots.ts';
 import { createClients } from './downloads/client-api.ts';
 import { torrentVideos } from './imports/importer.ts';
-import type { Clients, Db, FolderInventory, InventoryFile, MediaFile, QueueEntry, ScanFound, ScanResult, Title } from '../types.ts';
+import type { ClientHandle, Clients, Db, FolderInventory, InventoryFile, MediaFile, QueueEntry, ScanFound, ScanResult, Title, Torrent } from '../types.ts';
 
 export const scanJob = (key: string) => ({ type: 'library.scan', payload: { key }, dedupeKey: `scan:${key}` });
 
@@ -45,7 +45,7 @@ async function findVideos(folder: string, rootReal: string): Promise<ScanFound[]
           if (!target || !inside(rootReal, target)) continue;
         }
         const info = await stat(path).catch(() => undefined);
-        if (info?.isFile()) found.push({ path: relative(rootReal, path).split(sep).join('/'), sizeBytes: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino });
+        if (info?.isFile()) found.push({ path: relative(rootReal, path).split(sep).join('/'), sizeBytes: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino, nlink: info.nlink });
       }
     }
   }
@@ -77,6 +77,30 @@ export async function readTitleFolder(title: Title, { guessedFolder = false }: {
   const files = await findVideos(real!, rootReal);
   const ambiguous = new Set(inspectCoverage(files.map((file) => file.path), title, title.numbering).ambiguous);
   return { status: 'ok', rootReal, files: files.map((file) => ({ ...file, parsed: ambiguous.has(file.path) ? undefined : releaseEpisodes(file.path, title.episodes, title.numbering, null, title.meta.title) })) };
+}
+
+export async function linkedSources(clients: Clients, files: ScanFound[]) {
+  const identity = (f: Pick<ScanFound, 'dev' | 'ino' | 'sizeBytes' | 'mtimeMs'>) => `${f.dev}:${f.ino}:${f.sizeBytes}:${f.mtimeMs}`;
+  const linked = files.filter((file) => (file.nlink ?? 0) > 1);
+  const wanted = new Set(linked.map(identity));
+  const sizes = new Set(linked.map((file) => file.sizeBytes));
+  type Source = { handle: ClientHandle; torrent: Torrent; download: NonNullable<MediaFile['download']> & { file: string } };
+  const found = new Map<string, Source | null>();
+  if (wanted.size) for (const handle of clients.all()) {
+    for (const torrent of await clients.list(handle).catch(() => [])) {
+      if (!torrent.complete) continue;
+      for (const video of await torrentVideos(handle, torrent, sizes).catch(() => undefined) ?? []) {
+        const key = identity(video);
+        if (wanted.has(key)) found.set(key, found.has(key) ? null : {
+          handle, torrent, download: { clientId: handle.id, hash: torrent.hash, name: torrent.name, file: video.rel, external: !db.data.sentTorrents[torrent.hash] },
+        });
+      }
+    }
+  }
+  return new Map(linked.flatMap((file) => {
+    const source = found.get(identity(file));
+    return source ? [[file.path, source] as const] : [];
+  }));
 }
 
 async function legacyImports(title: Title, folder: FolderInventory, clients: Clients) {
@@ -178,6 +202,8 @@ export async function scanTitle(key: string, clients: Clients = scanClients): Pr
   if (folder.status === 'no_folder') return empty('no_folder');
   const legacyImportsResult = await legacyImports(title, folder, clients);
   const { recovered } = legacyImportsResult;
+  const known = new Set(Object.values(db.data.files).filter((file) => file.titleKey === key && file.download?.name && file.download.file).map((file) => file.path));
+  const sources = await linkedSources(clients, folder.files.filter((file) => !known.has(file.path)));
 
   // The user can remove the title while the scan reads the disk. A file record must not outlive its title.
   if (db.data.titles[key] !== title) return empty('no_folder');
@@ -223,6 +249,11 @@ export async function scanTitle(key: string, clients: Clients = scanClients): Pr
       numberingRevision: title.numbering?.revision ?? 0,
       identity: { sizeBytes: found.sizeBytes, mtimeMs: found.mtimeMs, dev: found.dev, ino: found.ino },
     };
+    const source = sources.get(found.path);
+    if (source && (episodes.length || title.mediaType === 'movie') && (!file.download || (file.download.hash === source.torrent.hash && file.download.clientId === source.handle.id))) {
+      file.download = { ...source.download, external: file.download?.external ?? source.download.external };
+      file.association!.originalName = source.download.file;
+    }
     return file;
   };
 

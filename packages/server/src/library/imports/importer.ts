@@ -83,19 +83,20 @@ export async function listVideos(base: string, { skipHidden = false }: { skipHid
 
 // The video files of a torrent, from the file list of the client. The folder of the content can be the folder of every
 // download, so the disk is not walked.
-export async function torrentVideos(handle: ClientHandle, torrent: Torrent): Promise<ImporterFound[] | undefined> {
+export async function torrentVideos(handle: ClientHandle, torrent: Torrent, sizes?: Set<number>) {
   const save = await realpath(torrent.savePath).catch(() => undefined);
   const content = await realpath(torrent.contentPath).catch(() => undefined);
   if (!save || !content || !inside(save, content)) return;
-  const found: ImporterFound[] = [];
+  const found: (ImporterFound & { dev: number; ino: number; mtimeMs: number })[] = [];
   for (const file of await handle.api.files(torrent.hash)) {
+    if (sizes && !sizes.has(file.sizeBytes)) continue;
     const abs = join(save, file.name);
     if (!inside(save, abs) || !inside(content, abs)) continue;
     const rel = abs === content ? basename(abs) : posix(relative(content, abs));
     if (!isVideoFile(rel) || isSample(rel)) continue;
     const info = await lstat(abs).catch(() => undefined);
     if (!info?.isFile()) continue;
-    found.push({ abs, rel, sizeBytes: info.size });
+    found.push({ abs, rel, sizeBytes: info.size, dev: info.dev, ino: info.ino, mtimeMs: info.mtimeMs });
   }
   return found;
 }
@@ -588,7 +589,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     }));
     if (!steps.length) return;
 
-    const journal: ImportJournal = { id: randomUUID(), hash, titleKey: title.key, steps, createdAt: now(), clientId: handle.id, downloadBase: base };
+    const journal: ImportJournal = { id: randomUUID(), hash, torrentName: clientTorrent.name, titleKey: title.key, steps, createdAt: now(), clientId: handle.id, downloadBase: base };
     for (const step of steps) step.expected = { entries: Object.fromEntries(step.entryIds.map((id) => [id, inputs.get(id)!])), library: libraryOf(title, step) };
     db.data.imports[journal.id] = journal;
     for (const step of steps) {
@@ -738,10 +739,10 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     const parsed = release ? parseRelease(release.title) : null;
     // The torrent that gave the file goes with it, so a removal can delete it later. A manual import has none.
     const source = entriesOf(step.entryIds).find((entry) => entry.clientId && entry.transferHash);
-    const download = source ? { clientId: source.clientId!, hash: source.transferHash!, external: source.release?.external === true } : null;
+    const download = !journal.sourceBase && journal.clientId ? { clientId: journal.clientId, hash: journal.hash, name: journal.torrentName ?? source?.release?.title, file: step.association?.originalName, external: source?.release?.external === true } : null;
     const inPlace = journal.sourceBase && step.source === step.dest && existing?.association && sameIdentity(existing.association.identity, info);
     Object.assign(file, { sizeBytes: info.size, mtimeMs: info.mtimeMs, episodes: step.episodes, missing: false, source: inPlace ? existing!.source ?? null : parsed?.source ?? null, resolution: inPlace ? existing!.resolution ?? null : parsed?.resolution ?? null, download: inPlace ? existing!.download ?? null : download });
-    file.association = step.association ? { ...step.association, identity: { sizeBytes: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino } } : undefined;
+    file.association = step.association ? { ...step.association, originalName: file.download?.file ?? step.association.originalName, identity: { sizeBytes: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino } } : undefined;
     db.data.files[file.id] = file;
 
     const covered = title.mediaType === 'movie' ? [] : step.episodes.map((c) => title.episodes.find((e) => e.season === c.season && e.number === c.number)).filter((e): e is Episode => Boolean(e));

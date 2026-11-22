@@ -196,7 +196,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     for (const row of rows) {
       const { id, season, number } = row;
       const { path: saved, draft } = rowSource(row);
-      if (!mapSeries || !saved) continue;
+      if (!mapSeries || !saved || !row.torrent) continue;
       const path = draft?.path ?? saved;
       if (editable.has(id)) confirmedIds.push(id);
       else if (path === saved) continue;
@@ -268,13 +268,14 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
             const fileValue = draft?.file !== undefined ? draft.file?.rel ?? '' : suggested?.rel ?? '';
             const selected = verified && !options.some((option) => option.value === own)
               ? [...options, { value: own, label: verified.name }] : options;
-            const selectFile = (value: string | null) => change(point.id, { ...draft, file: list?.files?.find((file) => file.rel === value) ?? null });
+             const selectFile = (value: string | null) => change(point.id, { ...draft, file: list?.files?.find((file) => file.rel === value) ?? null });
+             const alternatives = path && own ? libraryOptions?.filter((option) => option.hash === own) : undefined;
             const matches = mapSeries ? (
               <SearchableDropdown
                 key={`file:${source.key}`} label={t('Matches')} hideLabel width="full"
                 placeholder={t('Unassigned')} emptyText={t('No options.')}
                 value={path ? draft?.path ?? path : fileValue}
-                options={path ? libraryOptions?.filter((option) => option.hash === own) ?? [{ value: path, label: match!.file }] : list?.options ?? []}
+                options={path ? alternatives ?? [{ value: path, label: match!.file }] : list?.options ?? []}
                 onValueChange={path ? (next) => { if (next) change(point.id, { path: next }); } : selectFile}
               />
             ) : !canEdit ? readout(shown) : (

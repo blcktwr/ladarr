@@ -32,7 +32,7 @@ async function mappingOf(title: Title, clients: Clients, fixedSeason: number | n
   };
   if (fixedSeason === null) for (const { entry, file } of rows) {
     add(entry?.clientId, entry?.transferHash);
-    add(file?.download?.clientId, file?.download?.hash);
+    if (!file?.download?.name) add(file?.download?.clientId, file?.download?.hash);
   }
   const handles = new Map(clients.all().filter(({ id }) => hashes.has(id)).map((handle) => [handle.id, handle]));
   const inventory = new Map(await Promise.all([...handles.values()].map(async ({ id, api }) => {
@@ -59,14 +59,14 @@ async function mappingOf(title: Title, clients: Clients, fixedSeason: number | n
   const mapping = await Promise.all(rows.map(async ({ id, season, number, releaseSeason, entry, file }) => {
     const current = find(entry?.clientId, entry?.transferHash);
     const imported = entry?.importResult;
-    const origin = file?.download ? find(file.download.clientId, file.download.hash)
+    const origin = file?.download ? (fixedSeason === null && file.download.name ? file.download : find(file.download.clientId, file.download.hash))
       : file && current && entry?.clientId && imported?.ok && imported.path === file.path
         && (imported.method === 'copy' || (imported.method === 'hardlink' && await linked(entry.clientId, current, file.path))) ? current : undefined;
-    const saved = origin || fixedSeason !== null ? file : undefined;
     const manual = entry?.manualMatch?.covers.some((point) => point.season === season && point.number === number) ? entry.manualMatch.file : undefined;
     const torrent = origin ?? (file && entry?.state.kind === 'available' ? undefined : current);
-    const name = saved?.association?.originalName ?? (saved ? saved.path.split('/').pop() : (torrent || fixedSeason !== null ? manual : undefined));
-    return { id, season, number, releaseSeason, torrent: torrent ? { hash: torrent.hash, name: torrent.name } : null, match: name ? { file: name, path: saved?.path ?? null } : null };
+    const saved = !torrent || origin ? file : undefined;
+    const name = saved?.download?.file ?? saved?.association?.originalName ?? (saved ? saved.path.split('/').pop() : (torrent || fixedSeason !== null ? manual : undefined));
+    return { id, season, number, releaseSeason, torrent: torrent ? { hash: torrent.hash, name: torrent.name ?? torrent.hash } : null, match: name ? { file: name, path: saved?.path ?? null } : null };
   }));
   return mapping.sort((a, b) => a.season - b.season || a.number - b.number);
 }

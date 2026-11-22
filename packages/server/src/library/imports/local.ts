@@ -12,7 +12,7 @@ import { parseRelease, normalizeTitle } from '../grab/release.ts';
 import { normalizeNumbering, releasePoint } from '../numbering.ts';
 import { isSample, isVideoFile, releaseEpisodes } from '../parse.ts';
 import { inside } from '../roots.ts';
-import { readTitleFolder } from '../scan.ts';
+import { linkedSources, readTitleFolder } from '../scan.ts';
 import type { ClientHandle, Clients, InventoryFile, LocalResult, MediaFile, Queue, QueueEntry, Selection, Title, Torrent } from '../../types.ts';
 
 // A target that a local import can resolve: it is on its way to a file, and no download owns it.
@@ -27,53 +27,6 @@ const fileOf = (title: Title, entry: QueueEntry) => (title.mediaType === 'movie'
 
 const numberingOf = (title: Title, entry: QueueEntry) => normalizeNumbering(entry.numbering === undefined ? title.numbering : entry.numbering);
 const covers = (episodes: EpisodeRef[], entry: QueueEntry) => episodes.some((episode) => episode.season === entry.season && episode.number === entry.number);
-
-// Finds the torrent of the client that holds the files, by the identity of the data. An imported file is a hard link
-// of the file of its torrent, so the device and the inode of both are the same. Returns nothing when no torrent holds
-// one of the files.
-async function findTorrent({ clients }: { clients: Clients }, files: { path: string; abs: string }[]): Promise<{ handle: ClientHandle; torrent: Torrent; paths: Set<string>; names: Map<string, string> } | undefined> {
-  const wanted = new Map<string, string>();
-  for (const file of files) {
-    const info = await stat(file.abs).catch(() => undefined);
-    // A file with one link is not the data of another folder, so no torrent can hold it.
-    if (info?.isFile() && info.nlink > 1) wanted.set(`${info.dev}:${info.ino}`, file.path);
-  }
-  if (!wanted.size) return undefined;
-  for (const handle of clients.all()) {
-    let list: Torrent[];
-    try {
-      list = await clients.list(handle);
-    } catch {
-      continue;
-    }
-    for (const torrent of list) {
-      if (!torrent.complete) continue;
-      const save = await realpath(torrent.savePath).catch(() => undefined);
-      if (!save) continue;
-      let listed: { name: string }[];
-      try {
-        listed = await handle.api.files(torrent.hash);
-      } catch {
-        continue;
-      }
-      const paths = new Set<string>();
-      const names = new Map<string, string>();
-      for (const item of listed) {
-        if (!isVideoFile(item.name)) continue;
-        const abs = join(save, item.name);
-        if (!inside(save, abs)) continue;
-        const info = await stat(abs).catch(() => undefined);
-        if (!info?.isFile()) continue;
-        const path = wanted.get(`${info.dev}:${info.ino}`);
-        if (path) {
-          paths.add(path);
-          names.set(path, item.name);
-        }
-      }
-      if (paths.size) return { handle, torrent, paths, names };
-    }
-  }
-}
 
 // The names that a release of this title can use.
 const namesOf = (title: Title) => [title.meta.title, title.meta.originalTitle, ...title.meta.aliases].map((name) => normalizeTitle(name)).filter((name) => name.length >= 3);
@@ -213,6 +166,10 @@ export async function importLocal({ queue, clients }: { queue: Queue; clients: C
     return Boolean(expected && actual && expected.sizeBytes === actual.sizeBytes && expected.mtimeMs === actual.mtimeMs
       && (expected.dev === undefined || expected.dev === actual.dev) && (expected.ino === undefined || expected.ino === actual.ino));
   };
+  const sources = await linkedSources(clients, localOnly ? [] : folder.files.filter((file) => {
+    const actual = identities.get(file.path);
+    return actual?.dev === file.dev && actual?.ino === file.ino && actual?.mtimeMs === file.mtimeMs && actual?.sizeBytes === file.sizeBytes;
+  }));
   // A saved pointer is not proof of content. Only unchanged files with approved coverage can complete the import.
   for (const entry of entries) {
     if (!current(entry) || entry.manualMatch) continue;
@@ -224,6 +181,11 @@ export async function importLocal({ queue, clients }: { queue: Queue; clients: C
       continue;
     }
     if (phaseOfEntry(entry) !== 'importing') queue.enter(entry, 'importing', 'the file is in the library');
+    const source = sources.get(file.path);
+    if (!file.download && source) {
+      file.download = source.download;
+      file.association!.originalName = source.download.file;
+    }
     entry.importResult = { at: Date.now(), ok: true, method: null, path: file.path, validation: 'basic' };
     queue.endAttempt(entry, 'imported', 'the file is in the library');
     queue.complete(entry, 'file is in the library', file.path);
@@ -315,8 +277,6 @@ export async function importLocal({ queue, clients }: { queue: Queue; clients: C
     }
   }
 
-  // A file that a torrent of the client already holds keeps that torrent as the one of the target.
-  const torrent = !localOnly && folder.status === 'ok' ? await findTorrent({ clients }, picks.map(({ file }) => ({ path: file.path, abs: join(folder.rootReal!, file.path) }))) : undefined;
   const invalid = new Set<string>();
   for (const selection of picks) {
     const abs = join(folder.rootReal!, selection.file.path);
@@ -329,9 +289,9 @@ export async function importLocal({ queue, clients }: { queue: Queue; clients: C
       for (const entry of selection.entries) stop(entry, 'file_invalid');
       continue;
     }
-    const original = torrent?.names.get(selection.file.path);
-    if (title.mediaType === 'tv' && original && selection.source !== 'manual' && !selection.association) {
-      const coverage = inspectCoverage([original], title, numberingOf(title, selection.entries[0]!));
+    const origin = sources.get(selection.file.path);
+    if (title.mediaType === 'tv' && origin && selection.source !== 'manual' && !selection.association) {
+      const coverage = inspectCoverage([origin.download.file], title, numberingOf(title, selection.entries[0]!), parseRelease(origin.torrent.name).season);
       if (selection.entries.some((entry) => !covers(coverage.episodes, entry))) {
         invalid.add(selection.file.path);
         for (const entry of selection.entries) stop(entry, 'file_unmapped');
@@ -340,9 +300,11 @@ export async function importLocal({ queue, clients }: { queue: Queue; clients: C
   }
   // The user can remove the title while the folder and the client are read. A file record must not outlive its title.
   if (db.data.titles[titleKey] !== title) return { imported: [], blocked: [] };
-  const associated = new Set(torrent ? picks.filter(({ file }) => torrent.paths.has(file.path)).map(({ file }) => file.path) : []);
-  const associatedEntries = picks.filter(({ file }) => associated.has(file.path)).flatMap(({ entries }) => entries).length;
-  const external = torrent ? !addedByApp(torrent.torrent.hash) : false;
+  const counts = new Map<Torrent, number>();
+  for (const { file, entries } of picks) {
+    const origin = sources.get(file.path);
+    if (origin) counts.set(origin.torrent, (counts.get(origin.torrent) ?? 0) + entries.length);
+  }
   const now = Date.now();
 
   for (const selection of picks) {
@@ -351,10 +313,11 @@ export async function importLocal({ queue, clients }: { queue: Queue; clients: C
     if (!selected.length) continue;
     const existing = Object.values(db.data.files).find((file) => file.titleKey === title.key && file.path === selection.file.path);
     const file: MediaFile = existing ?? { id: randomUUID(), titleKey: title.key, path: selection.file.path, sizeBytes: 0, mtimeMs: 0, episodes: [], missing: false, addedAt: now };
+    const origin = sources.get(selection.file.path);
     Object.assign(file, {
       sizeBytes: selection.file.sizeBytes, mtimeMs: selection.file.mtimeMs, episodes: selection.episodes, missing: false,
       association: selection.association ?? {
-        source: selection.source, originalName: torrent?.names.get(selection.file.path) ?? selection.file.path,
+        source: selection.source, originalName: origin?.download.file ?? selection.file.path,
         numberingRevision: selection.numberingRevision, identity: identities.get(selection.file.path)!,
       },
     });
@@ -366,9 +329,11 @@ export async function importLocal({ queue, clients }: { queue: Queue; clients: C
         const episode = episodeOf(title, entry);
         if (episode) episode.fileId = file.id;
       }
-      if (associated.has(file.path) && torrent) {
-        recordTorrent(entry, { handle: torrent.handle, torrent: torrent.torrent, kind: associatedEntries > 1 ? 'pack' : 'single', external });
-        file.download = { clientId: torrent.handle.id, hash: torrent.torrent.hash, external };
+      if (origin) {
+        const external = !addedByApp(origin.torrent.hash);
+        recordTorrent(entry, { ...origin, kind: counts.get(origin.torrent)! > 1 ? 'pack' : 'single', external });
+        file.download = { ...origin.download, external };
+        file.association!.originalName = origin.download.file;
       }
       if (entry.attempts.at(-1)?.outcome !== 'running') queue.startAttempt(entry, 'imported from the title folder');
       if (phaseOfEntry(entry) !== 'importing') queue.enter(entry, 'importing', 'imported from the title folder');

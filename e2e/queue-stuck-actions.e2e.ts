@@ -724,7 +724,7 @@ test('shows verified torrent matches and ignores a torrent that never reached th
   await expect(torrent('S01E01')).toHaveValue(name);
   await expect(match('S01E01')).toHaveValue(/Show\.Name\.S01E01\.mkv/);
   await expect(torrent('S01E02')).toHaveValue('');
-  await expect(match('S01E02')).toHaveValue('');
+  await expect(match('S01E02')).toHaveValue(/Show\.Name\.S01E02\.mkv/);
   await torrent('S01E02').fill('Alternate');
   await page.getByRole('option', { name: /S01\.Alternate/ }).click();
   await expect(match('S01E02')).toHaveValue(/Show\.Name\.S01E02\.mkv/);
@@ -785,6 +785,42 @@ test('changes the torrent of a mapped episode without a queue entry', async ({ p
   await expect(table).toBeHidden();
   await expect.poll(async () => (await stack.call('GET', '/queue/groups/tv:3?mapping=true')).body.mapping
     .find((point: { id: string }) => point.id === 'tv:3:2x3')).toMatchObject({ torrent: { hash: alternate }, match: { file: 'Replacement.mkv' } });
+});
+
+test('recovers both source packs on scan and shows their file paths after a restart without the torrents', async ({ page }) => {
+  const title = data.titles['tv:3']!;
+  title.folder = 'Two Seasons (2021)';
+  const packs = [
+    { season: 1, number: 1, name: 'First pack', file: 'Disc A/First.mkv' },
+    { season: 2, number: 3, name: 'Second pack', file: 'Disc B/Third.mkv' },
+  ];
+  mkdirSync(join(stack.folders.tv, title.folder), { recursive: true });
+  for (const pack of packs) {
+    completeTorrent(pack.name, { [pack.file]: 'video' });
+    const path = `${title.folder}/Local ${pack.number}.mkv`;
+    const dest = join(stack.folders.tv, path);
+    linkSync(join(stack.folders.downloads, pack.name, pack.file), dest);
+    const { size, mtimeMs, dev, ino } = statSync(dest);
+    const point = title.episodes.find((one) => one.season === pack.season && one.number === pack.number)!;
+    point.fileId = path;
+    data.files[path] = { id: path, titleKey: title.key, path, sizeBytes: size, mtimeMs, missing: false, addedAt: Date.now(),
+      episodes: [{ season: point.season, number: point.number }],
+      association: { source: 'manual', originalName: path, numberingRevision: 0, identity: { sizeBytes: size, mtimeMs, dev, ino } } };
+  }
+  data.queuePaused = true;
+  await start([blocked(title.key, 1, 2, 'importing', 'file_not_found')]);
+  expect((await stack.call('POST', `/library/${title.key}/rescan`)).status).toBe(202);
+  await expect.poll(async () => (await stack.call('GET', `/queue/groups/${title.key}?mapping=true`)).body.mapping.filter((row: { torrent: unknown }) => row.torrent).length).toBe(2);
+  await stack.server.stop();
+  stack.qbit.torrents.clear();
+  await stack.server.start();
+  await open(page, `group:${title.key}:1`);
+  await page.getByRole('button', { name: 'Map episodes', exact: true }).click();
+  for (const [i, label] of ['S01E01', 'S02E03'].entries()) {
+    const row = page.getByRole('dialog').getByRole('row').filter({ hasText: label });
+    await expect(row.getByRole('combobox', { name: 'Torrent' })).toHaveValue(packs[i]!.name);
+    await expect(row.getByRole('combobox', { name: 'Matches' })).toHaveValue(packs[i]!.file);
+  }
 });
 
 test('applies the file that the matcher gives to each episode of a stopped season', async ({ page }) => {
@@ -864,7 +900,9 @@ test('maps one blocked episode and preserves the library file coverage across se
   await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
   const mapped = table.getByRole('row').filter({ hasText: 'S01E02' });
   await expect(mapped.getByRole('combobox', { name: 'Torrent', exact: true })).toHaveValue('');
-  await expect(mapped.getByRole('combobox', { name: 'Matches' })).toHaveValue('');
+  await expect(mapped.getByRole('combobox', { name: 'Matches' })).toHaveValue('Segments.mkv');
+  await expect(table.getByRole('row').filter({ hasText: 'S02E03' }).getByRole('combobox', { name: 'Matches' })).toHaveValue('Segments.mkv');
+  await expect(table.getByRole('row').filter({ hasText: 'S02E04' }).getByRole('combobox', { name: 'Matches' })).toHaveValue('');
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
   await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('cell').last().getByRole('combobox').click();

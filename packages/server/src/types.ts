@@ -80,8 +80,8 @@ export type MediaFile = {
   source?: ReleaseSource | null;
   // The resolution of the release that gave the file. Null when the release does not say.
   resolution?: number | null;
-  // The torrent that gave the file. Scanned files and manual imports have none. An external torrent belongs to the user.
-  download?: { clientId: string; hash: string; external: boolean } | null;
+  // The source torrent and the path inside it. An external torrent belongs to the user.
+  download?: { clientId: string; hash: string; external: boolean; name?: string; file?: string } | null;
   association?: {
     source: 'manual' | 'numbering' | 'automatic';
     originalName: string;
@@ -822,7 +822,7 @@ export type JournalStep = {
 // a manual import reads a folder that the user named, and a rename reads the root of the title (`kind: 'rename'`).
 // An import from a download folder is link only: it never copies. It asks for a search when its files are in, so the
 // episodes that it did not bring still get a release.
-export type ImportJournal = { id: string; hash: string; titleKey: string; steps: JournalStep[]; createdAt: number; kind?: 'rename'; sourceBase?: string; clientId?: string; downloadBase?: string; linkOnly?: true; searchOnFinish?: true; correction?: CorrectionCommit };
+export type ImportJournal = { id: string; hash: string; torrentName?: string; titleKey: string; steps: JournalStep[]; createdAt: number; kind?: 'rename'; sourceBase?: string; clientId?: string; downloadBase?: string; linkOnly?: true; searchOnFinish?: true; correction?: CorrectionCommit };
 export type Fs = { link: typeof fsLink; copyFile: typeof fsCopyFile; rename: typeof fsRename };
 export type ImporterDeps = {
   queue: Queue;
@@ -981,7 +981,7 @@ export type ScanResult = {
 // for a target all read the folder through it.
 export type InventoryFile = ScanFound & { parsed: ParsedEpisodes | undefined };
 export type FolderInventory = { status: 'ok' | 'no_folder' | 'root_unavailable' | 'folder_missing'; rootReal: string | null; files: InventoryFile[] };
-export type ScanFound = { path: string; sizeBytes: number; mtimeMs: number; dev?: number; ino?: number };
+export type ScanFound = { path: string; sizeBytes: number; mtimeMs: number; dev?: number; ino?: number; nlink?: number };
 export type AddInput = {
   mediaType: MediaType;
   tmdbId: number;
