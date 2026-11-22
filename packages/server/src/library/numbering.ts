@@ -15,6 +15,9 @@ const integer = (value: unknown): value is number => typeof value === 'number' &
 // A saved record from an older version has no numbering. It uses the numbering of the catalog.
 export const normalizeNumbering = (value: Numbering | null | undefined): Numbering => (value && Array.isArray(value.ranges) ? value : NO_NUMBERING);
 
+export const seasonRevision = (map: Numbering | undefined | null, season: number | null) =>
+  map?.ranges.some((range) => range.season !== range.releaseSeason && (range.season === season || range.releaseSeason === season)) ? map.revision : undefined;
+
 // The last release episode of a range. The length of the range fixes it, so a release that ends earlier or later does
 // not extend the mapping.
 export const releaseTo = (range: NumberingRange) => range.releaseFrom + range.to - range.from;

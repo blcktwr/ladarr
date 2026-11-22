@@ -4,7 +4,8 @@ import { db, profilesInOrder } from '../core/db.ts';
 import { clock, summarize } from '../library/tools/api.ts';
 import { seriesCounts } from '../library/library.ts';
 import { qualityOfFile } from '../library/grab/upgrades.ts';
-import type { Db, Events, Title } from '../types.ts';
+import type { Db, Episode, Events, Title } from '../types.ts';
+import { normalizeNumbering, releasePoint, seasonRevision } from '../library/numbering.ts';
 import type { Override } from '@ladarr/shared/enums';
 
 const KEY = /^(movie|tv):[1-9]\d*$/;
@@ -61,15 +62,33 @@ function resolutionsOf(title: Title): number[] {
   return [...resolutions].sort((a, b) => b - a);
 }
 
+export function seasonGroups(title: Title) {
+  const numbering = normalizeNumbering(title.numbering);
+  const groups = new Map<number, { episode: Episode; number: number }[]>();
+  for (const episode of title.episodes) {
+    const { season, number } = releasePoint(numbering, episode) ?? episode;
+    const rows = groups.get(season) ?? [];
+    rows.push({ episode, number });
+    groups.set(season, rows);
+  }
+  return groups;
+}
+
 export function detail(title: Title): TitleDetail {
   const at = clock();
   const { meta } = title;
-  const seasons: SeasonRow[] = meta.seasons.map((season) => ({
-    seasonNumber: season.seasonNumber,
-    episodeCount: season.episodeCount,
-    counts: seriesCounts(title, at, (episode) => episode.season === season.seasonNumber),
-    override: title.seasonOverrides[season.seasonNumber] ?? null,
-  }));
+  const groups = seasonGroups(title);
+  const catalog = new Map(meta.seasons.map((season) => [season.seasonNumber, season.episodeCount]));
+  const seasons: SeasonRow[] = [...new Set([...catalog.keys(), ...groups.keys()])].sort((a, b) => a - b).map((seasonNumber) => {
+    const episodes = (groups.get(seasonNumber) ?? []).map((row) => row.episode);
+    const numberingRevision = seasonRevision(title.numbering, seasonNumber);
+    return {
+      seasonNumber, numberingRevision,
+      episodeCount: numberingRevision === undefined ? catalog.get(seasonNumber) ?? episodes.length : episodes.length,
+      counts: seriesCounts({ ...title, episodes }, at),
+      override: numberingRevision === undefined ? title.seasonOverrides[seasonNumber] ?? null : null,
+    };
+  });
   return {
     ...summarize(title),
     overview: meta.overview,

@@ -1,6 +1,8 @@
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { libraryScanHandler } from '../../src/jobs/library-scan.ts';
+import { queueSweepHandler } from '../../src/jobs/queue-sweep.ts';
 import { createClients } from '../../src/library/downloads/client-api.ts';
 import { reasonOfEntry } from '../../src/library/downloads/queue.ts';
 import { createImporter } from '../../src/library/imports/importer.ts';
@@ -155,6 +157,59 @@ describe('stale import workers', () => {
     expect(entry).toEqual(approved);
     expect(entry.completedAt).toBeNull();
     expect(entry.importResult).toBeNull();
+  });
+});
+
+describe('pending episodes with library files', () => {
+  it('completes a pending episode outside the journal targets only after the shared file passes the final check', async () => {
+    const item = title({ rootId: 'tv', episodes: [episode(1, 13), episode(1, 14)] });
+    const crash = new Error('stop after commit');
+    const { importer, deps, hash, target } = await setup(item, { 'shared.mkv': 'both episodes' }, {
+      afterStep: (state) => { if (state === 'committed') throw crash; },
+    });
+    const selected = target(1, 13);
+    selected.manualMatch = { file: 'shared.mkv', covers: [ref(1, 13), ref(1, 14)] };
+    const sibling = pipe!.queue.ensure(item.key, 1, 14);
+    pipe!.queue.request(sibling, 'missing episode');
+
+    await expect(importer.run(hash)).rejects.toThrow(crash);
+    expect(Object.values(pipe!.db.data.imports)[0]!.steps[0]!.entryIds).toEqual([selected.id]);
+    await libraryScanHandler(pipe!).run({ payload: { key: item.key } } as never, { signal: new AbortController().signal });
+    expect(selected.state.kind).toBe('importing');
+    expect(sibling.state.kind).toBe('queued');
+
+    await createImporter({ ...deps, afterStep: undefined }).run(hash);
+
+    expect(sibling.state.kind).toBe('available');
+    expect(sibling.attempts.at(-1)?.outcome).toBe('imported');
+    expect(sibling.importResult?.path).toBe(selected.importResult?.path);
+    expect(item.episodes[1]!.fileId).toBe(item.episodes[0]!.fileId);
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+  });
+
+  it('repairs a saved pending episode before retrying lost searches and rejects changed files', async () => {
+    const item = title({ rootId: 'tv', episodes: [episode(1, 1), episode(1, 2)] });
+    const { importer, hash, target } = await setup(item, { 'Show.S01E01.mkv': 'one', 'Show.S01E02.mkv': 'two' });
+    const stale = target(1, 1);
+    const changed = target(1, 2);
+    await importer.run(hash);
+    for (const entry of [stale, changed]) {
+      pipe!.queue.request(entry, 'missing episode');
+      expect(entry.state.kind).toBe('queued');
+    }
+    const file = pipe!.db.data.files[item.episodes[1]!.fileId!]!;
+    writeFileSync(join(pipe!.folders.tv, file.path), 'replacement data');
+    const sweep = () => queueSweepHandler(pipe!.finder, pipe!.queue).run({} as never, { signal: new AbortController().signal });
+    await sweep();
+
+    expect(stale.state.kind).toBe('available');
+    expect(stale.attempts.at(-1)?.outcome).toBe('imported');
+    expect(changed.state.kind).toBe('queued');
+    const searches = Object.values(pipe!.db.data.jobs).filter((job) => job.type === 'queue.search');
+    expect(searches.map((job) => job.payload)).toEqual([expect.objectContaining({ entryIds: [changed.id] })]);
+    const before = structuredClone(stale);
+    await sweep();
+    expect(stale).toEqual(before);
   });
 });
 

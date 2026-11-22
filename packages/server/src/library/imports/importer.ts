@@ -15,7 +15,8 @@ import { parseRelease } from '../grab/release.ts';
 import { probeFile } from '../probe.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
 import { entryId, isActive, phaseOfEntry } from '../downloads/queue.ts';
-import { checkRoot } from '../roots.ts';
+import { checkRoot, sameIdentity } from '../roots.ts';
+import { pendingFile } from './reconcile.ts';
 import { MAX_IMPORT_ATTEMPTS } from './limits.ts';
 import type { ClientHandle, Episode, Fs, ImporterDeps, ImporterFound, ImportJournal, JournalStep, MediaFile, ProbeResult, QueueEntry, Title, Torrent } from '../../types.ts';
 
@@ -102,8 +103,6 @@ export async function torrentVideos(handle: ClientHandle, torrent: Torrent): Pro
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const checkKey = (hash: string, titleKey: string) => `${hash}:${titleKey}`;
 class StaleImport extends Error {}
-const sameIdentity = (expected: NonNullable<JournalStep['sourceIdentity']>, actual: { size: number; mtimeMs: number; dev: number; ino: number }) =>
-  expected.sizeBytes === actual.size && expected.mtimeMs === actual.mtimeMs && (expected.dev === undefined || expected.dev === actual.dev) && (expected.ino === undefined || expected.ino === actual.ino);
 
 const numberingOf = (entry: QueueEntry) => entry.numbering === undefined ? db.data.titles[entry.titleKey]?.numbering ?? null : entry.numbering;
 const assignmentsOf = (entry: QueueEntry) => {
@@ -838,9 +837,11 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
   function finishDownload(journal: ImportJournal) {
     const done = new Set<string>();
     for (const step of journal.steps) {
-      for (const entry of entriesOf(step.entryIds)) {
-        current(journal, step);
-        if (entry.state.kind !== 'importing') continue;
+      current(journal, step);
+      const selected = entriesOf(step.entryIds).filter((entry) => entry.state.kind === 'importing');
+      const covered = entriesOf(step.episodes.map((one) => entryId(journal.titleKey, one.season, one.number)))
+        .filter((entry) => pendingFile(entry)?.path === step.dest);
+      for (const entry of [...selected, ...covered]) {
         if (done.has(entry.id)) continue;
         done.add(entry.id);
         entry.importResult = { at: now(), ok: true, method: step.method, path: step.dest, validation: step.validation };

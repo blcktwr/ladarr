@@ -123,6 +123,7 @@ describe('the numbering of a title', () => {
   it('saves and reads the ranges, and refuses a stale revision', async () => {
     pipe = await startPipeline();
     const item = title({ rootId: 'tv', episodes: range(1, 23).map((number) => episode(1, number)), numbering: numbering([], 0) });
+    item.meta.seasons = [{ seasonNumber: 1, episodeCount: 23, airDate: '2020-01-01' }];
     pipe.db.data.titles[item.key] = item;
     api = await pipe.api();
 
@@ -131,6 +132,14 @@ describe('the numbering of a title', () => {
 
     const read = await api.get(`/library/${item.key}`);
     expect((read.body as { title: { numbering: Numbering } }).title.numbering).toEqual({ revision: 1, ranges: [RANGE] });
+    expect(read.body.title.seasons).toMatchObject([
+      { seasonNumber: 1, episodeCount: 12, counts: { total: 12 } },
+      { seasonNumber: 2, episodeCount: 11, counts: { total: 11 } },
+    ]);
+    const first = await api.get(`/library/${item.key}/episodes?season=1`);
+    const second = await api.get(`/library/${item.key}/episodes?season=2`);
+    expect(first.body.episodes.map((ep: { number: number }) => ep.number)).toEqual(range(1, 12));
+    expect(second.body.episodes).toMatchObject(range(1, 11).map((number) => ({ season: 2, number, name: `Episode ${number + 12}` })));
 
     // The stale request came from the version before the save.
     const stale = await api.patch(`/library/${item.key}`, { numbering: { revision: 0, ranges: [] } });
@@ -149,6 +158,23 @@ describe('the numbering of a title', () => {
 
     expect(next.titles[item.key]!.numbering).toEqual({ revision: 0, ranges: [] });
     expect(next.titles[item.key]!.numbering!.ranges).toEqual([]);
+  });
+
+  it('adds and searches only the episodes of the selected release season', async () => {
+    pipe = await startPipeline();
+    await pipe.worker.pause();
+    const item = title({ rootId: 'tv', episodes: range(1, 23).map((n) => episode(1, n)), numbering: numbering(), seasonOverrides: { 1: 'unmonitored' } });
+    pipe.db.data.titles[item.key] = item;
+    api = await pipe.api();
+    const target = { titleKey: item.key, season: 2, numberingRevision: 1 };
+    const path = `/library/${item.key}/seasons/2`;
+    expect((await api.patch(path, { override: 'monitored', numberingRevision: 0 })).status).toBe(409);
+    expect((await api.post('/queue/search', { ...target, numberingRevision: 0 })).status).toBe(409);
+    expect((await api.patch(path, { override: 'monitored', numberingRevision: 1 })).status).toBe(200);
+    expect(item.episodes.filter((ep) => ep.override === 'monitored').map((ep) => ep.number)).toEqual(range(13, 23));
+    const result = await api.post('/queue/search', target);
+    expect(result.status).toBe(202);
+    expect(result.body.started).toEqual(range(13, 23).map((n) => `${item.key}:1x${n}`));
   });
 });
 

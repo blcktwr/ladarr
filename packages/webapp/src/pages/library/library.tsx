@@ -23,7 +23,7 @@ import { FileInfoDialog } from './library-files.tsx';
 import { UntitledFolders } from './library-folders.tsx';
 import { AttachFolderDialog } from './title-files.tsx';
 
-type Target = { titleKey: string; season?: number; number?: number };
+type Target = { titleKey: string; season?: number; number?: number; numberingRevision?: number };
 
 const PAGE_SIZE = 48;
 // The title page keeps the margins of the app. The thumbnails lie on the page with no pane.
@@ -248,14 +248,11 @@ const seasonName = (seasonNumber: number) => (seasonNumber === 0 ? t('Specials')
 const seasonOrder = <T extends { seasonNumber: number }>(seasons: T[]) =>
   [...seasons].sort((a, b) => (a.seasonNumber === 0 ? Infinity : a.seasonNumber) - (b.seasonNumber === 0 ? Infinity : b.seasonNumber));
 
-// The status of an episode comes from its target in the queue. An episode that the queue never had is Available
-// when it has a file, and Searching until a release is found otherwise. An episode without monitoring shows N/A,
-// because nothing searches for it.
 function EpisodeStatus({ episode }: { episode: EpisodeItem }) {
-  if (episode.queue) {
+  if (episode.hasFile) return <StatusText small status={statusLabel('available')} icon="available" />;
+  if (episode.queue && episode.queue !== 'available') {
     return <StatusText small status={statusLabel(episode.queue)} icon={episode.queue} />;
   }
-  if (episode.hasFile) return <StatusText small status={statusLabel('available')} icon="available" />;
   if (episode.monitored === false) return <Text variant="small">{t('N/A')}</Text>;
   return <StatusText small status={statusLabel('searching')} icon="searching" />;
 }
@@ -336,7 +333,7 @@ const seasonSelected = (season: SeasonRow) => season.counts.eligible + season.co
 // Each season is a container that opens and closes. All of them start closed. The button on a container opens the
 // table of its episodes. A season that is not selected has a + that selects it, and a selected season has a trash that
 // removes it.
-function Seasons({ title, onAddSeason, onRemoveSeason }: { title: TitleDetail; onAddSeason: (season: number) => void; onRemoveSeason: (season: number) => void }) {
+function Seasons({ title, onAddSeason, onRemoveSeason }: { title: TitleDetail; onAddSeason: (season: SeasonRow) => void; onRemoveSeason: (season: SeasonRow) => void }) {
   const [open, setOpen] = useState<Set<number> | null>(null);
   if (title.episodesLoadedAt === null) {
     return (
@@ -371,11 +368,11 @@ function Seasons({ title, onAddSeason, onRemoveSeason }: { title: TitleDetail; o
         onToggle={() => toggle(season.seasonNumber)}
         add={
           seasonSelected(season) ? (
-            <Button iconOnly variant="danger" aria-label={t('Delete {season}', { season: seasonName(season.seasonNumber) })} onClick={() => onRemoveSeason(season.seasonNumber)}>
+            <Button iconOnly variant="danger" aria-label={t('Delete {season}', { season: seasonName(season.seasonNumber) })} onClick={() => onRemoveSeason(season)}>
               <Trash2 />
             </Button>
           ) : (
-            <Button iconOnly variant="ghost" aria-label={t('Add {season}', { season: seasonName(season.seasonNumber) })} onClick={() => onAddSeason(season.seasonNumber)}>
+            <Button iconOnly variant="ghost" aria-label={t('Add {season}', { season: seasonName(season.seasonNumber) })} onClick={() => onAddSeason(season)}>
               <Plus />
             </Button>
           )
@@ -650,9 +647,9 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
 
   // A season that is not selected is added from the page of the series. Its override makes it monitored, and its
   // search starts at once, like the search of a season in the queue.
-  async function addSeason(titleKey: string, season: number) {
-    await api(`/library/${titleKey}/seasons/${season}`, { method: 'PATCH', body: { override: 'monitored' } });
-    return search({ titleKey, season });
+  async function addSeason(titleKey: string, { seasonNumber: season, numberingRevision }: SeasonRow) {
+    await api(`/library/${titleKey}/seasons/${season}`, { method: 'PATCH', body: { override: 'monitored', numberingRevision } });
+    return search({ titleKey, season, numberingRevision });
   }
 
   const series = header.mediaType === 'tv';
@@ -727,7 +724,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
                 {title.numbering.ranges.map((range) => <Badge key={`${range.season}:${range.from}`}>{numberingRangeText(range)}</Badge>)}
               </div>
             )}
-            {title && !addLoading ? <Seasons title={title} onAddSeason={(season) => void run(() => addSeason(title.key, season))} onRemoveSeason={(season) => setPlan({ request: { action: 'remove', keys: [title.key], season }, subject: seasonName(season) })} /> : <PreviewSeasons tmdbId={header.tmdbId} onAddSeason={startAdd} pending={addLoading && pendingAdd?.kind === 'series' ? pendingAdd : null} />}
+            {title && !addLoading ? <Seasons title={title} onAddSeason={(season) => void run(() => addSeason(title.key, season))} onRemoveSeason={({ seasonNumber: season, numberingRevision }) => setPlan({ request: { action: 'remove', keys: [title.key], season, numberingRevision }, subject: seasonName(season) })} /> : <PreviewSeasons tmdbId={header.tmdbId} onAddSeason={startAdd} pending={addLoading && pendingAdd?.kind === 'series' ? pendingAdd : null} />}
           </div>
         </>
       )}

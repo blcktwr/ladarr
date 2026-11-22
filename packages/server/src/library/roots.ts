@@ -5,7 +5,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { RootProblem } from '@ladarr/shared/enums';
 import type { RootCheck } from '@ladarr/shared/types';
 import { db } from '../core/db.ts';
-import type { Db, Refusal, Root } from '../types.ts';
+import type { Db, MediaFile, Refusal, Root } from '../types.ts';
 
 // shortcut: one fixed limit for every root. Make it a setting if people ask.
 const LOW_SPACE_BYTES = 5 * 1024 ** 3;
@@ -36,6 +36,9 @@ export const inside = (parent: string, child: string) => {
   const path = relative(parent, child);
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path));
 };
+
+export const sameIdentity = (expected: NonNullable<MediaFile['association']>['identity'], actual: { size: number; mtimeMs: number; dev: number; ino: number }) =>
+  expected.sizeBytes === actual.size && expected.mtimeMs === actual.mtimeMs && (expected.dev === undefined || expected.dev === actual.dev) && (expected.ino === undefined || expected.ino === actual.ino);
 
 // Decides if a folder can become a root. Returns the resolved path, or the reason it cannot.
 // A saved root leaves itself out of the overlap check when its path changes.

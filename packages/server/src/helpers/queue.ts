@@ -4,7 +4,7 @@ import { REJECTION_TEXT } from '../library/grab/decide.ts';
 import { aggregate, describe, needsOtherSeasons, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
 import { createHash } from 'node:crypto';
 import type { QueueGroupRow, QueuePage, QueueResolution, QueueRow } from '@ladarr/shared/types';
-import { normalizeNumbering, releasePoint } from '../library/numbering.ts';
+import { normalizeNumbering, releasePoint, seasonRevision } from '../library/numbering.ts';
 import { db } from '../core/db.ts';
 import { seasonOf } from '../core/jobs.ts';
 import { reasonInfo } from '../core/reasons.ts';
@@ -553,8 +553,7 @@ function groupRow(group: RowGroup): QueueGroupRow {
     year: group.title.meta.year,
     posterPath: group.title.meta.posterPath,
     season: group.season,
-    ...(group.title.numbering?.ranges.some((range) => range.season !== range.releaseSeason && (range.season === group.season || range.releaseSeason === group.season))
-      ? { numberingRevision: group.title.numbering.revision } : {}),
+    numberingRevision: seasonRevision(group.title.numbering, group.season),
     status: summary.status,
     total: summary.total,
     reached: reachedOf(group.entries),

@@ -371,6 +371,7 @@ test('maps selected episodes from a completed torrent with different season numb
   const hash = completeTorrent(longName, secondFiles, '');
   const missing = title.episodes.slice(5).map(({ number }) => blocked(title.key, 1, number, 'fetching', 'pack_partial'));
   const unselected = missing.at(-1)!;
+  available[0]!.state = { kind: 'queued' };
   title.meta.seasons.push({ seasonNumber: 0, episodeCount: 1, airDate: null });
   title.episodes.push(
     { ...title.episodes[0]!, tmdbId: 100, season: 0, fileId: null },
@@ -379,6 +380,7 @@ test('maps selected episodes from a completed torrent with different season numb
   data.queuePaused = true;
   await start([...available, ...missing]);
   const before = await Promise.all(available.map((item) => entry(item.id)));
+  expect(before[0].status).toBe('queued');
   const unselectedBefore = await entry(unselected.id);
   const filesPath = `/library/${title.key}/files`;
   const filesBefore = (await stack.call('GET', filesPath)).body.files as Data['files'][string][];
@@ -476,7 +478,8 @@ test('maps selected episodes from a completed torrent with different season numb
   for (const target of selected) {
     await expect.poll(async () => (await entry(target.id)).status, { timeout: 60_000 }).toBe('available');
   }
-  expect(await Promise.all(available.map((item) => entry(item.id)))).toEqual(before);
+  await expect.poll(async () => (await entry(available[0]!.id)).status).toBe('available');
+  expect(await Promise.all(available.slice(1).map((item) => entry(item.id)))).toEqual(before.slice(1));
   expect(await entry(unselected.id)).toEqual(unselectedBefore);
   const imported = (await stack.call('GET', filesPath)).body.files as Data['files'][string][];
   expect(imported).toHaveLength(9);
@@ -492,6 +495,17 @@ test('maps selected episodes from a completed torrent with different season numb
   await page.goto(`${URL_BASE}/catalog/tv/1`);
   await expect(page.getByText('Manual mapping', { exact: true })).toBeVisible();
   await expect(page.getByText('S01E06–S01E09 → S02E01–S02E04', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Show episodes of Season 1', exact: true }).click();
+  const firstTable = page.getByRole('region', { name: 'Season 1', exact: true }).getByRole('table', { name: 'Episodes' });
+  const importedFirst = firstTable.locator('[data-row="1x1"]');
+  await expect(importedFirst.getByRole('cell', { name: 'Episode 1', exact: true })).toBeVisible();
+  await expect(importedFirst.getByText('Available', { exact: true })).toBeVisible();
+  await expect(firstTable.getByRole('cell', { name: 'Episode 6', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show episodes of Season 2', exact: true }).click();
+  const secondTable = page.getByRole('region', { name: 'Season 2', exact: true }).getByRole('table', { name: 'Episodes' });
+  await expect(secondTable.getByRole('row')).toHaveCount(5);
+  await expect(secondTable.getByRole('row').filter({ hasText: 'Episode 6' }).getByRole('cell', { name: '1', exact: true })).toBeVisible();
+  await expect(secondTable.getByText('Available', { exact: true })).toHaveCount(4);
   expect(stack.tracker.state.downloads).toEqual([]);
   expect(stack.qbit.calls.filter((call) => call.path === 'torrents/add')).toEqual([]);
 });

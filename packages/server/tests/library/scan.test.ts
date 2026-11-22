@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { open } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
+import { createQueue } from '../../src/library/downloads/queue.ts';
 import { availability, seriesCounts } from '../../src/library/library.ts';
 import { applyCorrection, correctionOf } from '../../src/library/mapping.ts';
 import { scanTitle } from '../../src/library/scan.ts';
@@ -416,9 +417,35 @@ describe('scan job and API', () => {
   it('runs from the job handler', async () => {
     write(join(movies, 'Film', 'a.mkv'));
     db.data.titles['movie:1'] = title('movie:1', 'movie', 'Film');
-    const handler = libraryScanHandler({ events: createEvents() });
+    const events = createEvents();
+    const handler = libraryScanHandler({ events, queue: createQueue(events, () => {}) });
     await handler.run({ payload: { key: 'movie:1' } } as never, { signal: new AbortController().signal });
     expect(db.data.titles['movie:1']!.fileId).toBeTruthy();
+  });
+
+  it('completes only the pending catalog episodes that a file covers', async () => {
+    const episodes = Array.from({ length: 8 }, (_, index) => episode(1, index + 13));
+    const show = db.data.titles['tv:1'] = title('tv:1', 'tv', 'Show', episodes);
+    show.numbering = { revision: 1, ranges: [{ season: 1, from: 13, to: 20, releaseSeason: 2, releaseFrom: 1 }] };
+    for (let n = 1; n <= 7; n++) write(join(tv, 'Show', `Show.S02E0${n}.mkv`));
+    const events = createEvents();
+    const queue = createQueue(events, () => {});
+    const entries = episodes.map((one) => queue.ensure(show.key, one.season, one.number));
+    queue.request(entries[1]!, 'missing episode');
+    queue.wait(entries[1]!, 'no_results', 'search ended');
+    queue.block(entries[2]!, { code: 'file_unmapped' }, 'import blocked');
+    queue.pause(entries[3]!, 'user paused');
+    queue.cancel(entries[4]!, 'user cancelled');
+    entries[5]!.replaceDestination = true;
+    queue.request(entries[6]!, 'upgrade search');
+    const before = structuredClone(entries.slice(2));
+
+    await libraryScanHandler({ events, queue }).run({ payload: { key: show.key } } as never, { signal: new AbortController().signal });
+
+    expect(entries.slice(0, 2).map((entry) => entry.state.kind)).toEqual(['available', 'available']);
+    expect(entries[1]!.attempts.at(-1)?.outcome).toBe('imported');
+    expect(entries.slice(2)).toEqual(before);
+    expect(queue.get(`${show.key}:2x1`)).toBeUndefined();
   });
 
   it('queues a rescan, and refuses a title without a folder', async () => {

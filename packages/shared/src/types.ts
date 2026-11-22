@@ -118,7 +118,7 @@ export type TitleSummary = {
   eligibleAt: number | null;
 };
 
-export type SeasonRow = { seasonNumber: number; episodeCount: number; counts: EpisodeCounts; override: Override | null };
+export type SeasonRow = { seasonNumber: number; episodeCount: number; counts: EpisodeCounts; override: Override | null; numberingRevision?: number };
 
 export type TitleDetail = TitleSummary & {
   overview: string;
