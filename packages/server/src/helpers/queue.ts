@@ -437,6 +437,7 @@ export const bySeasonNumber = (a: QueueEntry, b: QueueEntry) => {
 // rows of its tab always agree.
 function groupsOf(f: Filters, poller?: Poller): RowGroup[] {
   const groups = new Map<string, RowGroup>();
+  const entryFilters = { ...f, key: undefined };
   for (const entry of Object.values(db.data.queue)) {
     if (!shown(entry) || (!f.cleared && entry.clearedAt)) continue;
     const title = titleOf(entry)!;
@@ -461,7 +462,7 @@ function groupsOf(f: Filters, poller?: Poller): RowGroup[] {
     group.entries.push(entry);
     // A target that found no release waits for a new release, so its row goes after the rows that still have work.
     if (statusOf(entry) === 'not_found') group.notFound = true;
-    if (matches(entry, f)) group.matching++;
+    if (matches(entry, entryFilters)) group.matching++;
     group.first = Math.min(group.first, entry.createdAt);
     // An available target is finished. It does not hold the group back.
     if (entry.state.kind !== 'available') group.progress = Math.min(group.progress, progressOf(entry));
@@ -529,9 +530,21 @@ export const otherSeasonsTargets = (titleKey: string, season: number | null) =>
     (entry) => entry.titleKey === titleKey && (season === null || entry.season === season) && shown(entry) && needsOtherSeasons(entry.state),
   );
 
+export function aggregateEntries(entries: QueueEntry[]) {
+  const result = aggregate(entries.map((entry) => entry.state));
+  if (result.status !== 'no_match') return result;
+
+  const releaseSeasons = new Set(entries.filter((entry) => entry.release && entry.season !== null).map((entry) => queueEpisode(entry)!.season));
+  if (releaseSeasons.size && entries.some((entry) => entry.season !== null && statusOf(entry) === 'no_match' && releaseSeasons.has(queueEpisode(entry)!.season))) {
+    result.status = 'stuck';
+    result.tabs = ['stuck'];
+  }
+  return result;
+}
+
 // The aggregate of a group. It covers every member of the season, before the tab filter and the page.
 export function groupAggregate(entries: QueueEntry[]) {
-  const result = aggregate(entries.map((entry) => entry.state));
+  const result = aggregateEntries(entries);
   return {
     status: result.status,
     counts: result.counts,

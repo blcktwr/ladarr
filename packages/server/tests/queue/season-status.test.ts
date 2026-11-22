@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { episode, title } from '../helpers/test-fixtures.ts';
+import { episode, release, title } from '../helpers/test-fixtures.ts';
 import { startPipeline } from '../helpers/test-pipeline.ts';
 import { move } from '../helpers/test-queue.ts';
 import { queueStatusOf } from '../../src/library/tools/queue-status.ts';
@@ -11,6 +11,42 @@ afterEach(async () => {
 });
 
 describe('season status', () => {
+  it('shows a stuck season when a selected pack leaves an episode without a match', async () => {
+    pipe = await startPipeline();
+    const api = await pipe.api();
+    const series = title({ rootId: 'tv', episodes: [episode(1, 1), episode(1, 2), episode(2, 1)] });
+    pipe.db.data.titles[series.key] = series;
+    const first = pipe.queue.ensure(series.key, 1, 1);
+    const second = pipe.queue.ensure(series.key, 1, 2);
+    for (const entry of [first, second]) {
+      pipe.queue.request(entry, 'test');
+      entry.state = { kind: 'waiting', outcome: 'all_rejected' };
+    }
+    expect((await api.get('/queue?stage=queued')).body.items[0].status).toBe('no_match');
+
+    first.release = { ...release('Show Name S01 576p WEB-DL'), kind: 'pack', indexerName: 'Tracker', manual: true };
+    first.state = { kind: 'downloading' };
+    expect((await api.get('/queue?stage=downloading')).body.items[0].status).toBe('downloading');
+    first.state = { kind: 'available' };
+
+    const expected = { status: 'stuck', tabs: ['stuck'], counts: { available: 1, no_match: 1 } };
+    expect((await api.get('/queue')).body.items[0]).toMatchObject(expected);
+    expect((await api.get('/queue?stage=stuck')).body.items[0]).toMatchObject(expected);
+    expect((await api.get('/queue?stage=queued')).body.total).toBe(0);
+    expect((await api.get('/queue/summary')).body.counts).toEqual({ stuck: 1 });
+    const detail = (await api.get(`/queue/groups/${series.key}?season=1&stage=stuck`)).body;
+    expect(detail.group).toMatchObject(expected);
+    expect(detail.items).toMatchObject([{ status: 'available', release: { title: first.release.title } }, { status: 'no_match' }]);
+    expect(queueStatusOf(series.key)).toBe('stuck');
+
+    second.state = { kind: 'available' };
+    const nextSeason = pipe.queue.ensure(series.key, 2, 1);
+    pipe.queue.request(nextSeason, 'test');
+    nextSeason.state = { kind: 'waiting', outcome: 'all_rejected' };
+    expect((await api.get('/queue?stage=queued')).body.items[0]).toMatchObject({ season: 2, status: 'no_match' });
+    expect(queueStatusOf(series.key)).toBe('no_match');
+  });
+
   it('shows the same aggregate in the row and in the inspector, whatever tab is open', async () => {
     pipe = await startPipeline();
     const api = await pipe.api();
