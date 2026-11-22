@@ -7,9 +7,11 @@ import { catalogPath, contentType, posterState, posterUrl, describeError } from 
 import { t } from '../../i18n/index.ts';
 import { useQueueNotice } from '../../lib/queue-notice.ts';
 
-// The button searches the title. A title that is not in the catalog is added first, with the defaults of Settings, as the title page does.
-function SearchButton({ result }: { result: SearchResult }) {
-  const [libraryKey, setLibraryKey] = useState(result.libraryKey ?? null);
+// The poster opens the page of the title, in the catalog or not. With onSelectedChange, the poster can also be selected.
+// The poster has no text under it; its title stays for a screen reader.
+export function ResultItem({ result, size, selected, onSelectedChange }: { result: SearchResult; size?: 'sm' | 'md'; selected?: boolean; onSelectedChange?: (selected: boolean) => void }) {
+  const [addedKey, setAddedKey] = useState<string | null>(null);
+  const libraryKey = result.libraryKey ?? addedKey;
   const [pending, setPending] = useState(false);
   const queueNotice = useQueueNotice();
 
@@ -23,7 +25,7 @@ function SearchButton({ result }: { result: SearchResult }) {
       } else {
         const summary = { title: result.title, year: result.year, posterPath: result.posterPath };
         const { title } = await api<{ title: { key: string } }>('/library', { method: 'POST', body: { mediaType: result.mediaType, tmdbId: result.tmdbId, add: 'all', summary } });
-        setLibraryKey(title.key);
+        setAddedKey(title.key);
         queueNotice(1);
       }
     } catch (err) {
@@ -33,7 +35,7 @@ function SearchButton({ result }: { result: SearchResult }) {
     }
   }
 
-  return (
+  const button = result.mediaType === 'tv' && libraryKey ? undefined : (
     <Button
       pending={pending}
       onClick={(event) => {
@@ -46,11 +48,7 @@ function SearchButton({ result }: { result: SearchResult }) {
       {t('Add')}
     </Button>
   );
-}
 
-// The poster opens the page of the title, in the catalog or not. With onSelectedChange, the poster can also be selected.
-// The poster has no text under it; its title stays for a screen reader.
-export function ResultItem({ result, size, selected, onSelectedChange }: { result: SearchResult; size?: 'sm' | 'md'; selected?: boolean; onSelectedChange?: (selected: boolean) => void }) {
   // A series in the library is anime only when its type says so. A title that is not in the library is a series.
   const type = contentType(result.mediaType, result.seriesType);
   const state = posterState(result);
@@ -66,7 +64,7 @@ export function ResultItem({ result, size, selected, onSelectedChange }: { resul
         noCaption
         selected={selected}
         onSelectedChange={onSelectedChange}
-        overlay={<SearchButton result={result} />}
+        overlay={button}
       />
     </RouterLink>
   );
