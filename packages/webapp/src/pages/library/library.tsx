@@ -2,7 +2,7 @@ import type { LibraryType } from '@ladarr/shared/enums';
 import type { CastMember, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary, UpgradeQuality } from '@ladarr/shared/types';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
-import { ArrowLeft, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronUp, Download, Plus, Trash2 } from 'lucide-react';
 import { Link as RouterLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
 import { ResultItem } from '../search/result-item.tsx';
@@ -462,13 +462,12 @@ function Controls({ children }: { children?: ReactNode }) {
   );
 }
 
-// The logos open the title on IMDb and TMDB. The rating of TMDB shows with its logo.
-function TitleLinks({ imdbId, tmdbId, mediaType, rating }: { imdbId: string | null; tmdbId: number; mediaType: string; rating: number | null }) {
+// The logos open the title on IMDb and TMDB.
+function TitleLinks({ imdbId, tmdbId, mediaType }: { imdbId: string | null; tmdbId: number; mediaType: string }) {
   return (
     <div className="flex items-center gap-6">
-      <a href={`https://www.themoviedb.org/${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}`} target="_blank" rel="noreferrer" className="flex items-center gap-2">
-        <img src={tmdbLogo} alt="TMDB" className="h-[9.8px] w-auto" />
-        {rating !== null && <Badge>{rating.toFixed(1)}</Badge>}
+      <a href={`https://www.themoviedb.org/${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}`} target="_blank" rel="noreferrer">
+        <img src={tmdbLogo} alt="TMDB" className="h-5 w-auto" />
       </a>
       {imdbId !== null && (
         <a href={`https://www.imdb.com/title/${imdbId}/`} target="_blank" rel="noreferrer">
@@ -507,15 +506,19 @@ function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutio
             <Thumbnail size="lg" image={posterUrl(header.posterPath, posterSize) ?? ''} title="" year="" type={type} state={state} stateLabel={stateLabel} />
           </div>
           <div className="grid gap-3 grow basis-64 min-w-0 self-center">
-            <Text variant="title">{`${header.title}${header.year ? ` (${header.year})` : ''}`}</Text>
+            <div className="flex items-center gap-2">
+              <Text variant="title">{`${header.title}${header.year ? ` (${header.year})` : ''}`}</Text>
+              {header.rating !== null && <Badge>{header.rating.toFixed(1)}</Badge>}
+            </div>
             {facts.length > 0 && <Text>{facts.join(' | ')}</Text>}
             {header.overview && <Text>{header.overview}</Text>}
-            {mediaType !== undefined && tmdbId !== undefined && <TitleLinks imdbId={header.imdbId} tmdbId={tmdbId} mediaType={mediaType} rating={header.rating} />}
+            {mediaType !== undefined && tmdbId !== undefined && <TitleLinks imdbId={header.imdbId} tmdbId={tmdbId} mediaType={mediaType} />}
             {header.date && <Text variant="small">{formatDate(header.date)}</Text>}
             {resolutions && resolutions.length > 0 && (
-              <div className="flex items-center gap-2">
+              <div className="mt-4 flex items-center gap-2">
                 {resolutions.map((resolution) => (
                   <Badge key={resolution} onClick={onResolution ? () => onResolution(resolution) : undefined} label={onResolution ? t('Show details of {resolution}p', { resolution }) : undefined}>
+                    <Download aria-hidden="true" />
                     {`${resolution}p`}
                   </Badge>
                 ))}
