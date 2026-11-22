@@ -33,15 +33,16 @@ const fileOptions = (files: PackFile[]) => [
   ...files.map((file) => ({ value: file.rel, label: `${file.rel} (${formatBytes(file.sizeBytes)})` })),
 ];
 
-function sourceOf(item: QueueEntryView, hash?: string, fixed?: FileSource, torrent?: QueueMappingEpisode['torrent']) {
+function sourceOf(item: QueueEntryView, fixed?: FileSource) {
   const action = item.actions.find((action) => action.action === 'match');
-  const source = torrent !== undefined ? 'download' : fixed ?? action?.fileSource ?? (item.hasTorrent ? 'download' : 'library');
-  const own = torrent !== undefined ? torrent?.hash ?? '' : source === 'download' ? action?.source ?? item.transfer?.hash ?? item.release?.title ?? '' : '';
-  const selected = hash && hash !== own ? hash : undefined;
-  const type = selected ? 'download' : source;
-  const key = selected || own || (type === 'library' ? 'library' : item.id);
-  const path = `/queue/entries/${item.id}/files?source=${type}${selected ? `&hash=${selected}` : ''}`;
-  return { own, hash: selected, type, key, path: (torrent === null && !selected) || (hash === '' && own) ? null : path };
+  const type = fixed ?? action?.fileSource ?? (item.hasTorrent ? 'download' : 'library');
+  const own = type === 'download' ? action?.source ?? item.transfer?.hash ?? item.release?.title ?? '' : '';
+  return { own, hash: undefined, type, key: own || (type === 'library' ? 'library' : item.id), path: `/queue/entries/${item.id}/files?source=${type}` };
+}
+
+function torrentSource(id: string, own: string, selected = own) {
+  const hash = selected && selected !== own ? selected : undefined;
+  return { hash, type: 'download' as const, key: selected || id, path: selected ? `/queue/entries/${id}/files?source=download${hash ? `&hash=${hash}` : ''}` : null };
 }
 
 async function apply({ id, ...body }: Change) {
@@ -94,29 +95,37 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   const sources = new Map<string, string>();
   const initial = new Set<string>();
   const essential = new Set<string>();
-  const addSource = (item: QueueEntryView, draft?: Draft, torrent?: QueueMappingEpisode['torrent']) => {
-    const { key, path } = sourceOf(item, draft?.hash, fixed, torrent);
+  const rowSource = (point: QueueMappingEpisode) => {
+    const dropped = discarded.has(point.id);
+    const item = dropped ? undefined : items.get(point.id);
+    const draft = drafts[point.id];
+    const torrent = dropped ? null : point.torrent;
+    const match = dropped ? null : point.match;
+    const hash = draft?.hash ?? torrent?.hash ?? '';
+    const path = draft?.hash === undefined ? match?.path : undefined;
+    const source = mapSeries ? torrentSource(point.id, torrent?.hash ?? '', hash) : sourceOf(item ?? entry, fixed);
+    return { item, draft, torrent, match, hash, path, source };
+  };
+  const addSource = ({ key, path }: { key: string; path: string | null }) => {
     if (path && !sources.has(key)) sources.set(key, path);
     return key;
   };
   if (!series || fixedSource) {
-    const key = addSource(entry);
+    const key = addSource(sourceOf(entry, fixed));
     initial.add(key);
     essential.add(key);
   }
   else if (group.isPending) for (const item of entries) {
     const own = sourceOf(item).own;
     const known = options.find((option) => option.value === own);
-    if (known) initial.add(addSource(item, undefined, { hash: own, name: known.label }));
+    if (known) initial.add(addSource(torrentSource(item.id, own)));
   }
   else for (const point of rows) {
-    const item = items.get(point.id);
-    const edit = editable.has(point.id);
-    if (item && !point.match?.path && (point.torrent || drafts[point.id]?.hash)) {
-      const draft = drafts[point.id];
-      const key = addSource(item, draft, point.torrent);
+    const { draft, path, hash, source } = rowSource(point);
+    if (!path && hash) {
+      const key = addSource(source);
       if (!draft?.hash) initial.add(key);
-      if (edit) essential.add(key);
+      if (editable.has(point.id) || draft?.hash) essential.add(key);
     }
   }
   const packs = useQueries({
@@ -138,7 +147,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     return files?.find((file) => file.current?.some((cover) => sameEpisode(cover, point)))
       ?? files?.find((file) => file.proposal?.episodes.some((cover) => sameEpisode(cover, point)));
   };
-  const movieList = lists.get(sourceOf(entry, undefined, fixed).key);
+  const movieList = lists.get(sourceOf(entry, fixed).key);
   const failed = group.error ?? library.error ?? packs.find((pack, i) => essential.has(keys[i]!) && pack.error)?.error;
   const shown = error || (failed ? errorText(failed) : '');
 
@@ -170,26 +179,26 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
 
   // Keep existing coverage when a file also contains episodes from another season.
   function changes(corrected: Map<string, EpisodeRef[]>): Change[] {
-    if (!series) return movie ? [{ id: entry.id, source: sourceOf(entry, undefined, fixed).type, file: movie, ids: [entry.id] }] : [];
+    if (!series) return movie ? [{ id: entry.id, source: sourceOf(entry, fixed).type, file: movie, ids: [entry.id] }] : [];
     const groups = new Map<string, Change & { covers: EpisodeRef[] }>();
     for (const point of rows) {
-      const draft = drafts[point.id];
-      if (point.match?.path || (!mapSeries && point.match) || (mapSeries && !editable.has(point.id) && !draft?.file)) continue;
-      const item = items.get(point.id) ?? entry;
-      const source = sourceOf(item, draft?.hash, fixed, mapSeries ? point.torrent : undefined);
+      const { draft, path, match, hash, source } = rowSource(point);
+      const selected = editable.has(point.id) || (mapSeries && Boolean(draft?.hash || draft?.file));
+      if (path || (!mapSeries && match) || (mapSeries && !selected)) continue;
       const file = draft?.file !== undefined
         ? lists.get(source.key)?.files?.find((file) => file.rel === draft.file?.rel)
-        : mapSeries && source.path ? proposed(point, source.key, source.hash ? undefined : point.match?.file) : undefined;
+        : mapSeries && source.path ? proposed(point, source.key, source.hash ? undefined : match?.file) : undefined;
       if (!file) continue;
       const key = JSON.stringify([source.key, file.rel]);
       const group = groups.get(key) ?? {
-        id: item.id, source: source.type, file: file.rel, covers: [...((source.type === 'library' ? corrected.get(file.rel) : undefined) ?? file.current ?? [])], ids: [],
+        id: point.id, source: source.type, file: file.rel, covers: [...((source.type === 'library' ? corrected.get(file.rel) : undefined) ?? file.current ?? [])], ids: [],
       };
       if (!group.covers.some((p) => p.season === point.season && p.number === point.number)) group.covers.push({ season: point.season, number: point.number });
-      if (editable.has(point.id) || (mapSeries && draft?.file)) {
+      if (selected) {
+        const explicitHash = source.hash ?? (mapSeries && !editable.has(point.id) ? hash : undefined);
         group.ids.push(point.id);
-        if (source.hash || group.ids.length === 1) group.id = item.id;
-        if (source.hash) group.hash = source.hash;
+        if (explicitHash || group.ids.length === 1) group.id = point.id;
+        if (explicitHash) group.hash = explicitHash;
       }
       groups.set(key, group);
     }
@@ -201,13 +210,15 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     const corrected = new Map<string, EpisodeRef[]>();
     const confirmedIds: string[] = [];
     const coverage = (path: string) => corrected.get(path) ?? library.data?.files.find((file) => file.path === path)?.episodes ?? [];
-    for (const { id, season, number, match } of rows) {
-      if (!mapSeries || !match?.path) continue;
-      const path = drafts[id]?.path ?? match.path;
+    for (const row of rows) {
+      const { id, season, number } = row;
+      const { path: saved, draft } = rowSource(row);
+      if (!mapSeries || !saved) continue;
+      const path = draft?.path ?? saved;
       if (editable.has(id)) confirmedIds.push(id);
-      else if (path === match.path) continue;
+      else if (path === saved) continue;
       const point = { season, number };
-      if (path !== match.path) corrected.set(match.path, coverage(match.path).filter((ep) => !sameEpisode(ep, point)));
+      if (path !== saved) corrected.set(saved, coverage(saved).filter((ep) => !sameEpisode(ep, point)));
       corrected.set(path, [...coverage(path).filter((ep) => !sameEpisode(ep, point)), point]);
     }
     const posts = changes(corrected);
@@ -247,7 +258,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
           {mapSeries && (
             <div className="mr-auto min-w-0 max-w-40 flex-1">
               <Dropdown
-                label={t('Season')} hideLabel width="full" reserve={false} disabled={busy}
+                label={t('Season')} hideLabel width="full" reserve={false}
                 value={String(season)} options={seasons.map((n) => ({ value: String(n), label: seasonName(n) }))}
                 onValueChange={(next) => { if (next !== null) setSeason(Number(next)); }}
               />
@@ -273,36 +284,27 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
           ]}
           rows={rows.map((point) => {
             const dropped = discarded.has(point.id);
-            const item = dropped ? undefined : items.get(point.id);
-            const draft = drafts[point.id];
-            const verified = dropped ? null : point.torrent;
-            const source = sourceOf(item ?? entry, draft?.hash, fixed, mapSeries ? verified : undefined);
+            const { item, draft, torrent: verified, source, hash, match, path } = rowSource(point);
             const list = source.path ? lists.get(source.key) : undefined;
             const own = verified?.hash ?? '';
-            const match = dropped ? null : point.match;
-            const hash = draft?.hash ?? own;
-            const path = match?.path;
             const name = source.hash ? undefined : match?.file;
-            const suggested = mapSeries && item && !path && source.path ? proposed(point, source.key, name) : undefined;
+            const suggested = mapSeries && !path && source.path ? proposed(point, source.key, name) : undefined;
             const canEdit = !match && !suggested && (editable.has(point.id) || fixedSource) && item?.status !== 'available';
             const shown = match?.file ?? item?.file?.name ?? (suggested ? suggested.originalName || suggested.rel : undefined) ?? '—';
             const fileValue = draft?.file !== undefined ? draft.file?.rel ?? '' : suggested?.rel ?? '';
-            const torrentOptions = path ? [] : options;
-            const selected = hash && !torrentOptions.some((option) => option.value === hash) && verified?.hash === hash
-              ? [...torrentOptions, { value: hash, label: verified.name }] : torrentOptions;
+            const selected = verified && !options.some((option) => option.value === own)
+              ? [...options, { value: own, label: verified.name }] : options;
             const selectFile = (value: string | null) => change(point.id, { ...draft, file: list?.files?.find((file) => file.rel === value) ?? null });
-            const pickTorrent = !path && (Boolean(hash) || Boolean(item && editable.has(point.id)));
             const matches = mapSeries ? (
               <SearchableDropdown
                 key={`file:${source.key}`} label={t('Matches')} hideLabel width="full"
                 placeholder={t('Unassigned')} emptyText={t('No options.')}
-                disabled={busy || (path ? !libraryOptions : !list?.files || !item || item.status === 'cancelled' || item.status === 'paused')}
                 value={path ? draft?.path ?? path : fileValue}
                 options={path ? libraryOptions?.filter((option) => option.hash === own) ?? [{ value: path, label: match!.file }] : list?.options ?? []}
                 onValueChange={path ? (next) => { if (next) change(point.id, { path: next }); } : selectFile}
               />
             ) : !canEdit ? readout(shown) : (
-              <Dropdown key="file" width="full" reserve={false} disabled={busy || !list?.files}
+              <Dropdown key="file" width="full" reserve={false}
                 value={draft?.file?.rel ?? ''} options={list?.options ?? []} onValueChange={selectFile} />
             );
             return {
@@ -313,7 +315,6 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
                   <SearchableDropdown
                     key="torrent" label={t('Torrent')} hideLabel width="full" value={hash}
                     placeholder={t('No torrent selected')} emptyText={t('No options.')}
-                    disabled={busy || !pickTorrent}
                     options={selected}
                     onValueChange={(next) => change(point.id, { hash: next === own ? undefined : next })}
                   />

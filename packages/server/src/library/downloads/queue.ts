@@ -10,6 +10,15 @@ const pad = (n: number) => String(n).padStart(2, '0');
 
 export const entryId = (titleKey: string, season: number | null, number: number | null) => (season === null || number === null ? titleKey : `${titleKey}:${season}x${number}`);
 
+export function newEntry(titleKey: string, season: number | null, number: number | null, now: number): QueueEntry {
+  return {
+    id: entryId(titleKey, season, number), titleKey, season, number, state: { kind: 'queued' },
+    revision: 0, createdAt: now, stateSince: now, phaseSince: now, completedAt: null, clearedAt: null,
+    priority: null, attempt: 0, attempts: [], history: [], search: null, release: null,
+    transferHash: null, clientId: null, manualMatch: null, importResult: null,
+  };
+}
+
 // An entry is active until it is available, or cancelled by the user.
 export const isActive = (entry: QueueEntry) => isActiveState(entry.state);
 
@@ -81,32 +90,9 @@ export function createQueue(events: Events, persist: () => void, onState?: State
 
   function ensure(titleKey: string, season: number | null, number: number | null): QueueEntry {
     const id = entryId(titleKey, season, number);
-    const now = Date.now();
     const found = db.data.queue[id];
     if (found) return found;
-    const entry = (db.data.queue[id] = {
-      id,
-      titleKey,
-      season,
-      number,
-      state: { kind: 'queued' },
-      revision: 0,
-      createdAt: now,
-      stateSince: now,
-      phaseSince: now,
-      completedAt: null,
-      clearedAt: null,
-      priority: null,
-      attempt: 0,
-      attempts: [],
-      history: [],
-      search: null,
-      release: null,
-      transferHash: null,
-      clientId: null,
-      manualMatch: null,
-      importResult: null,
-    });
+    const entry = (db.data.queue[id] = newEntry(titleKey, season, number, Date.now()));
     catalog.info('queued', 'Added to the queue', itemFields(entry), { season, number, status: 'queued' });
     return entry;
   }

@@ -48,7 +48,7 @@ export function Modal({ trigger, title, hideTitle, actions, width = 'md', childr
             <Dialog.Title className={hideTitle ? 'sr-only' : 'text-ink-strong text-[17px]/none font-semibold'}>{title}</Dialog.Title>
             <Dialog.Close render={<Button variant="ghost" iconOnly aria-label="Close" className={hideTitle ? 'ml-auto' : undefined} />}><X /></Dialog.Close>
           </div>
-          <div className="-mx-6 -my-6 grid grid-cols-[minmax(0,1fr)] justify-items-start min-h-0 flex-1 gap-5 overflow-x-hidden overflow-y-auto px-6 py-6">{children}</div>
+          <div className={`-mx-6 grid grid-cols-[minmax(0,1fr)] justify-items-start min-h-0 flex-1 gap-5 overflow-x-hidden overflow-y-auto px-6 ${actions ? '-mt-6 pt-6' : '-my-6 py-6'}`}>{children}</div>
           {actions && <Actions className="w-full justify-end">{actions}</Actions>}
         </Dialog.Popup>
       </Dialog.Portal>

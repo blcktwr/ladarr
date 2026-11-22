@@ -7,19 +7,19 @@ import { evidenceOf, matchContent } from '../../../../../library/content.ts';
 import { releaseEpisodes } from '../../../../../library/parse.ts';
 import { catalogPoint, normalizeNumbering } from '../../../../../library/numbering.ts';
 import { probeFile } from '../../../../../library/probe.ts';
-import { HASH, matchSource } from '../../../../../helpers/queue-attach.ts';
-import { catalogTargets, shown } from '../../../../../helpers/queue.ts';
+import { HASH, matchEntry, matchSource } from '../../../../../helpers/queue-attach.ts';
+import { catalogTargets } from '../../../../../helpers/queue.ts';
 import type { Clients } from '../../../../../types.ts';
 
 export function queueEntryFilesGet(clients: Clients): RequestHandler<{ id: string }> {
   return async (req, res) => {
-    const entry = db.data.queue[req.params.id];
-    if (!entry || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
+    const hash = req.query.hash;
+    const entry = matchEntry(req.params.id, hash);
+    if (!entry) return void res.status(404).json({ error: 'not_found' });
     const title = db.data.titles[entry.titleKey]!;
     const selectedSource = req.query.source ?? (entry.transferHash ? 'download' : 'library');
     if (selectedSource !== 'library' && selectedSource !== 'download') return void res.status(400).json({ error: 'invalid_request' });
-    const hash = req.query.hash;
-    if (hash !== undefined && (typeof hash !== 'string' || !HASH.test(hash) || selectedSource !== 'download' || entry.season === null || entry.state.kind !== 'blocked')) return void res.status(400).json({ error: 'invalid_request' });
+    if (hash !== undefined && (typeof hash !== 'string' || !HASH.test(hash) || selectedSource !== 'download' || entry.season === null)) return void res.status(400).json({ error: 'invalid_request' });
     try {
       const source = await matchSource(entry, clients, selectedSource, hash);
       if ('error' in source) return void res.status(409).json({ error: source.error });

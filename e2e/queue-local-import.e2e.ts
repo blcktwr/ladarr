@@ -66,7 +66,7 @@ test('does not map local files without a torrent', async ({ page }) => {
   await expect(matches).toHaveCount(3);
   for (const match of await matches.all()) {
     await expect(match).toHaveValue('');
-    await expect(match).toBeDisabled();
+    await expect(match).toBeEnabled();
   }
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);

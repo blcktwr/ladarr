@@ -9,15 +9,15 @@ import { PlanError } from '../../../../../library/imports/plan.ts';
 import { bindJournal } from '../../../../../library/imports/importer.ts';
 import { recordTorrent } from '../../../../../library/downloads/attach.ts';
 import { normalizeNumbering } from '../../../../../library/numbering.ts';
-import { HASH, matchSource, torrentInUse } from '../../../../../helpers/queue-attach.ts';
-import { associationState, catalogTargets, label, resolutionCurrent, resolutionVersion, shown } from '../../../../../helpers/queue.ts';
+import { HASH, matchEntry, matchSource, torrentInUse } from '../../../../../helpers/queue-attach.ts';
+import { associationState, catalogTargets, label, resolutionCurrent, resolutionVersion } from '../../../../../helpers/queue.ts';
 import type { Clients, EnqueueInput, Finder, ImportJournal, Job, Queue, QueueEntry } from '../../../../../types.ts';
 
 export function queueEntryMatchPost(queue: Queue, _finder: Finder, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler<{ id: string }> {
   return async (req, res) => {
-    const entry = db.data.queue[req.params.id];
     const { file, covers, ids, preview, version, hash, source: requestedSource } = (req.body ?? {}) as { file?: unknown; covers?: unknown; ids?: unknown; preview?: boolean; version?: unknown; hash?: unknown; source?: unknown };
-    if (!entry || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
+    const entry = matchEntry(req.params.id, hash);
+    if (!entry) return void res.status(404).json({ error: 'not_found' });
     if (typeof file !== 'string' || (ids !== undefined && (!Array.isArray(ids) || ids.length > 100 || !ids.every((id) => typeof id === 'string')))) return void res.status(400).json({ error: 'invalid_request' });
     const title = db.data.titles[entry.titleKey]!;
     const selectedSource = requestedSource ?? (entry.transferHash ? 'download' : 'library');
@@ -31,21 +31,23 @@ export function queueEntryMatchPost(queue: Queue, _finder: Finder, clients: Clie
       if (coverage.some((point) => !title.episodes.some((episode) => episode.season === point.season && episode.number === point.number))) return void res.status(400).json({ error: 'cover_not_in_download' });
     }
     const selected: QueueEntry[] = [];
-    for (const id of (ids ?? [entry.id]) as string[]) {
-      const target = db.data.queue[id];
-      if (!target || !shown(target) || target.state.kind === 'cancelled' || target.state.kind === 'paused' || target.titleKey !== entry.titleKey) return void res.status(400).json({ error: 'invalid_request' });
+    for (const id of new Set((ids ?? [entry.id]) as string[])) {
+      const target = id === entry.id ? entry : matchEntry(id, hash);
+      if (!target || target.titleKey !== entry.titleKey || (hash === undefined && (target.state.kind === 'cancelled' || target.state.kind === 'paused'))) return void res.status(400).json({ error: 'invalid_request' });
       if (hash !== undefined ? target.season === null : selectedSource === 'download' && (target.transferHash !== entry.transferHash || target.clientId !== entry.clientId)) return void res.status(400).json({ error: 'invalid_request' });
-      if (!selected.includes(target)) selected.push(target);
+      selected.push(target);
     }
     if (hash !== undefined && !selected.includes(entry)) return void res.status(400).json({ error: 'invalid_request' });
     if (selected.some((target) => target.season !== null && !coverage.some((point) => point.season === target.season && point.number === target.number))) return void res.status(400).json({ error: 'invalid_request' });
     try {
+      const originals = [entry, ...selected].map(({ id }) => [id, db.data.queue[id]] as const);
+      const stale = () => originals.some(([id, original]) => db.data.queue[id] !== original);
       const source = await matchSource(entry, clients, selectedSource, hash);
       if ('error' in source) return void res.status(409).json({ error: source.error });
       const download = source.download;
       const transfer = download?.torrent.hash;
       const clientId = download?.handle.id;
-      if (db.data.queue[entry.id] !== entry || selected.some((target) => db.data.queue[target.id] !== target)) return void res.status(409).json({ error: 'preview_changed' });
+      if (stale()) return void res.status(409).json({ error: 'preview_changed' });
       const chosen = source.files.find((item) => item.rel === file);
       if (!chosen) return void res.status(400).json({ error: selectedSource === 'download' ? 'file_not_in_download' : 'file_not_in_title' });
       if (selectedSource === 'library' && (chosen.mtimeMs === null || chosen.ino === null || chosen.dev === null || !db.data.roots[title.rootId])) return void res.status(409).json({ error: 'preview_changed' });
@@ -79,7 +81,7 @@ export function queueEntryMatchPost(queue: Queue, _finder: Finder, clients: Clie
           return { id: target.id, label: target.label, current: queued?.manualMatch?.file ?? record?.path ?? null };
         }),
         replaces: removed,
-        retries: continued.map(({ id }) => ({ id, label: label(db.data.queue[id]!) })),
+        retries: conflicts.length ? [] : selected.map((target) => ({ id: target.id, label: label(target) })),
       };
       if (selectedSource === 'library' && title.mediaType === 'tv' && records.length) {
         const correction = correctionOf(title.key, [{ path: file, episodes: coverage }], selected.map((target) => target.id));
@@ -122,7 +124,6 @@ export function queueEntryMatchPost(queue: Queue, _finder: Finder, clients: Clie
       const anchors = selected.length ? selected : [entry];
       const latest = Math.max(0, ...sameSource.filter((target) => target.manualMatch?.file === file).map((target) => target.manualMatchRevision ?? 0));
       const applied = anchors.every((target) => JSON.stringify(target.manualMatch) === JSON.stringify(match) && target.manualMatchRevision !== undefined && target.manualMatchRevision >= latest && (!selected.includes(target) || ['importing', 'available'].includes(target.state.kind)) && (hash === undefined || sameSource.includes(target)));
-      if (hash !== undefined && (preview || !applied) && selected.some((target) => target.state.kind !== 'blocked')) return void res.status(409).json({ error: 'preview_changed' });
       if (preview) return void res.json(summary);
       if (!resolutionCurrent(version, scope, applied ? undefined : state)) return void res.status(409).json({ error: 'preview_changed' });
       if (applied) return void res.json({ ...summary, done: true });
@@ -130,7 +131,7 @@ export function queueEntryMatchPost(queue: Queue, _finder: Finder, clients: Clie
       await withTitleLock(title.key, async () => {
         const currentSource = await matchSource(entry, clients, selectedSource, hash);
         const currentEntries = Object.values(db.data.queue).filter((target) => target.titleKey === title.key).sort((a, b) => a.id.localeCompare(b.id));
-        if ('error' in currentSource || (hash !== undefined && torrentInUse(entry, hash)) || !resolutionCurrent(version, { ...scope, manifest: currentSource.manifest }, { selected, anchor: entry, sourceEntries: currentEntries, associations: associationState(title.key), files: currentSource.files })) throw new PlanError('mapping_stale');
+        if (stale() || 'error' in currentSource || (hash !== undefined && torrentInUse(entry, hash)) || !resolutionCurrent(version, { ...scope, manifest: currentSource.manifest }, { selected, anchor: entry, sourceEntries: currentEntries, associations: associationState(title.key), files: currentSource.files })) throw new PlanError('mapping_stale');
         const trimmed = selectedSource === 'download' ? records.filter((record) => record.episodes.some((point) => !coverage.some((cover) => cover.season === point.season && cover.number === point.number))).map((record) => ({ ...structuredClone(record), episodes: record.episodes.filter((point) => coverage.some((cover) => cover.season === point.season && cover.number === point.number)) })) : [];
         const pointers = title.episodes.flatMap((episode) => {
           if (!trimmed.some((record) => record.id === episode.fileId) || coverage.some((point) => point.season === episode.season && point.number === episode.number)) return [];
@@ -149,9 +150,16 @@ export function queueEntryMatchPost(queue: Queue, _finder: Finder, clients: Clie
           }
         }
         const revision = db.data.queueRev + 1;
-        for (const target of anchors) {
-          if (selected.includes(target) && target.state.kind === 'blocked') queue.retryAttempt(target, 'retry');
-          if (hash !== undefined && download && !sameSource.includes(target)) {
+        for (const anchor of anchors) {
+          const target = db.data.queue[anchor.id] ?? queue.ensure(anchor.titleKey, anchor.season, anchor.number);
+          const picked = selected.includes(anchor);
+          if (picked && hash !== undefined) {
+            if (target.state.kind === 'paused') queue.resume(target, 'file selected by the user');
+            if (target.state.kind === 'cancelled' || !target.attempt) queue.request(target, 'file selected by the user');
+            target.clearedAt = null;
+          }
+          if (picked && target.state.kind === 'blocked') queue.retryAttempt(target, 'retry');
+          if (hash !== undefined && download && (target.transferHash !== transfer || target.clientId !== clientId)) {
             recordTorrent(target, { ...download, kind: source.files.length > 1 ? 'pack' : 'single', external: true });
             target.search = null;
             target.importResult = null;
@@ -160,12 +168,12 @@ export function queueEntryMatchPost(queue: Queue, _finder: Finder, clients: Clie
           target.manualMatch = structuredClone(match);
           target.manualMatchRevision = revision;
           queue.touch(target);
-          if (selected.includes(target)) {
+          if (picked) {
             if (target.state.kind === 'available') queue.invalidate(target, 'file selected by the user', file);
             if (target.state.kind !== 'available') queue.resolve(target, 'importing', 'file selected by the user', file);
           }
         }
-        const entryIds = selected.filter((target) => target.state.kind !== 'available').map((target) => target.id);
+        const entryIds = selected.map((target) => target.id).filter((id) => db.data.queue[id]!.state.kind !== 'available');
         if (entryIds.length && transfer) {
           const job = enqueue({ type: 'import.run', payload: { hash: transfer, entryIds, manual: true }, dedupeKey: `import:${transfer}`, priority: entry.priority !== null });
           if (job.type === 'import.run' && job.state === 'waiting') {

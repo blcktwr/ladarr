@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { db } from '../core/db.ts';
 import { inside, torrentVideos } from '../library/imports/importer.ts';
 import { titleFiles } from '../library/imports/local.ts';
-import { isActive, phaseOfEntry } from '../library/downloads/queue.ts';
+import { entryId, isActive, newEntry, phaseOfEntry } from '../library/downloads/queue.ts';
+import { shown } from './queue.ts';
 import type { AttachCache, ClientHandle, Clients, QueueEntry, Torrent } from '../types.ts';
 
 export const HASH = /^[0-9a-f]{40}$/;
@@ -12,6 +13,16 @@ export const MAX_TORRENTS = 100;
 export const MAX_TARGETS = 100;
 // Opening the details of several targets of one pack reads the client once.
 const TELEMETRY_TTL_MS = 5_000;
+
+export function matchEntry(id: string, hash: unknown) {
+  const entry = db.data.queue[id];
+  if (entry && shown(entry)) return entry;
+  if (typeof hash !== 'string' || !HASH.test(hash)) return;
+  const title = db.data.titles[id.slice(0, id.lastIndexOf(':'))];
+  const episode = title?.episodes.find((point) => entryId(title.key, point.season, point.number) === id);
+  // A catalog episode enters the queue only when the user applies its mapping.
+  if (title && episode) return entry ?? newEntry(title.key, episode.season, episode.number, 0);
+}
 
 // Says if a download can be attached to the entry. Work that runs now keeps its own path.
 export function attachRefusal(entry: QueueEntry): string | null {
