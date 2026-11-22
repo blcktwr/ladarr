@@ -271,13 +271,12 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   await open(page, 'group:tv:1:1');
   const main = page.getByRole('main');
   await expect(main.getByRole('table', { name: 'Episodes of season 1' })).toBeHidden();
-  await expect(main.getByRole('button', { name: 'Attach download', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Attach download', exact: true })).toHaveCount(0);
   const maps = main.getByRole('button', { name: 'Map episodes', exact: true });
   await expect(maps).toHaveCount(1);
   await expect(main.getByText(/^Show Name S01E/)).toHaveCount(0);
   const actions = maps.locator('..');
   await expect(actions.getByRole('button', { name: 'Map episodes', exact: true })).toHaveCount(1);
-  await expect(actions.getByRole('button', { name: 'Attach download', exact: true })).toBeVisible();
   await expect(actions).toHaveCSS('justify-content', 'flex-start');
   await expect(main.getByText('The pack did not hold every episode of the season.', { exact: true })).toHaveCount(0);
 
@@ -1229,49 +1228,6 @@ test('restricts Use existing file to library files when the destination exists',
   expect(stack.qbit.calls.filter((call) => call.path === 'torrents/add')).toEqual([]);
 });
 
-test('attaches the download to both descriptor targets when a stuck group saves', async ({ page }) => {
-  const first = blocked('tv:3', 1, 1, 'sending', 'torrent_exists');
-  const second = blocked('tv:3', 1, 2, 'sending', 'torrent_exists');
-  data.titles['tv:3']!.seasonOverrides['2'] = 'unmonitored';
-  const release = 'Two.Seasons.S01.1080p.WEB-DL-GRP';
-  download(first, release, { 'Two.Seasons.S01E01.mkv': 'one', 'Two.Seasons.S01E02.mkv': 'two' });
-  const hash = first.transferHash!;
-  first.transferHash = null;
-  first.clientId = null;
-  first.release!.external = true;
-  second.release = structuredClone(first.release);
-  await start([first, second]);
-  const group = (await stack.call('GET', '/queue/groups/tv:3')).body;
-  const action = group.group.actions.find((item: { action: string }) => item.action === 'attach');
-  expect(action.ids).toEqual([first.id, second.id]);
-
-  await open(page, 'group:tv:3:1');
-  const attach = page.getByRole('main').getByRole('button', { name: 'Attach download', exact: true });
-  await expect(attach).toHaveCount(1);
-  await attach.click();
-  const modal = page.getByRole('dialog');
-  await expect(modal.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
-  await expect(modal.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
-  await expect(modal.getByRole('checkbox')).toHaveCount(0);
-  await modal.getByRole('combobox', { name: 'Download', exact: true }).click();
-  await page.getByRole('option', { name: new RegExp(release.replaceAll('.', '\\.')) }).click();
-
-  const path = `/api/queue/entries/${first.id}/attach`;
-  const [preview, applied] = await Promise.all([
-    page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === path && response.request().postDataJSON().preview === true),
-    page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === path && response.request().postDataJSON().preview !== true),
-    modal.getByRole('button', { name: 'Save', exact: true }).click(),
-  ]);
-  expect(preview.request().postDataJSON()).toMatchObject({ hash, ids: [second.id], preview: true });
-  expect(preview.status()).toBe(200);
-  expect((await preview.json()).affected.map((item: { id: string }) => item.id)).toEqual(action.ids);
-  expect(applied.status()).toBe(200);
-  expect(applied.request().postDataJSON()).toMatchObject({ hash, ids: [second.id], confirmOwner: true, confirmTitle: true, version: (await preview.json()).version });
-  await expect(modal).toBeHidden();
-  await expect.poll(async () => (await entry(first.id)).status, { timeout: 60_000 }).toBe('available');
-  await expect.poll(async () => (await entry(second.id)).status, { timeout: 60_000 }).toBe('available');
-});
-
 test('shows the failure of Apply mapping inside the dialog', async ({ page }) => {
   const stopped = blocked('tv:3', 1, 1, 'importing', 'file_unmapped');
   const title = data.titles['tv:3']!;
@@ -1293,27 +1249,4 @@ test('shows the failure of Apply mapping inside the dialog', async ({ page }) =>
   await expect(panel.getByRole('alert')).toHaveText('The download folder is not the same as configured as media.');
   await expect(panel).toBeVisible();
   expect((await entry(stopped.id)).status).toBe('stuck');
-});
-
-test('shows one attach action for the two downloads of a stuck season', async ({ page }) => {
-  const first = blocked('tv:3', 1, 1, 'sending', 'torrent_exists');
-  const second = blocked('tv:3', 1, 2, 'sending', 'torrent_exists');
-  const files = { 'Two.Seasons.S01E01.mkv': 'one', 'Two.Seasons.S01E02.mkv': 'two' };
-  download(first, 'Two.Seasons.S01.1080p.WEB-DL-GRP', files);
-  download(second, 'Two.Seasons.S01.1080p.WEB-DL-GRP.copy', files);
-  await start([first, second]);
-
-  await open(page, 'group:tv:3:1');
-  const attach = page.getByRole('main').getByRole('button', { name: 'Attach download', exact: true });
-  await expect(attach).toHaveCount(1);
-  await attach.click();
-  const modal = page.getByRole('dialog');
-  await modal.getByRole('combobox', { name: 'Download', exact: true }).click();
-  await page.getByRole('option', { name: /Two\.Seasons\.S01\.1080p\.WEB-DL-GRP \(/ }).click();
-  const [preview] = await Promise.all([
-    page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/queue/entries/${first.id}/attach` && response.request().postDataJSON().preview === true),
-    modal.getByRole('button', { name: 'Save', exact: true }).click(),
-  ]);
-  expect(preview.request().postDataJSON()).toMatchObject({ ids: [second.id], preview: true });
-  expect((await preview.json()).affected.map((item: { id: string }) => item.id)).toEqual([first.id, second.id]);
 });

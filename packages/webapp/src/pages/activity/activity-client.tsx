@@ -1,11 +1,7 @@
 import type { TrackerStatus } from '@ladarr/shared/enums';
-import type { AttachCandidates, AttachPreview, QueueClientDetail, QueueEntryView } from '@ladarr/shared/types';
+import type { QueueClientDetail } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
-import { api, ApiError } from '../../lib/api.ts';
-import { Button, EmptyState, Modal, Section, Spinner, TagInput } from 'nebula';
-import { Alert } from '../../components/alert.tsx';
-import { formatBytes } from '../../lib/format.ts';
+import { Section, Spinner } from 'nebula';
 import { t } from '../../i18n/index.ts';
 
 // The state of a torrent as the client reports it. A check by the client is not the file check of ladarr.
@@ -83,86 +79,3 @@ export function ClientDetails({ entryId }: { entryId: string }) {
   );
 }
 
-export function AttachDialog({ entry, ids, onDone }: { entry: QueueEntryView; ids?: string[]; onDone: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [hash, setHash] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const search = useQuery<AttachCandidates>({ queryKey: [`/queue/entries/${entry.id}/external`], enabled: open });
-  const found = search.data;
-  const searchError = search.error?.message === 'client_unreachable' ? t('The client does not answer.') : search.error?.message === 'client_missing' ? t('No download client is set.') : search.error ? t('The request did not complete.') : '';
-  const shown = error || searchError;
-  const picked = found?.torrents.find((torrent) => torrent.hash === hash);
-
-  async function save() {
-    if (!picked || busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      const path = `/queue/entries/${entry.id}/attach`;
-      const body = { hash, ids: ids?.filter((id) => id !== entry.id) ?? [], confirmOwner: true, confirmTitle: true };
-      const preview = await api<AttachPreview>(path, { method: 'POST', body: { ...body, preview: true } });
-      await api(path, { method: 'POST', body: { ...body, version: preview.version } });
-      setOpen(false);
-      onDone();
-    } catch (err) {
-      const code = err instanceof ApiError ? err.message : '';
-      setError(
-        code === 'torrent_in_use'
-          ? t('A target of another title uses this download.')
-          : code === 'torrent_not_found'
-            ? t('The client does not have this download now.')
-            : code === 'attach_not_supported'
-              ? t('A target is not waiting for a download now.')
-              : t('The request did not complete.'),
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onOpenChange={(next) => {
-        if (next) {
-          setHash('');
-          setError('');
-        }
-        setOpen(next);
-      }}
-      title={t('Attach download')}
-      trigger={<Button>{t('Attach download')}</Button>}
-      actions={
-        <>
-          <Button variant="ghost" onClick={() => setOpen(false)}>{t('Cancel')}</Button>
-          <Button disabled={!picked || busy} pending={busy} onClick={() => void save()}>{t('Save')}</Button>
-        </>
-      }
-    >
-      {shown && <Alert tone="danger">{shown}</Alert>}
-      {!found && !shown && <Spinner label={t('Loading downloads')} />}
-      {found && found.torrents.length === 0 && <EmptyState>{t('The client has no download for this search.')}</EmptyState>}
-      {found && found.torrents.length > 0 && (
-        // The list of a multiple combobox stays open after a pick, so a new key closes it and the actions stay usable.
-        <TagInput
-          key={hash}
-          label={t('Download')}
-          value={hash ? [hash] : []}
-          onValueChange={(values) => {
-            setHash(values.at(-1) ?? '');
-            setError('');
-          }}
-          disabled={busy}
-          width="full"
-          allowCustom={false}
-          emptyText={t('No options.')}
-          options={found.torrents.map((torrent) => ({
-            value: torrent.hash,
-            label: `${torrent.name} (${formatBytes(torrent.sizeBytes)}, ${torrent.complete ? t('complete') : `${Math.round(torrent.progress * 100)}%`}${torrent.category ? `, ${torrent.category}` : ''})`,
-          }))}
-        />
-      )}
-    </Modal>
-  );
-}

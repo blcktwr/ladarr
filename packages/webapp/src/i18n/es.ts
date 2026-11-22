@@ -617,6 +617,7 @@ export const es: Record<string, string> = {
   'Hard link': 'Enlace duro',
   'Copying {copied} of {total} ({percent}%)': 'Copiando {copied} de {total} ({percent}%)',
   'These files were not changed': 'Estos archivos no se cambiaron',
+  'Attach folder': 'Vincular carpeta',
   'Import a folder for {label}': 'Importar una carpeta para {label}',
   'Import 1 file': 'Importar 1 archivo',
   'Import {n} files': 'Importar {n} archivos',

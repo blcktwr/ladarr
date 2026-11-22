@@ -21,6 +21,7 @@ import { BulkActions, PlanDialog, useSelection } from './library-bulk.tsx';
 import { AddManuallyDialog, ImportBackupDialog } from './catalog-import.tsx';
 import { FileInfoDialog } from './library-files.tsx';
 import { UntitledFolders } from './library-folders.tsx';
+import { AttachFolderDialog } from './title-files.tsx';
 
 type Target = { titleKey: string; season?: number; number?: number };
 
@@ -595,6 +596,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
   // The resolution badge whose downloaded file the user opened.
   const [info, setInfo] = useState<number | null>(null);
   const [adding, setAdding] = useState<{ season: number | null } | null>(null);
+  const [attaching, setAttaching] = useState(false);
   // The title that the user added stays on the page while the job brings its facts. Its own control shows the wait.
   const [pendingAdd, setPendingAdd] = useState<{ kind: 'series'; season: number | null } | { kind: 'movie' } | null>(null);
   const queueNotice = useQueueNotice();
@@ -703,6 +705,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
               <Button variant="danger" onClick={() => setPlan({ request: { action: 'remove', keys: [title.key] }, subject: title.title })}>
                 {t('Delete')}
               </Button>
+              <ActionMenu label={t('More actions')} items={[{ label: t('Attach folder'), onClick: () => setAttaching(true) }]} />
             </Actions>
           ) : series ? (
             <Button onClick={() => startAdd(null)}>{t('Add')}</Button>
@@ -714,6 +717,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
       {message && <Alert tone="danger">{message}</Alert>}
       <PlanDialog request={plan?.request ?? null} subject={plan?.subject} onClose={() => setPlan(null)} onDone={() => void reload()} />
       {title && info !== null && <FileInfoDialog titleKey={title.key} resolution={info} onClose={() => setInfo(null)} />}
+      {title && <AttachFolderDialog titleKey={title.key} label={title.title} isOpen={attaching} onClose={() => setAttaching(false)} />}
       {series && (
         <>
           <div className={`${pageWidth} grid gap-6`}>

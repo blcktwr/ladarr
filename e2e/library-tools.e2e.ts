@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from './fixtures.ts';
 import { configure, startStack, URL_BASE, type Stack } from './stack.ts';
 
@@ -480,4 +482,25 @@ test('the General tab changes the theme of the interface', async ({ page }) => {
   await page.getByRole('option', { name: 'Dark' }).click();
   await expect(html).toHaveAttribute('data-theme', 'dark');
   expect((await stack.call('GET', '/settings')).body.settings.theme).toBe('dark');
+});
+
+test('Attach folder on the page of a series imports the files of the folder', async ({ page }) => {
+  const folder = join(stack.folders.downloads, 'Show Name S01E02');
+  mkdirSync(folder, { recursive: true });
+  const source = join(folder, 'Show.Name.S01E02.1080p.WEB-DL.mkv');
+  writeFileSync(source, 'episode two');
+
+  await page.goto(`${URL_BASE}/catalog/tv/1`);
+  await page.getByRole('button', { name: 'More actions', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Attach folder', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Attach folder' });
+  await dialog.getByLabel('Folder').fill(folder);
+  await dialog.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(dialog.getByText('The names match this title')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Import 1 file', exact: true }).click();
+  await expect(dialog.getByText('The run ended.')).toBeVisible({ timeout: 30_000 });
+
+  const library = join(stack.folders.tv, 'Show Name (2020)', 'Season 01', 'Show Name - S01E02 - Episode 2.mkv');
+  expect(existsSync(library)).toBe(true);
+  expect(statSync(library).ino).toBe(statSync(source).ino);
 });

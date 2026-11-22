@@ -2,7 +2,7 @@ import type { FolderPlan, RenameRow, RunView } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../lib/api.ts';
-import { Actions, Badge, Button, Field, Form, List, Row, Section, Spinner, Switch } from 'nebula';
+import { Actions, Badge, Button, Field, Form, List, Modal, Row, Section, Spinner, Switch } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { formatBytes } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
@@ -72,8 +72,9 @@ export function RunProgress({ id }: { id: string }) {
   );
 }
 
-// Imports the video files of a folder that the user names. The preview shows each file and changes nothing.
-export function ImportFolderDialog({ titleKey, label, isOpen, onClose }: { titleKey: string; label: string; isOpen: boolean; onClose: () => void }) {
+// Attaches the video files of a folder that the user names to a title in the library. The preview shows each file
+// and changes nothing.
+export function AttachFolderDialog({ titleKey, label, isOpen, onClose }: { titleKey: string; label: string; isOpen: boolean; onClose: () => void }) {
   const [path, setPath] = useState('');
   const [replace, setReplace] = useState(false);
   const [plan, setPlan] = useState<FolderPlan | null>(null);
@@ -113,19 +114,26 @@ export function ImportFolderDialog({ titleKey, label, isOpen, onClose }: { title
 
   if (!isOpen) return null;
   return (
-    <Section
-      title={t('Import a folder for {label}', { label })}
+    <Modal
+      open
+      onOpenChange={(next) => !next && onClose()}
+      title={t('Attach folder')}
+      width="lg"
       actions={
-        <>
-          <Button variant="ghost" autoFocus={Boolean(runId)} onClick={onClose}>
-            {runId ? t('Close') : t('Cancel')}
+        runId ? (
+          <Button variant="ghost" onClick={onClose}>
+            {t('Close')}
           </Button>
-          {!runId && (
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              {t('Cancel')}
+            </Button>
             <Button disabled={!plan || plan.importable === 0} pending={busy} onClick={() => void ask('start')}>
               {plan ? (plan.importable === 1 ? t('Import 1 file') : t('Import {n} files', { n: plan.importable })) : t('Import')}
             </Button>
-          )}
-        </>
+          </>
+        )
       }
     >
       {error && <Failure message={error} />}
@@ -166,7 +174,7 @@ export function ImportFolderDialog({ titleKey, label, isOpen, onClose }: { title
           {plan && <PlanView plan={plan} label={label} />}
         </>
       )}
-    </Section>
+    </Modal>
   );
 }
 

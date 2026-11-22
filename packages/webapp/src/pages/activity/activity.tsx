@@ -12,7 +12,6 @@ import { Confirm } from '../../components/confirm.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
 import { FinishedPanel } from './activity-finished.tsx';
 import { MatchDialog, type MatchRequest } from './activity-match.tsx';
-import { AttachDialog } from './activity-client.tsx';
 import { PlanDialog } from '../library/library-bulk.tsx';
 import { Link, LoadFailed, ModalActions, pageWidth, TextLink } from '../../components/index.ts';
 import { catalogPath, formatBytes, groupName, posterUrl, reasonText, seasonName, stageLabel, statusHelpText, statusLabel } from '../../lib/format.ts';
@@ -90,7 +89,7 @@ const retryActions = new Set<QueueResolution['action']>(['retry', 'retry_fetch',
 const OpenMatch = createContext<(request: MatchRequest) => void>(() => {});
 
 // The server supplies each action and its explicit target scope.
-function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refresh }: { entry: QueueEntryView; entries?: QueueEntryView[]; actions?: QueueResolution[]; run: Run; refresh: () => void }) {
+function EntryFix({ entry, entries = [entry], actions = entry.actions, run }: { entry: QueueEntryView; entries?: QueueEntryView[]; actions?: QueueResolution[]; run: Run }) {
   const openMatch = useContext(OpenMatch);
   return (
     <>
@@ -103,8 +102,6 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
           case 'match':
           case 'use_existing':
             return <Button key={action} aria-haspopup="dialog" onClick={() => openMatch({ entry: target, ids: item.ids, entries, fileSource: item.fileSource, fixedSource: action === 'use_existing' })}>{t(item.label)}</Button>;
-          case 'attach':
-            return <AttachDialog key={item.action} entry={target} ids={item.ids} onDone={refresh} />;
           case 'replace':
             return <ReplaceAllFix key={item.action} ids={item.ids} run={run} />;
           case 'settings':
@@ -122,7 +119,7 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run, refr
 // that it opens.
 const fixKey = (item: QueueResolution) => (item.action === 'settings' ? `settings:${item.settings === 'library' ? 'media' : 'connections'}` : item.action);
 
-function GroupFix({ actions, stopped, run, refresh }: { actions: QueueResolution[]; stopped: QueueEntryView[]; run: Run; refresh: () => void }) {
+function GroupFix({ actions, stopped, run }: { actions: QueueResolution[]; stopped: QueueEntryView[]; run: Run }) {
   const fixes = new Map<string, QueueResolution>();
   for (const item of actions) {
     if (retryActions.has(item.action)) continue;
@@ -135,7 +132,7 @@ function GroupFix({ actions, stopped, run, refresh }: { actions: QueueResolution
   return (
     <div className="flex flex-wrap justify-start gap-2 mt-2 w-full">
       {[...fixes].map(([key, item]) => (
-        <EntryFix key={key} entry={entry} entries={stopped} actions={[item]} run={run} refresh={refresh} />
+        <EntryFix key={key} entry={entry} entries={stopped} actions={[item]} run={run} />
       ))}
     </div>
   );
@@ -660,7 +657,7 @@ function SeasonTable({ titleKey, entries, opened, onSeason, detail }: { titleKey
 }
 
 // The inspector of a series: the progress of the whole series, and the seasons. A season opens its episodes under its row.
-function GroupDetail({ group, filters, run, refresh }: { group: QueueGroupRow; filters: Filters; run: Run; refresh: () => void }) {
+function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: Filters; run: Run }) {
   const [season, setSeason] = useState<number | null>(null);
   const { data, error, refetch } = useGroupEntries(group, filters);
   const entries = data?.items;
@@ -713,7 +710,7 @@ function GroupDetail({ group, filters, run, refresh }: { group: QueueGroupRow; f
             message={message}
             divider={!importing}
           >
-            {stopped.length > 0 && <GroupFix actions={summary?.actions ?? group.actions ?? []} stopped={stopped} run={run} refresh={refresh} />}
+            {stopped.length > 0 && <GroupFix actions={summary?.actions ?? group.actions ?? []} stopped={stopped} run={run} />}
           </DetailStatus>
         ) : (
           <Text>—</Text>
@@ -753,10 +750,10 @@ function GroupDetail({ group, filters, run, refresh }: { group: QueueGroupRow; f
 }
 
 // The inspector of a movie: its status and its progress, with the match of a file when the target asks for it.
-function MovieDetail({ entry, run, refresh }: { entry: QueueEntryView; run: Run; refresh: () => void }) {
+function MovieDetail({ entry, run }: { entry: QueueEntryView; run: Run }) {
   return (
     <div className="grid gap-3">
-      <EntryDetails entry={entry} label={false} fix={<EntryFix entry={entry} run={run} refresh={refresh} />} />
+      <EntryDetails entry={entry} label={false} fix={<EntryFix entry={entry} run={run} />} />
     </div>
   );
 }
@@ -774,7 +771,7 @@ function PendingDetail() {
 // title changes, so a season of the title before does not stay open. The last item of the menu deletes the row from the
 // library, with the same modal as the page of the title. A row of a series is one season, so it deletes that season. The
 // whole series goes only from the page of the series.
-function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDelete, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; refresh: () => void; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onDelete: (request: PlanRequest, subject: string) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
+function Inspector({ row, filters, run, openLogs, openGroupLogs, onDelete, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onDelete: (request: PlanRequest, subject: string) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
   const deletion: { request: PlanRequest; subject: string } | null =
     row.kind === 'entry'
       ? { request: { action: 'remove', keys: [row.titleKey] }, subject: row.title }
@@ -805,11 +802,11 @@ function Inspector({ row, filters, run, refresh, openLogs, openGroupLogs, onDele
         {items.length > 0 && <ActionMenu label={t('Actions for {name}', { name: nameOf(row) })} items={items} />}
       </div>
       {row.kind === 'group' ? (
-        <GroupDetail key={`${row.key}|${filters.stage}`} group={row} filters={filters} run={run} refresh={refresh} />
+        <GroupDetail key={`${row.key}|${filters.stage}`} group={row} filters={filters} run={run} />
       ) : row.kind === 'pending' ? (
         <PendingDetail />
       ) : (
-        <MovieDetail key={`${row.id}|${filters.stage}`} entry={row} run={run} refresh={refresh} />
+        <MovieDetail key={`${row.id}|${filters.stage}`} entry={row} run={run} />
       )}
     </div>
   );
@@ -1198,7 +1195,7 @@ function QueueView() {
                   <div ref={detailsBox} className="w-full">
                     <Pane className="w-full">
                       <OpenMatch.Provider value={setMatch}>
-                        <Inspector row={chosen} filters={filters} run={run} refresh={refresh} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(request, subject) => setDeletion({ request, subject })} onBack={back} backRef={backButton} />
+                        <Inspector row={chosen} filters={filters} run={run} openLogs={setLogs} openGroupLogs={setGroupLogs} onDelete={(request, subject) => setDeletion({ request, subject })} onBack={back} backRef={backButton} />
                       </OpenMatch.Provider>
                     </Pane>
                   </div>
