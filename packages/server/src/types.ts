@@ -859,7 +859,7 @@ export type CheckRun = { entryIds: string[]; checks: ImportCheck[] };
 export type CheckResult = { code: string; detail?: string };
 export type ImportStatus = ReturnType<typeof createImportStatus>;
 // The TMDB part replaces on each refresh. `override` and `fileId` belong to ladarr, so a refresh keeps them.
-export type Episode = EpisodeMeta & { override: Override | null; fileId: string | null };
+export type Episode = EpisodeMeta & { override: Override | null; fileId: string | null; removedFromTmdb?: true };
 // `meta` holds the TMDB facts. Every other field is a choice of the user or a fact of ladarr,
 // and a refresh never changes it. This keeps a refresh from changing a policy.
 export type Title = {

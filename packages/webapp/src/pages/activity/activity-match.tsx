@@ -2,7 +2,7 @@ import type { AttachCandidates, EpisodeRef, FileRow, QueueEntryView, QueueGroupP
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { Button, Dropdown, EmptyState, Field, Modal, SearchableDropdown, Spinner, Table } from 'nebula';
+import { Button, Dropdown, EmptyState, Modal, SearchableDropdown, Spinner, Table } from 'nebula';
 import { Confirm } from '../../components/confirm.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { describeError, formatBytes, groupName, seasonName } from '../../lib/format.ts';
@@ -23,6 +23,7 @@ const errorText = (err: unknown) =>
 const pad = (value: number) => String(value).padStart(2, '0');
 const pointText = (point: EpisodeRef) => `S${pad(point.season)}E${pad(point.number)}`;
 const sameEpisode = (a: EpisodeRef, b: EpisodeRef) => a.season === b.season && a.number === b.number;
+const validSeason = (value: string) => /^\d+$/.test(value) && Number.isSafeInteger(Number(value));
 type FileSource = QueuePackFiles['source'];
 type PackFile = QueuePackFiles['files'][number];
 type Draft = { hash?: string; file?: PackFile | null; path?: string };
@@ -93,7 +94,13 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   });
   const rows = mapSeries ? episodes : episodes.filter((point) => point.season === entry.season);
   const seasonChanged = (point: QueueMappingEpisode) => seasons[point.id] !== undefined && Number(seasons[point.id]) !== point.releaseSeason;
-  const invalidSeason = Object.values(seasons).some((value) => !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)));
+  const invalidSeason = Object.values(seasons).some((value) => !validSeason(value));
+  const knownSeasons = new Set(rows.flatMap((point) => [point.season, point.releaseSeason]));
+  for (const value of Object.values(seasons)) if (validSeason(value)) knownSeasons.add(Number(value));
+  let nextSeason = 1;
+  while (knownSeasons.has(nextSeason)) nextSeason++;
+  knownSeasons.add(nextSeason);
+  const seasonOptions = [...knownSeasons].sort((a, b) => a - b).map((number) => ({ value: String(number) }));
   const sources = new Map<string, string>();
   const initial = new Set<string>();
   const essential = new Set<string>();
@@ -275,10 +282,10 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
         <Table
           aria-label={t('Map episodes')}
           loading={loading}
-          minWidth={mapSeries ? '57rem' : undefined}
+          minWidth={mapSeries ? '60rem' : undefined}
           columns={[
             { label: t('Episodes'), width: '9rem' },
-            ...(mapSeries ? [{ label: t('Season'), width: '5rem' }, { label: t('Torrent'), width: '22rem' }] : []),
+            ...(mapSeries ? [{ label: t('Season'), width: '8rem' }, { label: t('Torrent'), width: '22rem' }] : []),
             { label: t('Matches'), width: mapSeries ? '21rem' : undefined },
           ]}
           rows={rows.map((point) => {
@@ -311,12 +318,9 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
               cells: [
                 pointText(point),
                 ...(mapSeries ? [(
-                  <Field key="season" label={t('Season')} hideLabel type="number" min={0} step={1} size="sm" width="full"
+                  <SearchableDropdown key="season" label={t('Season')} hideLabel width="full" allowCustom options={seasonOptions} emptyText={t('No options.')}
                     disabled={busy || dropped} value={seasons[point.id] ?? String(point.releaseSeason)}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value;
-                      setSeasons((state) => ({ ...state, [point.id]: value }));
-                    }} />
+                    onValueChange={(value) => setSeasons((state) => ({ ...state, [point.id]: value }))} />
                 ), (
                   <SearchableDropdown
                     key="torrent" label={t('Torrent')} hideLabel width="full" value={hash}

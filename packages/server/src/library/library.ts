@@ -76,5 +76,5 @@ export function mergeEpisodes(existing: Episode[], fetched: EpisodeMeta[], keep:
   // TMDB can drop an episode. The user keeps one that has a choice, a file, or a reference from the numbering.
   // A file links to its episode through fileId, so this check covers files too.
   const kept = existing.filter((episode) => !fresh.has(episodeKey(episode)) && (episode.override || episode.fileId || keep(episode)));
-  return [...merged, ...kept].sort(bySeasonNumber);
+  return [...merged, ...kept.map((episode) => ({ ...episode, removedFromTmdb: true as const }))].sort(bySeasonNumber);
 }

@@ -12,12 +12,14 @@ type SearchableDropdownProps = {
   placeholder?: string;
   value: string;
   onValueChange: (value: string) => void;
+  // Use the typed text as the value, even if no option matches.
+  allowCustom?: boolean;
   options: { value: string; label?: string; disabled?: boolean }[];
   emptyText?: string;
   width?: keyof typeof widths;
 };
 
-export function SearchableDropdown({ label, hideLabel, disabled, placeholder, value, onValueChange, options, emptyText = 'No options.', width = 'md' }: SearchableDropdownProps) {
+export function SearchableDropdown({ label, hideLabel, disabled, placeholder, value, onValueChange, allowCustom, options, emptyText = 'No options.', width = 'md' }: SearchableDropdownProps) {
   const id = useId();
   const anchorRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
@@ -31,6 +33,10 @@ export function SearchableDropdown({ label, hideLabel, disabled, placeholder, va
       </label>
       <Combobox.Root
         items={items}
+        inputValue={allowCustom ? value : undefined}
+        onInputValueChange={allowCustom ? (text, details) => {
+          if (details.reason === 'input-change') onValueChange(text);
+        } : undefined}
         value={value || null}
         onValueChange={(next, details) => {
           if (details.reason === 'escape-key') details.allowPropagation();

@@ -371,6 +371,11 @@ test('maps selected episodes from a completed torrent with different season numb
   const hash = completeTorrent(longName, secondFiles, '');
   const missing = title.episodes.slice(5).map(({ number }) => blocked(title.key, 1, number, 'fetching', 'pack_partial'));
   const unselected = missing.at(-1)!;
+  title.meta.seasons.push({ seasonNumber: 0, episodeCount: 1, airDate: null });
+  title.episodes.push(
+    { ...title.episodes[0]!, tmdbId: 100, season: 0, fileId: null },
+    { ...title.episodes[0]!, tmdbId: 111, number: 11, removedFromTmdb: true },
+  );
   data.queuePaused = true;
   await start([...available, ...missing]);
   const before = await Promise.all(available.map((item) => entry(item.id)));
@@ -387,6 +392,8 @@ test('maps selected episodes from a completed torrent with different season numb
   const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
   await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Season', 'Torrent', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(11);
+  await expect(table.getByText('S00E01', { exact: true })).toHaveCount(0);
+  await expect(table.getByText('S01E11', { exact: true })).toHaveCount(0);
   const cellsOf = (number: number) => table.getByRole('row').filter({
     has: page.getByRole('cell', { name: episodeLabel(number), exact: true }),
   }).getByRole('cell');
@@ -401,7 +408,23 @@ test('maps selected episodes from a completed torrent with different season numb
   await expect(table).toHaveCSS('table-layout', 'fixed');
   for (const [index, target] of missing.entries()) {
     const cells = cellsOf(target.number!);
-    if (target.id !== unselected.id) await cells.getByRole('spinbutton', { name: 'Season' }).fill('2');
+    const season = cells.getByRole('combobox', { name: 'Season', exact: true });
+    await expect(season).toHaveValue('1');
+    if (target.id !== unselected.id) {
+      if (index === 0) {
+        await season.click();
+        await page.getByRole('option', { name: '2', exact: true }).click();
+        await season.fill('12');
+        await page.keyboard.press('Escape');
+        await expect(season).toHaveValue('12');
+      }
+      await season.fill('2');
+      const option = page.getByRole('option', { name: '2', exact: true });
+      const label = option.getByText('2', { exact: true });
+      await expect(label).toBeVisible();
+      expect(await label.evaluate((node) => node.clientWidth >= node.scrollWidth)).toBe(true);
+      await option.click();
+    }
     const input = cells.getByRole('combobox', { name: 'Torrent', exact: true });
     await input.fill('Second.Part');
     const torrent = page.getByRole('option', { name: /Show\.Name\.S02\.Second\.Part\./ });
@@ -1082,7 +1105,7 @@ for (const shared of [false, true]) {
           await expect(panel).toBeInViewport({ ratio: 1 });
           await expectFooter(panel);
           const inputs = table.getByRole('combobox');
-          await expect(inputs).toHaveCount(6);
+          await expect(inputs).toHaveCount(9);
           expect(await inputs.evaluateAll((fields) => fields.every((field) => {
             const bounds = field.closest('td')!.getBoundingClientRect();
             const input = field.getBoundingClientRect();

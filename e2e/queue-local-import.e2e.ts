@@ -71,7 +71,7 @@ test('does not map local files without a torrent', async ({ page }) => {
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
   const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
-  await expect(table.getByRole('spinbutton', { name: 'Season' }).first()).toHaveValue('1');
+  await expect(table.getByRole('combobox', { name: 'Season' }).first()).toHaveValue('1');
   await apply.click();
   const question = page.getByRole('dialog', { name: 'Apply this episode mapping?', exact: true });
   await question.getByRole('button', { name: 'Cancel', exact: true }).click();

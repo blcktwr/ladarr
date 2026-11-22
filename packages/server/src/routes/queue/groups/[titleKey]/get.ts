@@ -15,7 +15,11 @@ async function identity(path: string) {
 
 async function mappingOf(title: Title, clients: Clients, fixedSeason: number | null): Promise<QueueMappingEpisode[]> {
   const numbering = normalizeNumbering(title.numbering);
-  const rows = title.episodes.map(({ season, number, fileId }) => {
+  const regularSeasons = new Set(title.meta.seasons.filter((season) => season.seasonNumber > 0 && season.episodeCount > 0).map((season) => season.seasonNumber));
+  const episodes = fixedSeason === null
+    ? title.episodes.filter((episode) => regularSeasons.has(episode.season) && episode.tmdbId > 0 && episode.number > 0 && !episode.removedFromTmdb)
+    : title.episodes.filter((episode) => episode.season === fixedSeason);
+  const rows = episodes.map(({ season, number, fileId }) => {
     const id = `${title.key}:${season}x${number}`;
     const entry = db.data.queue[id];
     const record = fileId ? db.data.files[fileId] : undefined;

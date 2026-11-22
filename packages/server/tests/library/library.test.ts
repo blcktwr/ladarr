@@ -142,6 +142,8 @@ describe('episode merge', () => {
     const before = [episode(1, 1, null), episode(1, 2, null)];
     const after = mergeEpisodes(before, [], (one) => one.season === 1 && one.number === 2);
     expect(after.map((e) => e.number)).toEqual([2]);
+    expect(after[0]?.removedFromTmdb).toBe(true);
+    expect(mergeEpisodes(after, before)[1]?.removedFromTmdb).toBeUndefined();
   });
 
   it('sorts by season and number', () => {
