@@ -283,7 +283,8 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
             const shown = match?.file ?? item?.file?.name ?? (suggested ? suggested.originalName || suggested.rel : undefined) ?? '—';
             const torrentName = (draft?.hash ? options.find((option) => option.value === draft.hash)?.label ?? draft.hash : undefined)
               ?? options.find((option) => option.value === match?.hash)?.label ?? match?.torrent ?? match?.hash
-              ?? (!match && (item?.hasTorrent || source.own) ? item?.release?.title ?? options.find((option) => option.value === source.own)?.label ?? source.own : null) ?? '—';
+              ?? (!match && (item?.hasTorrent || source.own) ? item?.release?.title ?? options.find((option) => option.value === source.own)?.label ?? source.own : null);
+            const torrent = torrentName ? hash : '';
             const matched = suggested?.rel ?? name;
             const fileValue = draft?.file !== undefined ? draft.file?.rel ?? '' : matched ?? match?.file ?? '';
             const files = list?.options ?? [];
@@ -310,10 +311,10 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
                 pointText(point),
                 ...(mapSeries ? [(
                   <SearchableDropdown
-                    key="torrent" label={t('Torrent')} hideLabel width="full" value={hash}
-                    placeholder={t('No torrent selected')} emptyText={t('No options.')}
+                    key="torrent" label={t('Torrent')} hideLabel width="full" value={torrent}
+                    placeholder="—" emptyText={t('No options.')}
                     disabled={busy || !pickTorrent}
-                    options={hash && !options.some((option) => option.value === hash) ? [...options, { value: hash, label: torrentName }] : options}
+                    options={torrent && !options.some((option) => option.value === torrent) ? [...options, { value: torrent, label: torrentName ?? torrent }] : options}
                     onValueChange={(next) => change(point.id, { hash: next === own || next === match?.hash ? undefined : next })}
                   />
                 )] : []),

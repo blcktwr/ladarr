@@ -707,7 +707,7 @@ test('discards an episode from its row and leaves it unassigned', async ({ page 
   const cells = table.getByRole('row').filter({ hasText: 'S02E04' }).getByRole('cell');
   await cells.last().getByRole('button', { name: 'Discard episode S02E04', exact: true }).click();
   await expect(cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true })).toHaveValue('');
-  await expect(cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true })).toHaveAttribute('placeholder', 'No torrent selected');
+  await expect(cells.nth(1).getByRole('combobox', { name: 'Torrent', exact: true })).toHaveAttribute('placeholder', '—');
   await expect(cells.last().getByRole('combobox')).toHaveValue('');
   await expect.poll(async () => (await stack.call('GET', '/queue/entries/tv:3:2x4')).status).toBe(404);
   const episodes = (await stack.call('GET', '/library/tv:3/episodes?season=2')).body.episodes;
