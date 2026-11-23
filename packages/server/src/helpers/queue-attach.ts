@@ -1,4 +1,4 @@
-import type { QueueClientDetail } from '@ladarr/shared/types';
+import type { AttachCandidates, QueueClientDetail } from '@ladarr/shared/types';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { db } from '../core/db.ts';
@@ -31,10 +31,23 @@ export function attachRefusal(entry: QueueEntry): string | null {
   return 'This target is not waiting for a download.';
 }
 
-export const torrentInUse = (entry: QueueEntry, hash: string) =>
+export const torrentInUse = (entry: Pick<QueueEntry, 'titleKey'>, hash: string) =>
   Object.values(db.data.queue).some((other) => other.transferHash === hash && isActive(other) && other.titleKey !== entry.titleKey);
 
-async function findDownload(entry: QueueEntry, clients: Clients, hash: string | undefined): Promise<{ handle: ClientHandle; torrent: Torrent } | { error: 'torrent_in_use' | 'download_not_found' | 'client_missing' | 'torrent_not_found' }> {
+export async function attachCandidates(handles: ClientHandle[], titleKey: string, mapping: boolean, q = '') {
+  const byHash = new Map<string, Torrent>();
+  for (const list of await Promise.all(handles.map((handle) => handle.api.listAll()))) {
+    for (const torrent of list) if ((!mapping || torrent.complete) && !byHash.has(torrent.hash)) byHash.set(torrent.hash, torrent);
+  }
+  const busy = new Set<string>();
+  for (const entry of Object.values(db.data.queue)) if (entry.transferHash && isActive(entry) && entry.titleKey !== titleKey) busy.add(entry.transferHash);
+  const free = [...byHash.values()].filter((torrent) => !busy.has(torrent.hash) && (!q || torrent.name.toLowerCase().includes(q))).sort((a, b) => b.addedAt - a.addedAt);
+  const torrents: AttachCandidates['torrents'] = (mapping ? free : free.slice(0, MAX_TORRENTS)).map(({ hash, name, sizeBytes, progress, complete, category, addedAt }) =>
+    ({ hash, name, sizeBytes, progress, complete, category, addedAt }));
+  return { total: free.length, torrents };
+}
+
+export async function findDownload(entry: Pick<QueueEntry, 'titleKey' | 'transferHash' | 'clientId'>, clients: Clients, hash: string | undefined): Promise<{ handle: ClientHandle; torrent: Torrent } | { error: 'torrent_in_use' | 'download_not_found' | 'client_missing' | 'torrent_not_found' }> {
   if (hash && torrentInUse(entry, hash)) return { error: 'torrent_in_use' };
   const transfer = hash ?? entry.transferHash;
   if (!transfer) return { error: 'download_not_found' };

@@ -1,8 +1,8 @@
-import type { FolderPlan, RenameRow, RunView } from '@ladarr/shared/types';
+import type { AttachCandidates, FolderPlan, RenameRow, RunView } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../lib/api.ts';
-import { Actions, Badge, Button, Field, Form, List, Modal, Row, Section, Spinner, Switch } from 'nebula';
+import { Actions, Badge, Button, Field, Form, List, Modal, Row, SearchableDropdown, Section, Spinner, Switch } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { formatBytes } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
@@ -74,13 +74,20 @@ export function RunProgress({ id }: { id: string }) {
 
 // Attaches the video files of a folder that the user names to a title in the library. The preview shows each file
 // and changes nothing.
-export function AttachFolderDialog({ titleKey, label, isOpen, onClose }: { titleKey: string; label: string; isOpen: boolean; onClose: () => void }) {
+export function AttachFolderDialog({ titleKey, label, series, isOpen, onClose }: { titleKey: string; label: string; series: boolean; isOpen: boolean; onClose: () => void }) {
   const [path, setPath] = useState('');
+  const [hash, setHash] = useState('');
   const [replace, setReplace] = useState(false);
   const [plan, setPlan] = useState<FolderPlan | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
+  const downloadPath = `/library/${titleKey}/attach`;
+  const candidates = useQuery<Pick<AttachCandidates, 'torrents'>>({
+    queryKey: [downloadPath],
+    enabled: isOpen && series,
+    gcTime: 0,
+  });
   // A new value of the form makes the answer of an earlier preview old. The number tells which answer is the current one.
   const request = useRef(0);
   const reset = () => {
@@ -91,14 +98,21 @@ export function AttachFolderDialog({ titleKey, label, isOpen, onClose }: { title
   useEffect(() => {
     if (isOpen) return;
     reset();
+    setHash('');
     setError('');
     setRunId(null);
   }, [isOpen]);
 
-  async function ask(route: 'preview' | 'start') {
+  async function ask(route: 'preview' | 'start' | 'attach') {
+    if (busy) return;
     setError('');
     setBusy(true);
     try {
+      if (route === 'attach') {
+        await api(downloadPath, { method: 'POST', body: { hash } });
+        onClose();
+        return;
+      }
       const body = { titleKey, path: path.trim(), replace };
       if (route === 'preview') {
         const mine = ++request.current;
@@ -129,9 +143,13 @@ export function AttachFolderDialog({ titleKey, label, isOpen, onClose }: { title
             <Button variant="ghost" onClick={onClose}>
               {t('Cancel')}
             </Button>
-            <Button disabled={!plan || plan.importable === 0} pending={busy} onClick={() => void ask('start')}>
-              {plan ? (plan.importable === 1 ? t('Import 1 file') : t('Import {n} files', { n: plan.importable })) : t('Import')}
-            </Button>
+            {hash ? (
+              <Button pending={busy} onClick={() => void ask('attach')}>{t('Attach download')}</Button>
+            ) : (
+              <Button disabled={!plan || plan.importable === 0} pending={busy} onClick={() => void ask('start')}>
+                {plan ? (plan.importable === 1 ? t('Import 1 file') : t('Import {n} files', { n: plan.importable })) : t('Import')}
+              </Button>
+            )}
           </>
         )
       }
@@ -144,32 +162,57 @@ export function AttachFolderDialog({ titleKey, label, isOpen, onClose }: { title
           <Form
             onSubmit={(e) => {
               e.preventDefault();
-              void ask('preview');
+              if (!hash) void ask('preview');
             }}
           >
+            {series && (
+              <SearchableDropdown
+                label={t('Torrent')}
+                width="full"
+                placeholder={t('No torrent selected')}
+                emptyText={candidates.error ? requestMessage(candidates.error) : t('No options.')}
+                disabled={busy}
+                value={hash}
+                options={(candidates.data?.torrents ?? []).map(({ hash, name }) => ({ value: hash, label: name }))}
+                onValueChange={(value) => {
+                  setHash(value);
+                  if (value) setPath('');
+                  setError('');
+                  reset();
+                }}
+              />
+            )}
             <Field
               label={t('Folder')}
-              required
+              required={!hash}
+              disabled={busy}
               autoFocus
               width="full"
               placeholder="/data/downloads/Show Name"
               value={path}
               onValueChange={(value) => {
                 setPath(value);
+                if (value) setHash('');
+                setError('');
                 reset();
               }}
             />
-            <Switch
-              label={t('Replace files that the library has')}
-              checked={replace}
-              onCheckedChange={(value) => {
-                setReplace(value);
-                reset();
-              }}
-            />
-            <Button type="submit" variant="ghost" pending={busy}>
-              {t('Preview')}
-            </Button>
+            {!hash && (
+              <>
+                <Switch
+                  label={t('Replace files that the library has')}
+                  checked={replace}
+                  disabled={busy}
+                  onCheckedChange={(value) => {
+                    setReplace(value);
+                    reset();
+                  }}
+                />
+                <Button type="submit" variant="ghost" pending={busy}>
+                  {t('Preview')}
+                </Button>
+              </>
+            )}
           </Form>
           {plan && <PlanView plan={plan} label={label} />}
         </>

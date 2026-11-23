@@ -718,7 +718,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
       {message && <Alert tone="danger">{message}</Alert>}
       <PlanDialog request={plan?.request ?? null} subject={plan?.subject} onClose={() => setPlan(null)} onDone={() => void reload()} />
       {title && info !== null && <FileInfoDialog titleKey={title.key} resolution={info} onClose={() => setInfo(null)} />}
-      {title && <AttachFolderDialog titleKey={title.key} label={title.title} isOpen={attaching} onClose={() => setAttaching(false)} />}
+      {title && <AttachFolderDialog titleKey={title.key} label={title.title} series={series} isOpen={attaching} onClose={() => setAttaching(false)} />}
       {series && (
         <>
           <div className={`${pageWidth} grid gap-6`}>

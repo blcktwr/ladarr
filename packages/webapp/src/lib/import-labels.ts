@@ -59,6 +59,10 @@ export const requestError: Record<string, string> = labels({
   title_busy: 'This title has an open import. Wait until it ends.',
   nothing_to_import: 'No file can be imported.',
   nothing_to_rename: 'No file can be renamed.',
+  client_missing: 'No download client is set.',
+  client_unreachable: 'The client does not answer.',
+  torrent_in_use: 'A target of another title uses this download.',
+  torrent_not_found: 'The client does not have this download now.',
 });
 
 export const templateError = (problem: string, kind: 'movie' | 'episode') => {

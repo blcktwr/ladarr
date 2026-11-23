@@ -114,6 +114,7 @@ import { titleParam } from './helpers/library.ts';
 import { libraryGet } from './routes/library/get.ts';
 import { libraryAdd } from './routes/library/post.ts';
 import { libraryTitleGet } from './routes/library/[key]/get.ts';
+import { libraryAttachGet, libraryAttachPost } from './routes/library/[key]/attach.ts';
 import { libraryUpgrades } from './routes/library/[key]/upgrades/get.ts';
 import { libraryTitleUpdate } from './routes/library/[key]/patch.ts';
 import { libraryTitleDelete } from './routes/library/[key]/delete.ts';
@@ -270,6 +271,8 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   }
   const clientCheck = services ? createClientCheck(services.clients) : undefined;
   if (services) {
+    api.get('/library/:key/attach', titleParam(), libraryAttachGet(services.clients));
+    api.post('/library/:key/attach', titleParam(), libraryAttachPost(services.queue, services.clients));
     api.get('/queue/summary', queueSummaryGet(services.poller));
     api.post('/queue/pause', queuePausePost(services.queue));
     api.get('/queue/jobs', queueJobsGet(services.finder));
