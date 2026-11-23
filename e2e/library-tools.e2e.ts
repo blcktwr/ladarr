@@ -473,10 +473,10 @@ test('the General tab changes the language of the interface', async ({ page }) =
   expect((await stack.call('GET', '/settings')).body.settings.language).toBe('en');
 });
 
-test('the Search button on a result shows on hover and searches the title', async ({ page }) => {
+test('the Add button shows on hover only until the title is in the catalog', async ({ page }) => {
   await page.goto(`${URL_BASE}/catalog/movie/2`);
   const result = page.getByRole('main').getByRole('link', { name: /Bench Movie Alpha/ });
-  const button = result.getByRole('button', { name: 'Search Bench Movie Alpha' });
+  const button = result.getByRole('button', { name: 'Add', exact: true });
   const scrim = button.locator('..');
   // The pointer is away from the poster, so the button hides.
   await page.mouse.move(0, 0);
@@ -488,6 +488,10 @@ test('the Search button on a result shows on hover and searches the title', asyn
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Added to the queue')).toBeVisible();
   await expect(page).toHaveURL(/\/catalog\/movie\/2$/);
   expect((await stack.call('GET', '/library/movie:900001')).status).toBe(200);
+  await expect(button).toHaveCount(0);
+  await page.reload();
+  await result.hover();
+  await expect(button).toHaveCount(0);
 });
 
 test('the General tab changes the theme of the interface', async ({ page }) => {

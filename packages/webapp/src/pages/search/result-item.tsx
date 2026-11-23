@@ -2,7 +2,7 @@ import type { SearchResult } from '@ladarr/shared/types';
 import { Button, Thumbnail, alert } from 'nebula';
 import { useState } from 'react';
 import { Link as RouterLink } from 'react-router';
-import { api, ApiError } from '../../lib/api.ts';
+import { api } from '../../lib/api.ts';
 import { catalogPath, contentType, posterState, posterUrl, describeError } from '../../lib/format.ts';
 import { t } from '../../i18n/index.ts';
 import { useQueueNotice } from '../../lib/queue-notice.ts';
@@ -10,24 +10,17 @@ import { useQueueNotice } from '../../lib/queue-notice.ts';
 // The poster opens the page of the title, in the catalog or not. With onSelectedChange, the poster can also be selected.
 // The poster has no text under it; its title stays for a screen reader.
 export function ResultItem({ result, size, selected, onSelectedChange }: { result: SearchResult; size?: 'sm' | 'md'; selected?: boolean; onSelectedChange?: (selected: boolean) => void }) {
-  const [addedKey, setAddedKey] = useState<string | null>(null);
-  const libraryKey = result.libraryKey ?? addedKey;
+  const [added, setAdded] = useState(false);
   const [pending, setPending] = useState(false);
   const queueNotice = useQueueNotice();
 
-  async function search() {
+  async function add() {
     setPending(true);
     try {
-      if (libraryKey) {
-        const { started } = await api<{ started: string[] }>('/queue/search', { method: 'POST', body: { titleKey: libraryKey } });
-        if (!started.length) throw new ApiError(409, 'nothing_to_search');
-        queueNotice(started.length);
-      } else {
-        const summary = { title: result.title, year: result.year, posterPath: result.posterPath };
-        const { title } = await api<{ title: { key: string } }>('/library', { method: 'POST', body: { mediaType: result.mediaType, tmdbId: result.tmdbId, add: 'all', summary } });
-        setAddedKey(title.key);
-        queueNotice(1);
-      }
+      const summary = { title: result.title, year: result.year, posterPath: result.posterPath };
+      await api('/library', { method: 'POST', body: { mediaType: result.mediaType, tmdbId: result.tmdbId, add: 'all', summary } });
+      setAdded(true);
+      queueNotice(1);
     } catch (err) {
       alert.danger(t('The request did not complete.'), describeError(err), { timeout: 0 });
     } finally {
@@ -35,14 +28,14 @@ export function ResultItem({ result, size, selected, onSelectedChange }: { resul
     }
   }
 
-  const button = result.mediaType === 'tv' && libraryKey ? undefined : (
+  const button = result.libraryKey || added ? undefined : (
     <Button
       pending={pending}
       onClick={(event) => {
         // The button is in the link of the poster, and it does its own work.
         event.preventDefault();
         event.stopPropagation();
-        void search();
+        void add();
       }}
     >
       {t('Add')}
