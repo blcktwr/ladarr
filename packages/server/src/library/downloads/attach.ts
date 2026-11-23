@@ -9,6 +9,7 @@ export function recordTorrent(
   entry: QueueEntry,
   { handle, torrent, kind, external }: { handle: ClientHandle; torrent: Torrent; kind: ReleaseRef['kind']; external: boolean },
 ): void {
+  if (entry.release?.uploadPath && entry.source) forgetSource(entry);
   entry.release = {
     guid: `attached:${torrent.hash}`,
     indexerId: 0,
@@ -42,7 +43,7 @@ export async function attachTorrent(
   let attached = false;
   for (const target of targets) {
     // A cancelled or completed target stays as it is. A late attach must not revive it.
-    if (!isActive(target) || target.state.kind === 'paused' || (target.state.kind === 'blocked' && !manual)) continue;
+    if (target.release?.uploadPath || !isActive(target) || target.state.kind === 'paused' || (target.state.kind === 'blocked' && !manual)) continue;
     queue.endAttempt(target, 'cancelled', 'replaced by an attached download');
     queue.startAttempt(target, 'attached download');
     recordTorrent(target, { handle, torrent, kind: targets.length > 1 ? 'pack' : 'single', external: true });

@@ -10,6 +10,7 @@ import { unfinishedImports } from './library/imports/importer.ts';
 import { createLimiter } from './core/limiter.ts';
 import { createPoller } from './library/downloads/poller.ts';
 import { createQueue } from './library/downloads/queue.ts';
+import { enqueueUpload, uploadHash } from './library/downloads/upload.ts';
 import { createIndexerService } from './library/grab/torznab.ts';
 import { UpdateError, installUpdate } from './system/update.ts';
 import { SCHEMA_VERSION, createSaver, db, open } from './core/db.ts';
@@ -58,7 +59,7 @@ if (!tmdb) log.warn('No TMDB key is in this build, so titles cannot be searched'
 else void withOutboundRequests(() => tmdb.check().then(({ ok, code }) => ok || log.warn('TMDB check failed', { code })));
 
 const save = createSaver();
-const persist = () => void save().catch((error) => log.error('could not save the database', { error }));
+const persist = () => save().catch((error) => log.error('could not save the database', { error }));
 const clients = createClients();
 const webhooks = createWebhooks({
   enqueue: (input) => worker.enqueue(input),
@@ -82,10 +83,21 @@ const local = new Set(Object.values(db.data.queue).filter((entry) => !entry.tran
 for (const titleKey of local) worker.enqueue({ type: 'import.local', payload: { titleKey }, dedupeKey: `local:${titleKey}` });
 // A target that fetched its torrent waits for a slot. The source stays in the data, so the send does not ask the
 // indexer for the release again.
+const uploads = new Map<string, (typeof db.data.queue)[string][]>();
 for (const entry of Object.values(db.data.queue)) {
+  const hash = uploadHash(entry);
+  if (hash) {
+    if (entry.state.kind === 'waiting_slot' || entry.state.kind === 'sending') {
+      const entries = uploads.get(hash) ?? [];
+      entries.push(entry);
+      uploads.set(hash, entries);
+    }
+    continue;
+  }
   if (entry.state.kind !== 'waiting_slot' || !entry.source) continue;
   worker.enqueue({ type: 'queue.send', payload: { entryIds: [entry.id] }, dedupeKey: `send:${entry.id}`, runAt: entry.createdAt });
 }
+for (const [hash, entries] of uploads) enqueueUpload(worker.enqueue, entries, hash);
 
 const restorer = createRestorer({ dir: config.backupDir, worker });
 const services = { queue, finder, poller, clients, importStatus };

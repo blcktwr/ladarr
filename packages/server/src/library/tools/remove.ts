@@ -3,7 +3,7 @@ import { basename, dirname, join } from 'node:path';
 import { db } from '../../core/db.ts';
 import { deleteItemLog } from '../../core/log.ts';
 import { inside } from '../imports/folder-files.ts';
-import { isActive } from '../downloads/queue.ts';
+import { forgetSource, isActive, ownsUpload } from '../downloads/queue.ts';
 import type { Db, Job, MediaFile, Queue, QueueEntry, Retired, Seen, Title } from '../../types.ts';
 
 // The torrents that ladarr added for the removed targets and files, and that no target outside the removal still uses.
@@ -11,7 +11,8 @@ import type { Db, Job, MediaFile, Queue, QueueEntry, Retired, Seen, Title } from
 export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[], files: MediaFile[] = []) {
   const keyOf = (entry: QueueEntry) => (entry.clientId && entry.transferHash ? `${entry.clientId}\n${entry.transferHash}` : null);
   const used = new Set(remaining.flatMap((entry) => keyOf(entry) ?? []));
-  const attached = new Set(removed.flatMap((entry) => (entry.release?.external ? (keyOf(entry) ?? []) : [])));
+  const protectedTorrent = (entry: QueueEntry) => entry.release?.uploadPath ? !ownsUpload(entry) : entry.release?.external === true;
+  const attached = new Set(removed.flatMap((entry) => (protectedTorrent(entry) ? (keyOf(entry) ?? []) : [])));
   const seen = new Set<string>();
   const refs: { clientId: string; hash: string }[] = [];
   const add = (clientId: string | null | undefined, hash: string | null | undefined, external: boolean) => {
@@ -21,7 +22,7 @@ export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[
     seen.add(id);
     refs.push({ clientId, hash });
   };
-  for (const entry of removed) add(entry.clientId, entry.transferHash, entry.release?.external === true);
+  for (const entry of removed) add(entry.clientId, entry.transferHash, protectedTorrent(entry));
   for (const file of files) add(file.download?.clientId, file.download?.hash, file.download?.external === true);
   return refs;
 }
@@ -57,6 +58,7 @@ export function dropTitle(key: string, queue?: Queue, cancelJob?: (id: string) =
     }
   }
   for (const entry of entries) {
+    if (entry.release?.uploadPath && entry.source) forgetSource(entry);
     deleteItemLog(entry.id);
     delete db.data.queue[entry.id];
   }
@@ -78,10 +80,10 @@ export function dropSeason(key: string, season: number, queue?: Queue, cancelJob
   const ids = new Set(entries.map((entry) => entry.id));
   // A search of a season holds the title key and the season. The jobs of one target hold its ID.
   const own = (job: Job) => {
-    const payload = job.payload as { titleKey?: unknown; season?: unknown; entryIds?: unknown } | null;
+    const payload = job.payload as { titleKey?: unknown; season?: unknown; entryIds?: unknown; uploadHash?: unknown } | null;
     if (!points && job.type === 'queue.search' && payload?.titleKey === key && payload.season === season) return true;
     if (Array.isArray(payload?.entryIds) && payload.entryIds.some((id) => ids.has(id))) {
-      if (!points) return true;
+      if (!points && !(job.type === 'queue.send' && payload.uploadHash)) return true;
       const remaining = payload.entryIds.filter((id) => !ids.has(id));
       if (!remaining.length) return true;
       payload.entryIds = remaining;
@@ -101,6 +103,7 @@ export function dropSeason(key: string, season: number, queue?: Queue, cancelJob
     }
   }
   for (const entry of entries) {
+    if (entry.release?.uploadPath && entry.source) forgetSource(entry);
     deleteItemLog(entry.id);
     delete db.data.queue[entry.id];
   }

@@ -19,6 +19,7 @@ export function queueGrabHandler(deps: GrabberDeps): Handler {
       const { entryIds } = job.payload as { entryIds: string[] };
       const entries = entryIds.map((id) => db.data.queue[id]).filter((entry): entry is QueueEntry => Boolean(entry) && grabbable(entry!));
       if (!entries.length) return;
+      const releases = new Map(entries.map((entry) => [entry, entry.release]));
       try {
         await fetch(entries, signal);
       } catch (error) {
@@ -26,12 +27,10 @@ export function queueGrabHandler(deps: GrabberDeps): Handler {
         const reason = reasonOf(error);
         const kind = error instanceof JobError ? error.kind : 'outage';
         for (const entry of entries) {
+          if (db.data.queue[entry.id] !== entry || releases.get(entry) !== entry.release || !grabbable(entry)) continue;
           catalog.warn('download_failed', `Download failed: ${reason.code} (try ${job.attempts} of ${MAX_ATTEMPTS})`, itemFields(entry), { code: reason.code, try: job.attempts, maxTries: MAX_ATTEMPTS, kind });
-        }
-        if (kind === 'invalid_input' || job.attempts >= MAX_ATTEMPTS) {
-          for (const entry of entries) queue.block(entry, reason, 'grab failed');
-        } else {
-          for (const entry of entries) queue.observe(entry, 'grab will be tried again', reason.code);
+          if (kind === 'invalid_input' || job.attempts >= MAX_ATTEMPTS) queue.block(entry, reason, 'grab failed');
+          else queue.observe(entry, 'grab will be tried again', reason.code);
         }
         throw error;
       }

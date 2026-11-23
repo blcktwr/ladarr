@@ -24,6 +24,7 @@ export const REASONS: Record<string, ReasonInfo> = {
   client_error: { message: 'The download client reports an error for this torrent.', action: 'retry' },
   torrent_exists: { message: 'This torrent is in the client already and was not added by the app.', action: 'attach' },
   torrent_missing: { message: 'The torrent is not in the client now.', action: 'retry' },
+  upload_source_missing: { message: 'Upload the torrent file again.', action: 'none' },
   grab_failed: { message: 'The release did not reach the client.', action: 'retry' },
   too_many_attempts: { message: 'Several releases failed. Select a release by hand, or try again.', action: 'retry' },
   job_removed: { message: 'The job was removed from the queue. Start it again.', action: 'retry' },

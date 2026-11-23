@@ -188,7 +188,11 @@ export function withDefaults(data: Data): Data {
     entry.source = { torrent: true };
   }
   // A copy that no target waits for is of no use.
-  const waiting = new Set(Object.values(next.queue).flatMap((entry) => (entry.source && entry.transferHash ? [entry.transferHash] : [])));
+  const waiting = new Set(Object.values(next.queue).flatMap((entry) => {
+    if (entry.release?.uploadPath && (entry.state.kind === 'available' || entry.state.kind === 'cancelled')) entry.source = null;
+    const hash = entry.transferHash ?? (entry.release?.uploadPath ? entry.release.infoHash : null);
+    return entry.source && hash ? [hash] : [];
+  }));
   for (const hash of Object.keys(next.torrents)) if (!waiting.has(hash)) delete next.torrents[hash];
   // The history is not in the file. The run starts with none, and the log of each target keeps the events.
   for (const entry of Object.values(next.queue)) entry.history = [];

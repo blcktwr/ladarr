@@ -1,6 +1,6 @@
 import { db } from '../../../../../../core/db.ts';
 import { deleteItemLog } from '../../../../../../core/log.ts';
-import { entryId, isActive } from '../../../../../../library/downloads/queue.ts';
+import { entryId, forgetSource, isActive } from '../../../../../../library/downloads/queue.ts';
 import { changed, detail } from '../../../../../../helpers/library.ts';
 import type { RequestHandler } from 'express';
 import type { Events, Queue, QueueEntry, Title } from '../../../../../../types.ts';
@@ -22,6 +22,7 @@ export function libraryEpisodeDiscard({ events, queue }: { events: Events; queue
         queue.cancel(entry, 'episode discarded');
       }
     }
+    if (entry?.release?.uploadPath && entry.source) forgetSource(entry);
     deleteItemLog(id);
     delete db.data.queue[id];
     for (const file of Object.values(db.data.files)) {

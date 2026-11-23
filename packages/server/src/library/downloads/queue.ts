@@ -26,15 +26,20 @@ export const isActive = (entry: QueueEntry) => isActiveState(entry.state);
 export const phaseOfEntry = (entry: QueueEntry) => phaseOf(entry.state);
 export const stageOf = phaseOfEntry;
 
+export const ownsUpload = (entry: QueueEntry) =>
+  Boolean(entry.release?.uploadPath && entry.transferHash && entry.transferHash === entry.release.infoHash && entry.clientId && entry.release.uploadOwner === entry.clientId);
+
 // A target that the client has does not wait for its torrent any more. The copy of the file goes when no other target
 // of the same hash waits for it.
 export function forgetSource(entry: QueueEntry) {
   entry.source = null;
-  const hash = entry.transferHash;
+  const hash = sourceHash(entry);
   if (!hash) return;
-  for (const other of Object.values(db.data.queue)) if (other !== entry && other.source && other.transferHash === hash) return;
+  for (const other of Object.values(db.data.queue)) if (other !== entry && other.source && sourceHash(other) === hash) return;
   delete db.data.torrents[hash];
 }
+
+const sourceHash = (entry: QueueEntry) => entry.transferHash ?? (entry.release?.uploadPath ? entry.release.infoHash : null);
 
 // The problem of a stuck target, or the result of the search that keeps it waiting. A target that moves has none.
 const WAITING_REASON = { no_results: 'no_results', all_rejected: 'all_rejected', deferred: 'search_deferred', indexers_failed: 'indexers_failed' } as const;
@@ -50,7 +55,7 @@ const sentThisRelease = (entry: QueueEntry) =>
   entry.release !== null && entry.history.some((event) => event.stage === 'sending' && event.detail === entry.release?.title);
 export function addedByApp(hash: string) {
   if (db.data.sentTorrents[hash]) return true;
-  const entries = Object.values(db.data.queue).filter((entry) => entry.transferHash === hash);
+  const entries = Object.values(db.data.queue).filter((entry) => entry.transferHash === hash && !entry.release?.uploadPath);
   if (entries.some((entry) => entry.release?.external)) return false;
   return entries.some((entry) => !EARLY.includes(phaseOf(entry.state)) || sentThisRelease(entry));
 }
@@ -106,6 +111,7 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     const phaseBefore = phaseOf(before);
     const phaseAfter = phaseOf(next);
     entry.state = next;
+    if ((next.kind === 'available' || next.kind === 'cancelled') && entry.release?.uploadPath) forgetSource(entry);
     entry.stateSince = now;
     if (phaseAfter !== phaseBefore) entry.phaseSince = now;
     // A repeated completion keeps the first time. The hook does not send a second event.
@@ -228,7 +234,7 @@ export function createQueue(events: Events, persist: () => void, onState?: State
         : (title.episodes.find((episode) => episode.season === entry.season && episode.number === entry.number)?.fileId ?? null);
     const file = fileId ? db.data.files[fileId] : undefined;
     if (!file || file.download) return;
-    file.download = { clientId: entry.clientId, hash: entry.transferHash, external: entry.release?.external === true };
+    file.download = { clientId: entry.clientId, hash: entry.transferHash, external: entry.release?.uploadPath ? !ownsUpload(entry) : entry.release?.external === true };
   }
 
   // A request for a target. It returns false when the target is already in the journey, so no second request starts.
@@ -237,6 +243,7 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     // An entry that was made but never requested has no attempt yet.
     if (entry.attempt > 0 && isActive(entry)) return false;
     rememberDownload(entry);
+    if (entry.release?.uploadPath) forgetSource(entry);
     Object.assign(entry, { search: null, release: null, transferHash: null, clientId: null, source: null, importTries: 0, importResult: null, clearedAt: null, completedAt: null, manualMatch: entry.manualMatch });
     startAttempt(entry, reason);
     // A target that is already queued keeps its state. The record says why the attempt started.

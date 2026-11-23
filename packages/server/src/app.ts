@@ -115,6 +115,8 @@ import { libraryGet } from './routes/library/get.ts';
 import { libraryAdd } from './routes/library/post.ts';
 import { libraryTitleGet } from './routes/library/[key]/get.ts';
 import { libraryAttachGet, libraryAttachPost } from './routes/library/[key]/attach.ts';
+import { libraryTorrent } from './routes/library/[key]/torrent.ts';
+import { MAX_TORRENT_BYTES } from './library/grab/torrent.ts';
 import { libraryUpgrades } from './routes/library/[key]/upgrades/get.ts';
 import { libraryTitleUpdate } from './routes/library/[key]/patch.ts';
 import { libraryTitleDelete } from './routes/library/[key]/delete.ts';
@@ -159,7 +161,11 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
     res.set('Cache-Control', 'no-store');
     next();
   });
-  api.use(express.json({ limit: '100kb' }));
+  const json = express.json({ limit: '100kb' });
+  api.use((req, res, next) => {
+    if (services && req.method === 'POST' && /^\/library\/[^/]+\/torrent\/apply\/?$/i.test(req.path)) return next();
+    json(req, res, next);
+  });
   if (restorer) api.use(restoreGate(restorer));
   api.get('/health', healthGet(heartbeat));
   api.get('/auth/status', authStatus());
@@ -271,6 +277,9 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   }
   const clientCheck = services ? createClientCheck(services.clients) : undefined;
   if (services) {
+    const torrent = libraryTorrent(services.queue, services.clients, enqueue, persist);
+    api.post('/library/:key/torrent', titleParam(), express.raw({ type: 'application/x-bittorrent', limit: MAX_TORRENT_BYTES, inflate: false }), torrent.upload);
+    api.post('/library/:key/torrent/apply', titleParam(), express.json({ limit: '16mb' }), torrent.apply);
     api.get('/library/:key/attach', titleParam(), libraryAttachGet(services.clients));
     api.post('/library/:key/attach', titleParam(), libraryAttachPost(services.queue, services.clients));
     api.get('/queue/summary', queueSummaryGet(services.poller));

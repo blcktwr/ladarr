@@ -35,12 +35,12 @@ export async function api<T = unknown>(path: string, init: { method?: string; bo
 
 // Sends a file as the raw body. The server reads the backup ZIP of Sonarr or Radarr this way.
 // onProgress reports the part that the browser sent, from 0 to 1.
-export function upload<T = unknown>(path: string, file: Blob, onProgress?: (part: number) => void): Promise<T> {
+export function upload<T = unknown>(path: string, file: Blob, onProgress?: (part: number) => void, contentType = 'application/zip'): Promise<T> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open('POST', apiUrl(path));
     request.withCredentials = true;
-    request.setRequestHeader('content-type', 'application/zip');
+    request.setRequestHeader('content-type', contentType);
     if (csrfToken) request.setRequestHeader('x-csrf-token', csrfToken);
     request.upload.addEventListener('progress', (event) => {
       if (event.lengthComputable && event.total > 0) onProgress?.(event.loaded / event.total);

@@ -1,12 +1,12 @@
 import type { LibraryType } from '@ladarr/shared/enums';
-import type { CastMember, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary, UpgradeQuality } from '@ladarr/shared/types';
+import type { CastMember, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary, TorrentUploadPreview, UpgradeQuality } from '@ladarr/shared/types';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { ArrowLeft, ChevronDown, ChevronUp, Download, Plus, Trash2 } from 'lucide-react';
 import { Link as RouterLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
-import { api, ApiError } from '../../lib/api.ts';
+import { api, ApiError, upload } from '../../lib/api.ts';
 import { ResultItem } from '../search/result-item.tsx';
-import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, Dropdown, EmptyState, Gallery, Modal, Pane, Section, Spinner, SubMenu, Table, Text, Thumbnail, type ThumbnailState } from 'nebula';
+import { Actions, ActionMenu, Backdrop, Badge, Button, Checkbox, DropFileField, Dropdown, EmptyState, Gallery, Modal, MultiSelect, Pane, Section, Spinner, SubMenu, Table, Text, Thumbnail, type ThumbnailState } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { Link, LoadFailed, LoadingGallery, pageWidth, pageWidthContent } from '../../components/index.ts';
 import { ModalActions } from '../../components/modal-actions.tsx';
@@ -590,6 +590,9 @@ function TitleExtras({ mediaType, tmdbId }: { mediaType: string; tmdbId: string 
   );
 }
 
+type TorrentMethod = 'default' | 'folders';
+type TorrentSelection = { titleKey: string; method: TorrentMethod; file?: File; preview?: TorrentUploadPreview; message?: string };
+
 // A title in the library and a title that is not in it have one tree. When the user adds the title, the page changes in place and does not mount again.
 function TitleView({ header, title, reload }: { header: TitleDetail | TitlePreview; title?: TitleDetail; reload: () => Promise<unknown> }) {
   const [message, setMessage] = useState('');
@@ -598,6 +601,10 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
   const [info, setInfo] = useState<number | null>(null);
   const [adding, setAdding] = useState<{ season: number | null } | null>(null);
   const [attaching, setAttaching] = useState(false);
+  const [torrent, setTorrent] = useState<TorrentSelection | null>(null);
+  const previewQueue = useRef(Promise.resolve());
+  const selection = useRef<TorrentSelection | null>(null);
+  const [applying, setApplying] = useState(false);
   // The title that the user added stays on the page while the job brings its facts. Its own control shows the wait.
   const [pendingAdd, setPendingAdd] = useState<{ kind: 'series'; season: number | null } | { kind: 'movie' } | null>(null);
   const queueNotice = useQueueNotice();
@@ -608,6 +615,50 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
       queueNotice(await action());
     } catch (err) {
       setMessage(describeError(err));
+    }
+  }
+
+  const torrentRoute = (key: string) => `/library/${key}/torrent`;
+  const sendTorrent = <T,>(path: string, file: File) => upload<T>(path, file, undefined, 'application/x-bittorrent');
+  function selectTorrent(titleKey: string, method: TorrentMethod, file?: File) {
+    const request = { titleKey, file, method };
+    selection.current = request;
+    setTorrent(request);
+    if (!series || !file) return;
+    // The server replaces the previous preview for this torrent. Send these requests in order.
+    previewQueue.current = previewQueue.current.then(async () => {
+      if (selection.current !== request) return;
+      try {
+        const preview = await sendTorrent<TorrentUploadPreview>(`${torrentRoute(titleKey)}${method === 'folders' ? '?method=folders' : ''}`, file);
+        setTorrent((current) => current === request ? { ...request, preview } : current);
+      } catch (error) {
+        setTorrent((current) => current === request ? { ...request, message: torrentError(error) } : current);
+      }
+    });
+  }
+
+  function closeTorrent() {
+    selection.current = null;
+    setTorrent(null);
+  }
+
+  async function applyTorrent(review: TorrentSelection) {
+    const { titleKey, file, preview } = review;
+    if (!file || (series && !preview)) return;
+    const request = { ...review, message: undefined };
+    setApplying(true);
+    selection.current = request;
+    setTorrent(request);
+    try {
+      const result = preview
+        ? await api<{ targets: number }>(`${torrentRoute(titleKey)}/apply`, { method: 'POST', body: { hash: preview.hash, version: preview.version, files: preview.files } })
+        : await sendTorrent<{ targets: number }>(torrentRoute(titleKey), file);
+      if (selection.current === request) closeTorrent();
+      queueNotice(result.targets);
+    } catch (error) {
+      setTorrent((current) => current === request ? { ...request, message: torrentError(error) } : current);
+    } finally {
+      setApplying(false);
     }
   }
 
@@ -678,6 +729,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
   useEffect(() => {
     if (!addLoading) setPendingAdd(null);
   }, [addLoading]);
+  useEffect(() => () => { selection.current = null; }, []);
 
   return (
     <>
@@ -706,7 +758,10 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
               <Button variant="danger" onClick={() => setPlan({ request: { action: 'remove', keys: [title.key] }, subject: title.title })}>
                 {t('Delete')}
               </Button>
-              <ActionMenu label={t('More actions')} items={[{ label: t('Attach folder'), onClick: () => setAttaching(true) }]} />
+              <ActionMenu label={t('More actions')} items={[
+                { label: t('Attach folder'), onClick: () => setAttaching(true) },
+                { label: t('Upload torrent'), onClick: () => { setMessage(''); selectTorrent(title.key, 'default'); } },
+              ]} />
             </Actions>
           ) : series ? (
             <Button onClick={() => startAdd(null)}>{t('Add')}</Button>
@@ -716,6 +771,16 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
         }
       />
       {message && <Alert tone="danger">{message}</Alert>}
+      {torrent && title?.key === torrent.titleKey && (
+        <TorrentDialog
+          series={series} file={torrent.file} method={torrent.method} preview={torrent.preview} applying={applying} message={torrent.message}
+          onFile={(file) => selectTorrent(torrent.titleKey, torrent.method, file)}
+          onMethod={(method) => selectTorrent(torrent.titleKey, method, torrent.file)}
+          onClose={closeTorrent}
+          onChange={(preview) => setTorrent({ ...torrent, preview })}
+          onApply={() => void applyTorrent(torrent)}
+        />
+      )}
       <PlanDialog request={plan?.request ?? null} subject={plan?.subject} onClose={() => setPlan(null)} onDone={() => void reload()} />
       {title && info !== null && <FileInfoDialog titleKey={title.key} resolution={info} onClose={() => setInfo(null)} />}
       {title && <AttachFolderDialog titleKey={title.key} label={title.title} series={series} isOpen={attaching} onClose={() => setAttaching(false)} />}
@@ -735,6 +800,65 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
       {!title && series && adding && <AddSeries result={header} season={adding.season} onClose={() => setAdding(null)} onAdded={() => addedSeries(adding.season)} />}
       <TitleExtras mediaType={header.mediaType} tmdbId={String(header.tmdbId)} />
     </>
+  );
+}
+
+function torrentError(error: unknown) {
+  if (error instanceof ApiError) {
+    switch (error.message) {
+      case 'invalid_torrent': return t('Select a valid torrent file.');
+      case 'nothing_to_import': return t('The torrent has no file that Ladarr can import for this title.');
+      case 'preview_changed': return t('Open the torrent file again.');
+      case 'torrent_in_use': return t('A download already uses this torrent or target.');
+      case 'client_missing': return t('No download client configured');
+      case 'client_unreachable': return t('The download client does not answer.');
+      case 'client_rejected': return t('The download client rejects the login.');
+    }
+  }
+  return describeError(error);
+}
+
+function TorrentDialog({ series, file, method, preview, applying, message, onFile, onMethod, onClose, onChange, onApply }: {
+  series: boolean; file?: File; method: TorrentMethod; preview?: TorrentUploadPreview; applying: boolean; message?: string;
+  onFile: (file: File) => void; onMethod: (method: TorrentMethod) => void; onClose: () => void;
+  onChange: (preview: TorrentUploadPreview) => void; onApply: () => void;
+}) {
+  const keyOf = ({ season, number }: { season: number; number: number }) => `${season}:${number}`;
+  const options = (preview?.catalog ?? []).map((episode) => ({
+    value: keyOf(episode),
+    label: `S${String(episode.season).padStart(2, '0')}E${String(episode.number).padStart(2, '0')}${episode.name ? ` · ${episode.name}` : ''}`,
+  }));
+  const byKey = new Map(options.map(({ value, label }) => [value, label]));
+  const assigned = preview?.files.flatMap(({ episodes }) => episodes.map(keyOf)) ?? [];
+  return (
+    <Modal open title={t('Upload torrent')} width={series ? 'lg' : 'md'} onOpenChange={(open) => { if (!open && !applying) onClose(); }} actions={
+      <>
+        <Button variant="ghost" disabled={applying} onClick={onClose}>{t('Cancel')}</Button>
+        <Button pending={applying} disabled={series ? !preview || !assigned.length || new Set(assigned).size !== assigned.length : !file} onClick={onApply}>{t('Import')}</Button>
+      </>
+    }>
+      {message && <div role="alert"><Text>{message}</Text></div>}
+      <DropFileField label={t('Torrent file')} placeholder={t('Drop or choose a file')} accept=".torrent,application/x-bittorrent" value={file?.name} disabled={applying} width="full" onFile={onFile} />
+      {series && <Dropdown label={t('Mapping method')} value={method} disabled={applying} options={[
+        { value: 'default', label: t('Default') },
+        { value: 'folders', label: t('Numeric bulk mapping by folder') },
+      ]} onValueChange={(value) => { if ((value === 'default' || value === 'folders') && value !== method) onMethod(value); }} />}
+      {preview ? <div className="grid gap-2">
+        {preview.files.map((file) => {
+          const selected = file.episodes.map(keyOf);
+          return <MultiSelect key={file.path} label={file.path} value={selected} options={options} disabled={applying} width="full"
+            valueText={() => selected.map((id) => byKey.get(id)).join(', ') || t('Unassigned')}
+            onValueChange={(next) => {
+              const episodes = next.map((value) => {
+                const [season, number] = value.split(':').map(Number);
+                return { season: season!, number: number! };
+              });
+              onChange({ ...preview, files: preview.files.map((other) => other === file ? { ...file, episodes } : other) });
+            }}
+          />;
+        })}
+      </div> : series && file && !message && <Spinner label={t('Loading')} />}
+    </Modal>
   );
 }
 

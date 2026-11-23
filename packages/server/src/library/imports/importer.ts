@@ -14,7 +14,7 @@ import { recoverCorrection } from '../mapping.ts';
 import { parseRelease } from '../grab/release.ts';
 import { probeFile } from '../probe.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
-import { entryId, isActive, phaseOfEntry } from '../downloads/queue.ts';
+import { entryId, isActive, ownsUpload, phaseOfEntry } from '../downloads/queue.ts';
 import { checkRoot, sameIdentity } from '../roots.ts';
 import { pendingFile } from './reconcile.ts';
 import { MAX_IMPORT_ATTEMPTS } from './limits.ts';
@@ -87,7 +87,7 @@ export async function torrentVideos(handle: ClientHandle, torrent: Torrent, size
   const save = await realpath(torrent.savePath).catch(() => undefined);
   const content = await realpath(torrent.contentPath).catch(() => undefined);
   if (!save || !content || !inside(save, content)) return;
-  const found: (ImporterFound & { dev: number; ino: number; mtimeMs: number })[] = [];
+  const found: (ImporterFound & { clientPath: string; dev: number; ino: number; mtimeMs: number })[] = [];
   for (const file of await handle.api.files(torrent.hash)) {
     if (sizes && !sizes.has(file.sizeBytes)) continue;
     const abs = join(save, file.name);
@@ -96,7 +96,7 @@ export async function torrentVideos(handle: ClientHandle, torrent: Torrent, size
     if (!isVideoFile(rel) || isSample(rel)) continue;
     const info = await lstat(abs).catch(() => undefined);
     if (!info?.isFile()) continue;
-    found.push({ abs, rel, sizeBytes: info.size, dev: info.dev, ino: info.ino, mtimeMs: info.mtimeMs });
+    found.push({ abs, rel, clientPath: file.name, sizeBytes: info.size, dev: info.dev, ino: info.ino, mtimeMs: info.mtimeMs });
   }
   return found;
 }
@@ -180,11 +180,12 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
   type Pick = { file: ImporterFound; entries: QueueEntry[]; episodes: Episode[]; source: 'manual' | 'numbering' | 'automatic'; probe?: ProbeResult; identity?: JournalStep['sourceIdentity'] };
   type Picks = { picks: Pick[]; missing: QueueEntry[]; unknown: QueueEntry[]; coverage: Episode[]; complete: boolean };
 
-  async function pick(title: Title, group: QueueEntry[], files: ImporterFound[], content: string): Promise<Picks> {
+  async function pick(title: Title, group: QueueEntry[], files: (ImporterFound & { clientPath: string })[], content: string): Promise<Picks> {
     const picks: Pick[] = [];
     const taken = new Set<string>();
     const episodesOf = (refs: { season: number; number: number }[]) => refs.map((ref) => title.episodes.find((episode) => episode.season === ref.season && episode.number === ref.number)).filter((episode): episode is Episode => Boolean(episode));
     const sameCoverage = (a: { season: number; number: number }[], b: { season: number; number: number }[]) => a.length === b.length && a.every((one) => b.some((other) => one.season === other.season && one.number === other.number));
+    const upload = Boolean(group[0]!.release?.uploadPath);
     // The name of the release, or the folder of the download, can give the season that the client leaves out of each
     // file name. A group of several seasons has no one season for these files.
     const seasons = new Set(group.map((entry) => entry.season));
@@ -193,10 +194,11 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
 
     if (title.mediaType === 'movie') {
       const entry = group[0]!;
-      const chosen = entry.manualMatch ? files.find((file) => file.rel === entry.manualMatch!.file) : files.length === 1 ? files[0] : undefined;
+      const chosen = entry.manualMatch ? files.find((file) => file.rel === entry.manualMatch!.file)
+        : upload ? files.find((file) => file.clientPath === entry.release?.uploadPath) : files.length === 1 ? files[0] : undefined;
       return chosen
-        ? { picks: [{ file: chosen, entries: [entry], episodes: [], source: entry.manualMatch ? 'manual' : 'automatic' }], missing: [], unknown: [], coverage: [], complete: true }
-        : { picks, missing: files.length ? [] : group, unknown: files.length ? group : [], coverage: [], complete: false };
+        ? { picks: [{ file: chosen, entries: [entry], episodes: [], source: entry.manualMatch || upload ? 'manual' : 'automatic' }], missing: [], unknown: [], coverage: [], complete: true }
+        : { picks, missing: upload || !files.length ? group : [], unknown: !upload && files.length ? group : [], coverage: [], complete: false };
     }
 
     const assignments = new Map(assignmentsOf(group[0]!).map((assignment) => [assignment.file, assignment]));
@@ -219,6 +221,22 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     }
     for (const path of unassigned) taken.add(path);
     const done = () => new Set(picks.flatMap((p) => p.entries.map((e) => e.id)));
+    if (upload) {
+      const explicit = done();
+      const byPath = new Map(files.filter((file) => !taken.has(file.rel) && !assignments.has(file.rel)).map((file) => [file.clientPath, file]));
+      const chosen = new Map<string, QueueEntry[]>();
+      for (const entry of group) {
+        if (explicit.has(entry.id) || entry.manualMatch || [...assignments.values()].some((match) => match.covers.some((ref) => ref.season === entry.season && ref.number === entry.number))) continue;
+        const path = entry.release!.uploadPath!;
+        if (byPath.has(path)) chosen.set(path, [...(chosen.get(path) ?? []), entry]);
+      }
+      for (const [path, entries] of chosen) {
+        const episodes = episodesOf(entries.map(({ season, number }) => ({ season: season!, number: number! })));
+        if (episodes.length === entries.length) picks.push({ file: byPath.get(path)!, entries, episodes, source: 'manual' });
+      }
+      const imported = done();
+      return { picks, missing: group.filter((entry) => !imported.has(entry.id)), unknown: [], coverage: [], complete: false };
+    }
     // The numbering of the acquisition, saved with its release. A target of an older version has none, so the title map
     // applies. The release numbers go to the catalog episodes through it.
     const numbering = numberingOf(group[0]!);
@@ -422,7 +440,8 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     }
     if (picked.unknown.length) block(picked.unknown, 'file_unmapped');
     // Only identified files can prove that the other episodes are absent.
-    if (picked.missing.length) block(picked.missing, 'pack_partial');
+    const upload = Boolean(group[0]!.release?.uploadPath);
+    if (picked.missing.length) block(picked.missing, upload ? 'file_not_found' : 'pack_partial');
 
     const activeInputs = new Map(group.filter((entry) => entry.state.kind === 'importing').map((entry) => [entry.id, inputs.get(entry.id)!]));
     const currentCandidates = () => {
@@ -510,7 +529,8 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       const dest = candidate.dest!;
       const entry = candidate.entries.find((item) => item.clientId && item.transferHash);
       const recordedAt = (path: string) => Object.values(db.data.files).find((file) => file.titleKey === title.key && file.path === path);
-      const fromSameTorrent = (file: MediaFile | undefined) => Boolean(file?.download && entry && file.download.clientId === entry.clientId && file.download.hash === entry.transferHash);
+      const correction = candidate.entries.some((entry) => entry.manualMatch);
+      const fromSameTorrent = (file: MediaFile | undefined) => Boolean(file?.download && (!upload || correction || file.missing) && entry && file.download.clientId === entry.clientId && file.download.hash === entry.transferHash);
       const currentIds = title.mediaType === 'movie' ? [title.fileId] : candidate.episodes.map((episode) => episode.fileId);
       const sameSource = Object.values(db.data.files).find((file) => file.titleKey === title.key && fromSameTorrent(file) && file.association?.originalName === candidate.file.rel);
       if (sameSource && candidate.source !== 'manual' && (sameSource.episodes.length !== candidate.episodes.length || sameSource.episodes.some((ref) => !candidate.episodes.some((episode) => ref.season === episode.season && ref.number === episode.number)))) throw new ImportProblem('file_unmapped');
@@ -589,7 +609,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     }));
     if (!steps.length) return;
 
-    const journal: ImportJournal = { id: randomUUID(), hash, torrentName: clientTorrent.name, titleKey: title.key, steps, createdAt: now(), clientId: handle.id, downloadBase: base };
+    const journal: ImportJournal = { id: randomUUID(), hash, torrentName: clientTorrent.name, titleKey: title.key, steps, createdAt: now(), clientId: handle.id, downloadBase: base, ...(upload ? { upload: true } : {}) };
     for (const step of steps) step.expected = { entries: Object.fromEntries(step.entryIds.map((id) => [id, inputs.get(id)!])), library: libraryOf(title, step) };
     db.data.imports[journal.id] = journal;
     for (const step of steps) {
@@ -739,7 +759,8 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     const parsed = release ? parseRelease(release.title) : null;
     // The torrent that gave the file goes with it, so a removal can delete it later. A manual import has none.
     const source = entriesOf(step.entryIds).find((entry) => entry.clientId && entry.transferHash);
-    const download = !journal.sourceBase && journal.clientId ? { clientId: journal.clientId, hash: journal.hash, name: journal.torrentName ?? source?.release?.title, file: step.association?.originalName, external: source?.release?.external === true } : null;
+    const external = source?.release?.uploadPath ? !ownsUpload(source) : source?.release?.external === true;
+    const download = !journal.sourceBase && journal.clientId ? { clientId: journal.clientId, hash: journal.hash, name: journal.torrentName ?? source?.release?.title, file: step.association?.originalName, external } : null;
     const inPlace = journal.sourceBase && step.source === step.dest && existing?.association && sameIdentity(existing.association.identity, info);
     Object.assign(file, { sizeBytes: info.size, mtimeMs: info.mtimeMs, episodes: step.episodes, missing: false, source: inPlace ? existing!.source ?? null : parsed?.source ?? null, resolution: inPlace ? existing!.resolution ?? null : parsed?.resolution ?? null, download: inPlace ? existing!.download ?? null : download });
     file.association = step.association ? { ...step.association, originalName: file.download?.file ?? step.association.originalName, identity: { sizeBytes: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino } } : undefined;
@@ -1059,7 +1080,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       delete db.data.imports[journal.id];
       // The files are in, so a search only targets the episodes that have no file. A download import runs it too:
       // a pack can leave episodes without a file, and they must not wait for another action.
-      if (journal.searchOnFinish || !journal.sourceBase) enqueueJob({ type: 'queue.initial', payload: { key: journal.titleKey }, dedupeKey: `initial:${journal.titleKey}` });
+      if (journal.searchOnFinish || (!journal.sourceBase && !journal.upload)) enqueueJob({ type: 'queue.initial', payload: { key: journal.titleKey }, dedupeKey: `initial:${journal.titleKey}` });
       await save();
       status?.finish(journal.id);
     }
@@ -1100,15 +1121,25 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
 
     const inJournal = new Set(Object.values(db.data.imports).flatMap((journal) => journal.steps.flatMap((step) => step.entryIds)));
     const ready = Object.values(db.data.queue).filter((entry) => entry.transferHash === hash && entry.state.kind === 'importing' && !inJournal.has(entry.id));
-    // The targets of one torrent have the same client.
-    const handle = clients.get(ready[0]?.clientId);
-    if (!handle) return;
     const groups = new Map<string, QueueEntry[]>();
     for (const entry of ready) {
-      const key = JSON.stringify([entry.titleKey, numberingOf(entry)]);
+      const upload = Boolean(entry.release?.uploadPath);
+      if (upload && !entry.manualMatch) {
+        const title = db.data.titles[entry.titleKey];
+        const id = entry.season === null ? title?.fileId : title?.episodes.find((episode) => episode.season === entry.season && episode.number === entry.number)?.fileId;
+        const file = id ? db.data.files[id] : undefined;
+        if (file && !file.missing) {
+          queue.endAttempt(entry, 'imported', 'the file is in the library');
+          queue.complete(entry, 'file is in the library', file.path);
+          continue;
+        }
+      }
+      const key = JSON.stringify([entry.titleKey, entry.clientId, numberingOf(entry), upload]);
       groups.set(key, [...(groups.get(key) ?? []), entry]);
     }
     for (const group of groups.values()) {
+      const handle = clients.get(group[0]!.clientId);
+      if (!handle) continue;
       let journal: ImportJournal | undefined;
       try {
         journal = await plan(hash, group, handle);

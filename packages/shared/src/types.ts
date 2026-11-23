@@ -31,6 +31,9 @@ import type { Phase, QueueState, Status, Tab } from './queue.ts';
 // A season and an episode number. A movie file covers none.
 export type EpisodeRef = { season: number; number: number };
 
+export type TorrentUploadFile = { path: string; episodes: EpisodeRef[] };
+export type TorrentUploadPreview = { hash: string; version: string; files: TorrentUploadFile[]; catalog: { season: number; number: number; name?: string }[] };
+
 // One correspondence between the episodes of the catalog and the episodes of a release. The catalog episodes run from
 // `from` to `to`, and the release numbers the first one as `releaseFrom`. The release end follows from the length.
 export type NumberingRange = { season: number; from: number; to: number; releaseSeason: number; releaseFrom: number };

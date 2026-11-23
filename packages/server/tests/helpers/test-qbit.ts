@@ -49,6 +49,7 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
   // The fields of /app/preferences that the tests use, and one that ladarr must never pass on.
   const preferences: Record<string, unknown> = { queueing_enabled: true, max_active_downloads: 3, max_active_torrents: 5, max_active_uploads: 3, web_ui_password: 'must-not-leave' };
   const calls: { path: string; body?: string }[] = [];
+  const receivedTorrents: Buffer[] = [];
   const sessions = new Set<string>();
   const control = {
     // The number of /torrents/add requests that do the work but never answer, like a timeout.
@@ -121,6 +122,7 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
       let hash: string | undefined;
       let name = 'torrent';
       if (files[0]) {
+        receivedTorrents.push(files[0]);
         hash = infoHashOf(files[0]);
         const text = files[0].toString('latin1');
         const at = text.indexOf('4:name') + 6;
@@ -179,6 +181,7 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
     preferences,
     categories,
     calls,
+    receivedTorrents,
     control,
     // Ends all sessions, like a restart of the client.
     expireSessions: () => sessions.clear(),

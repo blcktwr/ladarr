@@ -5,8 +5,9 @@ import type { WorkPhase } from '@ladarr/shared/queue';
 import type { RequestHandler } from 'express';
 import { deprioritize, prioritize } from '../../../core/jobs.ts';
 import { ClientError } from '../../../library/downloads/qbittorrent.ts';
-import { addedByApp, isActive, phaseOfEntry } from '../../../library/downloads/queue.ts';
+import { addedByApp, forgetSource, isActive, ownsUpload, phaseOfEntry } from '../../../library/downloads/queue.ts';
 import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts';
+import { enqueueUpload, uploadHash } from '../../../library/downloads/upload.ts';
 import { actionsOf, associationState, bySeasonNumber, label, lanePositions, otherSeasonsTargets, queueEpisode, resolutionCurrent, resolutionVersion, shown, statusOf } from '../../../helpers/queue.ts';
 import { canRetry, needsOtherSeasons } from '@ladarr/shared/queue';
 import type { ClientHandle, Clients, EnqueueInput, Finder, Job, Poller, Queue, QueueEntry, Torrent } from '../../../types.ts';
@@ -52,6 +53,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
         if (!entry.transferHash) return 'This target has no torrent.';
         if (sharing(entry).length > 0) return 'A target still uses this torrent.';
         // ladarr removes only a torrent that it added. A download that the user attached stays in the client.
+        if (entry.release?.uploadPath) return ownsUpload(entry) ? null : 'This torrent was not added by the app. Delete it in the download client.';
         if (removal?.attached.has(entry.transferHash)) return 'This torrent was not added by the app. Delete it in the download client.';
         const found = removal?.torrents.get(entry.transferHash);
         return found && !addedByApp(found.hash) ? 'This torrent was not added by the app. Delete it in the download client.' : null;
@@ -68,7 +70,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
   // The entries that the action changes. Pause and resume of a download act on the whole transfer.
   function scope(action: Action, entry: QueueEntry) {
     // The torrent goes for all targets that point at it.
-    if (action === 'remove_torrent') return Object.values(db.data.queue).filter((other) => other.transferHash === entry.transferHash);
+    if (action === 'remove_torrent') return Object.values(db.data.queue).filter((other) => other.transferHash === entry.transferHash && (!entry.release?.uploadPath || other.clientId === entry.clientId));
     if ((action === 'pause' || action === 'resume') && entry.state.kind === 'downloading' && entry.transferHash) {
       const matching = action === 'pause' ? 'downloading' : 'paused';
       return Object.values(db.data.queue).filter(
@@ -103,11 +105,14 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
           } else if ((was === 'fetching' || was === 'waiting_slot' || was === 'sending') && entry.release) {
             queue.resume(entry, 'resumed by the user');
             // A fetched torrent goes to the send. A release without its source is fetched first.
-            if (entry.source) enqueue({ type: 'queue.send', payload: { entryIds: [entry.id] }, dedupeKey: `send:${entry.id}`, runAt: entry.createdAt });
+            const upload = uploadHash(entry);
+            if (upload) enqueueUpload(enqueue, [entry], upload);
+            else if (entry.source) enqueue({ type: 'queue.send', payload: { entryIds: [entry.id] }, dedupeKey: `send:${entry.id}`, runAt: entry.createdAt });
             else enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, dedupeKey: `grab:${entry.id}`, runAt: entry.createdAt });
           } else {
             queue.resume(entry, 'resumed by the user');
-            finder.enqueueSearch({ titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id] });
+            if (uploadHash(entry)) retry(entry);
+            else finder.enqueueSearch({ titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id] });
           }
           break;
         }
@@ -140,7 +145,11 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
           if (!removed.has(entry.transferHash!)) await api.remove(entry.transferHash!, false);
           removed.add(entry.transferHash!);
           // The torrent is gone, so the record of the torrents that ladarr sent no longer covers it.
-          delete db.data.sentTorrents[entry.transferHash!];
+          if (entry.release?.uploadPath) {
+            forgetSource(entry);
+            entry.release.uploadOwner = undefined;
+            entry.release.external = true;
+          } else delete db.data.sentTorrents[entry.transferHash!];
           queue.observe(entry, 'torrent removed from the client', 'The data stays on the disk.');
           entry.transferHash = null;
           entry.clientId = null;

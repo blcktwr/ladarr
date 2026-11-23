@@ -1,5 +1,6 @@
 import { db } from '../../core/db.ts';
 import { deleteItemLog } from '../../core/log.ts';
+import { forgetSource } from '../downloads/queue.ts';
 import { titleKey } from '../library.ts';
 import { refreshJob } from '../metadata.ts';
 import { scanJob } from '../scan.ts';
@@ -20,6 +21,8 @@ function forgetTargets(key: string) {
   const ids = new Set(Object.values(db.data.queue).filter((entry) => entry.titleKey === key).map((entry) => entry.id));
   if (ids.size === 0) return;
   for (const id of ids) {
+    const entry = db.data.queue[id];
+    if (entry?.release?.uploadPath && entry.source) forgetSource(entry);
     delete db.data.queue[id];
     deleteItemLog(id);
   }

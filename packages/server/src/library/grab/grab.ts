@@ -5,6 +5,7 @@ import { inspectCoverage } from '../coverage.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
 import { addedByApp, forgetSource, isActive } from '../downloads/queue.ts';
 import { hasFreeSlot } from '../downloads/slots.ts';
+import { findUpload, uploadHash, uploadInUse, uploadOwner } from '../downloads/upload.ts';
 import { isSample, isVideoFile, parseEpisodes } from '../parse.ts';
 import { NO_NUMBERING } from '../numbering.ts';
 import { infoHashOf, magnetHash, torrentComment, torrentFiles } from './torrent.ts';
@@ -35,13 +36,16 @@ const encode = (source: Source): NonNullable<QueueEntry['source']> => ('magnet' 
 const decode = (entry: QueueEntry): Source | null => {
   if (!entry.source) return null;
   if ('magnet' in entry.source) return { magnet: entry.source.magnet };
-  const saved = entry.transferHash ? db.data.torrents[entry.transferHash] : undefined;
+  const hash = entry.transferHash ?? uploadHash(entry);
+  const saved = hash ? db.data.torrents[hash] : undefined;
   return saved ? { torrent: Buffer.from(saved, 'base64') } : null;
 };
 
 // The chosen release is fetched first, and it waits for a slot of the client after that. The fetch and the send are two
 // steps: a full client must not stop the fetch, and the fetched torrent must not come from the indexer a second time.
 export function createGrabber({ queue, finder, indexers, clients, save, enqueue, reconcileMs = 1_000 }: GrabberDeps) {
+  const claimedByUpload = (titleKey: string, hash: string) =>
+    Object.values(db.data.queue).some((entry) => entry.titleKey !== titleKey && isActive(entry) && uploadHash(entry) === hash);
   // Async results belong to the acquisition that requested them, not to a later user selection.
   function snapshot(entries: QueueEntry[]) {
     const input = (entry: QueueEntry) => JSON.stringify({
@@ -119,9 +123,13 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
       if (!isActive(entry) || entry.state.kind === 'blocked' || entry.state.kind === 'paused') continue;
       entry.transferHash = found.hash;
       entry.clientId = connection.id;
-      forgetSource(entry);
+      if (!uploadHash(entry)) forgetSource(entry);
       if (entry.release) {
         entry.release.infoHash = found.hash;
+        if (entry.release.uploadPath) {
+          entry.release.uploadOwner = external ? undefined : connection.id;
+          entry.release.external = external;
+        }
         // A torrent that ladarr did not send stays the user's, so a removal never deletes it.
         if (external) entry.release.external = true;
       }
@@ -138,9 +146,13 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
   // A torrent in the client with the hash of the release is the release. A finished torrent is used as it is, also when
   // ladarr did not send it, because the user added it by hand or an older version did. A torrent that still downloads
   // is the user's, and ladarr does not take it over: the target stops with the reason that offers the attach.
-  async function take(entries: QueueEntry[], connection: ClientHandle, found: Torrent) {
+  async function take(entries: QueueEntry[], connection: ClientHandle, found: Torrent, sentUpload = false) {
     entries = entries.filter((entry) => isActive(entry) && entry.state.kind !== 'blocked' && entry.state.kind !== 'paused');
     if (!entries.length) return;
+    if (uploadHash(entries[0]!)) return adopt(entries, connection, found, !sentUpload && !uploadOwner(entries[0]!.titleKey, found.hash, connection.id));
+    if (claimedByUpload(entries[0]!.titleKey, found.hash)) {
+      return block(entries, 'torrent_in_use', 'another title uses this torrent');
+    }
     if (entries[0]!.release?.kind === 'pack') {
       const source = decode(entries[0]!);
       const saved = source && 'torrent' in source ? packFiles(source.torrent) : null;
@@ -254,6 +266,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
     // The hash and the source are saved before the wait. After a crash, the target still knows which torrent to send,
     // and the indexer is not asked again for it. The file is one copy for the whole pack.
     const saved = encode(source);
+    if (hash && claimedByUpload(leader.titleKey, hash)) return block(entries, 'torrent_in_use', 'another title uses this torrent');
     if ('torrent' in source && hash) db.data.torrents[hash] = source.torrent.toString('base64');
     for (const entry of entries) {
       if (entry.state.kind === 'blocked' || !isActive(entry)) continue;
@@ -298,7 +311,21 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
     if (!entries.length) return;
     const leader = entries[0]!;
     const ref = leader.release;
-    const connection = leader.clientId ? clients.get(leader.clientId) : clients.next();
+    const upload = uploadHash(leader);
+    let connection = leader.clientId ? clients.get(leader.clientId) : clients.next();
+    if (upload) {
+      const current = snapshot(entries);
+      const { download, handle } = await findUpload(clients, upload, leader.clientId);
+      entries = current();
+      if (!entries.length) return;
+      if (uploadInUse(leader.titleKey, upload)) return block(entries, 'torrent_in_use', 'another title uses this torrent');
+      if (download) return take(entries, download.handle, download.torrent);
+      connection = handle;
+      for (const entry of entries) {
+        entry.release!.uploadOwner = undefined;
+        entry.release!.external = true;
+      }
+    }
     if (!connection) {
       block(entries, 'client_missing', 'no download client');
       return;
@@ -314,14 +341,17 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
 
     // The torrent can be in the client already, for example after a manual add. No slot is used by a torrent that is
     // there already.
-    clients.invalidate(connection);
-    const current = snapshot(entries);
-    const existing = await clients.find(connection, hash);
-    entries = current();
-    if (!entries.length) return;
-    if (existing) return take(entries, connection, existing);
+    if (!upload) {
+      clients.invalidate(connection);
+      const current = snapshot(entries);
+      const existing = await clients.find(connection, hash);
+      entries = current();
+      if (!entries.length) return;
+      if (existing) return take(entries, connection, existing);
+    }
     const source = decode(entries[0]!);
     if (!source) {
+      if (upload) return block(entries, 'upload_source_missing', 'torrent file is missing');
       for (const entry of entries) queue.enter(entry, 'fetching', 'the torrent source is gone');
       enqueue({ type: 'queue.grab', payload: { entryIds: entries.map((entry) => entry.id) }, dedupeKey: `grab:${leader.id}`, priority: entries.some((entry) => entry.priority !== null) });
       return;
@@ -333,16 +363,18 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
       // A slot that another send took. The target keeps its source, and a new job asks again for a slot.
       enqueue({
         type: 'queue.send',
-        payload: { entryIds: entries.map((entry) => entry.id) },
-        dedupeKey: `send-wait:${leader.id}`,
+        payload: { entryIds: entries.map((entry) => entry.id), ...(upload ? { uploadHash: upload } : {}) },
+        dedupeKey: `send-wait:${upload ? `upload:${upload}` : leader.id}`,
         runAt: Date.now() + 2_000,
         priority: entries.some((entry) => entry.priority !== null),
       });
       return;
     }
 
-    db.data.sentTorrents[hash] = Date.now();
-    for (const entry of entries) queue.enter(entry, 'sending', 'sending to the client', ref?.title ?? hash);
+    if (!upload) db.data.sentTorrents[hash] = Date.now();
+    for (const entry of entries) {
+      queue.enter(entry, 'sending', 'sending to the client', ref?.title ?? hash);
+    }
     const sentCurrent = snapshot(entries);
     try {
       for (const entry of entries) {
@@ -385,7 +417,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
       const added = await clients.find(connection, hash);
       entries = current();
       if (!entries.length) return;
-      if (added) return take(entries, connection, added);
+      if (added) return take(entries, connection, added, Boolean(upload));
     }
     throw new JobError('uncertain', 'The client accepted the torrent but does not list it.');
   }

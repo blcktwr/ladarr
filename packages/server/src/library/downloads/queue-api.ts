@@ -1,5 +1,6 @@
 import { db } from '../../core/db.ts';
 import { isActive } from './queue.ts';
+import { uploadHash } from './upload.ts';
 import type { EnqueueInput, Job, Queue, QueueEntry } from '../../types.ts';
 
 // The active targets that point at the same torrent.
@@ -10,6 +11,13 @@ export const sharingOf = (entry: QueueEntry) => (entry.transferHash ? Object.val
 // target away before it checks it.
 export function createRetry({ queue, enqueue }: { queue: Queue; enqueue: (input: EnqueueInput) => Job }) {
   function retry(entry: QueueEntry) {
+    const upload = uploadHash(entry);
+    if (upload) {
+      queue.retryAttempt(entry, 'retry');
+      queue.resolve(entry, 'queued', 'retry');
+      enqueue({ type: 'queue.retry', payload: { entryIds: [entry.id], uploadHash: upload, uploadAttempt: entry.attempt }, dedupeKey: `retry:upload:${entry.id}:${entry.attempt}`, priority: entry.priority !== null });
+      return;
+    }
     const hash = entry.transferHash ?? entry.release?.infoHash ?? null;
     if (entry.state.kind === 'blocked' && entry.state.at === 'downloading') {
       enqueue({ type: 'queue.retry', payload: { entryIds: [entry.id], checkDownload: true, revisions: { [entry.id]: entry.revision } }, dedupeKey: `check:${entry.id}`, priority: entry.priority !== null });

@@ -14,6 +14,7 @@ import { importLocal } from '../imports/local.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import { manualUpgradeTargets } from './upgrades.ts';
 import { requestIdFor } from '../../core/outbound.ts';
+import type { OutsideTitleLock } from '../../core/title-lock.ts';
 import { catalogPoint, catalogSeasons, normalizeNumbering, releasePoint, releaseSeasons } from '../numbering.ts';
 import { needsOtherSeasons } from '@ladarr/shared/queue';
 import type { Db, DecideContext, Decision, Episode, FinderDeps, Indexer, Job, Numbering, QueueEntry, RawRelease, ReleaseRef, Scope, SearchPayload, SearchQuery, SearchResume, SearchState, Title, TitleName, Want } from '../../types.ts';
@@ -318,9 +319,13 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       else for (const entry of entries) catalog[level](event, message, itemFields(entry), { ...fields, ...(name.alias ? { languages: name.languages } : {}) });
     };
     const state: SearchState = entries[0]?.search ?? { at: now(), indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null, rejected: [] };
+    const searches = entries.map((entry) => ({ entry, search: entry.search }));
     const report = (patch: (search: SearchState) => void) => {
-      for (const entry of entries) {
+      for (const saved of searches) {
+        const { entry } = saved;
+        if (db.data.queue[entry.id] !== entry || db.data.titles[title.key] !== title || saved.search !== entry.search) continue;
         entry.search ??= structuredClone(state);
+        saved.search = entry.search;
         patch(entry.search);
         queue.touch(entry);
       }
@@ -358,6 +363,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
             }
             requestId = requestIdFor(indexerName(indexer));
             await indexers.caps(indexer, { signal, requestId });
+            if (searches.length && !searches.some(({ entry, search }) => db.data.queue[entry.id] === entry && db.data.titles[title.key] === title && entry.search === search)) return;
           }
           const query = queryFor(indexer, title, scope, name.value);
           const key = JSON.stringify([indexer.id, query]);
@@ -573,13 +579,13 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     return true;
   }
 
-  async function search(payload: SearchPayload, signal: AbortSignal, final = true) {
+  async function search(payload: SearchPayload, signal: AbortSignal, final = true, outside: OutsideTitleLock = (work) => work()) {
     const title = db.data.titles[payload.titleKey];
     if (!title || title.paused) return;
     // A search job can run for targets that wait for their next search, so the job itself opens those targets.
     const targets = payload.entryIds
       .map((id) => queue.get(id))
-      .filter((entry): entry is QueueEntry => Boolean(entry) && isActive(entry) && (entry!.state.kind === 'waiting' || entry!.state.kind === 'queued' || entry!.state.kind === 'searching'));
+      .filter((entry): entry is QueueEntry => Boolean(entry) && !entry!.release?.uploadPath && isActive(entry) && (entry!.state.kind === 'waiting' || entry!.state.kind === 'queued' || entry!.state.kind === 'searching'));
     if (!targets.length) return;
     const startedAt = now();
     const due = targets.filter((entry) => entry.state.kind !== 'waiting' || (entry.search?.nextAt ?? 0) <= startedAt);
@@ -598,6 +604,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       queue.enter(entry, 'searching', 'search started');
     }
     let open = entries;
+    const searches = new Map(entries.map((entry) => [entry, entry.search]));
+    const current = (entry: QueueEntry) => db.data.titles[title.key] === title && queue.get(entry.id) === entry && entry.state.kind === 'searching' && entry.search === searches.get(entry);
     let asked = 0;
     let answered = 0;
     // Every decision of each entry, so the log of a target says why each release did not match.
@@ -667,7 +675,13 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     // Asks the indexers and decides for each entry. The line says what the query returned and what it accepted, so a
     // reader can tell a season answer with rejected packs from an empty individual answer.
     const ask = async (scope: Scope, name: TitleName, group: QueueEntry[], wantsOf: (entry: QueueEntry) => Want[]) => {
-      const result = await queryAll(title, scope, name, group, signal, { fresh: payload.fresh, quiet: scope.kind !== 'movie', ...(budget ? { budget } : {}) });
+      group = group.filter(current);
+      const empty = { decisionsOf: (_entry: QueueEntry): Decision[] => [], releases: [], incomplete: false };
+      if (!group.length) return empty;
+      const result = await outside(() => queryAll(title, scope, name, group, signal, { fresh: payload.fresh, quiet: scope.kind !== 'movie', ...(budget ? { budget } : {}) }));
+      open = open.filter(current);
+      group = group.filter(current);
+      if (!group.length) return empty;
       asked = Math.max(asked, result.asked);
       answered += result.answered;
       for (const release of result.releases) foundReleases.add(`${release.indexerId}:${release.guid}`);
@@ -1137,7 +1151,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     }
     const again = new Map<string, { titleKey: string; season: number | null; entryIds: string[]; otherSeasons: boolean }>();
     for (const entry of Object.values(db.data.queue)) {
-      if (entry.state.kind !== 'queued' || entry.attempt === 0) continue;
+      if (entry.state.kind !== 'queued' || entry.attempt === 0 || entry.release?.uploadPath) continue;
       if (held.has(entry.id) || entry.attempts.at(-1)?.outcome !== 'running') continue;
       const title = db.data.titles[entry.titleKey];
       if (!title || title.paused) continue;
@@ -1258,6 +1272,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     for (const entry of entries) {
       if (entry.state.kind === 'blocked') {
         queue.retryAttempt(entry, 'release chosen by the user');
+        if (entry.release?.uploadPath) forgetSource(entry);
         Object.assign(entry, { release: null, transferHash: null, clientId: null, source: null, manualMatch: null, importResult: null });
         queue.resolve(entry, 'queued', 'release chosen by the user');
       } else if (entry.state.kind === 'waiting') queue.enter(entry, 'queued', 'release chosen by the user');

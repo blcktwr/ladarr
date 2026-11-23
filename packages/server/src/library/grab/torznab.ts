@@ -2,6 +2,7 @@ import { backoffMs, JobError } from '../../core/jobs.ts';
 import { db } from '../../core/db.ts';
 import { outboundFetch } from '../../core/http.ts';
 import { indexerName } from './indexers.ts';
+import { MAX_TORRENT_BYTES } from './torrent.ts';
 import { log } from '../../core/log.ts';
 import type { Caps, Indexer, Limiter, RawRelease, SearchQuery, TorznabErrorCode, TorznabOptions } from '../../types.ts';
 
@@ -16,7 +17,6 @@ export class IndexerError extends JobError {
 }
 
 const MAX_FEED_BYTES = 10 * 1024 * 1024;
-const MAX_TORRENT_BYTES = 5 * 1024 * 1024;
 const MAX_ITEMS = 500;
 const CAPS_TTL_MS = 24 * 60 * 60_000;
 

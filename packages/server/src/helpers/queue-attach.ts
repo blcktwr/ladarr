@@ -26,6 +26,7 @@ export function matchEntry(id: string, hash: unknown) {
 
 // Says if a download can be attached to the entry. Work that runs now keeps its own path.
 export function attachRefusal(entry: QueueEntry): string | null {
+  if (entry.release?.uploadPath) return 'This target has an uploaded torrent.';
   if (!isActive(entry)) return 'This target is not waiting for a download.';
   if (['queued', 'searching', 'fetching', 'waiting_slot', 'sending'].includes(phaseOfEntry(entry)) || (entry.state.kind === 'blocked' && ['torrent_missing', 'client_error', 'pack_partial', 'coverage_unknown', 'file_not_found'].includes(entry.state.problem.code))) return null;
   return 'This target is not waiting for a download.';

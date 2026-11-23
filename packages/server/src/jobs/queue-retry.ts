@@ -3,6 +3,7 @@ import { catalog, itemFields } from '../core/log.ts';
 import { withTitleLock } from '../core/title-lock.ts';
 import { ClientError } from '../library/downloads/qbittorrent.ts';
 import { forgetSource, isActive, phaseOfEntry } from '../library/downloads/queue.ts';
+import { enqueueUpload, findUpload, uploadHash, uploadOwner } from '../library/downloads/upload.ts';
 import { readTitleFolder, scanTitle } from '../library/scan.ts';
 import type { Handler, QueueEntry, QueueRetryDeps, Title } from '../types.ts';
 
@@ -138,6 +139,44 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
     return true;
   }
 
+  async function fromUpload(entry: QueueEntry, hash: string) {
+    if (entry.state.kind !== 'queued') return;
+    const release = entry.release!;
+    const attempt = entry.attempt;
+    const current = () => queue.get(entry.id) === entry && entry.release === release && entry.attempt === attempt && entry.state.kind === 'queued';
+    let found;
+    try {
+      found = await findUpload(clients, hash, entry.clientId);
+    } catch (error) {
+      if (!(error instanceof ClientError)) throw error;
+      if (current()) queue.block(entry, { code: error.code === 'rejected' ? 'client_rejected' : 'client_unreachable' }, 'download check');
+      return;
+    }
+    if (!current()) return;
+    const { download, handle } = found;
+    if (!handle) return queue.block(entry, { code: 'client_missing' }, 'no download client');
+    entry.transferHash = hash;
+    entry.clientId = handle.id;
+    if (download) {
+      const { torrent } = download;
+      if (torrent.status === 'error') return queue.block(entry, { code: 'client_error' }, 'download check');
+      release.uploadOwner = uploadOwner(entry.titleKey, hash, handle.id);
+      release.external = !release.uploadOwner;
+      queue.enter(entry, torrent.complete ? 'importing' : 'downloading', 'retry: the client has the torrent', torrent.name);
+      if (torrent.complete) {
+        const job = enqueue({ type: 'import.run', payload: { hash, manual: true }, dedupeKey: `import:${hash}`, priority: entry.priority !== null });
+        if (job.state === 'waiting') job.payload = { hash, manual: true };
+      } else if (torrent.status === 'paused' && !release.external) await handle.api.setPaused(hash, false).catch(() => {});
+      return;
+    }
+    release.uploadOwner = undefined;
+    release.external = true;
+    if (!db.data.torrents[hash]) return queue.block(entry, { code: 'upload_source_missing' }, 'torrent file is missing');
+    entry.source = { torrent: true };
+    queue.enter(entry, 'waiting_slot', 'retry: the target has its torrent', release.title);
+    enqueueUpload(enqueue, [entry], hash);
+  }
+
   // No phase resolved the target, so it searches. Nothing is kept: the release that failed is gone, and the target
   // starts again from the top of the journey.
   function fromSearch(entry: QueueEntry) {
@@ -160,7 +199,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
     separate: true,
     maxAttempts: 3,
     run: async (job, { signal }) => {
-      const { entryIds, checkDownload: check, revisions } = job.payload as { entryIds: string[]; checkDownload?: boolean; revisions?: Record<string, number> };
+      const { entryIds, checkDownload: check, revisions, uploadHash: expectedHash, uploadAttempt } = job.payload as { entryIds: string[]; checkDownload?: boolean; revisions?: Record<string, number>; uploadHash?: string; uploadAttempt?: number };
       const entries = entryIds.map((id) => queue.get(id)).filter((entry): entry is QueueEntry => Boolean(entry));
       if (check) {
         for (const entry of entries) {
@@ -176,6 +215,15 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
         if (!title) continue;
         // The folder is read once for the title, and the search and the scan share the lock of the title.
         await withTitleLock(key, async () => {
+          if (expectedHash) {
+            for (const entry of group) {
+              signal.throwIfAborted();
+              if (queue.get(entry.id) === entry && uploadHash(entry) === expectedHash && entry.state.kind === 'queued' && entry.attempt === uploadAttempt) {
+                if (!(await fromLibrary(entry, title, present(fileOf(title, entry))))) await fromUpload(entry, expectedHash);
+              }
+            }
+            return;
+          }
           const scan = await scanTitle(key, clients);
           if (scan.added || scan.updated || scan.missing) events.publish('library.changed', { key });
           const fresh = scan.status === 'ok' || scan.status === 'folder_missing';
@@ -183,6 +231,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
             signal.throwIfAborted();
             // The user can pause or cancel the target while the retry waits for its title.
             if (!isActive(entry) || entry.state.kind === 'paused' || entry.state.kind === 'blocked') continue;
+            if (uploadHash(entry)) continue;
             // A target of an import runs its import checks. Its own job does that, with no limit.
             if (phaseOfEntry(entry) === 'importing') continue;
             if (await fromLibrary(entry, title, fresh)) continue;

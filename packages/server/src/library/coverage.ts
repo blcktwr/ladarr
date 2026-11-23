@@ -7,6 +7,7 @@ import { isSample, isVideoFile, parseEpisodes, releaseEpisodes } from './parse.t
 export function inspectCoverage(files: string[], title: Title, numbering?: Numbering | null, seasonHint?: number | null) {
   const map = normalizeNumbering(numbering === undefined ? title.numbering : numbering);
   const episodes: EpisodeRef[] = [];
+  const byFile = new Map<string, EpisodeRef[]>();
   const unknown: string[] = [];
   const pending: { season: number | null; numbers: number[] | null }[] = [];
   const key = (episode: EpisodeRef) => `${episode.season}:${episode.number}`;
@@ -39,6 +40,7 @@ export function inspectCoverage(files: string[], title: Title, numbering?: Numbe
     const refs = found ? found.numbers.map((number) => ({ season: found.season, number })) : crossSeason;
     const listed = refs.filter((ref) => title.episodes.some((episode) => episode.season === ref.season && episode.number === ref.number));
     if (listed.length) {
+      byFile.set(file, listed);
       for (const episode of listed) {
         if (identified.has(key(episode))) continue;
         identified.add(key(episode));
@@ -52,6 +54,7 @@ export function inspectCoverage(files: string[], title: Title, numbering?: Numbe
   }
   return {
     episodes,
+    byFile,
     unknown,
     ambiguous,
     status(target: EpisodeRef): 'identified' | 'absent' | 'unknown' {

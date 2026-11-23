@@ -481,6 +481,8 @@ export type ReleaseRef = {
   seed?: { ratio: number | null; minutes: number | null } | null;
   // Set when the user attached a download that was in the client already. ladarr did not add it, and never removes it.
   external?: boolean;
+  uploadPath?: string;
+  uploadOwner?: string;
 };
 export type Attempt = {
   n: number;
@@ -822,7 +824,7 @@ export type JournalStep = {
 // a manual import reads a folder that the user named, and a rename reads the root of the title (`kind: 'rename'`).
 // An import from a download folder is link only: it never copies. It asks for a search when its files are in, so the
 // episodes that it did not bring still get a release.
-export type ImportJournal = { id: string; hash: string; torrentName?: string; titleKey: string; steps: JournalStep[]; createdAt: number; kind?: 'rename'; sourceBase?: string; clientId?: string; downloadBase?: string; linkOnly?: true; searchOnFinish?: true; correction?: CorrectionCommit };
+export type ImportJournal = { id: string; hash: string; torrentName?: string; titleKey: string; steps: JournalStep[]; createdAt: number; kind?: 'rename'; sourceBase?: string; clientId?: string; downloadBase?: string; linkOnly?: true; searchOnFinish?: true; upload?: true; correction?: CorrectionCommit };
 export type Fs = { link: typeof fsLink; copyFile: typeof fsCopyFile; rename: typeof fsRename };
 export type ImporterDeps = {
   queue: Queue;

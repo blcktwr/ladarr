@@ -22,7 +22,7 @@ export { ValidatingIcon } from './components/indicators/ValidatingIcon.tsx';
 export { WaitingIcon } from './components/indicators/WaitingIcon.tsx';
 export { EmptyState } from './components/EmptyState.tsx';
 export { Field } from './components/Field.tsx';
-export { FileField } from './components/FileField.tsx';
+export { DropFileField, FileField } from './components/FileField.tsx';
 export { Form } from './components/Form.tsx';
 export { Gallery } from './components/Gallery.tsx';
 export { Hint } from './components/Hint.tsx';

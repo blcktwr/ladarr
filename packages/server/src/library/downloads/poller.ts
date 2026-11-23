@@ -93,11 +93,13 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
     // The key is the content of the numbering, because each target has its own copy of it.
     const readings = new Map<string, Map<string, ReturnType<typeof releaseEpisodes>>>();
     for (const entry of entries) {
+      const upload = entry.release?.uploadPath;
       const manual = entry.manualMatch?.file;
       const numbering = entry.numbering ?? title?.numbering ?? null;
       const numberingKey = JSON.stringify(numbering);
       const read = readings.get(numberingKey) ?? readings.set(numberingKey, new Map()).get(numberingKey)!;
       const file =
+        upload && !manual ? files.find((item) => item.name === upload) :
         entry.number === null && !manual
           ? [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)[0]
           : files.find((item) => {
@@ -136,7 +138,7 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
     const groups = new Map<string, QueueEntry[]>();
     for (const entry of entries) {
       // A target in Sending next to an attached target keeps waiting. Only the grab decides about its torrent.
-      if (entry.state.kind === 'sending' && entry.transferHash && !addedByApp(entry.transferHash)) continue;
+      if (entry.state.kind === 'sending' && entry.transferHash && (entry.release?.uploadPath || !addedByApp(entry.transferHash))) continue;
       groups.set(entry.transferHash!, [...(groups.get(entry.transferHash!) ?? []), entry]);
     }
 
