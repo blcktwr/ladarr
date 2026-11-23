@@ -787,7 +787,7 @@ test('changes the torrent of a mapped episode without a queue entry', async ({ p
     .find((point: { id: string }) => point.id === 'tv:3:2x3')).toMatchObject({ torrent: { hash: alternate }, match: { file: 'Replacement.mkv' } });
 });
 
-test('recovers both source packs on scan and shows their file paths after a restart without the torrents', async ({ page }) => {
+test('opens the mapping with both source packs and keeps their file paths after a restart without the torrents', async ({ page }) => {
   const title = data.titles['tv:3']!;
   title.folder = 'Two Seasons (2021)';
   const packs = [
@@ -808,19 +808,28 @@ test('recovers both source packs on scan and shows their file paths after a rest
       association: { source: 'manual', originalName: path, numberingRevision: 0, identity: { sizeBytes: size, mtimeMs, dev, ino } } };
   }
   data.queuePaused = true;
-  await start([blocked(title.key, 1, 2, 'importing', 'file_not_found')]);
-  expect((await stack.call('POST', `/library/${title.key}/rescan`)).status).toBe(202);
-  await expect.poll(async () => (await stack.call('GET', `/queue/groups/${title.key}?mapping=true`)).body.mapping.filter((row: { torrent: unknown }) => row.torrent).length).toBe(2);
+  const missing = blocked(title.key, 1, 2, 'importing', 'file_not_found');
+  missing.transferHash = hashOf(packs[0]!.name);
+  missing.clientId = data.downloadClients[0]!.id;
+  await start([missing]);
+  await open(page, `group:${title.key}:1`);
+  const show = async () => {
+    await page.getByRole('button', { name: 'Map episodes', exact: true }).click();
+    for (const [i, label] of ['S01E01', 'S02E03'].entries()) {
+      const row = page.getByRole('dialog').getByRole('row').filter({ hasText: label });
+      await expect(row.getByRole('combobox', { name: 'Torrent' })).toHaveValue(packs[i]!.name);
+      await expect(row.getByRole('combobox', { name: 'Matches' })).toHaveValue(packs[i]!.file);
+    }
+  };
+  await show();
+  const absent = page.getByRole('dialog').getByRole('row').filter({ hasText: 'S01E02' });
+  await expect(absent.getByRole('combobox', { name: 'Torrent' })).toHaveValue(packs[0]!.name);
+  await expect(absent.getByRole('combobox', { name: 'Matches' })).toHaveValue('');
   await stack.server.stop();
   stack.qbit.torrents.clear();
   await stack.server.start();
   await open(page, `group:${title.key}:1`);
-  await page.getByRole('button', { name: 'Map episodes', exact: true }).click();
-  for (const [i, label] of ['S01E01', 'S02E03'].entries()) {
-    const row = page.getByRole('dialog').getByRole('row').filter({ hasText: label });
-    await expect(row.getByRole('combobox', { name: 'Torrent' })).toHaveValue(packs[i]!.name);
-    await expect(row.getByRole('combobox', { name: 'Matches' })).toHaveValue(packs[i]!.file);
-  }
+  await show();
 });
 
 test('applies the file that the matcher gives to each episode of a stopped season', async ({ page }) => {

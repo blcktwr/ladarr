@@ -289,7 +289,7 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
     api.post('/queue/jobs/:id/run', queueJobRunPost(persist));
     api.delete('/queue/jobs/:id', queueJobDelete(services.queue, persist));
     api.get('/queue', queueGet(services.poller, importStatus));
-    api.get('/queue/groups/:titleKey', queueGroupGet(services.poller, importStatus, services.clients));
+    api.get('/queue/groups/:titleKey', queueGroupGet(services.poller, importStatus, services.clients, persist));
     api.get('/queue/recent', queueRecentGet(services.poller, importStatus));
     api.get('/queue/entries/:id', queueEntryGet(services.poller, importStatus));
     api.post('/queue/search', queueSearchPost(services.finder));

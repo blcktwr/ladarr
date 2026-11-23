@@ -6,6 +6,7 @@ import type { RequestHandler } from 'express';
 import { bySeasonNumber, filtersOf, groupAggregate, lanePositions, queueEpisode, reachedOf, shown, view } from '../../../../helpers/queue.ts';
 import { inside, torrentVideos } from '../../../../library/imports/importer.ts';
 import { normalizeNumbering, releasePoint } from '../../../../library/numbering.ts';
+import { recoverMappingSources } from '../../../../library/scan.ts';
 import type { Clients, ImportStatus, Poller, Title, Torrent } from '../../../../types.ts';
 
 async function identity(path: string) {
@@ -13,7 +14,7 @@ async function identity(path: string) {
   return info?.isFile() ? `${info.dev}:${info.ino}` : undefined;
 }
 
-async function mappingOf(title: Title, clients: Clients, fixedSeason: number | null): Promise<QueueMappingEpisode[]> {
+async function mappingOf(title: Title, clients: Clients, fixedSeason: number | null, persist: () => void): Promise<QueueMappingEpisode[]> {
   const numbering = normalizeNumbering(title.numbering);
   const regularSeasons = new Set(title.meta.seasons.filter((season) => season.seasonNumber > 0 && season.episodeCount > 0).map((season) => season.seasonNumber));
   const episodes = fixedSeason === null
@@ -26,6 +27,7 @@ async function mappingOf(title: Title, clients: Clients, fixedSeason: number | n
     const releaseSeason = releasePoint(numbering, { season, number })?.season ?? season;
     return { id, season, number, releaseSeason, entry, file: record?.titleKey === title.key && !record.missing ? record : undefined };
   });
+  if (fixedSeason === null && await recoverMappingSources(title, rows.flatMap(({ file }) => file ?? []), clients)) await persist();
   const hashes = new Map<string, Set<string>>();
   const add = (id: string | null | undefined, hash: string | null | undefined) => {
     if (id && hash) (hashes.get(id) ?? hashes.set(id, new Set()).get(id)!).add(hash);
@@ -75,7 +77,7 @@ async function mappingOf(title: Title, clients: Clients, fixedSeason: number | n
 // season of the series. `group` covers every member of the season before the tab filter, so the inspector header and
 // the row show the same aggregate. `items` holds every episode of the season: the tab of the page filters the rows,
 // not the children.
-export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undefined, clients: Clients): RequestHandler<{ titleKey: string }> {
+export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undefined, clients: Clients, persist = (): void | Promise<void> => db.write()): RequestHandler<{ titleKey: string }> {
   return async (req, res) => {
     const f = filtersOf(req.query);
     const lane = lanePositions();
@@ -96,7 +98,7 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
     const summary = groupAggregate(all);
     const title = db.data.titles[req.params.titleKey];
     const numberingRevision = title?.numbering?.revision ?? 0;
-    const mapping = mappingRequested && title ? await mappingOf(title, clients, season) : undefined;
+    const mapping = mappingRequested && title ? await mappingOf(title, clients, season, persist) : undefined;
     res.json({
       cursor: db.data.queueRev,
       group: {

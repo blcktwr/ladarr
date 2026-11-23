@@ -8,7 +8,7 @@ import { inspectCoverage } from './coverage.ts';
 import { libraryVersion } from './mapping.ts';
 import { normalizeTitle, parseRelease } from './grab/release.ts';
 import { isSample, isVideoFile, releaseEpisodes } from './parse.ts';
-import { checkRoot } from './roots.ts';
+import { checkRoot, sameIdentity } from './roots.ts';
 import { createClients } from './downloads/client-api.ts';
 import { torrentVideos } from './imports/importer.ts';
 import type { ClientHandle, Clients, Db, FolderInventory, InventoryFile, MediaFile, QueueEntry, ScanFound, ScanResult, Title, Torrent } from '../types.ts';
@@ -101,6 +101,37 @@ export async function linkedSources(clients: Clients, files: ScanFound[]) {
     const source = found.get(identity(file));
     return source ? [[file.path, source] as const] : [];
   }));
+}
+
+function recordSource(file: MediaFile, download: NonNullable<MediaFile['download']> & { file: string }) {
+  if (file.download && (file.download.hash !== download.hash || file.download.clientId !== download.clientId)) return false;
+  file.download = { ...download, external: file.download?.external ?? download.external };
+  if (file.association) file.association.originalName = download.file;
+  return true;
+}
+
+export async function recoverMappingSources(title: Title, records: MediaFile[], clients: Clients) {
+  const files = [...new Set(records)].filter((file) => !file.download?.name || !file.download.file);
+  const root = db.data.roots[title.rootId];
+  if (!files.length || !root) return false;
+  const version = libraryVersion(title.key);
+  const base = await realpath(root.path).catch(() => undefined);
+  if (!base || (root.dev !== undefined && (await stat(base).catch(() => undefined))?.dev !== root.dev)) return false;
+  const inventory = await Promise.all(files.map(async (file) => {
+    const abs = await realpath(join(base, file.path)).catch(() => undefined);
+    if (!abs || !inside(base, abs)) return [];
+    const info = await stat(abs).catch(() => undefined);
+    if (!info?.isFile() || !sameIdentity(file.association?.identity ?? file, info)) return [];
+    return [{ path: file.path, sizeBytes: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino, nlink: info.nlink }];
+  }));
+  const sources = await linkedSources(clients, inventory.flat());
+  if (!sources.size || db.data.titles[title.key] !== title || libraryVersion(title.key) !== version) return false;
+  let changed = false;
+  for (const file of files) {
+    const source = sources.get(file.path);
+    if (source && db.data.files[file.id] === file && recordSource(file, source.download)) changed = true;
+  }
+  return changed;
 }
 
 async function legacyImports(title: Title, folder: FolderInventory, clients: Clients) {
@@ -250,10 +281,7 @@ export async function scanTitle(key: string, clients: Clients = scanClients): Pr
       identity: { sizeBytes: found.sizeBytes, mtimeMs: found.mtimeMs, dev: found.dev, ino: found.ino },
     };
     const source = sources.get(found.path);
-    if (source && (episodes.length || title.mediaType === 'movie') && (!file.download || (file.download.hash === source.torrent.hash && file.download.clientId === source.handle.id))) {
-      file.download = { ...source.download, external: file.download?.external ?? source.download.external };
-      file.association!.originalName = source.download.file;
-    }
+    if (source && (episodes.length || title.mediaType === 'movie')) recordSource(file, source.download);
     return file;
   };
 
