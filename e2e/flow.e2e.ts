@@ -380,10 +380,10 @@ test('series: add, season pack, crash, import', async ({ page }) => {
   await page.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
   await expect(page.locator('[data-row="season:tv:1|1"]')).toBeVisible();
   await expect(groupRow).toContainText('Downloading');
-  // The bar of the season shows the part of the torrent that the client reports, and the line under it counts the
-  // episodes that finished.
+  // The bar and the status line show the same download percentage.
   await expect(page.getByRole('progressbar', { name: 'Show Name (2020) Season 1 Download' })).toHaveAttribute('aria-valuenow', '40');
-  await expect(page.getByRole('main').getByText('0 / 3 episodes')).toBeVisible();
+  await expect(page.getByRole('main').getByText('40%', { exact: true })).toBeVisible();
+  await expect(page.getByRole('main').getByText('0 / 3 episodes')).toHaveCount(0);
   // A click on the button of the season opens its episodes in the inspector.
   await page.getByRole('button', { name: 'Show episodes of Season 1' }).click();
   await expect(page.getByRole('table', { name: 'Episodes of season 1' })).toBeVisible();

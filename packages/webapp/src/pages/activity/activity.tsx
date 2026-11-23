@@ -671,7 +671,7 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
   const status = summary?.status ?? group.status;
   const completed = summary?.reached.completed ?? group.reached.completed;
   const total = summary?.total ?? group.total;
-  const download = summary?.download ?? group.download;
+  const percent = Math.round((summary?.download ?? group.download ?? 0) * 100);
   const toggle = (number: number) => setSeason((current) => (current === number ? null : number));
   // The releases of the series. A pack is one release. Several episodes can have their own.
   const releases = new Map<string, NonNullable<QueueEntryView['release']>>();
@@ -686,11 +686,11 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
   // The episodes that a problem stopped. One of them shows its own fix on the row of the season.
   const stopped = entries.filter((entry) => entry.status === 'stuck');
   const message =
-    status === 'no_match'
-      ? t('The indexers have releases, but none fits your selected qualities.')
-      : t('{count} / {total} episodes', { count: completed, total });
+    status === 'downloading' ? `${percent}%`
+      : status === 'no_match' ? t('The indexers have releases, but none fits your selected qualities.')
+        : t('{count} / {total} episodes', { count: completed, total });
   const bar = status === 'downloading' ? (
-    <Progress value={Math.round((download ?? 0) * 100)} label={`${groupName(group)} ${t('Download')}`} />
+    <Progress value={percent} label={`${groupName(group)} ${t('Download')}`} />
   ) : undefined;
   return (
     <div className="grid min-w-0">
