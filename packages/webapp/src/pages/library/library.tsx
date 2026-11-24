@@ -50,7 +50,6 @@ function TitlePoster({ title, selected, onSelectedChange }: { title: TitleSummar
         noCaption
         selected={selected}
         onSelectedChange={onSelectedChange}
-        dimmed={title.availability === 'waiting'}
       />
     </RouterLink>
   );
