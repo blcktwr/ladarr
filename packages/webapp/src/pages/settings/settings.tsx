@@ -17,7 +17,7 @@ import { FolderSettings, GeneralSettings } from './library-settings.tsx';
 import { Qualities } from './quality-settings.tsx';
 import { Backups, SystemVersion } from './system-settings.tsx';
 import { Webhook } from './webhook-settings.tsx';
-import { Help } from './help-settings.tsx';
+import { Bridges, Help } from './help-settings.tsx';
 
 function ApiKey() {
   const { data, error, isFetching: loading, refetch: reload } = useQuery<{ apiKey: string }>({ queryKey: ['/auth/api-key'] });
@@ -294,9 +294,14 @@ const categories = [
     value: 'help',
     label: 'Help',
     content: (
-      <Pane>
-        <Help />
-      </Pane>
+      <>
+        <Pane>
+          <Bridges />
+        </Pane>
+        <Pane>
+          <Help />
+        </Pane>
+      </>
     ),
   },
 ];

@@ -2,6 +2,15 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { TMDB_API_KEY } from './constants.ts';
 
+export const ports = { Sonarr: 8989, Radarr: 7878, Seerr: 5055 };
+
+export function bridges() {
+  return Object.entries(ports).map(([name, port]) => ({
+    name,
+    port: Number(process.env[`LADARR_${name.toUpperCase()}_PORT`] || port),
+  }));
+}
+
 export function loadConfig() {
   const configDir = process.env.LADARR_CONFIG_DIR ?? join(process.cwd(), 'config');
   mkdirSync(configDir, { recursive: true });

@@ -1,5 +1,7 @@
-import { Badge, List, Row, Section, Text } from 'nebula';
+import { Copy } from 'lucide-react';
+import { Badge, Button, Field, List, Row, Section, Text } from 'nebula';
 import { t } from '../../i18n/index.ts';
+import { WithSettings } from './with-settings.tsx';
 
 type Entry = { name: string; text: string };
 
@@ -65,6 +67,49 @@ const groups: { title: string; text: string; events: Entry[] }[] = [
     ],
   },
 ];
+
+async function copy(value: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch {
+    const write = (event: ClipboardEvent) => {
+      event.clipboardData?.setData('text/plain', value);
+      event.preventDefault();
+    };
+    document.addEventListener('copy', write);
+    try {
+      document.execCommand('copy');
+    } finally {
+      document.removeEventListener('copy', write);
+    }
+  }
+}
+
+export function Bridges() {
+  return (
+    <Section title={t('Compatible URLs')}>
+      <WithSettings>
+        {({ bridges }) => bridges.map(({ name, port }) => {
+          const url = `http://${location.hostname}:${port}`;
+          return (
+            <Field
+              key={name}
+              label={name}
+              width="full"
+              disabled
+              value={url}
+              action={
+                <Button variant="ghost" iconOnly aria-label={`${t('Copy')}: ${name}`} onClick={() => void copy(url)}>
+                  <Copy />
+                </Button>
+              }
+            />
+          );
+        })}
+      </WithSettings>
+    </Section>
+  );
+}
 
 export function Help() {
   return (

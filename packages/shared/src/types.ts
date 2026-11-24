@@ -312,6 +312,7 @@ export type SettingsData = {
 
 export type SettingsResponse = {
   settings: SettingsData;
+  bridges: { name: string; port: number }[];
   presets: PresetRow[];
   qualityTableVersion: number;
 };

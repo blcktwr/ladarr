@@ -1,7 +1,7 @@
 import { existsSync, unlinkSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { dirname } from 'node:path';
-import { loadConfig } from '@ladarr/shared/config';
+import { loadConfig, ports } from '@ladarr/shared/config';
 import { createApp } from './app.ts';
 import { createClients } from './library/downloads/client-api.ts';
 import { createImportStatus } from './library/imports/status.ts';
@@ -155,9 +155,9 @@ listen(
 
 if (config.proxy) {
   const deps = { restorer, tmdb, events, enqueue: worker.enqueue, services };
-  listen(sonarr({ ...deps, onChange: indexersChanged }), 8989, 'sonarr');
-  listen(radarr({ ...deps, onChange: indexersChanged }), 7878, 'radarr');
-  listen(seerr(deps), 5055, 'seerr');
+  listen(sonarr({ ...deps, onChange: indexersChanged }), ports.Sonarr, 'sonarr');
+  listen(radarr({ ...deps, onChange: indexersChanged }), ports.Radarr, 'radarr');
+  listen(seerr(deps), ports.Seerr, 'seerr');
 }
 
 let stopping = false;

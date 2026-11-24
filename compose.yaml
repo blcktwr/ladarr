@@ -14,6 +14,9 @@ services:
     environment:
       LADARR_URL_BASE: ${LADARR_URL_BASE:-}
       LADARR_COMPAT_PORTS: ${LADARR_COMPAT_PORTS:-1}
+      LADARR_SONARR_PORT: ${LADARR_SONARR_PORT:-8989}
+      LADARR_RADARR_PORT: ${LADARR_RADARR_PORT:-7878}
+      LADARR_SEERR_PORT: ${LADARR_SEERR_PORT:-5055}
     volumes:
       - ${LADARR_CONFIG:-./config}:/config
       - ${LADARR_DATA:-./data}:/data
