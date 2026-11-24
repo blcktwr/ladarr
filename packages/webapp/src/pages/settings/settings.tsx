@@ -153,53 +153,55 @@ function LogEntries({ kind }: { kind: 'logs' | 'requests' }) {
     setPage(0);
   };
 
-  return (
-    <Section title={t(kind === 'requests' ? 'Requests' : 'Logs')}>
-      {error && !data ? (
-        <LoadFailed onRetry={reload} />
-      ) : (
-        <>
-          {kind === 'logs' && <QueueLogs />}
-          <div className="flex flex-wrap items-center gap-4 w-full">
-            {kind === 'logs' && (
-              <>
-                <Dropdown
-                  label={t('Level')}
-                  value={level}
-                  options={[{ value: '', label: t('All') }, ...Object.entries(levelLook).map(([value, look]) => ({ value, label: t(look.label) }))]}
-                  onValueChange={(value) => filter(() => setLevel(value ?? ''))}
-                />
-                <Dropdown
-                  label={t('Type')}
-                  value={type}
-                  options={[{ value: '', label: t('All') }, { value: 'system', label: t('System') }, { value: 'catalog', label: t('Catalog') }]}
-                  onValueChange={(value) => filter(() => setType((value ?? '') as '' | 'system' | 'catalog'))}
-                />
-              </>
-            )}
-            {kind === 'requests' && (
-              <Dropdown
-                label={t('Traffic')}
-                value={traffic}
-                options={[{ value: '', label: t('All') }, { value: 'inbound', label: t('Inbound') }, { value: 'outbound', label: t('Outbound') }]}
-                onValueChange={(value) => filter(() => setTraffic((value ?? '') as Traffic))}
-              />
-            )}
-            <Dropdown label={t('Time')} value={period} options={periods.map((item) => ({ value: item.value, label: t(item.label) }))} onValueChange={(value) => filter(() => setPeriod(value as Period))} />
-            <Field label={t('Date')} type="date" width="sm" value={date} onValueChange={(value) => filter(() => setDate(value))} />
-            <Switch label={t('Live')} checked={live} onCheckedChange={setLive} />
-          </div>
-          {loading && !data && <Spinner label={t('Loading')} />}
-          {!loading && rows.length === 0 && <EmptyState>{t('No log entries.')}</EmptyState>}
-          <List>
-            {shown.map((entry) => (
-              <LogRow key={`${entry.time}|${entry.message}`} entry={entry} kind={kind} />
-            ))}
-          </List>
-          {pages > 1 && <Pagination aria-label={t('Pages')} page={current + 1} count={pages} onPageChange={(next) => setPage(next - 1)} />}
-        </>
-      )}
-    </Section>
+  const content = error && !data ? (
+    <LoadFailed onRetry={reload} />
+  ) : (
+    <>
+      {kind === 'logs' && <QueueLogs />}
+      <div className="flex flex-wrap items-center gap-4 w-full">
+        {kind === 'logs' && (
+          <>
+            <Dropdown
+              label={t('Level')}
+              value={level}
+              options={[{ value: '', label: t('All') }, ...Object.entries(levelLook).map(([value, look]) => ({ value, label: t(look.label) }))]}
+              onValueChange={(value) => filter(() => setLevel(value ?? ''))}
+            />
+            <Dropdown
+              label={t('Type')}
+              value={type}
+              options={[{ value: '', label: t('All') }, { value: 'system', label: t('System') }, { value: 'catalog', label: t('Catalog') }]}
+              onValueChange={(value) => filter(() => setType((value ?? '') as '' | 'system' | 'catalog'))}
+            />
+          </>
+        )}
+        {kind === 'requests' && (
+          <Dropdown
+            label={t('Traffic')}
+            value={traffic}
+            options={[{ value: '', label: t('All') }, { value: 'inbound', label: t('Inbound') }, { value: 'outbound', label: t('Outbound') }]}
+            onValueChange={(value) => filter(() => setTraffic((value ?? '') as Traffic))}
+          />
+        )}
+        <Dropdown label={t('Time')} value={period} options={periods.map((item) => ({ value: item.value, label: t(item.label) }))} onValueChange={(value) => filter(() => setPeriod(value as Period))} />
+        <Field label={t('Date')} type="date" width="sm" value={date} onValueChange={(value) => filter(() => setDate(value))} />
+        <Switch label={t('Live')} checked={live} onCheckedChange={setLive} />
+      </div>
+      {loading && !data && <Spinner label={t('Loading')} />}
+      {!loading && rows.length === 0 && <EmptyState>{t('No log entries.')}</EmptyState>}
+      <List>
+        {shown.map((entry) => (
+          <LogRow key={`${entry.time}|${entry.message}`} entry={entry} kind={kind} />
+        ))}
+      </List>
+      {pages > 1 && <Pagination aria-label={t('Pages')} page={current + 1} count={pages} onPageChange={(next) => setPage(next - 1)} />}
+    </>
+  );
+
+  return kind === 'logs' ? (
+    <Section title={t('Logs')}>{content}</Section>
+  ) : (
+    <div className="grid grid-cols-[minmax(0,1fr)] justify-items-start gap-5 w-full">{content}</div>
   );
 }
 

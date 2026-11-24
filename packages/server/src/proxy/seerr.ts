@@ -3,6 +3,7 @@ import express, { Router, type RequestHandler, type Response } from 'express';
 import { safeEqual } from '../core/auth.ts';
 import { db } from '../core/db.ts';
 import { onError } from '../core/errors.ts';
+import { inbound } from '../core/log.ts';
 import { isMonitored, seriesCounts } from '../library/library.ts';
 import { AddError, addTitle } from '../library/tools/add.ts';
 import { TmdbError } from '../metadata/tmdb.ts';
@@ -804,6 +805,7 @@ export function seerr(options: SeerrOptions) {
   const { restorer, ...deps } = options;
   const app = express();
   app.disable('x-powered-by');
+  app.use(inbound());
   app.use(express.json({ limit: '100kb' }));
   if (restorer) app.use(restoreGate(restorer));
   app.use('/api/v1', seerrRouter(deps), onError);

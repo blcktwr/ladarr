@@ -128,7 +128,7 @@ import { libraryEpisodeUpdate } from './routes/library/[key]/episodes/[season]/[
 import { libraryEpisodeDiscard } from './routes/library/[key]/episodes/[season]/[number]/delete.ts';
 import { libraryToolsRouter } from './library/tools/tools.ts';
 
-import { log, traffic } from './core/log.ts';
+import { inbound, log } from './core/log.ts';
 import { withOutboundRequests } from './core/outbound.ts';
 import { rootsAcceptMount } from './routes/roots/[id]/accept-mount/post.ts';
 import { rootsDelete } from './routes/roots/[id]/delete.ts';
@@ -351,18 +351,8 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   }
   // The requests that one call of the API sends belong to it, so its lines of the log link to them.
   app.use((_req, _res, next) => withOutboundRequests(next));
-  app.use((req, res, next) => {
-    // The path has no query string, so a key sent in the query never reaches the log of this middleware, or the quiet list.
-    const path = req.originalUrl.split('?')[0];
-    // A read of the log would log itself, and the tail of the log page would fill the file.
-    const quiet = [`${urlBase}/api/health`, `${urlBase}/api/system/logs`];
-    if (!quiet.includes(path)) {
-      // The address goes in the log as it came, and redact() hides a key, a token, or a password in the query.
-      const url = new URL(req.originalUrl, `${req.protocol}://${req.get('host') ?? 'localhost'}`).toString();
-      res.on('finish', () => traffic.info('request', { direction: 'inbound', request: { method: req.method, url }, response: { status: res.statusCode } }));
-    }
-    next();
-  });
+  // A read of the log would log itself, and the tail of the log page would fill the file.
+  app.use(inbound([`${urlBase}/api/health`, `${urlBase}/api/system/logs`]));
   // Seerr and other callers use /api/v3 on their own. The answer names the right paths, because the native API would answer 401.
   app.use(`${urlBase}/api/v3`, wrongPath(urlBase));
   // A Seerr client adds /api/v1 to the address. The adapter lives under /seerr.

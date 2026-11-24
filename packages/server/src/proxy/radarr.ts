@@ -2,6 +2,7 @@ import { join, posix } from 'node:path';
 import express, { Router } from 'express';
 import { db } from '../core/db.ts';
 import { onError } from '../core/errors.ts';
+import { inbound } from '../core/log.ts';
 import { candidate, clock, firstProfileId, hasFiles, isObject, noTmdb, notFound, notFoundPath, notSupported, parseId, presentFile, profileId, readOptions, readPlacement, refuse, tmdbProblem } from './common.ts';
 import { adapter } from './indexer.ts';
 import { AddError, addTitle } from '../library/tools/add.ts';
@@ -132,6 +133,7 @@ export function radarrRoutes(deps: CompatDeps) {
 export function radarr(options: AdapterOptions) {
   const app = express();
   app.disable('x-powered-by');
+  app.use(inbound());
   app.use('/api/v3', adapter('radarr', { ...options, urlBase: '' }), onError);
   app.use(notFoundPath('/api/v3'));
   return app;

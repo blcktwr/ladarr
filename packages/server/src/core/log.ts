@@ -2,6 +2,7 @@ import type { LogEntry } from '@ladarr/shared/types';
 import { appendFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import type { RequestHandler } from 'express';
 import pino from 'pino';
 import { createStream, type RotatingFileStream } from 'rotating-file-stream';
 import { db } from './db.ts';
@@ -286,6 +287,22 @@ export const traffic = {
   info: (message: string, fields?: Record<string, unknown>) => write('info', message, fields, 'requests'),
   warn: (message: string, fields?: Record<string, unknown>) => write('warn', message, fields, 'requests'),
 };
+
+export function inbound(quiet: string[] = []): RequestHandler {
+  return (req, res, next) => {
+    if (quiet.includes(req.originalUrl.split('?')[0]!)) return next();
+    const url = URL.parse(req.originalUrl, `${req.protocol}://${req.get('host') ?? 'localhost'}`);
+    if (url) {
+      url.username = '';
+      url.password = '';
+      for (const key of url.searchParams.keys()) {
+        if (SECRET_KEY.test(key)) url.searchParams.set(key, '[redacted]');
+      }
+      res.once('finish', () => traffic.info('request', { direction: 'inbound', request: { method: req.method, url: url.toString() }, response: { status: res.statusCode } }));
+    }
+    next();
+  };
+}
 
 const matches = (entry: LogEntry, filter: LogFilter) =>
   (!filter.type || (entry.type ?? 'system') === filter.type) &&
