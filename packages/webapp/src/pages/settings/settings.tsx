@@ -220,6 +220,9 @@ const categories = [
         <Pane>
           <SystemVersion />
         </Pane>
+        <Pane>
+          <Bridges />
+        </Pane>
       </>
     ),
   },
@@ -296,14 +299,9 @@ const categories = [
     value: 'help',
     label: 'Help',
     content: (
-      <>
-        <Pane>
-          <Bridges />
-        </Pane>
-        <Pane>
-          <Help />
-        </Pane>
-      </>
+      <Pane>
+        <Help />
+      </Pane>
     ),
   },
 ];

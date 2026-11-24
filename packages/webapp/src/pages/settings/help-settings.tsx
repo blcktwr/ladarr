@@ -87,25 +87,29 @@ async function copy(value: string) {
 
 export function Bridges() {
   return (
-    <Section title={t('Compatible URLs')}>
+    <Section title={t('Proxy URLs')}>
       <WithSettings>
-        {({ bridges }) => bridges.map(({ name, port }) => {
-          const url = `http://${location.hostname}:${port}`;
-          return (
-            <Field
-              key={name}
-              label={name}
-              width="full"
-              disabled
-              value={url}
-              action={
-                <Button variant="ghost" iconOnly aria-label={`${t('Copy')}: ${name}`} onClick={() => void copy(url)}>
-                  <Copy />
-                </Button>
-              }
-            />
-          );
-        })}
+        {({ bridges }) => bridges.length > 0 && (
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-2 w-full">
+            {bridges.map(({ name, port }) => {
+              const url = `http://${location.hostname}:${port}`;
+              return (
+                <Field
+                  key={name}
+                  label={name}
+                  width="full"
+                  disabled
+                  value={url}
+                  action={
+                    <Button variant="ghost" iconOnly aria-label={`${t('Copy')}: ${name}`} onClick={() => void copy(url)}>
+                      <Copy />
+                    </Button>
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
       </WithSettings>
     </Section>
   );
