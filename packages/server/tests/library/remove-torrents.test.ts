@@ -42,12 +42,12 @@ describe('torrentsForRemoval', () => {
     expect(torrentsForRemoval([entry('tv:1:1x1')], [entry('tv:1:2x1')])).toEqual([]);
   });
 
-  it('keeps a torrent that the user attached', () => {
-    expect(torrentsForRemoval([entry('movie:2', { release: { ...release, external: true } })], [])).toEqual([]);
+  it('takes a torrent that the user attached', () => {
+    expect(torrentsForRemoval([entry('movie:2', { release: { ...release, external: true } })], [])).toEqual([{ clientId: 'client', hash: 'hash' }]);
   });
 
-  it('keeps a torrent when an attached target shares it with a removed target', () => {
-    expect(torrentsForRemoval([entry('movie:2', { release: { ...release, external: true } }), entry('movie:3')], [])).toEqual([]);
+  it('takes the pack once when only some of its episodes mark it as external', () => {
+    expect(torrentsForRemoval([entry('tv:1:1x1', { release: { ...release, external: true } }), entry('tv:1:1x2')], [])).toEqual([{ clientId: 'client', hash: 'hash' }]);
   });
 
   it('ignores a target that has no torrent or no client', () => {

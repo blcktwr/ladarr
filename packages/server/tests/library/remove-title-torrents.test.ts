@@ -54,6 +54,7 @@ beforeAll(async () => {
         ? {
             api: {
               remove: async (hash: string, deleteFiles = false) => {
+                if (hash === 'offline') throw new Error('Client unreachable');
                 removed.push({ hash, deleteFiles });
               },
             },
@@ -109,5 +110,36 @@ describe('removal of a title and its torrent', () => {
 
     expect(removed).toEqual([{ hash: 'hash', deleteFiles: true }]);
     expect(existsSync(join(movies, FILE))).toBe(false);
+  });
+
+  it('deletes an external download recorded only on an imported file', async () => {
+    await seedFilm();
+    delete app.db.data.queue['movie:2'];
+    const file = Object.values(app.db.data.files)[0]!;
+    file.download = { clientId: 'client', hash: 'external', external: true };
+    const body = await preview({ action: 'remove', keys: ['movie:2'], deleteFiles: true });
+    expect((await apply(body.planId)).body).toMatchObject({ changed: 1, deleted: 1, skipped: [] });
+    expect(removed).toEqual([{ hash: 'external', deleteFiles: true }]);
+  });
+
+  it('keeps a download that a file of another title still uses', async () => {
+    await seedFilm();
+    const file = Object.values(app.db.data.files)[0]!;
+    app.db.data.files.other = { ...file, id: 'other', titleKey: 'movie:3', download: { clientId: 'client', hash: 'hash', external: true } };
+    const body = await preview({ action: 'remove', keys: ['movie:2'], deleteFiles: true });
+    expect((await apply(body.planId)).body).toMatchObject({ changed: 1, deleted: 1 });
+    expect(removed).toEqual([]);
+  });
+
+  it.each([['client', 'offline'], ['missing', 'hash']])('keeps the title for another attempt if %s cannot delete %s', async (clientId, hash) => {
+    await seedFilm();
+    delete app.db.data.queue['movie:2'];
+    const file = Object.values(app.db.data.files)[0]!;
+    file.download = { clientId, hash, external: true };
+    const body = await preview({ action: 'remove', keys: ['movie:2'], deleteFiles: true });
+    expect((await apply(body.planId)).body).toMatchObject({ changed: 0, skipped: [{ key: 'movie:2', reason: 'torrent_not_deleted' }] });
+    expect(app.db.data.titles['movie:2']).toBeDefined();
+    expect(app.db.data.files[file.id]?.download).toEqual({ clientId, hash, external: true });
+    expect(existsSync(join(movies, FILE))).toBe(true);
   });
 });

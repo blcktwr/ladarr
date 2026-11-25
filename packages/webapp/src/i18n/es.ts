@@ -995,6 +995,7 @@ export const es: Record<string, string> = {
   'Add qBittorrent in Settings.': 'Agrega qBittorrent en Configuración.',
   'Correct the login in the client settings.': 'Corrige el inicio de sesión en la configuración del cliente.',
   'The download client does not answer.': 'El cliente de descargas no responde.',
+  'The download client could not delete the torrent.': 'El cliente de descargas no pudo eliminar el torrent.',
   'Start qBittorrent, or correct the address in the client settings.': 'Inicia qBittorrent o corrige la dirección en la configuración del cliente.',
   'ffprobe is not installed, so files get a basic check only.': 'ffprobe no está instalado, así que los archivos solo reciben una comprobación básica.',
   'Install ffmpeg.': 'Instala ffmpeg.',

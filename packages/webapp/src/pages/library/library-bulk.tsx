@@ -28,11 +28,12 @@ export type Selection = ReturnType<typeof useSelection>;
 
 // --- Text --------------------------------------------------------------------------------------
 
-const skipText: Record<PlanSkip | 'title_gone' | 'files_not_deleted', string> = {
+const skipText: Record<PlanSkip | 'title_gone' | 'files_not_deleted' | 'torrent_not_deleted', string> = {
   import_running: 'An import runs for this title. It is left as it is.',
   root_unavailable: 'The library folder is missing, or its disk is not mounted. The title is left as it is.',
   title_gone: 'The title is not in the library now.',
   files_not_deleted: 'Some files were not deleted. The title stays in the library.',
+  torrent_not_deleted: 'The download client could not delete the torrent.',
 };
 
 const failText: Record<string, string> = {

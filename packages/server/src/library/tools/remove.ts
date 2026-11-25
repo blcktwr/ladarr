@@ -3,27 +3,27 @@ import { basename, dirname, join } from 'node:path';
 import { db } from '../../core/db.ts';
 import { deleteItemLog } from '../../core/log.ts';
 import { inside } from '../imports/folder-files.ts';
-import { forgetSource, isActive, ownsUpload } from '../downloads/queue.ts';
+import { forgetSource, isActive, ownsUpload, phaseOfEntry } from '../downloads/queue.ts';
 import type { Db, Job, MediaFile, Queue, QueueEntry, Retired, Seen, Title } from '../../types.ts';
 
-// The torrents that ladarr added for the removed targets and files, and that no target outside the removal still uses.
-// A shared pack goes once. A torrent that the user attached stays.
-export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[], files: MediaFile[] = []) {
-  const keyOf = (entry: QueueEntry) => (entry.clientId && entry.transferHash ? `${entry.clientId}\n${entry.transferHash}` : null);
-  const used = new Set(remaining.flatMap((entry) => keyOf(entry) ?? []));
-  const protectedTorrent = (entry: QueueEntry) => entry.release?.uploadPath ? !ownsUpload(entry) : entry.release?.external === true;
-  const attached = new Set(removed.flatMap((entry) => (protectedTorrent(entry) ? (keyOf(entry) ?? []) : [])));
-  const seen = new Set<string>();
+// Keep a torrent if an entry or a file outside the removal still uses it.
+export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[], files: MediaFile[] = [], keptFiles: MediaFile[] = []) {
+  const used = new Set(remaining.map((entry) => `${entry.clientId}\n${entry.transferHash}`));
+  for (const file of keptFiles) if (file.download) used.add(`${file.download.clientId}\n${file.download.hash}`);
   const refs: { clientId: string; hash: string }[] = [];
-  const add = (clientId: string | null | undefined, hash: string | null | undefined, external: boolean) => {
-    if (!clientId || !hash || external) return;
+  const add = (clientId: string | null, hash: string | null) => {
+    if (!clientId || !hash) return;
     const id = `${clientId}\n${hash}`;
-    if (used.has(id) || attached.has(id) || seen.has(id)) return;
-    seen.add(id);
+    if (used.has(id)) return;
+    used.add(id);
     refs.push({ clientId, hash });
   };
-  for (const entry of removed) add(entry.clientId, entry.transferHash, protectedTorrent(entry));
-  for (const file of files) add(file.download?.clientId, file.download?.hash, file.download?.external === true);
+  for (const entry of removed) {
+    // An upload has a hash and a client even before the client has the torrent.
+    if (entry.release?.uploadPath && !ownsUpload(entry) && !['downloading', 'importing', 'available'].includes(phaseOfEntry(entry))) continue;
+    add(entry.clientId, entry.transferHash);
+  }
+  for (const file of files) if (file.download) add(file.download.clientId, file.download.hash);
   return refs;
 }
 

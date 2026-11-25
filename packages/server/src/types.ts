@@ -479,7 +479,7 @@ export type ReleaseRef = {
   comment?: string;
   // The share limits that the indexer asked for when ladarr chose the release. Old entries lack it.
   seed?: { ratio: number | null; minutes: number | null } | null;
-  // Set when the user attached a download that was in the client already. ladarr did not add it, and never removes it.
+  // The download was already in the client when ladarr attached it.
   external?: boolean;
   uploadPath?: string;
   uploadOwner?: string;

@@ -13,7 +13,7 @@ import { refreshJob } from '../metadata.ts';
 import { log } from '../../core/log.ts';
 import { isActive } from '../downloads/queue.ts';
 import { checkRoot } from '../roots.ts';
-import type { Db, Failure, MediaFile, PlansDeps, Stored } from '../../types.ts';
+import type { Db, Failure, PlansDeps, Stored } from '../../types.ts';
 
 const KEY = /^(movie|tv):[1-9]\d*$/;
 const ACTIONS: PlanAction[] = ['pause', 'resume', 'refresh', 'preset', 'remove', 'delete_files'];
@@ -70,19 +70,20 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
   const destructive = (request: PlanRequest) => request.action === 'delete_files' || (request.action === 'remove' && request.deleteFiles === true);
   const journalOf = (key: string) => Object.values(db.data.imports).some((journal) => journal.titleKey === key);
 
-  // Removes the torrents of a dropped title or season. A client that fails does not stop the removal.
-  async function removeTorrents(refs: { clientId: string; hash: string }[], deleteFiles: boolean) {
+  async function removeTorrents(refs: { clientId: string; hash: string }[]) {
     for (const ref of refs) {
       const client = clients?.get(ref.clientId);
-      if (!client) continue;
+      if (!client) return false;
       try {
-        await client.api.remove(ref.hash, deleteFiles);
+        await client.api.remove(ref.hash, true);
         // The torrent is gone, so the record of the torrents that ladarr sent no longer covers it.
         delete db.data.sentTorrents[ref.hash];
       } catch (error) {
         log.warn('could not remove torrent', { clientId: ref.clientId, hash: ref.hash, error: String(error) });
+        return false;
       }
     }
+    return true;
   }
 
   // The real path of the root, or the reason that the files cannot be touched now.
@@ -260,7 +261,6 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
 
       let pruneRoot: string | undefined;
       let kept = false;
-      let removedFiles: MediaFile[] = [];
       if (request.action === 'pause' || request.action === 'resume') title.paused = request.action === 'pause';
       else if (request.action === 'preset') title.preset = request.preset ?? null;
       else if (request.action === 'refresh') enqueue(refreshJob(row.key));
@@ -271,11 +271,17 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
             skip(row.key, root.skip);
             continue;
           }
-          // The torrents of these files go with them. The records leave before the torrent calls.
           if (request.action === 'remove') {
-            removedFiles = Object.values(db.data.files).filter(
-              (file) => file.titleKey === row.key && (season === undefined || (file.episodes.length > 0 && file.episodes.every((episode) => inSeason(episode, season, stored.points)))),
-            );
+            const entries = Object.values(db.data.queue);
+            const removed = new Set(entries.filter((entry) => entry.titleKey === row.key && (season === undefined || inSeason(entry, season, stored.points))));
+            const files = Object.values(db.data.files);
+            const ids = new Set(stored.ids.get(row.key));
+            const refs = torrentsForRemoval([...removed], entries.filter((entry) => !removed.has(entry)), files.filter((file) => ids.has(file.id)), files.filter((file) => !ids.has(file.id)));
+            if (!(await removeTorrents(refs))) {
+              skip(row.key, 'torrent_not_deleted');
+              await db.write();
+              continue;
+            }
           }
           kept = (await retireTitle(stored, row.key, root, result)) > 0;
           pruneRoot = root.real;
@@ -286,19 +292,11 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
           }
         }
         if (season !== undefined) {
-          const removed = Object.values(db.data.queue).filter((entry) => entry.titleKey === row.key && inSeason(entry, season, stored.points));
-          const ids = new Set(removed.map((entry) => entry.id));
-          const refs = torrentsForRemoval(removed, Object.values(db.data.queue).filter((entry) => !ids.has(entry.id)), removedFiles);
           dropSeason(row.key, season, queue, cancelJob, stored.points);
           if (!stored.points) title.seasonOverrides[String(season)] = 'unmonitored';
           for (const episode of title.episodes) if (inSeason(episode, season, stored.points)) episode.override = stored.points ? 'unmonitored' : null;
-          if (!kept && request.deleteFiles === true) await removeTorrents(refs, true);
         } else if (request.action === 'remove' && !kept) {
-          const removed = Object.values(db.data.queue).filter((entry) => entry.titleKey === row.key);
-          const ids = new Set(removed.map((entry) => entry.id));
-          const refs = torrentsForRemoval(removed, Object.values(db.data.queue).filter((entry) => !ids.has(entry.id)), removedFiles);
           dropTitle(row.key, queue, cancelJob);
-          if (request.deleteFiles === true) await removeTorrents(refs, true);
         }
         if (kept && !result.skipped.some((item) => item.key === row.key)) skip(row.key, 'files_not_deleted');
       }

@@ -115,8 +115,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
     for (const entry of entries) queue.block(entry, { code }, cause);
   }
 
-  // The client has the torrent. The target waits for it, or goes to its import when the data is there. The torrent of
-  // the user stays the user's, so a removal never deletes it.
+  // The client has the torrent. The target waits for it or starts the import when the data is there.
   function adopt(entries: QueueEntry[], connection: ClientHandle, found: Torrent, external: boolean) {
     for (const entry of entries) {
       // Automatic adoption leaves stopped targets unchanged.
@@ -130,7 +129,6 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
           entry.release.uploadOwner = external ? undefined : connection.id;
           entry.release.external = external;
         }
-        // A torrent that ladarr did not send stays the user's, so a removal never deletes it.
         if (external) entry.release.external = true;
       }
       if (external) catalog.warn('download_exists', `The torrent is already in ${connection.config.name} and belongs to the user`, itemFields(entry), { client: connection.config.name, hash: found.hash, name: found.name });
