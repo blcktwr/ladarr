@@ -576,6 +576,7 @@ export const es: Record<string, string> = {
   'Dolby Vision': 'Dolby Vision',
   'Yes': 'Sí',
   'Apply this episode mapping?': '¿Aplicar este mapa de episodios?',
+  'Do you want to search for these new seasons?': '¿Quieres buscar estas nuevas temporadas?',
   'Manual mapping': 'Mapeo manual',
   'No': 'No',
   'Audio {n}': 'Audio {n}',

@@ -111,9 +111,9 @@ function matchRequests(page: Page) {
 
 const seasonPicker = (panel: Locator) => panel.getByRole('combobox').filter({ hasText: /^Season \d+$/ });
 
-async function applyMapping(page: Page, panel: Locator) {
+async function applyMapping(page: Page, panel: Locator, title = 'Apply this episode mapping?') {
   await panel.getByRole('button', { name: 'Apply mapping', exact: true }).click();
-  const question = page.getByRole('dialog', { name: 'Apply this episode mapping?', exact: true });
+  const question = page.getByRole('dialog', { name: title, exact: true });
   await question.getByRole('button', { name: 'Yes', exact: true }).click();
   await expect(question).toBeHidden();
 }
@@ -457,7 +457,7 @@ test('maps selected episodes from a completed torrent with different season numb
   }
   expect(requests).toEqual([]);
   expect(await entry(unselected.id)).toEqual(unselectedBefore);
-  await applyMapping(page, panel);
+  await applyMapping(page, panel, 'Do you want to search for these new seasons?');
   await expect(panel).toBeHidden();
   const selected = missing.slice(0, -1);
   expect((await stack.call('GET', `/library/${title.key}`)).body.title.numbering.ranges).toEqual([

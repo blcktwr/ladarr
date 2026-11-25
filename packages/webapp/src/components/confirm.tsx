@@ -11,17 +11,21 @@ type ConfirmProps = {
   // The label of the button that runs the action.
   confirm: string;
   onConfirm: () => void;
+  onOpen?: () => void;
   disabled?: boolean;
   children?: ReactNode;
 };
 
 // The button opens a modal that asks again, and the action runs only after the second click.
-export function Confirm({ label, title, confirm, onConfirm, disabled, children }: ConfirmProps) {
+export function Confirm({ label, title, confirm, onConfirm, onOpen, disabled, children }: ConfirmProps) {
   const [open, setOpen] = useState(false);
   return (
     <Modal
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(next) => {
+        if (next) onOpen?.();
+        setOpen(next);
+      }}
       title={title}
       trigger={
         <Button disabled={disabled}>

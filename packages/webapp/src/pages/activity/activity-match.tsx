@@ -1,7 +1,7 @@
 import type { AttachCandidates, EpisodeRef, FileRow, QueueEntryView, QueueGroupPage, QueueMappingEpisode, QueueMatchPreview, QueuePackFiles } from '@ladarr/shared/types';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button, Dropdown, EmptyState, Modal, SearchableDropdown, Spinner, Table } from 'nebula';
+import { Button, Checkbox, Dropdown, EmptyState, Modal, SearchableDropdown, Spinner, Table } from 'nebula';
 import { Confirm } from '../../components/confirm.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { describeError, formatBytes, groupName, seasonName } from '../../lib/format.ts';
@@ -60,6 +60,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   const mapSeries = series && !fixedSource;
   const fixed = fixedSource ? fileSource ?? 'library' : undefined;
   const [seasons, setSeasons] = useState<Record<string, string>>({});
+  const [searchSeasons, setSearchSeasons] = useState<number[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [movie, setMovie] = useState('');
   const [error, setError] = useState('');
@@ -92,8 +93,10 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   const rows = mapSeries ? episodes : episodes.filter((point) => point.season === entry.season);
   const seasonChanged = (point: QueueMappingEpisode) => seasons[point.id] !== undefined && Number(seasons[point.id]) !== point.releaseSeason;
   const invalidSeason = Object.values(seasons).some((value) => !validSeason(value));
-  const knownSeasons = new Set(rows.flatMap((point) => [point.season, point.releaseSeason]));
-  for (const value of Object.values(seasons)) if (validSeason(value)) knownSeasons.add(Number(value));
+  const initialSeasons = new Set(rows.flatMap((point) => [point.season, point.releaseSeason]));
+  const addedSeasons = [...new Set(rows.map((point) => seasons[point.id]).filter((value) => value !== undefined && validSeason(value)).map(Number))]
+    .filter((season) => !initialSeasons.has(season)).sort((a, b) => a - b);
+  const knownSeasons = new Set([...initialSeasons, ...addedSeasons]);
   let nextSeason = 1;
   while (knownSeasons.has(nextSeason)) nextSeason++;
   knownSeasons.add(nextSeason);
@@ -212,7 +215,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
       const assigned = new Set([...confirmedIds, ...posts.flatMap((post) => post.ids)]);
       const edits = rows.filter(seasonChanged).map((point) => ({
         season: point.season, number: point.number, releaseSeason: Number(seasons[point.id]),
-        search: !assigned.has(point.id) && !rowSource(point).match,
+        search: searchSeasons.includes(Number(seasons[point.id])) && !assigned.has(point.id) && !rowSource(point).match,
       }));
       if (edits.length) {
         await api(`/library/${entry.titleKey}`, { method: 'PATCH', body: { episodeSeasons: { revision: group.data!.numberingRevision, edits } } });
@@ -235,6 +238,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   }
 
   const title = groupName({ ...entry, season: null });
+  const confirmTitle = addedSeasons.length ? t('Do you want to search for these new seasons?') : t('Apply this episode mapping?');
   return (
     <Modal
       open
@@ -242,9 +246,18 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
       title={mapSeries ? title : series && entry.season !== null ? `${title} / ${seasonName(entry.season)}` : entry.label}
       width={mapSeries ? 'xl' : 'lg'}
       actions={mapSeries ? (
-        <Confirm label={t('Apply mapping')} title={t('Apply this episode mapping?')}
-          confirm={t('Yes')} onConfirm={() => void save()}
-          disabled={busy || invalidSeason || !group.data || (rows.some((point) => point.match?.path) && !library.data) || packs.some((pack, i) => essential.has(keys[i]!) && pack.isPending)} />
+        <Confirm label={t('Apply mapping')} title={confirmTitle}
+          confirm={t('Yes')} onOpen={() => setSearchSeasons([])} onConfirm={() => void save()}
+          disabled={busy || invalidSeason || !group.data || (rows.some((point) => point.match?.path) && !library.data) || packs.some((pack, i) => essential.has(keys[i]!) && pack.isPending)}>
+          {addedSeasons.length > 0 && (
+            <div className="grid gap-2">
+              {addedSeasons.map((season) => (
+                <Checkbox key={season} label={t('Season {number}', { number: pad(season) })} checked={searchSeasons.includes(season)}
+                  onCheckedChange={(on) => setSearchSeasons((current) => on ? [...current, season] : current.filter((n) => n !== season))} />
+              ))}
+            </div>
+          )}
+        </Confirm>
       ) : <Button disabled={busy || (!series && !movie)} pending={busy} onClick={() => void save()}>{t('Apply mapping')}</Button>}
     >
       {series ? (
