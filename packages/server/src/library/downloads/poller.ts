@@ -19,6 +19,7 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
   const seen = new Set<string>();
   const status: ClientStatus = { state: 'unconfigured', lastOkAt: null };
   let timer: NodeJS.Timeout | undefined;
+  let running: Promise<void> | undefined;
   let stopped = false;
   let lastPublish = 0;
   let dirty = new Set<string>();
@@ -222,23 +223,37 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
 
   function schedule() {
     if (stopped) return;
-    timer = setTimeout(async () => {
-      try {
-        await tick();
-      } catch (error) {
-        log.error('client poll failed', { error });
-      }
-      schedule();
+    timer = setTimeout(() => {
+      running = tick().catch((error) => log.error('client poll failed', { error })).finally(() => {
+        running = undefined;
+        schedule();
+      });
     }, intervalMs);
+  }
+
+  function stop() {
+    stopped = true;
+    clearTimeout(timer);
   }
 
   return {
     tick,
     // The client is read every 10 seconds. A new download shows at the next check.
-    start: () => schedule(),
-    stop() {
-      stopped = true;
-      clearTimeout(timer);
+    start() {
+      stopped = false;
+      schedule();
+    },
+    stop,
+    async pause() {
+      stop();
+      await running;
+    },
+    reset() {
+      transfers.clear();
+      seen.clear();
+      dirty.clear();
+      status.state = 'unconfigured';
+      status.lastOkAt = null;
     },
     status: () => ({ ...status }),
     transfer: (hash: string) => transfers.get(hash),

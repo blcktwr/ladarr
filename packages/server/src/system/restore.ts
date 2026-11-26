@@ -31,14 +31,25 @@ export function createRestorer({ dir, worker, drainMs = 10_000 }: { dir: string;
     }
   }
 
-  // `source` is the name of a backup in the backup folder, or the bytes of a backup file that the user sent.
-  // `self` is the response of the request that asks for the restore. It does not wait for itself.
-  async function restore(source: string | Uint8Array, self?: Response): Promise<{ safetyBackup: string }> {
+  async function exclusive<T>(self: Response | undefined, action: (pause: () => Promise<void>) => Promise<T>): Promise<T> {
     if (restoring) throw new RestoreError('restore_in_progress');
-    // The flag is set before the first await, so a second restore can not start. Requests that change data wait.
     restoring = true;
     let paused = false;
     try {
+      return await action(async () => {
+        await drain(self);
+        paused = true;
+        if (!(await worker.pause())) throw new RestoreError('worker_busy');
+      });
+    } finally {
+      if (paused) worker.resume();
+      restoring = false;
+    }
+  }
+
+  // `source` is the name of a backup in the backup folder, or the bytes of a backup file that the user sent.
+  async function restore(source: string | Uint8Array, self?: Response): Promise<{ safetyBackup: string }> {
+    return exclusive(self, async (pause) => {
       const file = typeof source === 'string' ? await readFile(join(dir, source)).catch(() => undefined) : source;
       if (!file) throw new RestoreError('not_found');
       // Nothing is written before this line. A bad backup leaves the installation as it is.
@@ -46,9 +57,7 @@ export function createRestorer({ dir, worker, drainMs = 10_000 }: { dir: string;
       // A backup holds no sessions, so after the restore everyone signs in again.
       const next = withDefaults(data);
 
-      await drain(self);
-      paused = true;
-      if (!(await worker.pause())) throw new RestoreError('worker_busy');
+      await pause();
       // The jobs are stopped, so this copy holds every change that was made.
       const safety = await createBackup(dir, 'safety');
 
@@ -69,14 +78,15 @@ export function createRestorer({ dir, worker, drainMs = 10_000 }: { dir: string;
       for (const title of Object.values(db.data.titles)) if (title.folder && !importing.has(title.key)) worker.enqueue(scanJob(title.key));
       log.info('backup restored', { name: typeof source === 'string' ? source : 'uploaded file', safetyBackup: safety.name });
       return { safetyBackup: safety.name };
-    } finally {
-      if (paused) worker.resume();
-      restoring = false;
-    }
+    });
   }
 
   return {
     restore,
+    reset: (clear: () => Promise<void>, self: Response) => exclusive(self, async (pause) => {
+      await pause();
+      await clear();
+    }),
     busy: () => restoring,
     track(res: Response) {
       active.add(res);

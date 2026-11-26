@@ -1,7 +1,7 @@
 import { db } from '../core/db.ts';
 import { log } from '../core/log.ts';
 import { createBackup, listBackups, pruneBackups } from '../system/backup.ts';
-import type { Db, Handler } from '../types.ts';
+import type { Handler } from '../types.ts';
 
 const AUTO_EVERY_MS = 24 * 60 * 60_000;
 
@@ -11,6 +11,7 @@ export function backupAutoHandler(dir: string): Handler {
     every: 60 * 60_000,
     maxAttempts: 3,
     run: async () => {
+      if (!db.data.owner) return;
       const last = (await listBackups(dir)).find((backup) => backup.kind === 'auto');
       if (last && Date.now() - last.createdAt < AUTO_EVERY_MS) return;
       const made = await createBackup(dir, 'auto');

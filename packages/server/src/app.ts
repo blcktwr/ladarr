@@ -14,6 +14,7 @@ import { alertsGet } from './routes/alerts/get.ts';
 import { eventsGet } from './routes/events/get.ts';
 import { healthGet } from './routes/health/get.ts';
 import { systemLogs } from './routes/system/logs/get.ts';
+import { systemReset } from './routes/system/reset/post.ts';
 import { systemSetupChecks } from './routes/system/setup-checks/get.ts';
 import { systemStatus } from './routes/system/status/get.ts';
 import { systemUpdateGet } from './routes/system/update/get.ts';
@@ -151,7 +152,7 @@ import { webhookCreate } from './routes/webhook/post.ts';
 import { webhookTest } from './routes/webhook/test/post.ts';
 import type { AppOptions, EnqueueInput } from './types.ts';
 
-export function createApp({ services, urlBase = '', events = createEvents(), webDir, devOrigin, heartbeat, tmdb, configDir, backupDir, enqueue: enqueueInput, cancelJob, persist, restorer, indexers, installUpdate, pauseQueue, resumeQueue, restart }: AppOptions = {}) {
+export function createApp({ services, urlBase = '', events = createEvents(), webDir, devOrigin, heartbeat, tmdb, configDir, backupDir, enqueue: enqueueInput, cancelJob, persist, restorer, indexers, installUpdate, pauseQueue, resumeQueue, restart, reset }: AppOptions = {}) {
   const enqueue = enqueueInput ?? ((input: EnqueueInput) => enqueueJob(input));
   const api = express.Router();
   const setupChanged = (kind: 'indexers' | 'clients') => {
@@ -315,6 +316,7 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   const healthSources = { tmdb, heartbeat, backupDir, clientCheck, ffprobe: services ? ffprobeAvailable : undefined };
   api.get('/system/status', systemStatus(healthSources));
   api.get('/system/version', systemVersion());
+  if (restorer && reset) api.post('/system/reset', sessionOnly, jsonOnly, systemReset(restorer, reset));
   api.get('/system/update', systemUpdateGet());
   api.post('/system/update', systemUpdatePost({ installUpdate, pauseQueue, resumeQueue, restart }));
   api.get('/alerts', alertsGet(healthSources));

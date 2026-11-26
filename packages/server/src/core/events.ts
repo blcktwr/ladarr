@@ -45,6 +45,11 @@ export function createEvents(replayLimit = 1_000) {
 
   return {
     handler,
+    reset() {
+      recent.length = 0;
+      for (const res of clients) res.end();
+      clients.clear();
+    },
     publish(type: string, data: unknown = {}) {
       const entry = { seq: ++seq, type, data };
       recent.push(entry);

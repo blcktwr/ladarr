@@ -20,6 +20,8 @@ import { radarr } from './proxy/radarr.ts';
 import { seerr } from './proxy/seerr.ts';
 import { closeLog, configureItemLogs, log, logToFile } from './core/log.ts';
 import { createRestorer } from './system/restore.ts';
+import { reset } from './system/reset.ts';
+import { uploads as migrationUploads } from './helpers/migration.ts';
 import { firstUnwritable } from './core/permissions.ts';
 import { UPDATE_EXIT_CODE } from './system/exit.ts';
 import { createTmdb } from './metadata/tmdb.ts';
@@ -130,6 +132,18 @@ listen(
     configDir: config.configDir,
     backupDir: config.backupDir,
     restorer,
+    reset: async () => {
+      try {
+        await poller.pause();
+        await reset(config, save);
+        poller.reset();
+        importStatus.reset();
+        migrationUploads.clear();
+        events.reset();
+      } finally {
+        poller.start();
+      }
+    },
     enqueue: worker.enqueue,
     cancelJob: (id) => worker.cancel(id),
     persist,

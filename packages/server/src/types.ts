@@ -20,7 +20,7 @@ import type { createTmdb } from './metadata/tmdb.ts';
 import type { createRestorer } from './system/restore.ts';
 
 export type Services = { queue: Queue; finder: Finder; poller: Poller; clients: Clients; importStatus?: ImportStatus };
-export type AppOptions = { services?: Services; urlBase?: string; events?: Events; webDir?: string; devOrigin?: string; heartbeat?: () => number; tmdb?: Tmdb; configDir?: string; backupDir?: string; enqueue?: (input: EnqueueInput) => ReturnType<typeof enqueueJob>; cancelJob?: (id: string) => void; persist?: () => void; restorer?: Restorer; indexers?: IndexerService; installUpdate?: () => Promise<{ version: string }>; pauseQueue?: () => Promise<void>; resumeQueue?: () => void; restart?: () => void };
+export type AppOptions = { services?: Services; urlBase?: string; events?: Events; webDir?: string; devOrigin?: string; heartbeat?: () => number; tmdb?: Tmdb; configDir?: string; backupDir?: string; enqueue?: (input: EnqueueInput) => ReturnType<typeof enqueueJob>; cancelJob?: (id: string) => void; persist?: () => void; restorer?: Restorer; indexers?: IndexerService; installUpdate?: () => Promise<{ version: string }>; pauseQueue?: () => Promise<void>; resumeQueue?: () => void; restart?: () => void; reset?: () => Promise<void> };
 export type Settings = {
   setupCompleted: boolean;
   // The language of the interface. The server sends no text in it.

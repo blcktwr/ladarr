@@ -2,7 +2,7 @@ import type { BackupsResponse, UpdateCheck, VersionInfo } from '@ladarr/shared/t
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { api, apiUrl } from '../../lib/api.ts';
-import { Badge, Button, Details, Divider, EmptyState, List, Row, Section, Spinner, Text } from 'nebula';
+import { Badge, Button, Confirm, Details, Divider, EmptyState, List, Row, Section, Spinner, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { formatBytes, describeError } from '../../lib/format.ts';
@@ -19,6 +19,9 @@ export function SystemVersion() {
   const [installing, setInstalling] = useState(false);
   const [installed, setInstalled] = useState('');
   const [seconds, setSeconds] = useState(6);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState('');
 
   // The page waits for the server, and a reload brings the page of the new version.
   useEffect(() => {
@@ -63,13 +66,31 @@ export function SystemVersion() {
     }
   }
 
+  async function reset() {
+    setResetting(true);
+    setResetError('');
+    try {
+      await api('/system/reset', { method: 'POST', body: { confirm: true } });
+      location.reload();
+    } catch (error) {
+      setResetError(describeError(error));
+      setResetting(false);
+      setResetOpen(false);
+    }
+  }
+
   return (
     <Section
       title={t('System')}
       action={
-        <Button pending={pending} disabled={!data} onClick={() => void check()}>
-          {t('Check updates')}
-        </Button>
+        <>
+          <Button variant="ghost-danger" disabled={installing || !!installed} onClick={() => setResetOpen(true)}>
+            {t('Reset')}
+          </Button>
+          <Button pending={pending} disabled={!data} onClick={() => void check()}>
+            {t('Check updates')}
+          </Button>
+        </>
       }
     >
       {error && !data ? (
@@ -98,6 +119,17 @@ export function SystemVersion() {
       ) : null}
       {installed && <Text variant="body" className="w-full text-center text-success">{t('Version {version} installed, the server will restart in {seconds}s...', { version: installed, seconds })}</Text>}
       {failed && <Alert tone="danger">{t('The request did not complete.')}</Alert>}
+      {resetError && <Alert tone="danger">{resetError}</Alert>}
+      <Confirm
+        open={resetOpen}
+        onOpenChange={(open) => !resetting && setResetOpen(open)}
+        title={t('Reset Ladarr?')}
+        confirm={t('Reset')}
+        onConfirm={() => void reset()}
+        pending={resetting}
+      >
+        <p>{t('Ladarr deletes the catalog, its files, linked downloads that Ladarr owns, local backups, logs, settings, and your account. You cannot undo this action.')}</p>
+      </Confirm>
     </Section>
   );
 }

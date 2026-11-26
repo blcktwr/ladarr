@@ -44,6 +44,11 @@ export function createImportStatus(events: Events, { pollMs = 500, now = Date.no
   }
 
   return {
+    reset() {
+      copies.clear();
+      runs.clear();
+      checkRuns.clear();
+    },
     // Reads the size of the staged file while the copy runs. The size on the disk is the measured progress.
     // Call the returned function when the copy ends, whatever the result.
     watchCopy(journalId: string, dest: string, entryIds: string[], stagePath: string, totalBytes: number) {
