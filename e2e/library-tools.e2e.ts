@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures.ts';
 import { configure, startStack, URL_BASE, type Stack } from './stack.ts';
 
@@ -10,6 +11,7 @@ test.use({ actionTimeout: 15_000 });
 
 let stack: Stack;
 let cookie: Awaited<ReturnType<Stack['createOwner']>>;
+const titleAdd = (page: Page) => page.getByRole('main').getByRole('button', { name: 'Add', exact: true }).and(page.locator('button:not(a button)'));
 test.beforeAll(async () => {
   stack = await startStack();
   cookie = await stack.createOwner();
@@ -97,18 +99,18 @@ test('Add on a title that is not in the catalog adds it', async ({ page }) => {
   await page.goto(`${URL_BASE}/search?q=Movie`);
   // The posters have no button that adds a title.
   await expect(page.getByRole('button', { name: /^Add / })).toHaveCount(0);
-  await page.getByRole('link', { name: /Movie Name Available Movies$/ }).getByText('Movie Name', { exact: true }).click();
+  await page.getByRole('main').getByRole('link', { name: /Movie Name Movies$/ }).getByText('Movie Name', { exact: true }).click();
   await expect(page).toHaveURL(/\/catalog\/movie\/2$/);
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await titleAdd(page).click();
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
   expect((await stack.call('GET', '/library/movie:2')).body.title.presetOverride).toBeNull();
 });
 
 test('the catalog shows the type of a title on its poster', async ({ page }) => {
   await page.goto(URL_BASE);
-  const movie = page.getByRole('main').getByRole('link', { name: 'Movie Name Movies', exact: true });
-  const show = page.getByRole('main').getByRole('link', { name: 'Show Name Series', exact: true });
+  const movie = page.getByRole('main').getByRole('link', { name: /^Movie Name Movies(?: |$)/ });
+  const show = page.getByRole('main').getByRole('link', { name: /^Show Name Series(?: |$)/ });
   await expect(movie).toBeVisible();
   await expect(show).toBeVisible();
   await expect(movie).toContainText('Movies');
@@ -116,15 +118,17 @@ test('the catalog shows the type of a title on its poster', async ({ page }) => 
   // The poster shows no availability badge.
   await expect(movie).not.toContainText('Available');
   await expect(show).not.toContainText('Available');
-  // The row of posters starts at the left edge of the centered catalog column.
-  const columnBox = (await page.getByRole('heading', { name: 'Catalog' }).boundingBox())!;
+  // The row of posters starts at the left edge of the centered gallery.
+  const gallery = (await movie.locator('../..').boundingBox())!;
+  const main = (await page.getByRole('main').boundingBox())!;
   const boxes = [(await movie.boundingBox())!, (await show.boundingBox())!].sort((a, b) => a.x - b.x);
-  expect(Math.abs(boxes[0]!.x - columnBox.x)).toBeLessThanOrEqual(2);
+  expect(Math.abs(boxes[0]!.x - gallery.x)).toBeLessThanOrEqual(2);
+  expect(Math.abs(gallery.x + gallery.width / 2 - (main.x + main.width / 2))).toBeLessThanOrEqual(2);
   const patched = await stack.call('PATCH', '/library/tv:1', { seriesType: 'anime' });
   if (patched.status >= 300) throw new Error(`PATCH /library/tv:1 answered ${patched.status}: ${JSON.stringify(patched.body)}`);
   try {
     await page.reload();
-    const anime = page.getByRole('main').getByRole('link', { name: 'Show Name Anime', exact: true });
+    const anime = page.getByRole('main').getByRole('link', { name: /^Show Name Anime(?: |$)/ });
     await expect(anime).toBeVisible();
   } finally {
     const restored = await stack.call('PATCH', '/library/tv:1', { seriesType: 'standard' });
@@ -185,7 +189,8 @@ test('a bare TMDB ID typed in the search box opens Discovery until a title is se
 
 test('the page of a title shows the TMDB score, the cast, and the recommendations', async ({ page }) => {
   await page.goto(`${URL_BASE}/catalog/movie/2`);
-  await expect(page.getByText('TMDB 7.5')).toBeVisible();
+  await expect(page.getByRole('main').getByText('7.5', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'TMDB', exact: true })).toHaveAttribute('href', 'https://www.themoviedb.org/movie/2');
   await expect(page.getByRole('heading', { name: 'Cast' })).toBeVisible();
   await expect(page.getByText('Actor One')).toBeVisible();
   await expect(page.getByText('Role One')).toBeVisible();
@@ -194,7 +199,7 @@ test('the page of a title shows the TMDB score, the cast, and the recommendation
   await expect(page).toHaveURL(/\/catalog\/movie\/900001$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Bench Movie Alpha (2019)' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await titleAdd(page).click();
   // The page stays at the same address, and it shows the actions of a title that is in the catalog now.
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/catalog\/movie\/900001$/);
@@ -276,7 +281,7 @@ test('Delete asks in an alert, and the page stays open as a title that is not in
   await alert.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Bench Movie Alpha removed from the library')).toBeVisible();
   await expect(page).toHaveURL(/\/catalog\/movie\/900001$/);
-  await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeVisible();
+  await expect(titleAdd(page)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
 });
 
@@ -287,7 +292,7 @@ test('removing a series tells the person that it is out of the library', async (
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await page.getByRole('alertdialog', { name: 'Delete Two Seasons?' }).getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Two Seasons removed from the library')).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Add/ })).toBeVisible();
+  await expect(titleAdd(page)).toBeVisible();
 });
 
 test('an actor opens a page with the movies and the series of the actor', async ({ page }) => {
@@ -321,9 +326,20 @@ test('the background reaches the end of a page that is taller than the window', 
   await page.setViewportSize({ width: 1280, height: 400 });
   await page.goto(`${URL_BASE}/catalog/movie/2`);
   await expect(page.getByRole('heading', { name: 'Recommendations' })).toBeVisible();
-  // The bottom margin of the last section must stay inside the background, or the page ends with a white band.
-  const band = await page.evaluate(() => document.documentElement.scrollHeight - (document.querySelector('main')!.parentElement!.getBoundingClientRect().bottom + scrollY));
-  expect(band).toBeLessThan(1);
+  // The fixed background covers the window even at the end of the page.
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(0);
+  const bounds = await page.evaluate(() => {
+    const layer = [...document.querySelector('main')!.parentElement!.children].find((element) => {
+      const style = getComputedStyle(element);
+      return style.position === 'fixed' && style.backgroundImage !== 'none';
+    });
+    const rect = layer?.getBoundingClientRect();
+    return rect && { top: rect.top, bottomBand: innerHeight - rect.bottom };
+  });
+  expect(bounds).toBeDefined();
+  expect(Math.abs(bounds!.top)).toBeLessThan(1);
+  expect(Math.abs(bounds!.bottomBand)).toBeLessThan(1);
   // The page under the background is not white, so a scroll past the end or a slow paint shows no flash.
   expect(await page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor)).toBe('rgb(4, 4, 4)');
 });
@@ -368,7 +384,7 @@ test('the quality profiles are an ordered priority chain', async ({ page }) => {
   await moveDown('2160p').click();
   await expect.poll(async () => (await stack.call('GET', '/quality')).body.profiles.map((profile: { id: string }) => profile.id)).toEqual(['p1080', 'p2160']);
 
-  await expect(moveUp('1080p')).toBeDisabled();
+  await expect(moveUp('1080p')).toHaveCount(0);
   await expect(moveDown('2160p')).toBeDisabled();
 });
 
@@ -381,21 +397,16 @@ test('the file size limits are in the dialog of the profile', async ({ page }) =
   await page.getByRole('button', { name: 'Actions for 1080p' }).click();
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const dialog = page.getByRole('dialog', { name: 'Edit quality' });
-  // The sizes of a series are the ones of the default table, so the dialog starts with Series.
   const media = dialog.getByRole('combobox', { name: 'Media' });
-  await expect(media).toContainText('Series');
+  await expect(media).toContainText('Movies');
 
   await dialog.getByRole('button', { name: 'Show size limits for 1080p' }).click();
   const minimum = dialog.getByRole('spinbutton', { name: 'Minimum for WEB-DL 1080p' });
-  await expect(minimum).toHaveValue('12.5');
-
-  // The table of movies has its own limits.
-  await media.click();
-  await page.getByRole('option', { name: 'Movies' }).click();
   await expect(minimum).toHaveValue('');
   await expect(minimum).toHaveAttribute('placeholder', '∞');
   await media.click();
   await page.getByRole('option', { name: 'Series' }).click();
+  await expect(minimum).toHaveValue('12.5');
 
   try {
     await minimum.fill('15.1');
@@ -415,6 +426,9 @@ test('an empty size limit shows infinity and saves as no limit', async ({ page }
   await page.getByRole('button', { name: 'Actions for 1080p' }).click();
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const dialog = page.getByRole('dialog', { name: 'Edit quality' });
+  const media = dialog.getByRole('combobox', { name: 'Media' });
+  await media.click();
+  await page.getByRole('option', { name: 'Series' }).click();
   await dialog.getByRole('button', { name: 'Show size limits for 1080p' }).click();
 
   const minimum = dialog.getByRole('spinbutton', { name: 'Minimum for WEB-DL 1080p' });
@@ -426,6 +440,8 @@ test('an empty size limit shows infinity and saves as no limit', async ({ page }
     // The empty minimum persists when the dialog opens again.
     await page.getByRole('button', { name: 'Actions for 1080p' }).click();
     await page.getByRole('menuitem', { name: 'Edit' }).click();
+    await media.click();
+    await page.getByRole('option', { name: 'Series' }).click();
     await dialog.getByRole('button', { name: 'Show size limits for 1080p' }).click();
     await expect(minimum).toHaveValue('');
     await expect(minimum).toHaveAttribute('placeholder', '∞');
