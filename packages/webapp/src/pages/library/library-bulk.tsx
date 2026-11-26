@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../lib/api.ts';
 import { t } from '../../i18n/index.ts';
 import { fileCount, SearchPlanButton, titleCount } from './calendar-filters.tsx';
-import { alert, Button, Confirm, List, Row, Switch } from 'nebula';
+import { alert, Button, Checkbox, Confirm, List, Row, Switch } from 'nebula';
 import { Alert } from '../../components/index.ts';
 
 // --- Selection ---------------------------------------------------------------------------------
@@ -122,8 +122,7 @@ const doneText = (request: PlanRequest, result: PlanResult, subject?: string | n
           : t('{n} files deleted', { n: result.deleted })
         : '';
 
-// An alert that asks before an action. The plan is made when the user confirms, so the switch makes no request.
-// `subject` names the title of a single action in the alert that follows it.
+// The plan starts when the user confirms. `subject` names the title or season.
 export function PlanDialog({ request, subject, onClose, onDone, deleteFilesDefault = false }: { request: PlanRequest | null; subject?: string | null; onClose: () => void; onDone: (result: PlanResult) => void; deleteFilesDefault?: boolean }) {
   const [deleteFiles, setDeleteFiles] = useState(false);
   const [result, setResult] = useState<PlanResult | null>(null);
@@ -166,6 +165,8 @@ export function PlanDialog({ request, subject, onClose, onDone, deleteFilesDefau
   const action = request?.action;
 
   if (!request || !action) return null;
+  const title = action === 'remove' && request.season === undefined ? subject : null;
+  const FileOption = title ? Checkbox : Switch;
   return (
     <Confirm
       open
@@ -176,14 +177,14 @@ export function PlanDialog({ request, subject, onClose, onDone, deleteFilesDefau
           ? t('Delete {files}?', { files: fileCount(request.fileIds.length) })
           : request.action === 'remove' && request.season !== undefined
             ? t('Delete {season}?', { season: subject ?? '' })
-            : t(question[action], { titles: titleCount(request.keys.length) })
+            : t(question[action], { titles: title ?? titleCount(request.keys.length) })
       }
       confirm={t(confirmText[action])}
       pending={busy}
       disabled={Boolean(result)}
       onConfirm={() => void confirm()}
     >
-      {action === 'remove' && !result && <Switch label={t('Delete the files too')} checked={deleteFiles} onCheckedChange={setDeleteFiles} />}
+      {action === 'remove' && !result && <FileOption label={t('Delete the files too')} checked={deleteFiles} onCheckedChange={setDeleteFiles} />}
       {error && <Alert tone="danger">{error}</Alert>}
       {result && <Outcome result={result} />}
     </Confirm>

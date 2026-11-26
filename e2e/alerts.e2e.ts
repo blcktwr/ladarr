@@ -119,7 +119,9 @@ test('the notice of a removal shows in front of the problems of the app', async 
   await expect(notices.getByText('No download client is set.')).toBeVisible();
 
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  await page.getByRole('alertdialog', { name: 'Delete 1 title?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+  const alert = page.getByRole('alertdialog', { name: 'Delete Two Seasons?' });
+  await expect(alert.getByRole('checkbox', { name: 'Delete the files too' })).not.toBeChecked();
+  await alert.getByRole('button', { name: 'Delete', exact: true }).click();
   // The removal ends in a modal too, so its notice must stay in front of the problems that come back.
   await expect(notices.getByText('Two Seasons removed from the library')).toBeVisible();
 });

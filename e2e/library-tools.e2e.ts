@@ -205,12 +205,14 @@ test('a title that has no file has Search, and a title that has a file has Upgra
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.getByRole('alert').getByText('Nothing to search')).toBeVisible();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  const alert = page.getByRole('alertdialog', { name: 'Delete 1 title?' });
+  const alert = page.getByRole('alertdialog', { name: 'Delete Show Name?' });
   await expect(alert).toBeVisible();
-  // The alert has the switch and the two buttons. The switch makes no request, so the button does not change.
   const plans: string[] = [];
   page.on('request', (request) => request.url().includes('/library/plans') && plans.push(request.url()));
-  await alert.getByRole('switch', { name: 'Delete the files too' }).click();
+  const deleteFiles = alert.getByRole('checkbox', { name: 'Delete the files too' });
+  await expect(deleteFiles).not.toBeChecked();
+  await deleteFiles.click();
+  await expect(deleteFiles).toBeChecked();
   await expect(alert.getByRole('button', { name: 'Delete', exact: true })).toBeEnabled();
   await expect(alert.getByRole('button')).toHaveText(['Cancel', 'Delete']);
   expect(plans).toEqual([]);
@@ -261,8 +263,8 @@ test('a title that has no better quality has Upgrade disabled', async ({ page })
 test('Delete asks in an alert, and the page stays open as a title that is not in the catalog', async ({ page }) => {
   await page.goto(`${URL_BASE}/catalog/movie/900001`);
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  const alert = page.getByRole('alertdialog', { name: 'Delete 1 title?' });
-  await expect(alert.getByRole('switch', { name: 'Delete the files too' })).toBeVisible();
+  const alert = page.getByRole('alertdialog', { name: 'Delete Bench Movie Alpha?' });
+  await expect(alert.getByRole('checkbox', { name: 'Delete the files too' })).not.toBeChecked();
   await alert.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Bench Movie Alpha removed from the library')).toBeVisible();
   await expect(page).toHaveURL(/\/catalog\/movie\/900001$/);
@@ -275,7 +277,7 @@ test('removing a series tells the person that it is out of the library', async (
   expect(added.status).toBe(201);
   await page.goto(`${URL_BASE}/catalog/tv/3`);
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  await page.getByRole('alertdialog', { name: 'Delete 1 title?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByRole('alertdialog', { name: 'Delete Two Seasons?' }).getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Two Seasons removed from the library')).toBeVisible();
   await expect(page.getByRole('button', { name: /^Add/ })).toBeVisible();
 });
