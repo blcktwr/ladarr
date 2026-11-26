@@ -21,7 +21,7 @@ import { BulkActions, PlanDialog, useSelection } from './library-bulk.tsx';
 import { AddManuallyDialog, ImportBackupDialog } from './catalog-import.tsx';
 import { FileInfoDialog } from './library-files.tsx';
 import { UntitledFolders } from './library-folders.tsx';
-import { AttachFolderDialog } from './title-files.tsx';
+import { AttachDownloadDialog } from './title-files.tsx';
 
 type Target = { titleKey: string; season?: number; number?: number; numberingRevision?: number };
 
@@ -653,6 +653,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
         ? await api<{ targets: number }>(`${torrentRoute(titleKey)}/apply`, { method: 'POST', body: { hash: preview.hash, version: preview.version, files: preview.files } })
         : await sendTorrent<{ targets: number }>(torrentRoute(titleKey), file);
       if (selection.current === request) closeTorrent();
+      if (!title) void reload();
       queueNotice(result.targets);
     } catch (error) {
       setTorrent((current) => current === request ? { ...request, message: torrentError(error) } : current);
@@ -707,6 +708,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
   }
 
   const series = header.mediaType === 'tv';
+  const titleKey = title?.key ?? `${header.mediaType}:${header.tmdbId}`;
   // The bookmark of the poster names the type of the title and its state, as the poster of the catalog does.
   const state = posterState(title ?? header);
   // The seasons of a series that is not in the library decide whether the Add needs the modal.
@@ -742,35 +744,37 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
         resolutions={title?.resolutions}
         onResolution={title ? setInfo : undefined}
         controls={
-          pendingAdd && addLoading && (pendingAdd.kind === 'movie' || pendingAdd.season === null || oneSeason !== null) ? (
-            <Button pending>{t('Add')}</Button>
-          ) : title ? (
-            <Actions>
-              {title.availability !== 'available' && !searched && (
-                <span title={title.availability === 'waiting' ? (series ? t('Not aired') : availabilityLabel.waiting) : undefined}>
-                  <Button disabled={title.availability === 'waiting'} onClick={() => void run(() => search({ titleKey: title.key }))}>
-                    {t('Search')}
-                  </Button>
-                </span>
-              )}
-              {hasFile && <UpgradeDialog titleKey={title.key} qualities={upgrades.data?.qualities} error={upgrades.error} />}
-              <Button variant="danger" onClick={() => setPlan({ request: { action: 'remove', keys: [title.key] }, subject: title.title })}>
-                {t('Delete')}
-              </Button>
-              <ActionMenu label={t('More actions')} items={[
-                { label: t('Attach folder'), onClick: () => setAttaching(true) },
-                { label: t('Upload torrent'), onClick: () => { setMessage(''); selectTorrent(title.key, 'default'); } },
-              ]} />
-            </Actions>
-          ) : series ? (
-            <Button onClick={() => startAdd(null)}>{t('Add')}</Button>
-          ) : (
-            <AddMovie result={header} onAdded={addedMovie} />
-          )
+          <Actions>
+            {pendingAdd && addLoading && (pendingAdd.kind === 'movie' || pendingAdd.season === null || oneSeason !== null) ? (
+              <Button pending>{t('Add')}</Button>
+            ) : title ? (
+              <>
+                {title.availability !== 'available' && !searched && (
+                  <span title={title.availability === 'waiting' ? (series ? t('Not aired') : availabilityLabel.waiting) : undefined}>
+                    <Button disabled={title.availability === 'waiting'} onClick={() => void run(() => search({ titleKey: title.key }))}>
+                      {t('Search')}
+                    </Button>
+                  </span>
+                )}
+                {hasFile && <UpgradeDialog titleKey={title.key} qualities={upgrades.data?.qualities} error={upgrades.error} />}
+                <Button variant="danger" onClick={() => setPlan({ request: { action: 'remove', keys: [title.key] }, subject: title.title })}>
+                  {t('Delete')}
+                </Button>
+              </>
+            ) : series ? (
+              <Button onClick={() => startAdd(null)}>{t('Add')}</Button>
+            ) : (
+              <AddMovie result={header} onAdded={addedMovie} />
+            )}
+            <ActionMenu label={t('More actions')} items={[
+              { label: t('Upload torrent'), onClick: () => { setMessage(''); selectTorrent(titleKey, 'default'); } },
+              { label: t('Attach download'), onClick: () => setAttaching(true) },
+            ]} />
+          </Actions>
         }
       />
       {message && <Alert tone="danger">{message}</Alert>}
-      {torrent && title?.key === torrent.titleKey && (
+      {torrent && titleKey === torrent.titleKey && (
         <TorrentDialog
           series={series} file={torrent.file} method={torrent.method} preview={torrent.preview} applying={applying} message={torrent.message}
           onFile={(file) => selectTorrent(torrent.titleKey, torrent.method, file)}
@@ -782,7 +786,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
       )}
       <PlanDialog request={plan?.request ?? null} subject={plan?.subject} onClose={() => setPlan(null)} onDone={() => void reload()} />
       {title && info !== null && <FileInfoDialog titleKey={title.key} resolution={info} onClose={() => setInfo(null)} />}
-      {title && <AttachFolderDialog titleKey={title.key} label={title.title} series={series} isOpen={attaching} onClose={() => setAttaching(false)} />}
+      <AttachDownloadDialog titleKey={titleKey} label={header.title} canAttachFolder={!!title} isOpen={attaching} onClose={() => setAttaching(false)} onAttached={() => { if (!title) void reload(); }} />
       {series && (
         <>
           <div className={`${pageWidth} grid gap-6`}>

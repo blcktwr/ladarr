@@ -278,11 +278,11 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   }
   const clientCheck = services ? createClientCheck(services.clients) : undefined;
   if (services) {
-    const torrent = libraryTorrent(services.queue, services.clients, enqueue, persist);
-    api.post('/library/:key/torrent', titleParam(), express.raw({ type: 'application/x-bittorrent', limit: MAX_TORRENT_BYTES, inflate: false }), torrent.upload);
-    api.post('/library/:key/torrent/apply', titleParam(), express.json({ limit: '16mb' }), torrent.apply);
-    api.get('/library/:key/attach', titleParam(), libraryAttachGet(services.clients));
-    api.post('/library/:key/attach', titleParam(), libraryAttachPost(services.queue, services.clients));
+    const torrent = libraryTorrent(services.queue, services.clients, { tmdb, events, enqueue }, persist);
+    api.post('/library/:key/torrent', express.raw({ type: 'application/x-bittorrent', limit: MAX_TORRENT_BYTES, inflate: false }), torrent.upload);
+    api.post('/library/:key/torrent/apply', express.json({ limit: '16mb' }), torrent.apply);
+    api.get('/library/:key/attach', libraryAttachGet(services.clients));
+    api.post('/library/:key/attach', libraryAttachPost(services.queue, services.clients, { tmdb, events, enqueue }, persist));
     api.get('/queue/summary', queueSummaryGet(services.poller));
     api.post('/queue/pause', queuePausePost(services.queue));
     api.get('/queue/jobs', queueJobsGet(services.finder));

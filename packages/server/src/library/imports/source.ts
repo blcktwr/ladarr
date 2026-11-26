@@ -40,7 +40,7 @@ async function episodesOf(tmdb: Tmdb, tmdbId: number, meta: TitleMeta): Promise<
 }
 
 // A title that is not in the catalog yet. The preview plans against it, and the start adds it. It is never saved here.
-async function draftTitle(tmdb: Tmdb, mediaType: MediaType, tmdbId: number, rootId: string): Promise<{ title: Title; episodes: EpisodeMeta[] }> {
+export async function draftTitle(tmdb: Tmdb, mediaType: MediaType, tmdbId: number, rootId: string): Promise<{ title: Title; episodes: EpisodeMeta[] }> {
   const meta = await tmdb.details(mediaType, tmdbId);
   const episodes = mediaType === 'tv' ? await episodesOf(tmdb, tmdbId, meta) : [];
   const now = Date.now();

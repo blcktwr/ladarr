@@ -72,9 +72,7 @@ export function RunProgress({ id }: { id: string }) {
   );
 }
 
-// Attaches the video files of a folder that the user names to a title in the library. The preview shows each file
-// and changes nothing.
-export function AttachFolderDialog({ titleKey, label, series, isOpen, onClose }: { titleKey: string; label: string; series: boolean; isOpen: boolean; onClose: () => void }) {
+export function AttachDownloadDialog({ titleKey, label, canAttachFolder, isOpen, onClose, onAttached }: { titleKey: string; label: string; canAttachFolder: boolean; isOpen: boolean; onClose: () => void; onAttached: () => void }) {
   const [path, setPath] = useState('');
   const [hash, setHash] = useState('');
   const [replace, setReplace] = useState(false);
@@ -85,7 +83,7 @@ export function AttachFolderDialog({ titleKey, label, series, isOpen, onClose }:
   const downloadPath = `/library/${titleKey}/attach`;
   const candidates = useQuery<Pick<AttachCandidates, 'torrents'>>({
     queryKey: [downloadPath],
-    enabled: isOpen && series,
+    enabled: isOpen,
     gcTime: 0,
   });
   // A new value of the form makes the answer of an earlier preview old. The number tells which answer is the current one.
@@ -111,6 +109,7 @@ export function AttachFolderDialog({ titleKey, label, series, isOpen, onClose }:
       if (route === 'attach') {
         await api(downloadPath, { method: 'POST', body: { hash } });
         onClose();
+        onAttached();
         return;
       }
       const body = { titleKey, path: path.trim(), replace };
@@ -131,7 +130,7 @@ export function AttachFolderDialog({ titleKey, label, series, isOpen, onClose }:
     <Modal
       open
       onOpenChange={(next) => !next && onClose()}
-      title={t('Attach folder')}
+      title={t('Attach download')}
       width="lg"
       actions={
         runId ? (
@@ -143,8 +142,8 @@ export function AttachFolderDialog({ titleKey, label, series, isOpen, onClose }:
             <Button variant="ghost" onClick={onClose}>
               {t('Cancel')}
             </Button>
-            {hash ? (
-              <Button pending={busy} onClick={() => void ask('attach')}>{t('Attach download')}</Button>
+            {hash || !canAttachFolder ? (
+              <Button disabled={!hash} pending={busy} onClick={() => void ask('attach')}>{t('Attach download')}</Button>
             ) : (
               <Button disabled={!plan || plan.importable === 0} pending={busy} onClick={() => void ask('start')}>
                 {plan ? (plan.importable === 1 ? t('Import 1 file') : t('Import {n} files', { n: plan.importable })) : t('Import')}
@@ -162,42 +161,42 @@ export function AttachFolderDialog({ titleKey, label, series, isOpen, onClose }:
           <Form
             onSubmit={(e) => {
               e.preventDefault();
-              if (!hash) void ask('preview');
+              if (canAttachFolder && !hash) void ask('preview');
             }}
           >
-            {series && (
-              <SearchableDropdown
-                label={t('Torrent')}
-                width="full"
-                placeholder={t('No torrent selected')}
-                emptyText={candidates.error ? requestMessage(candidates.error) : t('No options.')}
+            <SearchableDropdown
+              label={t('Torrent')}
+              width="full"
+              placeholder={t('No torrent selected')}
+              emptyText={candidates.error ? requestMessage(candidates.error) : t('No options.')}
+              disabled={busy}
+              value={hash}
+              options={(candidates.data?.torrents ?? []).map(({ hash, name }) => ({ value: hash, label: name }))}
+              onValueChange={(value) => {
+                setHash(value);
+                if (value) setPath('');
+                setError('');
+                reset();
+              }}
+            />
+            {canAttachFolder && (
+              <Field
+                label={t('Folder')}
+                required={!hash}
                 disabled={busy}
-                value={hash}
-                options={(candidates.data?.torrents ?? []).map(({ hash, name }) => ({ value: hash, label: name }))}
+                autoFocus
+                width="full"
+                placeholder="/data/downloads/Show Name"
+                value={path}
                 onValueChange={(value) => {
-                  setHash(value);
-                  if (value) setPath('');
+                  setPath(value);
+                  if (value) setHash('');
                   setError('');
                   reset();
                 }}
               />
             )}
-            <Field
-              label={t('Folder')}
-              required={!hash}
-              disabled={busy}
-              autoFocus
-              width="full"
-              placeholder="/data/downloads/Show Name"
-              value={path}
-              onValueChange={(value) => {
-                setPath(value);
-                if (value) setHash('');
-                setError('');
-                reset();
-              }}
-            />
-            {!hash && (
+            {canAttachFolder && !hash && (
               <>
                 <Switch
                   label={t('Replace files that the library has')}
@@ -214,7 +213,7 @@ export function AttachFolderDialog({ titleKey, label, series, isOpen, onClose }:
               </>
             )}
           </Form>
-          {plan && <PlanView plan={plan} label={label} />}
+          {canAttachFolder && plan && <PlanView plan={plan} label={label} />}
         </>
       )}
     </Modal>

@@ -10,13 +10,16 @@ import { enqueueUpload, findUpload, uploadHash, uploadInUse, uploadOwner } from 
 import { folderMapping } from '../../../library/grab/folder-mapping.ts';
 import { torrentInfo } from '../../../library/grab/torrent.ts';
 import { presentFile } from '../../../library/imports/plan.ts';
+import { draftTitle } from '../../../library/imports/source.ts';
 import { isSample, isVideoFile } from '../../../library/parse.ts';
-import type { Clients, EnqueueInput, EpisodeRef, Job, Queue, Title } from '../../../types.ts';
+import { addTitle } from '../../../library/tools/add.ts';
+import type { Clients, EpisodeRef, LibraryDeps, Queue, Title } from '../../../types.ts';
 
+const KEY = /^(movie|tv):([1-9]\d*)$/;
 const MAX_PREVIEWS = 8;
 const PREVIEW_MS = 10 * 60_000;
 const episodeKey = ({ season, number }: EpisodeRef) => `${season}:${number}`;
-type Preview = { title: Title; torrent: QueueTorrent; bytes: Buffer; paths: string[]; expires: number; catalog: Map<string, number> };
+type Preview = { title: Title; draft: boolean; torrent: QueueTorrent; bytes: Buffer; paths: string[]; expires: number; catalog: Map<string, number> };
 type Handler = RequestHandler<{ key: string }>;
 
 function proposed(paths: string[], title: Title, folders: boolean): TorrentUploadFile[] {
@@ -57,15 +60,18 @@ function reviewed(files: unknown, paths: string[], title: Title): TorrentUploadF
   return result;
 }
 
-export function libraryTorrent(queue: Queue, clients: Clients, enqueue: (input: EnqueueInput) => Job, persist?: () => void | Promise<void>) {
+export function libraryTorrent(queue: Queue, clients: Clients, { tmdb, events, enqueue }: LibraryDeps, persist?: () => void | Promise<void>) {
   const previews = new Map<string, Preview>();
 
-  async function start({ title, torrent, bytes, catalog: identity }: Preview, files: TorrentUploadFile[]) {
+  async function start({ title: proposed, draft, torrent, bytes, catalog: identity }: Preview, files: TorrentUploadFile[]) {
+    let title = proposed;
+    const expected = draft ? undefined : title;
+    const stale = draft ? { status: 409, error: 'preview_changed' } : { status: 404, error: 'not_found' };
     const { hash, name, totalBytes } = torrent;
     return withTitleLock(title.key, async () => {
-      if (db.data.titles[title.key] !== title) return { status: 404, error: 'not_found' };
+      if (db.data.titles[title.key] !== expected) return stale;
       if (uploadInUse(title.key, hash)) return { status: 409, error: 'torrent_in_use' };
-      const active = Object.values(db.data.queue).find((entry) => entry.titleKey === title.key && entry.transferHash === hash && isActive(entry));
+      const active = draft ? undefined : Object.values(db.data.queue).find((entry) => entry.titleKey === title.key && entry.transferHash === hash && isActive(entry));
       let found;
       try {
         found = await findUpload(clients, hash, active?.clientId);
@@ -74,7 +80,7 @@ export function libraryTorrent(queue: Queue, clients: Clients, enqueue: (input: 
         throw error;
       }
       const { download, handle } = found;
-      if (db.data.titles[title.key] !== title) return { status: 404, error: 'not_found' };
+      if (db.data.titles[title.key] !== expected) return stale;
       if (uploadInUse(title.key, hash)) return { status: 409, error: 'torrent_in_use' };
       if (!handle) return { status: 409, error: 'client_missing' };
       const catalog = new Map(title.episodes.map((episode) => [episodeKey(episode), episode]));
@@ -87,7 +93,7 @@ export function libraryTorrent(queue: Queue, clients: Clients, enqueue: (input: 
       let replay = 0;
       for (const { path, episode } of selections) {
         const file = presentFile(episode ? catalog.get(episodeKey(episode))!.fileId : title.fileId);
-        const current = queue.get(entryId(title.key, episode?.season ?? null, episode?.number ?? null));
+        const current = draft ? undefined : queue.get(entryId(title.key, episode?.season ?? null, episode?.number ?? null));
         if (file) {
           if (file.download?.hash === hash) replay++;
           continue;
@@ -117,6 +123,12 @@ export function libraryTorrent(queue: Queue, clients: Clients, enqueue: (input: 
         return { hash, targets: replay };
       }
 
+      if (draft) {
+        if (!tmdb) return { status: 503, error: 'metadata_unavailable' };
+        if (db.data.roots[title.rootId]?.mediaType !== title.mediaType) return { status: 400, error: 'root_required' };
+        const { mediaType, tmdbId, seriesType, rootId, meta, episodes } = title;
+        ({ title } = await addTitle({ tmdb, enqueue }, { mediaType, tmdbId, seriesType, rootId, meta, episodes, mode: 'paused', preset: null }));
+      }
       const owner = download ? uploadOwner(title.key, hash, handle.id) : undefined;
       const savedUpload = Object.values(db.data.queue).some((entry) => entry.titleKey === title.key && isActive(entry) && uploadHash(entry) === hash && entry.source)
         ? db.data.torrents[hash] : undefined;
@@ -146,13 +158,17 @@ export function libraryTorrent(queue: Queue, clients: Clients, enqueue: (input: 
       if (!download) enqueueUpload(enqueue, entries, hash);
       else if (download.torrent.complete) enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
       await (persist ? persist() : db.write());
+      if (draft) events.publish('library.changed', { key: title.key });
       return { hash, targets: entries.length };
     });
   }
 
   const upload: Handler = async (req, res) => {
+    const [, mediaType, rawId] = KEY.exec(req.params.key) ?? [];
+    const id = Number(rawId);
+    if ((mediaType !== 'movie' && mediaType !== 'tv') || !Number.isSafeInteger(id)) return void res.status(404).json({ error: 'not_found' });
+    const stored = db.data.titles[req.params.key];
     if (!req.is('application/x-bittorrent')) return void res.status(415).json({ error: 'invalid_torrent' });
-    const title = res.locals.title as Title;
     if (req.query.method !== undefined && req.query.method !== 'folders') return void res.status(400).json({ error: 'invalid_request' });
     let torrent: QueueTorrent;
     try {
@@ -161,13 +177,20 @@ export function libraryTorrent(queue: Queue, clients: Clients, enqueue: (input: 
       return void res.status(400).json({ error: 'invalid_torrent' });
     }
     const paths = torrent.files.filter(({ path, sizeBytes }) => sizeBytes > 0 && isVideoFile(path) && !isSample(path)).map(({ path }) => path);
-    if (!paths.length || (title.mediaType === 'movie' && paths.length !== 1)) return void res.status(422).json({ error: 'nothing_to_import' });
-    const preview = { torrent, title, bytes: req.body as Buffer, paths, expires: Date.now() + PREVIEW_MS, catalog: new Map(title.episodes.map((episode) => [episodeKey(episode), episode.tmdbId])) };
+    if (!paths.length || (mediaType === 'movie' && paths.length !== 1)) return void res.status(422).json({ error: 'nothing_to_import' });
+    let title = stored;
+    if (!title) {
+      if (!tmdb) return void res.status(503).json({ error: 'metadata_unavailable' });
+      const rootId = db.data.settings.defaultRoots[mediaType];
+      if (!rootId || db.data.roots[rootId]?.mediaType !== mediaType) return void res.status(400).json({ error: 'root_required' });
+      ({ title } = await draftTitle(tmdb, mediaType, id, rootId));
+    }
+    const preview = { torrent, title, draft: !stored, bytes: req.body as Buffer, paths, expires: Date.now() + PREVIEW_MS, catalog: new Map(title.episodes.map((episode) => [episodeKey(episode), episode.tmdbId])) };
     if (title.mediaType === 'movie') {
       const result = await start(preview, [{ path: paths[0]!, episodes: [] }]);
-      return void res.status(result.status ?? 200).json(result);
+      return void res.status('status' in result ? result.status : 200).json(result);
     }
-    for (const [version, stored] of previews) if (stored.expires <= Date.now() || (stored.title === title && stored.torrent.hash === torrent.hash)) previews.delete(version);
+    for (const [version, stored] of previews) if (stored.expires <= Date.now() || (stored.title.key === title.key && stored.torrent.hash === torrent.hash)) previews.delete(version);
     if (previews.size >= MAX_PREVIEWS) previews.delete(previews.keys().next().value!);
     const version = randomUUID();
     previews.set(version, preview);
@@ -176,14 +199,15 @@ export function libraryTorrent(queue: Queue, clients: Clients, enqueue: (input: 
   };
 
   const apply: Handler = async (req, res) => {
-    const title = res.locals.title as Title;
+    const key = req.params.key;
     const { hash, version, files } = req.body ?? {};
     const preview = typeof version === 'string' ? previews.get(version) : undefined;
-    if (!preview || title !== preview.title || hash !== preview.torrent.hash || preview.expires <= Date.now()) return void res.status(409).json({ error: 'preview_changed' });
-    const selections = reviewed(files, preview.paths, title);
+    if (!KEY.test(key) || (!db.data.titles[key] && !(preview?.draft && preview.title.key === key))) return void res.status(404).json({ error: 'not_found' });
+    if (!preview || preview.title.key !== key || hash !== preview.torrent.hash || preview.expires <= Date.now()) return void res.status(409).json({ error: 'preview_changed' });
+    const selections = reviewed(files, preview.paths, preview.title);
     if (!selections) return void res.status(400).json({ error: 'invalid_request' });
     const result = await start(preview, selections);
-    res.status(result.status ?? 200).json(result);
+    res.status('status' in result ? result.status : 200).json(result);
   };
 
   return { upload, apply };

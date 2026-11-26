@@ -511,7 +511,7 @@ test('the General tab changes the theme of the interface', async ({ page }) => {
   expect((await stack.call('GET', '/settings')).body.settings.theme).toBe('dark');
 });
 
-test('Attach folder on the page of a series imports the files of the folder', async ({ page }) => {
+test('Attach download on the page of a series imports the files of the folder', async ({ page }) => {
   const folder = join(stack.folders.downloads, 'Show Name S01E02');
   mkdirSync(folder, { recursive: true });
   const source = join(folder, 'Show.Name.S01E02.1080p.WEB-DL.mkv');
@@ -519,8 +519,8 @@ test('Attach folder on the page of a series imports the files of the folder', as
 
   await page.goto(`${URL_BASE}/catalog/tv/1`);
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'Attach folder', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Attach folder' });
+  await page.getByRole('menuitem', { name: 'Attach download', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Attach download', exact: true });
   await dialog.getByLabel('Folder').fill(folder);
   await dialog.getByRole('button', { name: 'Preview', exact: true }).click();
   await expect(dialog.getByText('The names match this title')).toBeVisible();

@@ -7,10 +7,12 @@ import { createClients } from '../../src/library/downloads/client-api.ts';
 import { ClientError } from '../../src/library/downloads/qbittorrent.ts';
 import { createFinder } from '../../src/library/grab/finder.ts';
 import { torrentsForRemoval } from '../../src/library/tools/remove.ts';
+import { createTmdb } from '../../src/metadata/tmdb.ts';
 import type { EpisodeRef, Job } from '../../src/types.ts';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
 import { hashOf, makeTorrent, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 import { startFakeQbit } from '../helpers/test-qbit.ts';
+import { createTmdbFixture, MOVIE_ID, SERIES_ID } from '../helpers/test-wholphin.ts';
 
 type Pipe = Awaited<ReturnType<typeof startPipeline>>;
 type Preview = { hash: string; version: string; files: { path: string; episodes: EpisodeRef[] }[] };
@@ -59,7 +61,8 @@ function seed(name: string, files: string[], progress: number) {
 
 beforeEach(async () => {
   pipe = await startPipeline({ handlers: (deps) => ({ 'queue.initial': queueInitialHandler(deps) }) });
-  api = await pipe.api();
+  const tmdb = createTmdb({ apiKey: 'k', fetch: createTmdbFixture().fetch, baseUrl: 'https://tmdb.test/3', spacingMs: 0, ttlMs: 0 });
+  api = await pipe.api({ tmdb });
 });
 
 afterEach(async () => {
@@ -391,5 +394,59 @@ describe('title torrent upload', () => {
     await until(() => entry.state.kind === 'downloading');
     expect([...pipe.qbit.torrents.keys()]).toEqual([hashOf('Selected', ['Movie.mkv'])]);
     expect(pipe.tracker.state.downloads).toEqual([]);
+  });
+});
+
+describe('downloads from a title page', () => {
+  beforeEach(() => {
+    pipe.db.data.settings.defaultRoots = { movie: 'movie', tv: 'tv' };
+  });
+
+  it('adds a catalog movie paused only after a valid torrent upload', async () => {
+    const key = `movie:${MOVIE_ID}`;
+    const name = 'Movie upload';
+    const files = ['Feature.mkv'];
+    const hash = hashOf(name, files);
+    expect((await upload(key, makeTorrent(name, ['One.mkv', 'Two.mkv']))).status).toBe(422);
+    expect(pipe.db.data.titles[key]).toBeUndefined();
+    expect(pipe.db.data.queue).toEqual({});
+    expect(adds()).toEqual([]);
+
+    accepted(await upload(key, makeTorrent(name, files)));
+    expect(pipe.db.data.titles[key]).toMatchObject({ paused: true, rootId: 'movie' });
+    expect(Object.keys(pipe.db.data.queue)).toEqual([key]);
+    expect(pipe.queue.get(key)).toMatchObject({ transferHash: hash, release: { uploadPath: `${name}/Feature.mkv` } });
+    await until(() => pipe.qbit.torrents.has(hash));
+    expect(pipe.tracker.state.searches).toEqual([]);
+  });
+
+  it.each([
+    { context: 'a library movie', key: 'movie:2', stored: true, file: 'Feature.mkv', suffix: '' },
+    { context: 'a catalog movie', key: `movie:${MOVIE_ID}`, stored: false, file: 'Feature.mkv', suffix: '' },
+    { context: 'a catalog series', key: `tv:${SERIES_ID}`, stored: false, file: 'Breaking.Bad.S01E01.mkv', suffix: ':1x1' },
+  ])('lists and attaches a completed download for $context', async ({ key, stored, file, suffix }) => {
+    if (stored) pipe.db.data.titles[key] = film();
+    const name = 'Completed download';
+    const hash = seed(name, [file], 1);
+    pipe.complete(name, { [file]: 'video' }, hash);
+    const invalid = seed('Notes', ['notes.txt'], 1);
+    const path = `/library/${key}/attach`;
+
+    const listing = await api.get(path);
+    expect(listing.status).toBe(200);
+    expect(listing.body.torrents).toContainEqual(expect.objectContaining({ hash, complete: true }));
+    expect(Object.keys(pipe.db.data.titles)).toEqual(stored ? [key] : []);
+    expect(pipe.db.data.queue).toEqual({});
+
+    expect((await api.post(path, { hash: invalid })).status).toBe(409);
+    expect(Object.keys(pipe.db.data.titles)).toEqual(stored ? [key] : []);
+    expect(pipe.db.data.queue).toEqual({});
+
+    expect((await api.post(path, { hash })).status).toBe(200);
+    expect(pipe.db.data.titles[key]).toMatchObject({ paused: !stored, rootId: suffix ? 'tv' : 'movie' });
+    expect(Object.keys(pipe.db.data.queue)).toEqual([`${key}${suffix}`]);
+    expect(pipe.queue.get(`${key}${suffix}`)).toMatchObject({ transferHash: hash, release: { external: true } });
+    expect(adds()).toEqual([]);
+    expect(pipe.tracker.state.searches).toEqual([]);
   });
 });
