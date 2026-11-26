@@ -81,8 +81,10 @@ export const tabEdge = 'before:pointer-events-none before:absolute before:inset-
 // A ring inside its edge shows its state: the accent when it has the focus, red when it is invalid.
 const flatSurface = 'box-border rounded-md outline-none text-ink-strong caret-point font-medium transition-[background-color,box-shadow] duration-200 ease-stone placeholder:text-fog placeholder:opacity-60 focus-visible:inset-ring-3 focus-visible:inset-ring-accent data-invalid:inset-ring-3 data-invalid:inset-ring-error data-disabled:opacity-35 data-disabled:cursor-not-allowed data-deactivated:struck';
 export const flat = `${flatSurface} h-11 bg-field hover:not-data-disabled:bg-field-hover`;
+const tableField = 'bg-field-small hover:not-data-disabled:bg-field-small-hover';
+export const flatTable = `${flatSurface} h-11 ${tableField}`;
 // A small field, for a value in a row of a table or a dense form. Its stone differs from a field, so it shows on a recess.
-export const flatSmall = `${flatSurface} h-7 bg-field-small hover:not-data-disabled:bg-field-small-hover`;
+export const flatSmall = `${flatSurface} h-7 ${tableField}`;
 // A field that holds a row of chips. It grows with the chips, and its focus ring shows for the input inside it.
 export const flatField = `${flatSurface} min-h-11 bg-field hover:not-data-disabled:bg-field-hover focus-within:inset-ring-3 focus-within:inset-ring-accent`;
 // A tag inside a field. It is flat, so it reads as a value and not as a key.

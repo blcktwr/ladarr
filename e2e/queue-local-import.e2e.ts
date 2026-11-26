@@ -67,7 +67,7 @@ test('does not map local files without a torrent', async ({ page }) => {
   await map.click();
   const panel = page.getByRole('dialog');
   await expect(panel).toHaveAccessibleName('Show Name (2020)');
-  const table = panel.getByRole('table', { name: 'Map episodes', exact: true });
+  const table = panel.getByRole('table', { name: 'Episodes of season 1', exact: true });
   await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Season', 'Torrent', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(4);
   const matches = table.getByRole('combobox', { name: 'Matches' });

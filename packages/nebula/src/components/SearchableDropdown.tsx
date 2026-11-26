@@ -1,7 +1,7 @@
 import { Combobox } from '@base-ui/react/combobox';
 import { Check } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
-import { flat, ghost, key, sunk } from '../theme/stone.ts';
+import { flat, flatTable, ghost, key, sunk } from '../theme/stone.ts';
 
 const widths = { sm: 'w-32', md: 'w-80 max-w-full', full: 'w-full' };
 
@@ -17,9 +17,11 @@ type SearchableDropdownProps = {
   options: { value: string; label?: string; disabled?: boolean }[];
   emptyText?: string;
   width?: keyof typeof widths;
+  /** Use `table` for the table-field surface. The input keeps its standard height. */
+  surface?: 'table';
 };
 
-export function SearchableDropdown({ label, hideLabel, disabled, placeholder, value, onValueChange, allowCustom, options, emptyText = 'No options.', width = 'md' }: SearchableDropdownProps) {
+export function SearchableDropdown({ label, hideLabel, disabled, placeholder, value, onValueChange, allowCustom, options, emptyText = 'No options.', width = 'md', surface }: SearchableDropdownProps) {
   const id = useId();
   const anchorRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
@@ -54,7 +56,7 @@ export function SearchableDropdown({ label, hideLabel, disabled, placeholder, va
           title={value ? textOf(value) : undefined}
           onFocus={() => setOpen(true)}
           onClick={() => setOpen(true)}
-          className={`${flat} w-full min-w-0 px-3.5 text-[15px]/none text-ellipsis`}
+          className={`${surface === 'table' ? flatTable : flat} w-full min-w-0 px-3.5 text-[15px]/none text-ellipsis`}
         />
         <Combobox.Portal>
           <Combobox.Positioner anchor={anchorRef} align="start" sideOffset={8}>

@@ -1,7 +1,8 @@
 import type { AttachCandidates, EpisodeRef, FileRow, QueueEntryView, QueueGroupPage, QueueMappingEpisode, QueueMatchPreview, QueuePackFiles } from '@ladarr/shared/types';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
-import { Button, Checkbox, Dropdown, EmptyState, Modal, SearchableDropdown, Spinner, Table } from 'nebula';
+import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useId, useState } from 'react';
+import { Button, Checkbox, Dropdown, EmptyState, Modal, SearchableDropdown, Spinner, Table, Text } from 'nebula';
 import { Confirm } from '../../components/confirm.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { describeError, formatBytes, groupName, seasonName } from '../../lib/format.ts';
@@ -59,6 +60,8 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   const series = entry.mediaType === 'tv';
   const mapSeries = series && !fixedSource;
   const fixed = fixedSource ? fileSource ?? 'library' : undefined;
+  const detailId = useId();
+  const [expanded, setExpanded] = useState<number[]>();
   const [seasons, setSeasons] = useState<Record<string, string>>({});
   const [searchSeasons, setSearchSeasons] = useState<number[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -237,6 +240,68 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     }
   }
 
+  const columns = [
+    { label: t('Episodes'), width: '9rem' },
+    ...(mapSeries ? [{ label: t('Season'), width: '8rem' }, { label: t('Torrent'), width: '22rem' }] : []),
+    { label: t('Matches'), width: mapSeries ? '21rem' : undefined },
+  ];
+
+  const episodeRow = (point: QueueMappingEpisode) => {
+    const { item, draft, torrent: verified, source, hash, match, path } = rowSource(point);
+    const list = source.path ? lists.get(source.key) : undefined;
+    const own = verified?.hash ?? '';
+    const name = source.hash ? undefined : match?.file;
+    const suggested = mapSeries && !path && source.path ? proposed(point, source.key, name) : undefined;
+    const canEdit = !match && !suggested && (editable.has(point.id) || fixedSource) && item?.status !== 'available';
+    const shown = match?.file ?? item?.file?.name ?? (suggested ? suggested.originalName || suggested.rel : undefined) ?? '—';
+    const fileValue = draft?.file !== undefined ? draft.file?.rel ?? '' : suggested?.rel ?? '';
+    const selected = verified && !options.some((option) => option.value === own)
+      ? [...options, { value: own, label: verified.name }] : options;
+    const selectFile = (value: string | null) => change(point.id, { ...draft, file: list?.files?.find((file) => file.rel === value) ?? null });
+    const alternatives = path && own ? libraryOptions?.filter((option) => option.hash === own) : undefined;
+    const matches = mapSeries ? (
+      <SearchableDropdown
+        key={`file:${source.key}`} label={t('Matches')} hideLabel width="full" surface="table"
+        placeholder={t('Unassigned')} emptyText={t('No options.')}
+        value={path ? draft?.path ?? path : fileValue}
+        options={path ? alternatives ?? [{ value: path, label: match!.file }] : list?.options ?? []}
+        onValueChange={path ? (next) => { if (next) change(point.id, { path: next }); } : selectFile}
+      />
+    ) : !canEdit ? readout(shown) : (
+      <Dropdown key="file" width="full" reserve={false}
+        value={draft?.file?.rel ?? ''} options={list?.options ?? []} onValueChange={selectFile} />
+    );
+    return {
+      key: point.id,
+      cells: [
+        pointText(point),
+        ...(mapSeries ? [(
+          <SearchableDropdown key="season" label={t('Season')} hideLabel width="full" surface="table" allowCustom options={seasonOptions} emptyText={t('No options.')}
+            disabled={busy} value={seasons[point.id] ?? String(point.releaseSeason)}
+            onValueChange={(value) => setSeasons((state) => ({ ...state, [point.id]: value }))} />
+        ), (
+          <SearchableDropdown
+            key="torrent" label={t('Torrent')} hideLabel width="full" surface="table" value={hash}
+            placeholder={t('No torrent selected')} emptyText={t('No options.')}
+            options={selected}
+            onValueChange={(next) => change(point.id, { hash: next === own ? undefined : next })}
+          />
+        )] : []),
+        matches,
+      ],
+    };
+  };
+
+  const bySeason = new Map<number, QueueMappingEpisode[]>();
+  if (mapSeries && !loading) for (const point of rows) {
+    const points = bySeason.get(point.season);
+    if (points) points.push(point);
+    else bySeason.set(point.season, [point]);
+  }
+  const catalogSeasons = [...bySeason].sort(([a], [b]) => a - b);
+  const firstSeason = catalogSeasons[0]?.[0];
+  if (expanded === undefined && firstSeason !== undefined) setExpanded([firstSeason]);
+
   const title = groupName({ ...entry, season: null });
   const confirmTitle = addedSeasons.length ? t('Do you want to search for these new seasons?') : t('Apply this episode mapping?');
   return (
@@ -260,61 +325,49 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
         </Confirm>
       ) : <Button disabled={busy || (!series && !movie)} pending={busy} onClick={() => void save()}>{t('Apply mapping')}</Button>}
     >
-      {series ? (
+      {mapSeries ? (
         <Table
           aria-label={t('Map episodes')}
           loading={loading}
-          minWidth={mapSeries ? '60rem' : undefined}
-          columns={[
-            { label: t('Episodes'), width: '9rem' },
-            ...(mapSeries ? [{ label: t('Season'), width: '8rem' }, { label: t('Torrent'), width: '22rem' }] : []),
-            { label: t('Matches'), width: mapSeries ? '21rem' : undefined },
-          ]}
-          rows={rows.map((point) => {
-            const { item, draft, torrent: verified, source, hash, match, path } = rowSource(point);
-            const list = source.path ? lists.get(source.key) : undefined;
-            const own = verified?.hash ?? '';
-            const name = source.hash ? undefined : match?.file;
-            const suggested = mapSeries && !path && source.path ? proposed(point, source.key, name) : undefined;
-            const canEdit = !match && !suggested && (editable.has(point.id) || fixedSource) && item?.status !== 'available';
-            const shown = match?.file ?? item?.file?.name ?? (suggested ? suggested.originalName || suggested.rel : undefined) ?? '—';
-            const fileValue = draft?.file !== undefined ? draft.file?.rel ?? '' : suggested?.rel ?? '';
-            const selected = verified && !options.some((option) => option.value === own)
-              ? [...options, { value: own, label: verified.name }] : options;
-             const selectFile = (value: string | null) => change(point.id, { ...draft, file: list?.files?.find((file) => file.rel === value) ?? null });
-             const alternatives = path && own ? libraryOptions?.filter((option) => option.hash === own) : undefined;
-            const matches = mapSeries ? (
-              <SearchableDropdown
-                key={`file:${source.key}`} label={t('Matches')} hideLabel width="full"
-                placeholder={t('Unassigned')} emptyText={t('No options.')}
-                value={path ? draft?.path ?? path : fileValue}
-                options={path ? alternatives ?? [{ value: path, label: match!.file }] : list?.options ?? []}
-                onValueChange={path ? (next) => { if (next) change(point.id, { path: next }); } : selectFile}
-              />
-            ) : !canEdit ? readout(shown) : (
-              <Dropdown key="file" width="full" reserve={false}
-                value={draft?.file?.rel ?? ''} options={list?.options ?? []} onValueChange={selectFile} />
-            );
+          columns={[{ label: t('Seasons'), hideLabel: true, width: '100%' }]}
+          detailTone="open"
+          rows={catalogSeasons.map(([season, points]) => {
+            const open = expanded?.includes(season) ?? false;
+            const id = `${detailId}-${season}`;
+            const toggle = () => setExpanded((current = []) => current.includes(season)
+              ? current.filter((number) => number !== season)
+              : [...current, season]);
             return {
-              key: point.id,
+              key: String(season),
+              onClick: toggle,
               cells: [
-                pointText(point),
-                ...(mapSeries ? [(
-                  <SearchableDropdown key="season" label={t('Season')} hideLabel width="full" allowCustom options={seasonOptions} emptyText={t('No options.')}
-                    disabled={busy} value={seasons[point.id] ?? String(point.releaseSeason)}
-                    onValueChange={(value) => setSeasons((state) => ({ ...state, [point.id]: value }))} />
-                ), (
-                  <SearchableDropdown
-                    key="torrent" label={t('Torrent')} hideLabel width="full" value={hash}
-                    placeholder={t('No torrent selected')} emptyText={t('No options.')}
-                    options={selected}
-                    onValueChange={(next) => change(point.id, { hash: next === own ? undefined : next })}
-                  />
-                )] : []),
-                matches,
+                <div className="flex items-center gap-2">
+                  <Button variant="plain" aria-expanded={open} aria-controls={open ? id : undefined} onClick={toggle}>
+                    {open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+                    {seasonName(season)}
+                  </Button>
+                  <Text variant="small">({points.length})</Text>
+                </div>,
               ],
+              detail: open && (
+                <div id={id}>
+                  <Table
+                    aria-label={t('Episodes of season {number}', { number: season })}
+                    columns={columns}
+                    minWidth="60rem"
+                    rows={points.toSorted((a, b) => a.number - b.number).map(episodeRow)}
+                  />
+                </div>
+              ),
             };
           })}
+        />
+      ) : series ? (
+        <Table
+          aria-label={t('Map episodes')}
+          loading={loading}
+          columns={columns}
+          rows={rows.map(episodeRow)}
         />
       ) : packs[0]?.isPending ? (
         <Spinner label={t('Loading files')} />

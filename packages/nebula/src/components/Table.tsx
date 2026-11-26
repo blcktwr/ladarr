@@ -34,6 +34,8 @@ type TableProps = ({ title: string; 'aria-label'?: never } | { title?: never; 'a
   stickyFirst?: boolean;
   // A minimum width for the table, such as '85rem', so a wide table scrolls sideways inside the pane.
   minWidth?: string;
+  /** Use `open` to give the detail the open-row surface. The parent row keeps its own surface. */
+  detailTone?: 'open';
 };
 
 // The cells of the first and the last column have the padding of the pane, so the text aligns with the content of the pane.
@@ -57,13 +59,14 @@ const shift = 8;
 // With animated, a row that enters, leaves, or moves takes its place with motion, unless the system asks for reduced motion.
 // With stickyFirst, the first column stays at the left edge while the row scrolls sideways. With minWidth, the table is at
 // least that wide, so it scrolls sideways inside the pane.
-export function Table({ title, 'aria-label': label, columns, rows = [], loading = false, action, animated = false, stickyFirst = false, minWidth }: TableProps) {
+export function Table({ title, 'aria-label': label, columns, rows = [], loading = false, action, animated = false, stickyFirst = false, minWidth, detailTone }: TableProps) {
   const body: Row[] = loading ? ['1', '2', '3'].map(key => ({ key, cells: columns.map((_, index) => <Skeleton key={index} className="inline-block align-middle h-3.5 w-24 max-w-full" />) })) : rows;
   // A width keeps the columns the same for every row set, so the layout does not follow the content.
   const fixed = columns.some(column => column.width);
   const id = useId();
   const still = useReducedMotion();
   const moving = animated && !still;
+  const detailCell = `px-6 py-2 ${detailTone === 'open' ? 'bg-row-open' : 'bg-(--recess-lit)'}`;
 
   const click = (row: Row) =>
     row.onClick
@@ -132,7 +135,7 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
                   ...(row.detail
                     ? [
                         <motion.tr key={`${row.key}:detail`} layout="position" initial={{ opacity: 0, y: shift }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -shift }} transition={transition}>
-                          <td colSpan={columns.length} className="px-6 py-2 bg-(--recess-lit)">
+                          <td colSpan={columns.length} className={detailCell}>
                             {row.detail}
                           </td>
                         </motion.tr>,
@@ -148,7 +151,7 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
                   </tr>
                   {row.detail && (
                     <tr>
-                      <td colSpan={columns.length} className="px-6 py-2 bg-(--recess-lit)">
+                      <td colSpan={columns.length} className={detailCell}>
                         {row.detail}
                       </td>
                     </tr>
