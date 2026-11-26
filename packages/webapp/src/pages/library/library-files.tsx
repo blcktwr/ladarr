@@ -86,33 +86,60 @@ export function FileInfoDialog({ titleKey, resolution, onClose }: { titleKey: st
   const [chosen, setChosen] = useState<string | null>(null);
   const files = (data?.files ?? []).filter((file) => file.resolution === resolution);
   const current = files.find((file) => file.id === chosen) ?? files[0];
+  const status = error && !data ? (
+    <LoadFailed onRetry={() => void refetch()} />
+  ) : !data ? (
+    <Spinner label={t('Loading')} />
+  ) : (
+    <EmptyState>{t('No file is recorded.')}</EmptyState>
+  );
+  const picker = current && files.length > 1 && (
+    <Dropdown label={t('File')} value={current.id} options={files.map((file) => ({ value: file.id, label: file.episodes.length > 0 ? episodeLabel(file.episodes) : fileName(file.path) }))} onValueChange={(value) => setChosen(value)} />
+  );
+  const torrent = current?.torrent;
   return (
     <Modal
       open
       onOpenChange={(open) => !open && onClose()}
       title={`${t('Downloaded file')} ${resolution}p`}
+      hideTitle
       width="lg"
+      tabs={[
+        {
+          value: 'file',
+          label: t('File'),
+          content: current ? (
+            <div className="grid gap-5">
+              {picker}
+              <FileInfo titleKey={titleKey} fileId={current.id} />
+            </div>
+          ) : status,
+        },
+        {
+          value: 'torrent',
+          label: t('Torrent'),
+          content: current ? (
+            <div className="grid gap-5">
+              {picker}
+              {torrent ? (
+                <Fields items={[
+                  ...(torrent.name ? [{ label: t('Name'), value: torrent.name }] : []),
+                  { label: t('Hash'), value: torrent.hash },
+                  ...(torrent.file ? [{ label: t('Original file'), value: torrent.file }] : []),
+                ]} />
+              ) : (
+                <EmptyState>{t('No torrent for this file.')}</EmptyState>
+              )}
+            </div>
+          ) : status,
+        },
+      ]}
       actions={
         <Button variant="ghost" onClick={onClose}>
           {t('Close')}
         </Button>
       }
-    >
-      {error && !data ? (
-        <LoadFailed onRetry={() => void refetch()} />
-      ) : !data ? (
-        <Spinner label={t('Loading')} />
-      ) : !current ? (
-        <EmptyState>{t('No file is recorded.')}</EmptyState>
-      ) : (
-        <>
-          {files.length > 1 && (
-            <Dropdown label={t('File')} value={current.id} options={files.map((file) => ({ value: file.id, label: file.episodes.length > 0 ? episodeLabel(file.episodes) : fileName(file.path) }))} onValueChange={(value) => setChosen(value)} />
-          )}
-          <FileInfo titleKey={titleKey} fileId={current.id} />
-        </>
-      )}
-    </Modal>
+    />
   );
 }
 

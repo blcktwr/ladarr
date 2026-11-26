@@ -12,7 +12,16 @@ const KEY = /^(movie|tv):[1-9]\d*$/;
 // ffprobe can read a big file for a while. A few at the same time are enough for one person.
 const MAX_PROBES = 3;
 
-export const fileRow = (file: MediaFile): FileRow => ({ id: file.id, path: file.path, sizeBytes: file.sizeBytes, mtimeMs: file.mtimeMs, missing: file.missing, episodes: file.episodes, resolution: qualityOfFile(file).resolution });
+export const fileRow = (file: MediaFile): FileRow => ({
+  id: file.id,
+  path: file.path,
+  sizeBytes: file.sizeBytes,
+  mtimeMs: file.mtimeMs,
+  missing: file.missing,
+  episodes: file.episodes,
+  resolution: qualityOfFile(file).resolution,
+  torrent: file.download ? { hash: file.download.hash, name: file.download.name, file: file.download.file } : null,
+});
 
 // The file records of each title, sorted by path.
 export function filesByTitle() {

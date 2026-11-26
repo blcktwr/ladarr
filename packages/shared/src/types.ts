@@ -181,6 +181,7 @@ export type FileRow = {
   episodes: EpisodeRef[];
   // The resolution of the file, from its release or from its name. Null when neither says.
   resolution: number | null;
+  torrent: { hash: string; name?: string; file?: string } | null;
 };
 
 export type FileDetails =
