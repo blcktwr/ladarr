@@ -218,9 +218,8 @@
     /* The groove between the rows of a table, carved in the pane: a dark line, and the light from above on its lower edge. */
     --groove: inset 0 1px 0 rgb(0 0 0 / 35%), inset 0 2px 0 rgb(255 255 255 / 5%);
     /* The line between two parts of a pane: a groove deeper than the groove of a table. Its two lines run the full width. */
-    --divider:
-      linear-gradient(rgb(0 0 0 / 65%), rgb(0 0 0 / 65%)),
-      linear-gradient(rgb(255 255 255 / 12%), rgb(255 255 255 / 12%));
+    --divider-dark: rgb(0 0 0 / 65%);
+    --divider-light: rgb(255 255 255 / 12%);
     /* The page under everything: near-black with haze, and the Spire's grain over it. The Background component shows it. */
     --backdrop:
       var(--grain),
@@ -292,15 +291,20 @@
     --panel-shadow: 0 0 0 1px var(--color-outline), -8px 0 24px rgb(0 0 0 / 12%);
     --navbar-edge: 0 1px 0 rgb(0 0 0 / 8%);
     --groove: inset 0 1px 0 rgb(0 0 0 / 10%), inset 0 2px 0 #ffffff;
-    --divider:
-      linear-gradient(rgb(0 0 0 / 30%), rgb(0 0 0 / 30%)),
-      linear-gradient(#ffffff, #ffffff);
+    --divider-dark: rgb(0 0 0 / 30%);
+    --divider-light: #ffffff;
     /* In daylight the haze is brighter than the ground. */
     --backdrop:
       var(--grain),
       radial-gradient(50% 30% at 22% 28%, rgb(255 255 255 / 60%), transparent),
       radial-gradient(45% 28% at 80% 58%, rgb(255 255 255 / 50%), transparent),
       radial-gradient(64% 64% at 50% 46%, var(--color-night), var(--color-night-deep));
+  }
+
+  :root, [data-theme=light] {
+    --divider:
+      linear-gradient(var(--divider-dark), var(--divider-dark)),
+      linear-gradient(var(--divider-light), var(--divider-light));
   }
 
   /* Text keeps the browser's normal line height, as before Tailwind; preflight sets 1.5. */

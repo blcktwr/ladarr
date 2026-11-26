@@ -72,6 +72,56 @@ const ModalSample = ({ width = 'md', children }) => {
   );
 };
 
+const TabbedModalSample = () => {
+  const [open, setOpen] = useState(false);
+  return <Modal
+    trigger={<Button>Open tabbed modal</Button>}
+    title="Downloaded file"
+    hideTitle
+    width="lg"
+    open={open}
+    onOpenChange={setOpen}
+    actions={<Button variant="ghost" onClick={() => setOpen(false)}>Close</Button>}
+    tabs={[
+      {
+        value: 'file',
+        label: 'File',
+        content: (
+          <div className="grid gap-8 w-full">
+            <Section title="General">
+              <Details items={[
+                { label: 'Format', value: 'matroska,webm' },
+                { label: 'Bit rate', value: '4.4 Mbit/s' },
+                { label: 'Size', value: '3.3 GiB' },
+                { label: 'Duration', value: '1 h 49 min' },
+              ]} />
+            </Section>
+            <Section title="Video">
+              <Details items={[
+                { label: 'Codec', value: 'h264' },
+                { label: 'Resolution', value: '1920 × 804' },
+                { label: 'Aspect ratio', value: '160:67' },
+                { label: 'Frame rate', value: '23.976 fps' },
+                { label: 'Dolby Vision', value: 'No' },
+              ]} />
+            </Section>
+            <Section title="Audio">
+              <Details items={[
+                { label: 'Audio 1', value: 'spa · eac3 · 2 ch' },
+                { label: 'Audio 2', value: 'eng · eac3 · 6 ch' },
+              ]} />
+            </Section>
+            <Section title="Subtitles">
+              <Details items={[{ label: 'Subtitles 1', value: 'spa · subrip' }]} />
+            </Section>
+          </div>
+        ),
+      },
+      { value: 'torrent', label: 'Torrent', content: <Details items={[{ label: 'Status', value: 'Complete' }]} /> },
+    ]}
+  />;
+};
+
 // The page opens the alert. Its action runs for a second and then closes it.
 const ConfirmSample = () => {
   const [open, setOpen] = useState(false);
@@ -386,6 +436,10 @@ const Sheet = () => {
             <Pane>
               <div className="flex flex-wrap gap-4"><ModalSample>Medium</ModalSample><ModalSample width="lg">Large</ModalSample><ModalSample width="xl">Extra large</ModalSample></div>
             </Pane>
+          </section>
+          <section id="tabs" className={card}>
+            <h1 className={h1}>Tabs</h1>
+            <Pane><TabbedModalSample /></Pane>
           </section>
           <section className={card}>
             <h1 className={h1}>Confirm</h1>

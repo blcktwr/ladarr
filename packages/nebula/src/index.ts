@@ -46,6 +46,7 @@ export { Spinner } from './components/Spinner.tsx';
 export { SubMenu } from './components/SubMenu.tsx';
 export { Switch } from './components/Switch.tsx';
 export { Table } from './components/Table.tsx';
+export { Tabs, type TabItem } from './components/Tabs.tsx';
 export { TagInput } from './components/TagInput.tsx';
 export type { TagOption } from './components/TagInput.tsx';
 export { Text } from './components/Text.tsx';
