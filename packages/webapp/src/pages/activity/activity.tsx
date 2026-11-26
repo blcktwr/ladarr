@@ -666,7 +666,7 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
   // The counts, the status, and the problem cover the whole series, not only the episodes that the filter shows.
   const summary = data?.group ?? group;
   const { status, total, torrents, missing, problem, actions } = summary;
-  const completed = summary.reached.completed;
+  const matched = summary.reached.matched;
   const percent = Math.round((summary.download ?? 0) * 100);
   const toggle = (number: number) => setSeason((current) => (current === number ? null : number));
   // The checklist belongs to the importing indicator. Every target of a pack carries the same list, so the first
@@ -678,7 +678,7 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
       : status === 'downloading' ? `${percent}%`
         : status === 'stuck' ? missing.length || !problem ? null : reasonText(problem)
           : status === 'no_match' ? t('None of the releases passed the checks.')
-        : t('{count} / {total} episodes', { count: completed, total });
+        : t('{count} / {total} episodes', { count: matched, total });
   const bar = status === 'downloading' ? (
     <Progress value={percent} label={`${groupName(group)} ${t('Download')}`} />
   ) : undefined;

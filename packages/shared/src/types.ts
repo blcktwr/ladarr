@@ -572,7 +572,7 @@ export type QueueEntryDetail = QueueEntryView & {
 };
 
 // The targets of a group that finished each stage. A target that is available finished every stage.
-export type QueueReached = { found: number; completed: number; validated: number; imported: number };
+export type QueueReached = { found: number; matched: number; completed: number; validated: number; imported: number };
 
 export type QueueGroupRow = {
   kind: 'group';

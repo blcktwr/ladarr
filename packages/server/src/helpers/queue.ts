@@ -37,11 +37,18 @@ const ITEM_JOB_TYPES = new Set(['queue.initial', 'queue.search', 'queue.grab', '
 export const isItemJob = (job: Job) => job.type.startsWith('item.') || ITEM_JOB_TYPES.has(job.type);
 
 // The targets of a group that finished each stage, for the line under its status.
-export function reachedOf(entries: QueueEntry[]) {
-  const reached = { found: 0, completed: 0, validated: 0, imported: 0 };
+export function reachedOf(entries: QueueEntry[], poller: Poller) {
+  const reached = { found: 0, matched: 0, completed: 0, validated: 0, imported: 0 };
   for (const entry of entries) {
     const phase = phaseOfEntry(entry);
     if (entry.release) reached.found++;
+    const hash = entry.transferHash;
+    const selection = hash ? itemFor(entry)?.selected[hash] : undefined;
+    if (entry.state.kind === 'available'
+      || (selection && selection.status !== 'verify' && selection.matches[entry.id])
+      || entry.manualMatch?.covers.some(({ season, number }) => season === entry.season && number === entry.number)
+      || (hash && poller.transfer(hash)?.entryFiles?.[entry.id])
+      || importOf(undefined, entry)) reached.matched++;
     if (phase === 'importing' || phase === 'available') {
       reached.completed++;
       reached.validated++;
@@ -695,7 +702,7 @@ export function groupAggregate(entries: QueueEntry[], item?: QueueTurn) {
     problem: reasonOfProblem(problem, status === 'stuck', description?.phase),
     actions,
     otherSeasons: entries.filter((entry) => needsOtherSeasons(entry.state) && problemOf(entry)?.code !== 'file_not_found').length,
-    torrents: torrentsOf(entries, item),
+    torrents: torrentsOf(entries, item).filter(({ status }) => status !== 'inspecting'),
     rejected: [...rejected.values()],
     missing: status === 'stuck' && problem?.code === 'no_results' ? entries.flatMap(({ id, season, number }) => {
       const rounds = item?.emptySearches[id] ?? 0;
@@ -707,7 +714,7 @@ export function groupAggregate(entries: QueueEntry[], item?: QueueTurn) {
   };
 }
 
-function groupRow(group: RowGroup): QueueGroupRow {
+function groupRow(group: RowGroup, poller: Poller): QueueGroupRow {
   const summary = groupAggregate(group.entries, findItem(group.title.key, group.season));
   return {
     ...summary,
@@ -719,7 +726,7 @@ function groupRow(group: RowGroup): QueueGroupRow {
     posterPath: group.title.meta.posterPath,
     season: group.season,
     numberingRevision: seasonRevision(group.title.numbering, group.season),
-    reached: reachedOf(group.entries),
+    reached: reachedOf(group.entries, poller),
     download: group.download < 0 ? null : group.download,
     matching: group.matching,
     priority: Number.isFinite(groupPriority(group)),
@@ -732,7 +739,7 @@ function groupRowOf(group: RowGroup, poller: Poller, importStatus: ImportStatus 
   }
   const first = group.entries[0]!;
   if (first.season === null) return { kind: 'entry', ...view(poller, importStatus, first, lane) };
-  return groupRow(group);
+  return groupRow(group, poller);
 }
 
 export function queuePage(poller: Poller, importStatus: ImportStatus | undefined, f: Filters, limit: number, offset: number): QueuePage {

@@ -319,7 +319,7 @@ describe('requests and summary', () => {
     pipe.finder.requestSearch(series.key);
     await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => stageOf(pipe!.queue.get(id)!) === 'downloading'));
     // The release of both episodes is in the client, so both are found, and no download finished.
-    expect((await api.get('/queue')).body.items[0].reached).toEqual({ found: 2, completed: 0, validated: 0, imported: 0 });
+    expect((await api.get('/queue')).body.items[0].reached).toEqual({ found: 2, matched: 2, completed: 0, validated: 0, imported: 0 });
     pipe.complete(pack, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two' });
     await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => stageOf(pipe!.queue.get(id)!) === 'available'));
     // The group leaves the list when every episode is in the library. Its children keep the stages.

@@ -183,7 +183,10 @@ it.each([
       pipe.finder.sweep();
     }
   }
-  expect(await group(series.key)).toMatchObject({ status: 'stuck', problem: { code: 'no_results' } });
+  expect(await group(series.key)).toMatchObject({
+    status: 'stuck', problem: { code: 'no_results' }, total: 2, reached: { matched: 1, completed: 0 },
+    torrents: [{ status: 'prepared', release: { title: partial.title } }],
+  });
   expect(turn.selected[hash]).toMatchObject({ status: 'prepared', matches: { [kept]: `${PACK}/${file(1)}` } });
   const trace = [seasonSearch, read(partial), episodeSearch(2), episodeSearch(2), episodeSearch(2)];
   expect(pipe.acquisition).toEqual(trace);
@@ -228,7 +231,11 @@ it('stops for manual mapping when the pack contains conflicting episode numberin
 
   await expect.poll(() => pipe.acquisition).toEqual([seasonSearch, read(conflicting)]);
   await expect.poll(async () => (await group(series.key)).status).toBe('stuck');
-  expect(await group(series.key)).toMatchObject({ tabs: ['stuck'], problem: { code: 'file_unmapped' } });
+  expect(await group(series.key)).toMatchObject({
+    tabs: ['stuck'], problem: { code: 'file_unmapped' }, reached: { matched: 0 },
+    torrents: [],
+    rejected: [{ release: { title: conflicting.title } }],
+  });
   expect(pipe.acquisition).toEqual([seasonSearch, read(conflicting)]);
 });
 

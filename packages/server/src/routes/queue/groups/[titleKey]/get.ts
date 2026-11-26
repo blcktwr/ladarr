@@ -110,7 +110,7 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
       cursor: db.data.queueRev,
       group: {
         ...summary,
-        reached: reachedOf(all),
+        reached: reachedOf(all, poller),
         download,
       },
       items: items.map((entry) => view(poller, importStatus, entry, lane)),
