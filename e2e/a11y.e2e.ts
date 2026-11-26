@@ -81,7 +81,6 @@ const PAGES: [string, Opener][] = [
       await expect(page.getByRole('table', { name: 'Episodes of season 1' })).toBeVisible();
     },
   ],
-  ['calendar', open('/calendar', (page) => expect(page.getByText('Nothing is scheduled.')).toBeVisible())],
   ['settings', open('/settings', (page) => expect(page.getByRole('button', { name: 'Rotate key' })).toBeEnabled())],
   [
     'settings media',
@@ -372,12 +371,13 @@ test.describe('signed in', () => {
   }
 
   test('the section links open their page with the keyboard', async ({ page }) => {
-    await open('/catalog', (p) => expect(p.getByRole('link', { name: 'Catalog', exact: true })).toBeVisible())(page);
-    await page.getByRole('link', { name: 'Catalog', exact: true }).focus();
+    await open('/discovery', (p) => expect(p.getByRole('link', { name: 'Discovery', exact: true })).toBeVisible())(page);
+    const sections = page.getByRole('navigation', { name: 'Sections' });
+    await sections.getByRole('link', { name: 'Discovery', exact: true }).focus();
     await page.keyboard.press('Tab');
-    await expect(page.getByRole('link', { name: 'Calendar', exact: true })).toBeFocused();
+    await expect(sections.getByRole('link', { name: 'Catalog', exact: true })).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page).toHaveURL(/\/calendar$/);
+    await expect(page).toHaveURL(/\/catalog$/);
   });
 
   test('reduced motion: no animation and no transition runs', async ({ page }) => {

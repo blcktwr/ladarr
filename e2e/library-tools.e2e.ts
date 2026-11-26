@@ -473,13 +473,13 @@ test('the General tab changes the language of the interface', async ({ page }) =
   await page.goto(`${URL_BASE}/settings`);
   await page.getByRole('combobox', { name: 'Language', exact: true }).click();
   await page.getByRole('option', { name: 'Español' }).click();
-  await expect(page.getByRole('link', { name: 'Calendario' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Catálogo', exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('link', { name: 'Calendario' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Catálogo', exact: true })).toBeVisible();
   expect((await stack.call('GET', '/settings')).body.settings.language).toBe('es');
   await page.getByRole('combobox', { name: 'Idioma', exact: true }).click();
   await page.getByRole('option', { name: 'English' }).click();
-  await expect(page.getByRole('link', { name: 'Calendar' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Catalog', exact: true })).toBeVisible();
   expect((await stack.call('GET', '/settings')).body.settings.language).toBe('en');
 });
 

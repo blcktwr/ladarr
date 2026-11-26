@@ -63,7 +63,7 @@ test('lists every alert on the Alerts page, including the ones closed as toasts'
   const sections = page.getByRole('navigation', { name: 'Sections' });
   const links = sections.getByRole('link');
   await expect(links).toHaveCount(4);
-  for (const [index, name] of ['Catalog', 'Calendar', 'Settings', 'Alerts'].entries()) {
+  for (const [index, name] of ['Discovery', 'Catalog', 'Settings', 'Alerts'].entries()) {
     await expect(links.nth(index)).toHaveAccessibleName(name);
   }
   await expect(links.nth(3)).toHaveText('');
