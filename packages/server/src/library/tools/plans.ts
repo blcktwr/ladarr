@@ -148,7 +148,7 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
 
       const root = await rootOf(title.rootId);
       if ('skip' in root) {
-        row.skip = root.skip;
+        if (records.length) row.skip = root.skip;
         continue;
       }
       for (const file of records) {
@@ -267,7 +267,7 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
       else {
         if (destructive(request)) {
           const root = await rootOf(title.rootId);
-          if ('skip' in root) {
+          if ('skip' in root && row.files > 0) {
             skip(row.key, root.skip);
             continue;
           }
@@ -276,15 +276,17 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
             const removed = new Set(entries.filter((entry) => entry.titleKey === row.key && (season === undefined || inSeason(entry, season, stored.points))));
             const files = Object.values(db.data.files);
             const ids = new Set(stored.ids.get(row.key));
-            const refs = torrentsForRemoval([...removed], entries.filter((entry) => !removed.has(entry)), files.filter((file) => ids.has(file.id)), files.filter((file) => !ids.has(file.id)));
+            const refs = torrentsForRemoval([...removed], entries.filter((entry) => !removed.has(entry)), files.filter((file) => ids.has(file.id)), files.filter((file) => !ids.has(file.id)), db.data.queueItems);
             if (!(await removeTorrents(refs))) {
               skip(row.key, 'torrent_not_deleted');
               await db.write();
               continue;
             }
           }
-          kept = (await retireTitle(stored, row.key, root, result)) > 0;
-          pruneRoot = root.real;
+          if ('real' in root) {
+            kept = (await retireTitle(stored, row.key, root, result)) > 0;
+            pruneRoot = root.real;
+          }
           // An import can start while the files are deleted. It needs its title to end, so the title stays.
           if (request.action === 'remove' && !kept && journalOf(row.key)) {
             kept = true;

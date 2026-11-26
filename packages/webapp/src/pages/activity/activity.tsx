@@ -1,12 +1,12 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
 import { RETRY_STATUSES } from '@ladarr/shared/queue';
-import type { LogEntry, LogsResponse, Numbering, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueResolution, QueueRow, QueueSummary, QueueTorrent } from '@ladarr/shared/types';
+import type { LogEntry, LogsResponse, Numbering, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueResolution, QueueRow, QueueSummary, QueueTorrentDetail } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, FileText, FileVideo, Info, LoaderCircle, Pause, Play, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
-import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, Field, List, Modal, Pagination, Pane, Panel, Progress, Row, Section, Spinner, SubMenu, Table, Text, Thumbnail, Tree, type TreeNode } from 'nebula';
+import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal, Pagination, Pane, Panel, Progress, Row, Section, Spinner, SubMenu, Table, Text, Thumbnail, Tree, type TreeNode } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { Confirm } from '../../components/confirm.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
@@ -157,7 +157,7 @@ function CommentText({ text }: { text: string }) {
 }
 
 // The files of the torrent as a tree: the folders keep their files, and each level shows its files before its folders.
-function torrentTree(data: QueueTorrent): TreeNode[] {
+function torrentTree(data: QueueTorrentDetail): TreeNode[] {
   const items: TreeNode[] = [];
   const folders = new Map<string, TreeNode>();
   for (const file of data.files) {
@@ -177,7 +177,7 @@ function torrentTree(data: QueueTorrent): TreeNode[] {
     children.push({
       key: file.path,
       name: parts[parts.length - 1]!,
-      size: formatBytes(file.sizeBytes),
+      size: file.sizeBytes === null ? undefined : formatBytes(file.sizeBytes),
       icon: /\.(mkv|mp4|m4v|avi|mov|wmv|ts|webm)$/i.test(file.path) ? <FileVideo /> : <FileText />,
     });
   }
@@ -191,7 +191,7 @@ function torrentTree(data: QueueTorrent): TreeNode[] {
 
 // The torrent metadata and file list.
 function TorrentInfo({ path }: { path: string }) {
-  const { data, error } = useQuery<QueueTorrent | { magnet: string } | null>({
+  const { data, error } = useQuery<QueueTorrentDetail | null>({
     queryKey: [path],
     refetchInterval: (query) => query.state.data === null && !query.state.error ? 2_000 : false,
   });
@@ -205,7 +205,6 @@ function TorrentInfo({ path }: { path: string }) {
       </div>
     );
   }
-  if ('magnet' in data) return <Field label={t('Magnet')} value={data.magnet} readOnly width="full" />;
   return (
     <>
       <Details
@@ -230,7 +229,7 @@ function TorrentInfo({ path }: { path: string }) {
 }
 
 // The release name, quality, and size. The button opens the torrent details.
-function ReleaseDetails({ entryId, release }: { entryId: string; release: NonNullable<QueueEntryView['release']> }) {
+function ReleaseDetails({ entryId, release, selection }: { entryId: string; release: NonNullable<QueueEntryView['release']>; selection?: string }) {
   return (
     <Details
       items={[
@@ -240,7 +239,7 @@ function ReleaseDetails({ entryId, release }: { entryId: string; release: NonNul
             <div className="flex items-center justify-between gap-3">
               <span className="min-w-0">{release.title}</span>
               <Modal trigger={<Button iconOnly variant="ghost" aria-label={t('Files in the torrent')}><Info /></Button>} title={t('Torrent')} width="lg">
-                <TorrentInfo path={`/queue/entries/${entryId}/torrent`} />
+                <TorrentInfo path={`/queue/entries/${entryId}/torrent${selection ? `?selection=${encodeURIComponent(selection)}` : ''}`} />
               </Modal>
             </div>
           ),
@@ -298,8 +297,10 @@ const sourceLabel = (source: string) => sourceLabels[source] ?? (source === 'unk
 const releaseQuality = (release: QueueRejectedRelease) => [release.resolution ? `${release.resolution}p` : null, sourceLabel(release.source)].filter(Boolean).join(' ');
 
 // The releases that a search found and rejected, with the button that takes one by hand.
-function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; release: QueueRejectedRelease }[]; onDone: () => void }) {
-  const [chosen, setChosen] = useState<{ entry: QueueEntryView; release: QueueRejectedRelease } | null>(null);
+type Rejected = QueueGroupRow['rejected'][number];
+
+function NoMatchReleases({ items, onDone }: { items: Rejected[]; onDone: () => void }) {
+  const [chosen, setChosen] = useState<Rejected | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -313,7 +314,7 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
     setBusy(true);
     setError('');
     try {
-      await api(`/queue/entries/${chosen.entry.id}/releases/grab`, { method: 'POST', body: { indexerId: chosen.release.indexerId, guid: chosen.release.guid } });
+      await api(`/queue/entries/${chosen.entryId}/releases/grab`, { method: 'POST', body: { indexerId: chosen.release.indexerId, guid: chosen.release.guid } });
       onDone();
       close();
     } catch (err) {
@@ -352,9 +353,9 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
                     title={t('Torrent')}
                     width="lg"
                   >
-                    <TorrentInfo path={`/queue/entries/${item.entry.id}/releases/torrent?indexerId=${item.release.indexerId}&guid=${encodeURIComponent(item.release.guid)}`} />
+                    <TorrentInfo path={`/queue/entries/${item.entryId}/releases/torrent?indexerId=${item.release.indexerId}&guid=${encodeURIComponent(item.release.guid)}`} />
                   </Modal>
-                  <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
+                  <Button iconOnly disabled={item.release.selectable === false} aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
                     <Check />
                   </Button>
                 </div>,
@@ -386,7 +387,7 @@ function NoMatchReleases({ items, onDone }: { items: { entry: QueueEntryView; re
 }
 
 // The rejected releases of a row, in their own container under its details.
-function RejectedPane({ items, onDone }: { items: { entry: QueueEntryView; release: QueueRejectedRelease }[]; onDone: () => void }) {
+function RejectedPane({ items, onDone }: { items: Rejected[]; onDone: () => void }) {
   if (items.length === 0) return null;
   return (
     <Pane className="w-full">
@@ -395,26 +396,16 @@ function RejectedPane({ items, onDone }: { items: { entry: QueueEntryView; relea
   );
 }
 
-// The rejected releases of a movie. Only a target that found no match keeps them.
+// The rejected releases of a movie that has no permitted selection.
 function MovieRejected({ entry, refresh }: { entry: QueueEntryView; refresh: () => void }) {
-  const releases = entry.status === 'no_match' ? (entry.search?.rejected ?? []) : [];
-  return <RejectedPane items={releases.map((release) => ({ entry, release }))} onDone={refresh} />;
+  const releases = entry.status === 'stuck' || entry.status === 'no_match' ? (entry.search?.rejected ?? []) : [];
+  return <RejectedPane items={releases.map((release) => ({ entryId: entry.id, release }))} onDone={refresh} />;
 }
 
-// The rejected releases of a series, one row for each release. Only a series that found no match keeps them.
+// The server sends the rejected releases of the season in preference order.
 function GroupRejected({ group, filters, refresh }: { group: QueueGroupRow; filters: Filters; refresh: () => void }) {
   const { data } = useGroupEntries(group, filters);
-  const status = data?.group?.status ?? group.status;
-  if (status !== 'no_match') return null;
-  const rejected = new Map<string, { entry: QueueEntryView; release: QueueRejectedRelease }>();
-  for (const entry of data?.items ?? []) {
-    if (entry.status !== 'no_match') continue;
-    for (const release of entry.search?.rejected ?? []) {
-      const key = `${release.indexerId}:${release.guid}`;
-      if (!rejected.has(key)) rejected.set(key, { entry, release });
-    }
-  }
-  return <RejectedPane items={[...rejected.values()]} onDone={refresh} />;
+  return <RejectedPane items={data?.group.rejected ?? group.rejected} onDone={refresh} />;
 }
 
 // The progress of a download: the part that is done.
@@ -442,7 +433,11 @@ function downloadPercent(entry: QueueEntryView) {
 // movie, where the heading of the panel says the name. An episode of a series shows the percent of its download in its name.
 function EntryDetails({ entry, label = true, inline = false, actions, fix }: { entry: QueueEntryView; label?: boolean; inline?: boolean; actions?: ReactNode; fix?: ReactNode }) {
   const percent = inline ? downloadPercent(entry) : null;
-  const data = !inline && entry.release ? <ReleaseDetails entryId={entry.id} release={entry.release} /> : inline && entry.file ? <FileDetails file={entry.file} /> : null;
+  const data = inline
+    ? entry.file ? <FileDetails file={entry.file} /> : null
+    : entry.torrents?.length
+      ? entry.torrents.map((torrent) => <ReleaseDetails key={torrent.key} entryId={torrent.entryId} release={torrent.release} selection={torrent.key} />)
+      : entry.release ? <ReleaseDetails entryId={entry.id} release={entry.release} /> : null;
   const name = label && <Text>{percent === null ? entry.label : <>{entry.label} <strong>({percent}%)</strong></>}</Text>;
   const status = entry.status;
   // The reason shows under the status of a movie. An episode keeps the reason in its status hint.
@@ -572,7 +567,7 @@ function GroupLine({ group }: { group: QueueGroupRow }) {
 function groupMenu(group: QueueGroupRow, openLogs: (group: QueueGroupRow) => void, run: Run) {
   const items = [{ label: t('Logs'), onClick: () => openLogs(group) }];
   // The episodes that wait for their next search, or that a problem stops, start again together from the row.
-  if (RETRY_STATUSES.some((status) => (group.counts[status] ?? 0) > 0)) items.unshift({ label: t('Try again'), onClick: () => run('retry', [], { titleKey: group.titleKey, season: group.season }) });
+  if (group.status && RETRY_STATUSES.includes(group.status)) items.unshift({ label: t('Try again'), onClick: () => run('retry', [], { titleKey: group.titleKey, season: group.season }) });
   return items;
 }
 
@@ -628,7 +623,7 @@ function SeasonEpisodes({ season, entries }: { season: number; entries: QueueEnt
 // The seasons of a series, with the part of each one that is in the library. A click on a row or on its button opens the
 // episodes of the season under its row, and a second click closes them.
 function SeasonTable({ titleKey, entries, opened, onSeason, detail }: { titleKey: string; entries: QueueEntryView[]; opened: number | null; onSeason: (season: number) => void; detail: (season: number) => ReactNode }) {
-  const seasons = [...new Set(entries.flatMap((entry) => entry.releaseEpisode?.season ?? []))].sort((a, b) => a - b);
+  const seasons = [...new Set(entries.flatMap((entry) => entry.season ?? []))].sort((a, b) => a - b);
   if (seasons.length === 0) return <EmptyState>{t('No target fits these filters.')}</EmptyState>;
   return (
     <Table
@@ -636,7 +631,7 @@ function SeasonTable({ titleKey, entries, opened, onSeason, detail }: { titleKey
       columns={seasonColumns.map((column) => ({ ...column, label: t(column.label) }))}
       rows={seasons.map((season) => {
         const name = seasonName(season);
-        const episodes = entries.filter((entry) => entry.releaseEpisode?.season === season).length;
+        const episodes = entries.filter((entry) => entry.season === season).length;
         return {
           key: `season:${titleKey}|${season}`,
           onClick: () => onSeason(season),
@@ -669,27 +664,20 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
     return <Table aria-label={t('Seasons')} loading columns={seasonColumns.map((column) => ({ ...column, label: t(column.label) }))} />;
   }
   // The counts, the status, and the problem cover the whole series, not only the episodes that the filter shows.
-  const summary = data?.group;
-  const status = summary?.status ?? group.status;
-  const completed = summary?.reached.completed ?? group.reached.completed;
-  const total = summary?.total ?? group.total;
-  const percent = Math.round((summary?.download ?? group.download ?? 0) * 100);
+  const summary = data?.group ?? group;
+  const { status, total, torrents, missing, problem, actions } = summary;
+  const completed = summary.reached.completed;
+  const percent = Math.round((summary.download ?? 0) * 100);
   const toggle = (number: number) => setSeason((current) => (current === number ? null : number));
-  // The releases of the series. A pack is one release. Several episodes can have their own.
-  const releases = new Map<string, NonNullable<QueueEntryView['release']>>();
-  for (const entry of entries) if (entry.release) releases.set(`${entry.release.title}|${entry.release.sizeBytes}`, entry.release);
-  const unique = [...releases.values()];
-  // The target that carries the release of the series. The .torrent of the release is the same for every episode of a pack.
-  const releaseEntry = entries.find((entry) => entry.release);
-  const qualities = [...new Set(unique.flatMap((release) => (release.quality ? [release.quality] : [])))];
   // The checklist belongs to the importing indicator. Every target of a pack carries the same list, so the first
   // importing episode shows it.
   const importing = status === 'importing' ? entries.find(showsChecks) : undefined;
-  // The episodes that a problem stopped. One of them shows its own fix on the row of the season.
-  const stopped = entries.filter((entry) => entry.status === 'stuck');
+  const stopped = entries.filter((entry) => actions.some((action) => action.ids.includes(entry.id)));
   const message =
-    status === 'downloading' ? `${percent}%`
-      : status === 'no_match' ? t('The indexers have releases, but none fits your selected qualities.')
+    status === 'fetching' ? null
+      : status === 'downloading' ? `${percent}%`
+        : status === 'stuck' ? missing.length || !problem ? null : reasonText(problem)
+          : status === 'no_match' ? t('None of the releases passed the checks.')
         : t('{count} / {total} episodes', { count: completed, total });
   const bar = status === 'downloading' ? (
     <Progress value={percent} label={`${groupName(group)} ${t('Download')}`} />
@@ -705,30 +693,19 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
             message={message}
             divider={!importing}
           >
-            {stopped.length > 0 && <GroupFix actions={summary?.actions ?? group.actions ?? []} stopped={stopped} run={run} />}
+            {missing.map(({ season, number, rounds }) => (
+              <Text key={`${season}:${number}`} variant="small">{t('Episode {number}: No release in {rounds} searches.', { number, rounds })}</Text>
+            ))}
+            {stopped.length > 0 && <GroupFix actions={actions} stopped={stopped} run={run} />}
           </DetailStatus>
         ) : (
           <Text>—</Text>
         )}
         {importing && <ImportChecks entry={importing} />}
-        {importing && unique.length > 0 && <Divider />}
-        {unique.length > 0 && (
-          <div>
-            {unique.length === 1 && releaseEntry ? (
-              <ReleaseDetails entryId={releaseEntry.id} release={unique[0]!} />
-            ) : (
-              <Details
-                items={[
-                  { label: t('Releases'), value: unique.length },
-                  ...(qualities.length ? [{ label: t('Quality'), value: qualities.join(', ') }] : []),
-                  { label: t('Size'), value: formatBytes(unique.reduce((sum, release) => sum + release.sizeBytes, 0)) },
-                ]}
-              />
-            )}
-          </div>
-        )}
+        {importing && torrents.length > 0 && <Divider />}
+        {torrents.map((torrent) => <ReleaseDetails key={torrent.key} entryId={torrent.entryId} release={torrent.release} selection={torrent.key} />)}
       </div>
-      {(unique.length > 0 || importing) && (
+      {(torrents.length > 0 || importing) && (
         <div className="mt-6">
           <Divider />
         </div>
@@ -738,7 +715,7 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
         entries={entries}
         opened={season}
         onSeason={toggle}
-        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.releaseEpisode?.season === number)} />}
+        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} />}
       />
     </div>
   );
@@ -771,7 +748,7 @@ function Inspector({ row, filters, run, openLogs, openGroupLogs, onDelete, onBac
     row.kind === 'entry'
       ? { request: { action: 'remove', keys: [row.titleKey] }, subject: row.title }
       : row.kind === 'group' && row.season !== null
-        ? { request: { action: 'remove', keys: [row.titleKey], season: row.season, numberingRevision: row.numberingRevision }, subject: seasonName(row.season) }
+        ? { request: { action: 'remove', keys: [row.titleKey], season: row.season }, subject: seasonName(row.season) }
         : null;
   const items: { label: string; onClick: () => void; danger?: boolean }[] =
     row.kind === 'pending'
@@ -987,7 +964,7 @@ function QueueView() {
     const updated = new Map(event.entries.map((entry) => [entry.id, entry]));
     const patch = (item: QueueEntryView): QueueEntryView => {
       const change = updated.get(item.id);
-      return change ? { ...item, status: change.status, phase: change.phase, checks: change.checks } : item;
+      return change ? { ...item, checks: change.checks } : item;
     };
     void queryClient.setQueriesData<QueuePage>({ predicate: (query) => String(query.queryKey[0]).startsWith('/queue?') }, (page) =>
       page ? { ...page, items: page.items.map((row) => (row.kind === 'entry' ? { ...row, ...patch(row) } : row)) } : page,

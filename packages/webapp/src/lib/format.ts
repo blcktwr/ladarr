@@ -206,7 +206,7 @@ const statusHelp: Record<string, string> = {
   not_found: 'The indexers returned no release. The search runs again later.',
   no_match: 'The indexers returned releases, but no release fits the preset. The search runs again later.',
   stuck: 'A problem stops this target. Open Activity to see the reason.',
-  fetching: 'ladarr gets the torrent from the indexer and checks it. Nothing to do.',
+  fetching: 'Ladarr reads the torrent files and prepares the selection. The download does not start until the client accepts the torrent.',
   waiting_slot: 'The download waits for a free slot in the download client. Nothing to do.',
   sending: 'The request goes to the download client. Nothing to do.',
   downloading: 'The download client gets the files. Nothing to do.',

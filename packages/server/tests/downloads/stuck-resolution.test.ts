@@ -14,9 +14,13 @@ import { importLocalHandler } from '../../src/jobs/import-local.ts';
 import { libraryVerifyHandler } from '../../src/jobs/library-verify.ts';
 import { queueGrabHandler } from '../../src/jobs/queue-grab.ts';
 import { queueRetryHandler } from '../../src/jobs/queue-retry.ts';
+import { queueSearchHandler } from '../../src/jobs/queue-search.ts';
 import { queueSendHandler } from '../../src/jobs/queue-send.ts';
-import type { GrabberDeps, Queue, QueueEntry } from '../../src/types.ts';
-import { episode, movie, title } from '../helpers/test-fixtures.ts';
+import { createFinder } from '../../src/library/grab/finder.ts';
+import { REJECTION_TEXT } from '../../src/library/grab/decide.ts';
+import { IndexerError } from '../../src/library/grab/torznab.ts';
+import type { GrabberDeps, Queue, QueueEntry, QueueTorrent } from '../../src/types.ts';
+import { episode, movie, release as rawRelease, title } from '../helpers/test-fixtures.ts';
 import { hashOf, makeTorrent, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
@@ -30,6 +34,8 @@ afterEach(async () => {
 
 const signal = () => ({ signal: new AbortController().signal });
 const work = () => Object.values(pipe!.db.data.jobs).filter((job) => job.type.startsWith('queue.') || job.type === 'import.run');
+const downloadName = (mediaType: 'movie' | 'tv') => mediaType === 'movie' ? 'Movie.Name.2019.1080p.BluRay-GRP' : 'Show.Name.S01.1080p.WEB-DL-GRP';
+const turnOf = (entry: QueueEntry) => pipe!.queue.itemFor(entry)!;
 
 async function setup(mediaType: 'movie' | 'tv', at: WorkPhase = 'importing', code = 'file_not_found', count = 1) {
   pipe = await startPipeline();
@@ -42,6 +48,7 @@ async function setup(mediaType: 'movie' | 'tv', at: WorkPhase = 'importing', cod
   const entries = Array.from({ length: count }, (_, index) => {
     const entry = pipe!.queue.ensure(item.key, mediaType === 'movie' ? null : 1, mediaType === 'movie' ? null : index + 1);
     pipe!.queue.request(entry, 'attached download');
+    if (at === 'downloading') Object.assign(entry, { transferHash: hashOf(downloadName(mediaType)), clientId: 'client-1' });
     pipe!.queue.enter(entry, at, 'download complete');
     pipe!.queue.block(entry, { code, detail: 'A human decision is necessary.' }, 'import blocked');
     entry.stateSince = Date.now() - 31 * 60_000;
@@ -51,7 +58,7 @@ async function setup(mediaType: 'movie' | 'tv', at: WorkPhase = 'importing', cod
 }
 
 function addDownload(entries: QueueEntry[], mediaType: 'movie' | 'tv', complete = true) {
-  const name = mediaType === 'movie' ? 'Movie.Name.2019.1080p.BluRay-GRP' : 'Show.Name.S01.1080p.WEB-DL-GRP';
+  const name = downloadName(mediaType);
   const hash = hashOf(name);
   pipe!.qbit.torrents.set(hash, {
     hash, name, size: 1_000_000, progress: complete ? 1 : 0.5,
@@ -84,7 +91,8 @@ function selectRelease(entry: QueueEntry) {
     infoHash: null, link: `http://127.0.0.1:${pipe!.tracker.port}/1/download?file=${encodeURIComponent(name)}`,
     magnet: null, kind: 'single', seeders: 20, manual: true,
   };
-  pipe!.tracker.state.items = [{ title: name, size: entry.release.sizeBytes }];
+  const files = [entry.season === null ? `${name}.mkv` : 'Show.Name.S01E01.mkv'];
+  pipe!.tracker.state.items = [{ title: name, size: entry.release.sizeBytes, files }];
   return entry.release;
 }
 
@@ -93,6 +101,52 @@ function grabDeps(): GrabberDeps {
     queue: pipe!.queue, finder: pipe!.finder, indexers: pipe!.indexers, clients: createClients(),
     save: async () => {}, enqueue, reconcileMs: 0,
   };
+}
+
+function prepared(entry: QueueEntry, name = entry.release!.title) {
+  const path = entry.season === null ? `${name}.mkv` : 'Show.Name.S01E01.mkv';
+  const files = [path];
+  const hash = hashOf(name, files);
+  const item = turnOf(entry);
+  const source = { torrent: true } as const;
+  const torrent: QueueTorrent = {
+    hash, release: { ...entry.release!, guid: name, title: name, infoHash: hash }, source,
+    numberingRevision: entry.season === null ? null : 0, matches: { [entry.id]: `${name}/${path}` }, clientId: null, status: 'prepared',
+  };
+  pipe!.db.data.torrents[hash] = makeTorrent(name, files).toString('base64');
+  pipe!.queue.updateItem(item, { selected: { [hash]: torrent } });
+  return torrent;
+}
+
+function beginFetch(entry: QueueEntry) {
+  pipe!.queue.resolve(entry, 'fetching', 'fixture: fetch starts');
+  const item = turnOf(entry);
+  if (item.state.kind === 'queued') pipe!.queue.transitionItem(item, { kind: 'searching' });
+  pipe!.queue.transitionItem(item, { kind: 'fetching' });
+  expect(item.state).toEqual({ kind: 'fetching' });
+}
+
+function fetchJob(entry: QueueEntry) {
+  const ref = entry.release!;
+  return pipe!.finder.enqueueSearch({
+    titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id], manual: true, forced: true,
+    supplied: [{ ...ref, publishedAt: null, peers: null, categories: [] }],
+  });
+}
+
+function sendJob(entry: QueueEntry, torrent: QueueTorrent) {
+  return enqueue({ type: 'queue.send', payload: { itemId: turnOf(entry).id, hash: torrent.hash, entryIds: [entry.id] } });
+}
+
+async function runFetchRetry(entry: QueueEntry) {
+  createRetry({ queue: pipe!.queue, enqueue }).retry(entry);
+  expect(turnOf(entry).state).toEqual({ kind: 'fetching' });
+  const bridge = work().find((job) => job.type === 'queue.grab');
+  expect(bridge).toBeDefined();
+  await queueGrabHandler(grabDeps()).run(bridge!, signal());
+  const search = work().find((job) => job.type === 'queue.search');
+  expect(search).toBeDefined();
+  await queueSearchHandler(pipe!.finder).run(search!, signal());
 }
 
 const operations: [string, (queue: Queue, entry: QueueEntry) => unknown][] = [
@@ -351,9 +405,9 @@ describe('selected target authorization', () => {
 
     expect((await api.post('/queue/actions', { action: 'retry', ids: [selected.id] })).status).toBe(200);
     pipe!.db.data.queuePaused = false;
-    await until(() => stageOf(selected) === 'available');
+    await vi.waitFor(() => expect(selected.state).toEqual({ kind: 'available' }));
 
-    expect(sibling).toEqual(before);
+    expect(sibling).toEqual({ ...before, revision: sibling.revision });
     expect(Object.values(pipe!.db.data.files)).toHaveLength(1);
     expect(pipe!.tracker.state.searches).toEqual([]);
     expect(pipe!.tracker.state.downloads).toEqual([]);
@@ -392,25 +446,29 @@ describe('selected target authorization', () => {
 describe.each(['movie', 'tv'] as const)('technical retry contract: %s', (mediaType) => {
   it.each([
     { attempts: 1, kind: 'outage', blocked: false },
-    { attempts: 7, kind: 'outage', blocked: false },
-    { attempts: 8, kind: 'outage', blocked: true },
+    { attempts: 5, kind: 'outage', blocked: false },
+    { attempts: 6, kind: 'outage', blocked: true },
     { attempts: 1, kind: 'invalid_input', blocked: true },
   ] as const)('keeps fetch active until its error is final: $kind, attempt $attempts', async ({ attempts, kind, blocked }) => {
     const { entry } = await setup(mediaType, 'fetching', 'indexer_unavailable');
     const release = structuredClone(selectRelease(entry));
-    pipe!.queue.resolve(entry, 'fetching', 'fixture: fetch starts');
+    beginFetch(entry);
     const history = entry.history.length;
-    const error = new JobError(kind, 'The indexer did not return the torrent.');
+    const message = 'The indexer did not return the torrent.';
+    const error = kind === 'outage' ? new IndexerError('unavailable', message) : new JobError(kind, message);
     vi.spyOn(pipe!.indexers, 'download').mockRejectedValueOnce(error);
-    const handler = queueGrabHandler(grabDeps());
-    const job = enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] } });
-    job.attempts = attempts;
+    const job = fetchJob(entry);
+    job.attempts = attempts - 1;
 
-    await expect(handler.run(job, signal())).rejects.toBe(error);
+    pipe!.db.data.queuePaused = false;
+    await vi.waitFor(() => expect(pipe!.db.data.jobs[job.id]).toMatchObject({
+      state: blocked ? 'failed' : 'waiting', attempts, lastError: { kind, message },
+    }));
+    await pipe!.worker.drain();
 
-    expect(entry.state).toMatchObject(blocked ? { kind: 'blocked', at: 'fetching' } : { kind: 'fetching' });
-    expect(entry.history.slice(history).some((event) => event.state.kind === 'blocked')).toBe(blocked);
-    expect(entry.release).toEqual(release);
+    expect.soft(turnOf(entry).state).toMatchObject(blocked ? { kind: 'blocked', at: 'fetching' } : { kind: 'fetching' });
+    expect.soft(entry.history.slice(history).some((event) => event.state.kind === 'blocked')).toBe(blocked);
+    expect(entry.release).toMatchObject({ guid: release.guid, title: release.title, link: release.link });
     expect(entry.attempt).toBe(1);
     expect(pipe!.tracker.state.searches).toEqual([]);
     expect(pipe!.qbit.torrents.size).toBe(0);
@@ -422,56 +480,59 @@ describe.each(['movie', 'tv'] as const)('technical retry contract: %s', (mediaTy
     { attempts: 8, kind: 'outage', blocked: true },
     { attempts: 1, kind: 'invalid_input', blocked: true },
   ] as const)('keeps send active until its error is final: $kind, attempt $attempts', async ({ attempts, kind, blocked }) => {
-    const { entry } = await setup(mediaType, 'sending', 'client_unreachable');
-    const release = selectRelease(entry);
-    const hash = hashOf(release.title);
-    release.infoHash = hash;
-    entry.transferHash = hash;
-    entry.clientId = 'client-1';
-    pipe!.db.data.torrents[hash] = makeTorrent(release.title).toString('base64');
-    entry.source = { torrent: true };
-    const before = structuredClone({ release: entry.release, source: entry.source });
-    pipe!.queue.resolve(entry, 'sending', 'fixture: send starts');
+    const { entry } = await setup(mediaType, 'fetching', 'client_unreachable');
+    selectRelease(entry);
+    beginFetch(entry);
+    const torrent = prepared(entry);
+    const before = structuredClone({ release: torrent.release, source: torrent.source, matches: torrent.matches });
+    await pipe!.worker.pause();
+    pipe!.db.data.queuePaused = false;
     const history = entry.history.length;
     const error = new JobError(kind, 'The client did not accept the torrent.');
     const deps = grabDeps();
-    vi.spyOn(deps.clients.get(entry.clientId)!.api, 'add').mockRejectedValueOnce(error);
+    const client = deps.clients.get('client-1')!.api;
+    const add = vi.spyOn(client, 'add').mockResolvedValue(undefined);
+    if (kind !== 'uncertain') vi.spyOn(client, 'find').mockRejectedValueOnce(error);
     const handler = queueSendHandler(deps);
-    const job = enqueue({ type: 'queue.send', payload: { entryIds: [entry.id] } });
+    const job = sendJob(entry, torrent);
     job.attempts = attempts;
 
-    await expect(handler.run(job, signal())).rejects.toBe(error);
+    await expect(handler.run(job, signal())).rejects.toMatchObject({ kind });
 
-    expect(entry.state).toMatchObject(blocked ? { kind: 'blocked', at: 'sending' } : { kind: 'sending' });
+    expect(entry.state).toMatchObject(blocked ? { kind: 'blocked', at: 'fetching' } : { kind: 'fetching' });
+    expect(turnOf(entry).state).toMatchObject(blocked ? { kind: 'blocked', at: 'fetching' } : { kind: 'fetching' });
     expect(entry.history.slice(history).some((event) => event.state.kind === 'blocked')).toBe(blocked);
-    expect({ release: entry.release, source: entry.source }).toEqual(before);
+    expect(turnOf(entry).selected[torrent.hash]).toMatchObject(before);
+    expect(add).toHaveBeenCalledTimes(kind === 'uncertain' ? 1 : 0);
     expect(entry.attempt).toBe(1);
     expect(pipe!.tracker.state.searches).toEqual([]);
     expect(pipe!.tracker.state.downloads).toEqual([]);
   });
 
-  it.each(['queue.grab', 'queue.send', 'queue.retry'] as const)('ignores a stale %s job for a blocked target', async (type) => {
-    const { entry } = await setup(mediaType, type === 'queue.grab' ? 'fetching' : 'sending', 'grab_failed');
+  it.each(['queue.search', 'queue.grab', 'queue.send', 'queue.retry'] as const)('ignores a stale %s job for a blocked target', async (type) => {
+    const { entry } = await setup(mediaType, 'fetching', 'grab_failed');
     selectRelease(entry);
-    entry.clientId = 'client-1';
-    entry.transferHash = hashOf(entry.release!.title);
-    entry.release!.infoHash = entry.transferHash;
-    pipe!.db.data.torrents[entry.transferHash] = makeTorrent(entry.release!.title).toString('base64');
-    entry.source = { torrent: true };
+    const item = turnOf(entry);
+    pipe!.queue.transitionItem(item, { kind: 'fetching' });
+    pipe!.queue.transitionItem(item, { kind: 'blocked', at: 'fetching', problem: { code: 'grab_failed' } });
+    const torrent = prepared(entry);
     const before = structuredClone(entry);
+    const itemBefore = structuredClone(item);
     const deps = grabDeps();
     const download = vi.spyOn(deps.indexers, 'download');
     const find = vi.spyOn(deps.clients, 'find');
-    const add = vi.spyOn(deps.clients.get(entry.clientId)!.api, 'add');
-    const handler = type === 'queue.grab' ? queueGrabHandler(deps)
+    const add = vi.spyOn(deps.clients.get('client-1')!.api, 'add');
+    const handler = type === 'queue.search' ? queueSearchHandler(pipe!.finder)
+      : type === 'queue.grab' ? queueGrabHandler(deps)
       : type === 'queue.send' ? queueSendHandler(deps)
       : queueRetryHandler({ ...deps, events: pipe!.events });
-    const job = enqueue({ type, payload: { entryIds: [entry.id] } });
+    const job = type === 'queue.search' ? fetchJob(entry) : type === 'queue.send' ? sendJob(entry, torrent) : enqueue({ type, payload: { entryIds: [entry.id] } });
     const jobs = structuredClone(pipe!.db.data.jobs);
 
     await handler.run(job, signal());
 
     expect(entry).toEqual(before);
+    expect(item).toEqual(itemBefore);
     expect(pipe!.db.data.jobs).toEqual(jobs);
     expect(download).not.toHaveBeenCalled();
     expect(find).not.toHaveBeenCalled();
@@ -479,79 +540,79 @@ describe.each(['movie', 'tv'] as const)('technical retry contract: %s', (mediaTy
     expect(pipe!.tracker.state.searches).toEqual([]);
   });
 
-  it.each(['fetch download', 'fetch client', 'send client'] as const)('ignores the old %s result after an explicit selection at the same stage', async (boundary) => {
-    const stage = boundary === 'send client' ? 'sending' : 'fetching';
-    const type = stage === 'sending' ? 'queue.send' : 'queue.grab';
-    const { entry } = await setup(mediaType, stage, 'grab_failed');
-    selectRelease(entry);
+  it.each(['torrent metadata', 'magnet metadata', 'send reconciliation'] as const)('ignores the old %s result after an explicit selection at the same stage', async (boundary) => {
+    const { entry } = await setup(mediaType, 'fetching', 'grab_failed');
+    const ref = selectRelease(entry);
+    beginFetch(entry);
     const deps = grabDeps();
+    const finder = createFinder(deps);
+    const client = deps.clients.get('client-1')!.api;
     let release!: () => void;
-    let arrived!: () => void;
+    let started = false;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    const started = new Promise<void>((resolve) => { arrived = resolve; });
-    if (boundary === 'fetch download') {
-      const torrent = makeTorrent(entry.release!.title);
-      vi.spyOn(deps.indexers, 'download').mockImplementationOnce(async () => {
-        arrived();
-        await gate;
-        return { torrent };
-      });
-    } else {
-      const { name, hash } = addDownload([entry], mediaType);
-      Object.assign(entry.release!, { title: name, guid: name, infoHash: hash, kind: mediaType === 'tv' ? 'pack' : 'single' });
-      const found = await deps.clients.find(deps.clients.get(entry.clientId)!, hash);
+    const hold = async <T,>(result: T) => {
+      started = true;
+      await gate;
+      return result;
+    };
+    let job;
+    if (boundary === 'send reconciliation') {
+      const torrent = prepared(entry);
+      Object.assign(torrent, { status: 'uncertain', clientId: 'client-1', addTag: 'original' });
+      const { hash } = addDownload([], mediaType, false);
+      pipe!.qbit.torrents.set(torrent.hash, { ...pipe!.qbit.torrents.get(hash)!, hash: torrent.hash, tags: 'original' });
+      const found = await client.find(torrent.hash);
       expect(found).not.toBeNull();
-      vi.spyOn(deps.clients, 'find').mockImplementationOnce(async () => {
-        arrived();
-        await gate;
-        return found;
-      });
+      vi.spyOn(client, 'find').mockImplementationOnce(() => hold(found));
+      await pipe!.worker.pause();
+      pipe!.db.data.queuePaused = false;
+      job = sendJob(entry, torrent);
+    } else {
+      if (boundary === 'torrent metadata') {
+        vi.spyOn(deps.indexers, 'download').mockImplementationOnce(() => hold({ torrent: makeTorrent(ref.title) }));
+      } else {
+        vi.spyOn(deps.indexers, 'download').mockResolvedValueOnce({ magnet: `magnet:?xt=urn:btih:${hashOf(ref.title)}` });
+        vi.spyOn(client, 'metadataFiles').mockImplementationOnce(() => hold([`${ref.title}/Show.Name.S01E01.mkv`]));
+      }
+      job = fetchJob(entry);
     }
-    pipe!.queue.resolve(entry, stage, 'fixture: original acquisition starts');
-    const handler = type === 'queue.send' ? queueSendHandler(deps) : queueGrabHandler(deps);
-    const job = enqueue({ type, payload: { entryIds: [entry.id] }, dedupeKey: `original:${entry.id}` });
-    const running = handler.run(job, signal());
-    await started;
-
-    pipe!.queue.block(entry, { code: 'file_unmapped' }, 'the source needs a human decision');
-    pipe!.queue.retryAttempt(entry, 'release chosen by the user');
-    const name = mediaType === 'movie' ? 'Movie.Name.2019.1080p.WEB-DL-NEW' : 'Show.Name.S01E01.1080p.WEB-DL-NEW';
-    const hash = hashOf(name);
-    Object.assign(entry, {
-      release: { ...entry.release!, title: name, guid: name, infoHash: hash, kind: 'single' },
-      transferHash: hash,
-      source: { torrent: true },
-      numbering: { revision: 2, ranges: [{ season: 1, from: 1, to: 1, releaseSeason: 1, releaseFrom: 1 }] },
-    });
-    pipe!.db.data.torrents[hash] = makeTorrent(name).toString('base64');
-    pipe!.queue.resolve(entry, stage, 'release chosen by the user');
-    delete pipe!.db.data.jobs[job.id];
-    const current = enqueue({ type, payload: { entryIds: [entry.id] }, dedupeKey: `selected:${entry.id}` });
-    const before = structuredClone({ entry, jobs: pipe!.db.data.jobs });
-
-    release();
-    await Promise.allSettled([running]);
-
-    expect(entry).toEqual(before.entry);
-    expect(pipe!.db.data.jobs).toEqual(before.jobs);
-    expect(work().map((job) => job.id)).toEqual([current.id]);
+    const handler = boundary === 'send reconciliation' ? queueSendHandler(deps) : queueSearchHandler(finder);
+    job.state = 'running';
+    const running = Promise.resolve(handler.run(job, signal())).then(() => ({ ok: true }), (error: unknown) => ({ error }));
+    try {
+      await vi.waitFor(() => expect(started).toBe(true));
+      pipe!.queue.block(entry, { code: 'file_unmapped' }, 'the source needs a human decision');
+      const name = mediaType === 'movie' ? 'Movie.Name.2019.1080p.WEB-DL-NEW' : 'Show.Name.S01E01.1080p.WEB-DL-NEW';
+      delete pipe!.db.data.jobs[job.id];
+      const replacement = rawRelease(name);
+      const want = finder.wantForRelease(pipe!.db.data.titles[entry.titleKey]!, replacement, entry.season ?? undefined, entry.number ?? undefined)!;
+      expect(finder.grabManual([entry], replacement, want)).toEqual({ reserved: true });
+      if (boundary === 'send reconciliation') {
+        const next = prepared(entry, name);
+        sendJob(entry, next);
+      }
+      const before = structuredClone({ entry, item: turnOf(entry), jobs: pipe!.db.data.jobs });
+      release();
+      expect(await running).toEqual({ ok: true });
+      expect.soft({ entry, item: turnOf(entry), jobs: pipe!.db.data.jobs }).toEqual(before);
+    } finally {
+      release();
+      await running;
+    }
     expect(pipe!.qbit.calls.filter((call) => call.path === 'torrents/add')).toEqual([]);
   });
 
   it('retries fetch at fetching with the selected release', async () => {
     const { entry } = await setup(mediaType, 'fetching', 'indexer_unavailable');
     const release = structuredClone(selectRelease(entry));
-    const { retry } = createRetry({ queue: pipe!.queue, enqueue });
-
-    retry(entry);
-
-    expect(entry.state).toEqual({ kind: 'fetching' });
-    expect(entry.release).toEqual(release);
-    expect(work()).toHaveLength(1);
-    expect(work()[0]).toMatchObject({ type: 'queue.grab', payload: { entryIds: [entry.id] } });
-    await queueGrabHandler(grabDeps()).run(work()[0]!, signal());
+    pipe!.queue.transitionItem(turnOf(entry), { kind: 'fetching' });
+    pipe!.queue.transitionItem(turnOf(entry), { kind: 'blocked', at: 'fetching', problem: { code: 'indexer_unavailable' } });
+    await runFetchRetry(entry);
     expect(entry.release).toMatchObject({ title: release.title, guid: release.guid, link: release.link });
-    expect(entry.state.kind).toBe('waiting_slot');
+    expect(turnOf(entry).state.kind).toBe('fetching');
+    expect(Object.values(turnOf(entry).selected)).toMatchObject([{ status: 'prepared', release: { title: release.title } }]);
+    expect(work().filter((job) => job.type === 'queue.send')).toHaveLength(1);
+    expect(pipe!.qbit.calls.filter((call) => call.path === 'torrents/add')).toEqual([]);
     expect(pipe!.tracker.state.searches).toEqual([]);
     expect(pipe!.tracker.state.downloads).toEqual([release.title]);
   });
@@ -560,37 +621,42 @@ describe.each(['movie', 'tv'] as const)('technical retry contract: %s', (mediaTy
     const { entry } = await setup(mediaType, 'fetching', 'indexer_unavailable');
     const release = structuredClone(selectRelease(entry));
     pipe!.tracker.state.items[0]!.bad = true;
-    const { retry } = createRetry({ queue: pipe!.queue, enqueue });
-    retry(entry);
-    const job = work().find((job) => job.type === 'queue.grab');
-    expect(job).toBeDefined();
+    pipe!.queue.transitionItem(turnOf(entry), { kind: 'fetching' });
+    pipe!.queue.transitionItem(turnOf(entry), { kind: 'blocked', at: 'fetching', problem: { code: 'indexer_unavailable' } });
+    await runFetchRetry(entry);
 
-    await Promise.allSettled([queueGrabHandler(grabDeps()).run(job!, signal())]);
-
-    expect(entry.state).toMatchObject({ kind: 'blocked', at: 'fetching', problem: { code: 'invalid_torrent' } });
-    expect(entry.release).toEqual(release);
-    expect(work().some((job) => job.type === 'queue.search')).toBe(false);
+    expect(turnOf(entry).state).toMatchObject({ kind: 'blocked', at: 'fetching', problem: { code: 'all_rejected' } });
+    expect(turnOf(entry).search?.rejected).toContainEqual(expect.objectContaining({ guid: release.guid, reasons: expect.arrayContaining([REJECTION_TEXT.invalid_torrent]) }));
+    expect(work().some((job) => job.type === 'queue.send')).toBe(false);
     expect(pipe!.tracker.state.searches).toEqual([]);
     expect(pipe!.tracker.state.downloads).toEqual([release.title]);
   });
 
   it('retries send through the sender and reuses a torrent that the client received', async () => {
-    const { entry } = await setup(mediaType, 'sending', 'client_unreachable');
-    const release = selectRelease(entry);
-    const { hash } = addDownload([entry], mediaType, false);
-    release.infoHash = hash;
-    const before = structuredClone(release);
+    const { entry } = await setup(mediaType, 'fetching', 'client_unreachable');
+    selectRelease(entry);
+    beginFetch(entry);
+    const torrent = prepared(entry);
+    const { hash } = torrent;
+    Object.assign(torrent, { status: 'uncertain', clientId: 'client-1', addTag: 'accepted-before-reply' });
+    const clientTorrent = addDownload([], mediaType, false);
+    pipe!.qbit.torrents.set(hash, { ...pipe!.qbit.torrents.get(clientTorrent.hash)!, hash, tags: torrent.addTag! });
+    pipe!.queue.block(entry, { code: 'client_unreachable' }, 'send failed');
+    pipe!.queue.transitionItem(turnOf(entry), { kind: 'blocked', at: 'fetching', problem: { code: 'client_unreachable' } });
     const { retry } = createRetry({ queue: pipe!.queue, enqueue });
 
     retry(entry);
 
-    expect(entry.state).toEqual({ kind: 'sending' });
-    expect(entry.release).toEqual(before);
+    expect(entry.state).toEqual({ kind: 'fetching' });
+    expect(turnOf(entry).selected[hash]?.status).toBe('uncertain');
     expect(work()).toHaveLength(1);
-    expect(work()[0]).toMatchObject({ type: 'queue.send', payload: { entryIds: [entry.id] } });
+    expect(work()[0]).toMatchObject({ type: 'queue.send', payload: { itemId: turnOf(entry).id, hash, entryIds: [entry.id] } });
+    await pipe!.worker.pause();
+    pipe!.db.data.queuePaused = false;
     await queueSendHandler(grabDeps()).run(work()[0]!, signal());
     expect(entry.state.kind).toBe('downloading');
     expect(entry.transferHash).toBe(hash);
+    expect(turnOf(entry).selected[hash]?.status).toBe('accepted');
     expect(pipe!.qbit.calls.some((call) => call.path === 'torrents/info')).toBe(true);
     expect(pipe!.qbit.calls.filter((call) => call.path === 'torrents/add')).toEqual([]);
     expect(pipe!.tracker.state.searches).toEqual([]);

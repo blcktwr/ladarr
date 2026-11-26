@@ -12,10 +12,15 @@ export function runningDownloads(clients: Clients, clientId: string, own: Readon
     if (entry.clientId !== clientId || entry.state.kind === 'cancelled' || own.has(entry.id)) continue;
     if (busy(entry) && entry.transferHash) hashes.add(entry.transferHash);
   }
-  let count = hashes.size;
+  for (const item of Object.values(db.data.queueItems)) {
+    if (!['fetching', 'downloading', 'importing'].includes(item.state.kind)) continue;
+    for (const torrent of Object.values(item.selected)) {
+      if (torrent.status === 'uncertain' && torrent.clientId === clientId && !Object.keys(torrent.matches).some((id) => own.has(id))) hashes.add(torrent.hash);
+    }
+  }
   for (const job of Object.values(db.data.jobs)) {
     if (job.type !== 'queue.send' || job.state !== 'running') continue;
-    const ids = (job.payload as { entryIds?: unknown }).entryIds;
+    const { entryIds: ids, hash, uploadHash } = job.payload as { entryIds?: unknown; hash?: string; uploadHash?: string };
     if (!Array.isArray(ids)) continue;
     const entries = ids
       .filter((id): id is string => typeof id === 'string' && !own.has(id))
@@ -24,11 +29,9 @@ export function runningDownloads(clients: Clients, clientId: string, own: Readon
     if (!entries.length) continue;
     const leader = entries[0]!;
     if ((leader.clientId ?? clients.next()?.id) !== clientId) continue;
-    // A send job that already entered Sending is in the torrents above.
-    if (entries.some(busy)) continue;
-    count++;
+    hashes.add(hash ?? uploadHash ?? leader.transferHash ?? leader.release?.infoHash ?? job.id);
   }
-  return count;
+  return hashes.size;
 }
 
 // True while the client has room for the torrent of these targets. A limit of zero means no limit.

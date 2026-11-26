@@ -37,7 +37,7 @@ export function recordTorrent(
 // both use it, so a manual attach and an automatic attach leave the same entry.
 export async function attachTorrent(
   { queue }: { queue: Queue },
-  { handle, torrent, targets, cause, manual = false }: { handle: ClientHandle; torrent: Torrent; targets: QueueEntry[]; cause: string; manual?: boolean },
+  { handle, torrent, targets, cause, manual = false, external = true }: { handle: ClientHandle; torrent: Torrent; targets: QueueEntry[]; cause: string; manual?: boolean; external?: boolean },
 ): Promise<void> {
   const hash = torrent.hash;
   let attached = false;
@@ -46,7 +46,7 @@ export async function attachTorrent(
     if (target.release?.uploadPath || !isActive(target) || target.state.kind === 'paused' || (target.state.kind === 'blocked' && !manual)) continue;
     queue.endAttempt(target, 'cancelled', 'replaced by an attached download');
     queue.startAttempt(target, 'attached download');
-    recordTorrent(target, { handle, torrent, kind: targets.length > 1 ? 'pack' : 'single', external: true });
+    recordTorrent(target, { handle, torrent, kind: targets.length > 1 ? 'pack' : 'single', external });
     // A torrent that the user attaches enters the acquisition with the numbering of the title now. A target that has a
     // snapshot already keeps it, so a restart does not reinterpret its download.
     if (target.numbering === undefined) target.numbering = structuredClone(normalizeNumbering(db.data.titles[target.titleKey]?.numbering));

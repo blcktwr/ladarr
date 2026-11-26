@@ -26,31 +26,26 @@ const named = (extra: Parameters<typeof title>[0] = {}) =>
   title({ rootId: 'tv', meta: { ...title().meta, title: 'Show Name', originalTitle: 'Original Show Name', aliases: ['Alias One', 'Alias Two', 'Alias Three'] }, ...extra });
 
 describe('search requests', () => {
-  it('takes a single episode from the season answer and sends no individual query for it', async () => {
+  it('takes the single releases from the season answer without individual queries', async () => {
     pipe = await startPipeline();
     const series = title({ rootId: 'tv', episodes: [1, 2, 3].map((number) => episode(1, number, '2020-01-01')) });
     pipe.db.data.titles[series.key] = series;
-    const single = 'Show.Name.S01E02.1080p.WEB-DL-GRP';
+    const singles = [1, 2, 3].map((number) => ({ title: `Show.Name.S01E0${number}.1080p.WEB-DL-GRP`, size: 60 * 45 * MIB }));
     pipe.tracker.state.items = [
       { title: 'Show.Name.S01.480p.WEB-DL-GRP', size: 3 * 30 * 45 * MIB },
       { title: 'Show.Name.S01.720p.WEB-DL-GRP', size: 3 * 40 * 45 * MIB },
-      { title: single, size: 60 * 45 * MIB },
+      ...singles,
     ];
 
     pipe.finder.requestSearch(series.key);
-    const first = pipe.queue.get('tv:1:1x1')!;
-    const second = pipe.queue.get('tv:1:1x2')!;
-    const third = pipe.queue.get('tv:1:1x3')!;
-    await until(() => grabbed(second) && branchOf(first) === 'waiting' && branchOf(third) === 'waiting');
+    await expect.poll(() => pipe!.acquisition.filter((event) => event.type === 'add')).toHaveLength(3);
 
     expect(seasonQueries()).toHaveLength(1);
     expect(episodeQueries()).toHaveLength(0);
-    expect(second.release!.title).toBe(single);
-    expect(branchOf(first)).toBe('waiting');
-    expect(branchOf(third)).toBe('waiting');
+    expect(pipe.tracker.state.downloads.toSorted()).toEqual(singles.map((item) => item.title));
   });
 
-  it('shows the season result in the title log and in each episode log, and sends no individual query for an old season', async () => {
+  it('shows the rejected season releases in the title log and in each episode log', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ladarr-season-log-'));
     logToFile(join(dir, 'ladarr.log'));
     try {
@@ -63,9 +58,8 @@ describe('search requests', () => {
       ];
 
       const entries = pipe.finder.requestSearch(series.key);
-      await until(() => entries.every((entry) => branchOf(entry) === 'waiting'));
+      await until(() => entries.every((entry) => reasonOfEntry(entry)?.code === 'all_rejected'));
       expect(seasonQueries()).toHaveLength(1);
-      expect(episodeQueries()).toHaveLength(0);
 
       await closeLog();
       const titleLog = await recentLogs(200, { itemId: series.key });
@@ -77,8 +71,6 @@ describe('search requests', () => {
         const lines = await recentLogs(200, { itemId: entry.id });
         const own = lines.find((line) => line.event === 'search' && line.message.startsWith('Search season "Show Name"'));
         expect(own).toMatchObject({ releases: 2, accepted: 0 });
-        expect(lines.some((line) => line.message === 'Search episode skipped: the episode is too old to be a recent episode, so only the season search ran.')).toBe(true);
-        expect(lines.some((line) => line.message.startsWith('Search episode "Show Name"'))).toBe(false);
       }
     } finally {
       await closeLog();
@@ -151,7 +143,7 @@ describe('search requests', () => {
     expect(individual.every((url) => url.searchParams.get('q') === 'Show Name')).toBe(true);
   });
 
-  it('asks every season name before it stops on a season', async () => {
+  it('asks every season name before it searches old episodes individually', async () => {
     pipe = await startPipeline();
     const series = named({ episodes: [episode(1, 1, '2020-01-01'), episode(1, 2, '2020-01-01')] });
     pipe.db.data.titles[series.key] = series;
@@ -161,21 +153,22 @@ describe('search requests', () => {
     await until(() => entries.every((entry) => branchOf(entry) === 'waiting'));
 
     expect(seasonQueries().map((url) => url.searchParams.get('q')).sort()).toEqual(['Alias One', 'Alias Three', 'Alias Two', 'Original Show Name', 'Show Name']);
-    expect(episodeQueries()).toHaveLength(0);
+    expect(queries().slice(0, 5)).toEqual(seasonQueries());
+    expect(episodeQueries().map((url) => Number(url.searchParams.get('ep'))).sort()).toEqual([1, 2]);
   });
 
   it('stops the season search at the first name that returns releases, even when none matches the profile', async () => {
     pipe = await startPipeline();
     const series = named({ episodes: [episode(1, 1, '2020-01-01'), episode(1, 2, '2020-01-01')] });
     pipe.db.data.titles[series.key] = series;
-    pipe.tracker.state.items = [{ title: 'Show.Name.S01.480p.WEB-DL-GRP', size: 2 * 30 * 45 * MIB }];
+    pipe.tracker.state.answer = (url) => url.searchParams.has('ep') ? [] : [{ title: 'Show.Name.S01.480p.WEB-DL-GRP', size: 2 * 30 * 45 * MIB }];
 
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((entry) => branchOf(entry) === 'waiting'));
+    await until(() => entries.every((entry) => reasonOfEntry(entry)?.code === 'all_rejected'));
 
     expect(seasonQueries()).toHaveLength(1);
     expect(seasonQueries()[0]!.searchParams.get('q')).toBe('Show Name');
-    expect(episodeQueries()).toHaveLength(0);
+    expect(episodeQueries().map((url) => Number(url.searchParams.get('ep'))).sort()).toEqual([1, 2]);
     expect(entries.every((entry) => entry.release === null && reasonOfEntry(entry)?.code === 'all_rejected')).toBe(true);
   });
 
@@ -192,23 +185,24 @@ describe('search requests', () => {
       ],
     });
     pipe.db.data.titles[series.key] = series;
-    const file = (id: string) => ({ id, titleKey: series.key, path: `Show Name (2020)/Season 01/Show Name - ${id}.mkv`, sizeBytes: 1, mtimeMs: 1, episodes: [], missing: false, addedAt: 1, source: 'webdl' as const });
-    pipe.db.data.files.e1 = file('S01E01');
-    pipe.db.data.files.e2 = file('S01E02');
+    const file = (number: number) => ({ id: `e${number}`, titleKey: series.key, path: `Show Name (2020)/Season 01/Show Name - S01E0${number}.mkv`, sizeBytes: 1, mtimeMs: 1, episodes: [{ season: 1, number }], missing: false, addedAt: 1, source: 'webdl' as const });
+    pipe.db.data.files.e1 = file(1);
+    pipe.db.data.files.e2 = file(2);
     const pack = 'Show.Name.S01.1080p.WEB-DL-GRP';
     const single = 'Show.Name.S01E04.1080p.WEB-DL-GRP';
-    pipe.tracker.state.answer = (url) => (url.searchParams.get('ep') === '4' ? [{ title: single, size: 60 * 45 * MIB }] : [{ title: pack, size: 5 * 60 * 45 * MIB }]);
+    const files = [1, 2, 3, 4, 5].map((number) => `Show.Name.S01E0${number}.mkv`);
+    pipe.tracker.state.answer = (url) => (url.searchParams.get('ep') === '4' ? [{ title: single, size: 60 * 45 * MIB }] : [{ title: pack, size: 5 * 60 * 45 * MIB, files }]);
 
     pipe.finder.requestSearch(series.key);
     const third = pipe.queue.get('tv:1:1x3')!;
     const fourth = pipe.queue.get('tv:1:1x4')!;
     const fifth = pipe.queue.get('tv:1:1x5')!;
-    await until(() => [third, fourth, fifth].every((entry) => grabbed(entry)));
+    await until(() => [third, fourth, fifth].every((entry) => stageOf(entry) === 'downloading'));
     // The pack covers every episode without a file, so the three take it and no episode query runs.
     expect([third, fourth, fifth].map((entry) => entry.release!.title)).toEqual([pack, pack, pack]);
-    const asked = episodeQueries().map((url) => url.searchParams.get('ep'));
-    expect(asked).not.toContain('3');
-    expect(asked).not.toContain('5');
+    expect(episodeQueries()).toEqual([]);
+    expect(pipe.qbit.torrents.size).toBe(1);
+    expect(series.episodes.slice(0, 2).map(({ fileId }) => fileId)).toEqual(['e1', 'e2']);
   });
 
   it('searches the last old episode on its own after the season answer settles the others', async () => {
@@ -266,15 +260,14 @@ describe('search requests', () => {
 
     expect((await api.post('/queue/search', { titleKey: series.key, season: 1, number: 1 })).status).toBe(202);
     const entry = pipe.queue.get('tv:1:1x1')!;
-    await until(() => branchOf(entry) === 'waiting' || grabbed(entry));
-
-    expect(branchOf(entry)).toBe('waiting');
+    await until(() => reasonOfEntry(entry)?.code === 'all_rejected');
+    expect(entry.state.kind).toBe('blocked');
     expect(episodeQueries().map((url) => url.searchParams.get('q'))).toEqual(['Show Name']);
     expect(entry.release).toBeNull();
     expect(reasonOfEntry(entry)?.code).toBe('all_rejected');
   });
 
-  it('uses the recent window for the individual queries of a multi-episode search', async () => {
+  it('makes individual queries for recent and old episodes when the season answer is empty', async () => {
     pipe = await startPipeline();
     const series = title({ rootId: 'tv', episodes: [episode(1, 1, daysAgo(2)), episode(1, 2, daysAgo(8))] });
     pipe.db.data.titles[series.key] = series;
@@ -285,6 +278,6 @@ describe('search requests', () => {
 
     expect(seasonQueries()).toHaveLength(1);
     expect(episodeQueries().filter((url) => url.searchParams.get('ep') === '1')).toHaveLength(1);
-    expect(episodeQueries().filter((url) => url.searchParams.get('ep') === '2')).toHaveLength(0);
+    expect(episodeQueries().filter((url) => url.searchParams.get('ep') === '2')).toHaveLength(1);
   });
 });

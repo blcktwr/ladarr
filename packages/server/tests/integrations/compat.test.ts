@@ -1,4 +1,4 @@
-import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
+import { findItem, stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
 import { branchOf } from '../helpers/test-queue.ts';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -220,14 +220,17 @@ describe('Seerr request for a movie', () => {
     const { pipe, radarr, key } = rig;
     pipe.tracker.state.items = [];
     await rig.app.post('/library', { mediaType: 'movie', tmdbId: 603, add: 'all' });
-    await eventually(async () => pipe.db.data.queue['movie:603'], (entry) => Boolean(entry && branchOf(entry) === 'waiting'));
+    await expect.poll(() => findItem('movie:603', null)?.state).toMatchObject({ kind: 'waiting', outcome: 'no_results' });
 
     // The command is queued while its search runs, and the answer says so.
     const first = await radarr.searchMovie(603);
     expect(first).toMatchObject({ id: 1, status: 'queued', result: 'unknown' });
-    const ended = await eventually(() => radarr.getCommand(1), (value) => value.status === 'completed');
     // A search with no release is not a failure.
-    expect(ended).toMatchObject({ result: 'successful' });
+    await expect.poll(async () => ({
+      command: await radarr.getCommand(1),
+      turn: findItem('movie:603', null)?.state.kind,
+      member: pipe.db.data.queue['movie:603']?.state.kind,
+    }), { timeout: 5_000 }).toMatchObject({ command: { status: 'completed', result: 'successful' }, turn: 'waiting', member: 'waiting' });
     expect(pipe.db.data.queue['movie:603']!.search).toMatchObject({ result: 'no_results' });
 
     // A new process reads the same data.
@@ -244,7 +247,7 @@ describe('Seerr request for a movie', () => {
       server.close();
     }
     expect(copy.data.compat.commandSeq).toBe(1);
-  });
+  }, 10_000);
 
   it('gives each command its own ID when two commands arrive at the same time', async () => {
     rig = await start();
@@ -262,21 +265,28 @@ describe('Seerr request for a movie', () => {
     const { pipe, radarr, app } = rig;
     pipe.tracker.state.items = [];
     await app.post('/library', { mediaType: 'movie', tmdbId: 603, add: 'all' });
-    await eventually(async () => pipe.db.data.queue['movie:603'], (entry) => Boolean(entry && branchOf(entry) === 'waiting'), 15_000);
+    await expect.poll(() => findItem('movie:603', null)?.state, { timeout: 8_000 }).toMatchObject({ kind: 'waiting', outcome: 'no_results' });
+    const itemId = findItem('movie:603', null)!.id;
     // A waiting search for a later time is not work that the command waits for.
     const jobsLeft = () =>
       Object.values(pipe.db.data.jobs).filter(
         (job) =>
           job.type === 'queue.search' &&
-          (job.payload as { entryIds: string[] }).entryIds.includes('movie:603') &&
+          (job.payload as { itemId?: string }).itemId === itemId &&
           (job.state === 'running' || (job.state === 'waiting' && job.runAt <= Date.now())),
       ).length;
     await until(() => jobsLeft() === 0);
 
     const first = await radarr.searchMovie(603);
-    await until(() => branchOf(pipe.db.data.queue['movie:603']) === 'waiting' && jobsLeft() === 0, 15_000);
+    await expect.poll(() => ({
+      turn: findItem('movie:603', null)?.state,
+      member: pipe.db.data.queue['movie:603']?.state,
+      jobsLeft: jobsLeft(),
+    }), { timeout: 8_000 }).toMatchObject({ turn: { kind: 'waiting', outcome: 'no_results' }, member: { kind: 'waiting' }, jobsLeft: 0 });
     // The next search of the entry stays in the queue, and the first command does not wait for it.
-    expect(Object.values(pipe.db.data.jobs).filter((job) => job.type === 'queue.search' && job.state === 'waiting' && job.runAt > Date.now()).map((job) => (job.payload as { entryIds: string[] }).entryIds)).toEqual([['movie:603']]);
+    expect(Object.values(pipe.db.data.jobs).filter((job) => job.type === 'queue.search' && job.state === 'waiting' && job.runAt > Date.now()).map((job) => job.payload)).toEqual([
+      expect.objectContaining({ itemId, entryIds: ['movie:603'] }),
+    ]);
     // The first search ended. The second search starts before anyone reads the first command.
     const second = await radarr.searchMovie(603);
     expect(second).toMatchObject({ id: first.id + 1, status: 'queued' });

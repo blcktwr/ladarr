@@ -126,6 +126,8 @@ export type Data = {
   downloadClients: ClientConfig[];
   // Keyed by the ID of the target. See queue.ts.
   queue: Record<string, QueueEntry>;
+  queueItems: Record<string, QueueTurn>;
+  queueItemSeq: number;
   // Rises with each change of an entry. SSE messages and snapshots carry it.
   queueRev: number;
   // The user paused the queue: no new queue work starts, and the running work ends.
@@ -528,13 +530,44 @@ export type SearchState = {
   rejected: RejectedRelease[];
 };
 export type ImportResult = { at: number; ok: boolean; method: 'hardlink' | 'copy' | null; path: string | null; validation: 'ffprobe' | 'basic'; detail?: string };
+export type QueueTorrent = {
+  hash: string;
+  release: ReleaseRef;
+  source: NonNullable<QueueEntry['source']> | null;
+  numberingRevision: number | null;
+  matches: Record<string, string | null>;
+  manifest?: string[];
+  manualMatches?: Record<string, EpisodeRef[]>;
+  clientId: string | null;
+  status: 'verify' | 'prepared' | 'uncertain' | 'accepted';
+  addTag?: string;
+};
+export type QueueTurn = {
+  id: string;
+  titleKey: string;
+  season: number | null;
+  entryIds: string[];
+  state: QueueState;
+  position: number;
+  priority: number | null;
+  createdAt: number;
+  stateSince: number;
+  revision: number;
+  nextAt: number | null;
+  clientHold: boolean;
+  emptySearches: Record<string, number>;
+  lastEmptyRound: string | null;
+  candidate: ReleaseRef | null;
+  selected: Record<string, QueueTorrent>;
+  search: SearchState | null;
+};
 export type QueueEntry = {
   // "movie:603" or "tv:1396:1x2". The same target always has the same ID.
   id: string;
   titleKey: string;
   season: number | null;
   number: number | null;
-  // The one state of the target. Every status and every tab comes from it.
+  // The progress of this target. The queue item controls the search turn.
   state: QueueState;
   // Rises with each change. A message with an older number is stale.
   revision: number;
@@ -649,7 +682,7 @@ export type SearchResume = { phase: 'episode' | 'absolute'; entryId: string };
 // `fresh` skips the cache of raw results. A search that the user asks for is fresh. `manual` marks a target that the
 // user selected, so its individual query runs whatever the age of the episode. `otherSeasons` marks the manual search
 // of the other seasons of the releases: it has its own jobs and it never merges with a normal search.
-export type SearchPayload = { titleKey: string; season: number | null; entryIds: string[]; fresh?: boolean; manual?: boolean; otherSeasons?: boolean; resume?: SearchResume };
+export type SearchPayload = { itemId?: string; titleKey: string; season: number | null; entryIds: string[]; fresh?: boolean; manual?: boolean; otherSeasons?: boolean; resume?: SearchResume };
 export type FinderDeps = {
   queue: Queue;
   indexers: IndexerService;

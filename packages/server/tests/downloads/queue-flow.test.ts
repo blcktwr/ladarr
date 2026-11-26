@@ -55,17 +55,6 @@ function addClientTorrent(name: string, progress: number) {
   return hash;
 }
 
-// Waits until one of the two movies downloads and the other waits for a slot with its source.
-async function heldBySlot(first: { id: string }, next: { id: string }) {
-  const pair = [first, next];
-  await until(() => pair.filter((entry) => stageOf(pipe!.queue.get(entry.id)!) === 'downloading').length === 1 && pair.some((entry) => stageOf(pipe!.queue.get(entry.id)!) === 'waiting_slot' && pipe!.queue.get(entry.id)!.source));
-  const running = pair.find((entry) => stageOf(pipe!.queue.get(entry.id)!) === 'downloading')!;
-  const waiting = pair.find((entry) => entry !== running)!;
-  expect(stageOf(pipe!.queue.get(waiting.id)!)).toBe('waiting_slot');
-  expect(pipe!.queue.get(waiting.id)!.source).not.toBeNull();
-  return { running: pipe!.queue.get(running.id)!, waiting: pipe!.queue.get(waiting.id)! };
-}
-
 describe('search preflight', () => {
   it('completes a movie whose file is in its title folder with no search and no torrent', async () => {
     pipe = await startPipeline();
@@ -153,43 +142,24 @@ describe('search preflight', () => {
 describe('a full client', () => {
   it('fetches both releases, and sends the waiting one when a slot frees', async () => {
     pipe = await startPipeline();
+    api = await pipe.api();
     Object.assign(pipe.db.data.downloadClients[0]!, { maxDownloads: 1 });
     const { first, next } = twoMovies();
 
-    const one = pipe.finder.requestSearch(first.key)[0]!;
-    const two = pipe.finder.requestSearch(next.key)[0]!;
-    const { running, waiting } = await heldBySlot(one, two);
+    pipe.finder.requestSearch(first.key);
+    await until(() => pipe!.qbit.torrents.has(hashOf(NAME)));
+    pipe.finder.requestSearch(next.key);
+    await until(() => pipe!.tracker.state.downloads.includes(SECOND));
+    await pipe.worker.drain();
 
-    // Both releases were fetched from the indexer. Only one torrent is in the client.
-    expect(pipe.tracker.state.downloads.sort()).toEqual([NAME, SECOND].sort());
+    expect.soft((await api.get(`/queue/entries/${next.key}`)).body.entry).toMatchObject({ status: 'fetching', release: { title: SECOND } });
     expect(pipe.qbit.torrents.size).toBe(1);
 
-    // The running torrent completes and frees the slot.
-    pipe.complete(running.release!.title, { 'Movie.mkv': 'the-film' }, running.transferHash!);
-    await until(() => stageOf(waiting) === 'downloading');
-
-    expect(pipe.qbit.torrents.size).toBe(2);
-    expect(pipe.qbit.torrents.has(waiting.transferHash!)).toBe(true);
-  }, 15_000);
-
-  it('reuses the saved source when the send runs again after the wait', async () => {
-    pipe = await startPipeline();
-    Object.assign(pipe.db.data.downloadClients[0]!, { maxDownloads: 1 });
-    const { first, next } = twoMovies();
-
-    const one = pipe.finder.requestSearch(first.key)[0]!;
-    const two = pipe.finder.requestSearch(next.key)[0]!;
-    const { waiting } = await heldBySlot(one, two);
-    const downloads = pipe.tracker.state.downloads.length;
-    expect(downloads).toBe(2);
-
-    // The send runs again from the saved source, as it does after a restart, and the slot is free now.
-    Object.assign(pipe.db.data.downloadClients[0]!, { maxDownloads: 0 });
-    pipe.worker.enqueue({ type: 'queue.send', payload: { entryIds: [waiting.id] }, dedupeKey: `send:${waiting.id}` });
-    await until(() => stageOf(waiting) === 'downloading');
-
-    expect(pipe.qbit.torrents.has(waiting.transferHash!)).toBe(true);
-    expect(pipe.tracker.state.downloads.length).toBe(downloads);
+    pipe.complete(NAME, { [`${NAME}.mkv`]: 'the-film' });
+    pipe.worker.resume();
+    await until(() => pipe!.qbit.torrents.has(hashOf(SECOND)));
+    expect(pipe.tracker.state.downloads).toEqual([NAME, SECOND]);
+    expect(pipe.qbit.calls.filter(({ path }) => path === 'torrents/add')).toHaveLength(2);
   }, 15_000);
 });
 
@@ -203,7 +173,7 @@ async function unreadableMovie() {
   pipe.finder.requestSearch(title.key);
   const entry = pipe.queue.get('movie:2')!;
   await until(() => stageOf(entry) === 'downloading');
-  pipe.complete(NAME, { 'Movie.mkv': 'the-film' });
+  pipe.complete(NAME, { [`${NAME}.mkv`]: 'the-film' });
   await until(() => entry.state.kind === 'blocked' && entry.state.at === 'importing' && entry.state.problem.code === 'file_unreadable');
   return entry;
 }

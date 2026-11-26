@@ -8,9 +8,10 @@ import { ClientError } from '../../../library/downloads/qbittorrent.ts';
 import { addedByApp, forgetSource, isActive, ownsUpload, phaseOfEntry } from '../../../library/downloads/queue.ts';
 import { createRetry, sharingOf } from '../../../library/downloads/queue-api.ts';
 import { enqueueUpload, uploadHash } from '../../../library/downloads/upload.ts';
-import { actionsOf, associationState, bySeasonNumber, label, lanePositions, otherSeasonsTargets, queueEpisode, resolutionCurrent, resolutionVersion, shown, statusOf } from '../../../helpers/queue.ts';
+import { actionsOf, associationState, bySeasonNumber, label, lanePositions, otherSeasonsTargets, resolutionCurrent, resolutionVersion, shown, statusOf } from '../../../helpers/queue.ts';
+import { preparedFiles, preparedMapping, resumePreparedMapping } from '../../../helpers/queue-attach.ts';
 import { canRetry, needsOtherSeasons } from '@ladarr/shared/queue';
-import type { ClientHandle, Clients, EnqueueInput, Finder, Job, Poller, Queue, QueueEntry, Torrent } from '../../../types.ts';
+import type { ClientHandle, Clients, EnqueueInput, Finder, Job, Poller, Queue, QueueEntry, QueueTurn, Torrent } from '../../../types.ts';
 
 export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler {
   type Action = QueueActionName;
@@ -161,7 +162,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
 
   // The entries of a group in the order that they have now, for an action on a group. A null season takes every season.
   function groupEntries(titleKey: string, season: number | null) {
-    return Object.values(db.data.queue).filter((entry) => entry.titleKey === titleKey && (season === null || queueEpisode(entry)?.season === season) && shown(entry)).sort((a, b) => a.createdAt - b.createdAt || bySeasonNumber(a, b));
+    return Object.values(db.data.queue).filter((entry) => entry.titleKey === titleKey && (season === null || entry.season === season) && shown(entry)).sort((a, b) => a.createdAt - b.createdAt || bySeasonNumber(a, b));
   }
 
   return async (req, res) => {
@@ -189,11 +190,25 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
       const scope = { action, ids: selected.map((entry) => entry.id).sort() };
       const numbering = selected.map((entry) => ({ id: entry.id, from: normalizeNumbering(entry.numbering), to: normalizeNumbering(db.data.titles[entry.titleKey]?.numbering), phase: 'queued' as WorkPhase }));
       const manifest: unknown[] = [];
+      const prepared = new Map<string, { item: QueueTurn; revision: number; hash: string }>();
       try {
         for (const item of numbering) {
           const entry = db.data.queue[item.id]!;
           if (entry.season !== null && !releasePoint(item.to, { season: entry.season, number: entry.number! })) return void res.status(409).json({ error: 'numbering_required' });
-          if (entry.transferHash) {
+          const mapping = preparedMapping(entry);
+          const turn = queue.itemFor(entry);
+          const selection = turn && (entry.transferHash ? turn.selected[entry.transferHash] :
+            Object.values(turn.selected).find(({ matches }) => Object.hasOwn(matches, entry.id)));
+          if (selection?.status === 'uncertain') return void res.status(409).json({ error: 'action_not_supported', unsupported });
+          if (mapping || (selection?.status === 'prepared' && turn)) {
+            const pending = mapping?.item ?? turn!;
+            const candidate = mapping?.candidate ?? selection!;
+            const files = preparedFiles(candidate);
+            if (!files?.length) return void res.status(409).json({ error: 'download_not_found' });
+            prepared.set(entry.id, { item: pending, revision: pending.revision, hash: candidate.hash });
+            manifest.push({ id: entry.id, item: pending.id, revision: pending.revision, candidate, files });
+            item.phase = 'fetching';
+          } else if (entry.transferHash && entry.clientId) {
             const handle = clients.get(entry.clientId);
             if (!handle) return void res.status(409).json({ error: 'client_missing' });
             const torrent = (await handle.api.byHashes([entry.transferHash]))[0];
@@ -201,8 +216,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
             manifest.push({ id: entry.id, torrent: torrent ? { hash: torrent.hash, complete: torrent.complete, contentPath: torrent.contentPath } : null, files: files.map(({ name, sizeBytes }) => ({ name, sizeBytes })) });
             if (!torrent) return void res.status(409).json({ error: 'torrent_not_found' });
             item.phase = torrent.complete ? 'importing' : 'downloading';
-          } else if (entry.source) item.phase = 'sending';
-          else if (entry.release) item.phase = 'fetching';
+          } else if (entry.release) item.phase = 'fetching';
           else if (phaseOfEntry(entry) === 'importing') item.phase = 'importing';
         }
       } catch (error) {
@@ -210,6 +224,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
         throw error;
       }
       if (selected.some((entry) => db.data.queue[entry.id] !== entry)) return void res.status(409).json({ error: 'preview_changed' });
+      if ([...prepared.values()].some(({ item, revision }) => queue.getItem(item.id) !== item || item.revision !== revision)) return void res.status(409).json({ error: 'preview_changed' });
       const boundScope = { ...scope, maps: numbering.map(({ id, to }) => ({ id, to })), manifest };
       const state = { selected, associations: [...new Set(selected.map((entry) => entry.titleKey))].map(associationState) };
       const summary = {
@@ -229,6 +244,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
       if (version === undefined || !resolutionCurrent(version, boundScope, already ? undefined : state)) return void res.status(409).json({ error: 'preview_changed' });
       if (already) return void res.json({ ...summary, done: true });
       if (unsupported.length || !selected.length) return void res.status(409).json({ error: 'action_not_supported', unsupported });
+      const recheck = new Map<QueueTurn, { hashes: Set<string>; entryIds: string[] }>();
       for (const item of numbering) {
         const entry = db.data.queue[item.id]!;
         entry.numbering = structuredClone(item.to);
@@ -247,10 +263,29 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
             if (job.type === 'import.local' && job.state === 'waiting') job.payload = payload;
           }
         }
-        else if (item.phase === 'sending') enqueue({ type: 'queue.send', payload: { entryIds: [entry.id] }, dedupeKey: `send:${entry.id}`, priority: entry.priority !== null });
-        else if (item.phase === 'fetching') enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, dedupeKey: `grab:${entry.id}`, priority: entry.priority !== null });
+        else if (item.phase === 'fetching') {
+          const pending = prepared.get(entry.id);
+          if (pending) {
+            const group = recheck.get(pending.item) ?? { hashes: new Set<string>(), entryIds: [] };
+            group.hashes.add(pending.hash);
+            group.entryIds.push(entry.id);
+            recheck.set(pending.item, group);
+          } else {
+            const item = queue.itemFor(entry);
+            if (item?.state.kind === 'blocked') queue.transitionItem(item, { kind: 'fetching' });
+            enqueue({ type: 'queue.grab', payload: { entryIds: [entry.id] }, dedupeKey: `grab:${entry.id}`, priority: entry.priority !== null });
+          }
+        }
         else if (item.phase === 'queued') finder.enqueueSearch({ titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id] });
       }
+      for (const [item, { hashes, entryIds }] of recheck) {
+        const revision = normalizeNumbering(db.data.titles[item.titleKey]?.numbering).revision;
+        const selected = Object.fromEntries(Object.entries(item.selected).map(([hash, source]) =>
+          [hash, source.status === 'prepared' && (hashes.has(hash) || source.numberingRevision !== revision) ? { ...source, status: 'verify' as const } : source]));
+        queue.updateItem(item, { selected });
+        resumePreparedMapping(queue, finder, item, entryIds, 'numbering applied by the user');
+      }
+      if (recheck.size) await db.write();
       return void res.json({ ...summary, done: true });
     }
 

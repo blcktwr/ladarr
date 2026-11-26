@@ -214,7 +214,7 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   api.get('/library/:key/episodes', titleParam(), libraryEpisodes());
   api.patch('/library/:key/seasons/:season', titleParam(), librarySeasonUpdate({ events }));
   api.patch('/library/:key/episodes/:season/:number', titleParam(), libraryEpisodeUpdate({ events }));
-  api.delete('/library/:key/episodes/:season/:number', titleParam(), libraryEpisodeDiscard({ events, queue: services?.queue }));
+  api.delete('/library/:key/episodes/:season/:number', titleParam(), libraryEpisodeDiscard({ events, queue: services?.queue, enqueue }));
   api.get('/settings', settingsGet());
   api.patch('/settings', settingsPatch());
   api.post('/settings/complete-setup', settingsCompleteSetup());

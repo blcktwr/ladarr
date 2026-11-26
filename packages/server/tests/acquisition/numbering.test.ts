@@ -86,27 +86,36 @@ describe('the acquisition of a mapped episode', () => {
     pipe.db.data.titles[item.key] = item;
     const name = 'Show.Name.S02E01.1080p.WEB-DL-GRP';
     const files = ['Show.Name.S02E01.mkv'];
-    pipe.tracker.state.items = [{ title: name, size: 60 * 45 * MIB, files }];
+    const bad = { title: 'Show.Name.S01E13.1080p.WEB-DL-BAD', size: 60 * 45 * MIB, files: ['Show.Name.S01E12.mkv'] };
+    pipe.tracker.state.answer = (query) => {
+      if (query.searchParams.get('season') === '1' && query.searchParams.get('ep') === '13') return [bad];
+      if (query.searchParams.get('season') === '2' && query.searchParams.get('ep') === '1') return [{ title: name, size: 60 * 45 * MIB, files }];
+      return [];
+    };
+    const [entry] = pipe.finder.requestSearch(item.key, { season: 1, number: 13 });
+    expect(entry).toBeDefined();
+    await expect.poll(() => pipe!.queue.findItem(item.key, 1)?.state).toMatchObject({ kind: 'blocked', problem: { code: 'all_rejected' } });
+    expect(pipe.acquisition.filter((event) => event.type === 'add')).toEqual([]);
 
-    const entry = entryOf({ id: `${item.key}:1x13`, titleKey: item.key, season: 1, number: 13, stage: 'fetching', reason: { code: 'pack_partial' } });
-    pipe.db.data.queue[entry.id] = entry;
     const earlier = entryOf({ id: `${item.key}:1x12`, titleKey: item.key, season: 1, number: 12, stage: 'available' });
     pipe.db.data.queue[earlier.id] = earlier;
+    item.episodes.find(({ number }) => number === 12)!.fileId = 'earlier';
+    pipe.db.data.files.earlier = { id: 'earlier', titleKey: item.key, path: 'Show Name (2020)/Season 01/Show Name - S01E12.mkv', sizeBytes: 1, mtimeMs: 0, episodes: [{ season: 1, number: 12 }], missing: false, addedAt: 1 };
     api = await pipe.api();
+    const before = pipe.tracker.state.searches.length;
     const saved = await api.patch(`/library/${item.key}`, { episodeSeasons: { revision: 0, edits: [{ season: 1, number: 13, releaseSeason: 2, search: true }] } });
     expect(saved.status).toBe(200);
     await until(() => stageOf(entry!) === 'downloading');
     const page = await api.get('/queue?stage=downloading');
-    expect(page.body.items).toMatchObject([{ key: `${item.key}:2`, season: 2, total: 1, reached: { imported: 0 } }]);
-    const group = await api.get(`/queue/groups/${item.key}?season=2`);
-    expect(group.body.items).toMatchObject([{ id: entry.id, season: 1, number: 13, label: 'Show Name S02E01' }]);
-    const previous = await api.get(`/queue/groups/${item.key}?season=1`);
-    expect(previous.body.items).toMatchObject([{ id: earlier.id, status: 'available' }]);
+    expect(page.body.items).toMatchObject([{ key: `${item.key}:1`, season: 1 }]);
+    const group = await api.get(`/queue/groups/${item.key}?season=1`);
+    expect(group.body.items).toMatchObject([{ id: earlier.id, status: 'available' }, { id: entry!.id, season: 1, number: 13, label: 'Show Name S02E01' }]);
+    expect((await api.get(`/queue/groups/${item.key}?season=2`)).body.items).toEqual([]);
 
     // The indexers get the release coordinates of the target. The catalog coordinates are never asked for.
-    const asked = pipe.tracker.state.searches;
-    expect(asked.some((url) => url.searchParams.get('season') === '2' && url.searchParams.get('ep') === '1')).toBe(true);
-    expect(asked.some((url) => url.searchParams.get('season') === '1' && url.searchParams.get('ep') === '13')).toBe(false);
+    const asked = pipe.tracker.state.searches.slice(before);
+    expect(asked.map((url) => [url.searchParams.get('season'), url.searchParams.get('ep')])).toEqual([['2', '1']]);
+    expect(pipe.acquisition.filter((event) => event.type === 'add')).toEqual([{ type: 'add', hash: hashOf(name, files) }]);
 
     pipe.complete(name, { 'Show.Name.S02E01.mkv': 'mapped-data' }, hashOf(name, files));
     await until(() => stageOf(entry!) === 'available', 20_000);

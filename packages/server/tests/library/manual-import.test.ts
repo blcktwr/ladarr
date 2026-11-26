@@ -308,8 +308,9 @@ describe('import', () => {
       return entry;
     });
     move(queue, waiting!, { branch: 'waiting' }, 'no release');
-    move(queue, loading!, { stage: 'downloading' }, 'client has it');
     loading!.transferHash = 'a'.repeat(40);
+    loading!.clientId = t.pipe.db.data.downloadClients[0]!.id;
+    move(queue, loading!, { stage: 'downloading' }, 'client has it');
     move(queue, paused!, { branch: 'paused' }, 'paused');
     move(queue, attention!, { stage: 'importing', reason: { code: 'file_not_found' } }, 'no file');
     // A download import that met a full disk leaves the target in Importing with a block.
@@ -356,11 +357,11 @@ describe('import', () => {
     const film = movie({ rootId: 'movie', manualRelease: true });
     t.pipe.db.data.titles[film.key] = film;
     const name = 'Movie.Name.2019.1080p.BluRay-GRP';
-    t.pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
+    t.pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB, files: [`${name}.mkv`] }];
     const [entry] = t.pipe.finder.requestSearch(film.key);
     await until(() => stageOf(entry!) === 'downloading');
     t.pipe.db.data.imports.busy = { id: 'busy', hash: 'rename:busy', titleKey: film.key, steps: [], createdAt: 0, kind: 'rename', sourceBase: t.pipe.folders.movies };
-    t.pipe.complete(name, { [`${name}.mkv`]: 'video-data' });
+    t.pipe.complete(name, { [`${name}.mkv`]: 'video-data' }, entry!.transferHash!);
     await sleep(300);
     // The target is not blocked. It waits in the import for the open journal.
     expect(entry).toMatchObject({ state: { kind: 'importing' } });

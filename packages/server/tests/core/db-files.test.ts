@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { emptyData, open, SCHEMA_VERSION } from '../../src/core/db.ts';
 import type { Data, Job, QueueEntry } from '../../src/types.ts';
+import { movie } from '../helpers/test-fixtures.ts';
 
-const queueKeys = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq', 'torrents'];
+const queueKeys = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq', 'torrents', 'queueItems', 'queueItemSeq'];
 
 const entry = {
   id: 'movie:603',
@@ -50,6 +51,8 @@ const job = {
 
 const queueWork = {
   queue: { [entry.id]: entry },
+  queueItems: {},
+  queueItemSeq: 4,
   queueRev: 7,
   queuePaused: true,
   jobs: { [job.id]: job },
@@ -67,6 +70,7 @@ const seed = (data: Data) => {
   data.queuePaused = true;
   data.jobSeq = 3;
   data.prioritySeq = 2;
+  data.queueItemSeq = 4;
   data.settings.naming.movie = 'DE';
 };
 
@@ -127,7 +131,31 @@ describe('database files', () => {
       expect(db.data.queuePaused).toBe(true);
       expect(db.data.jobSeq).toBe(3);
       expect(db.data.prioritySeq).toBe(2);
+      expect(db.data.queueItemSeq).toBe(4);
       expect(db.data.settings.naming.movie).toBe('DE');
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not migrate residual episode or movie records when the current item map is empty', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ladarr-db-files-'));
+    const file = join(dir, 'db.json');
+    try {
+      vi.stubEnv('NODE_ENV', 'production');
+      const db = await open(file);
+      const film = movie({ key: entry.titleKey, tmdbId: 603 });
+      db.data.titles[film.key] = film;
+      db.data.queue[entry.id] = { ...entry, state: { kind: 'cancelled', at: 'searching' }, attempt: 1 };
+      db.data.queueItemSeq = 4;
+      await db.write();
+
+      expect.soft(readJson(join(dir, 'queue.json'))).toHaveProperty('queueItems', {});
+      const reopened = await open(file);
+      expect(reopened.data.queue[entry.id]!.state.kind).toBe('cancelled');
+      expect(reopened.data.queueItems).toEqual({});
+      expect(reopened.data.queueItemSeq).toBe(4);
     } finally {
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });
@@ -140,7 +168,8 @@ describe('database files', () => {
     try {
       const data = emptyData();
       seed(data);
-      writeFileSync(file, JSON.stringify(data));
+      const { queueItems: _, queueItemSeq: __, ...old } = data;
+      writeFileSync(file, JSON.stringify({ ...old, schemaVersion: 9 }));
 
       vi.stubEnv('NODE_ENV', 'production');
       const db = await open(file);
@@ -154,7 +183,7 @@ describe('database files', () => {
       await db.write();
       const config = readJson(file);
       for (const key of queueKeys) expect(config).not.toHaveProperty(key);
-      expect(readJson(join(dir, 'queue.json'))).toEqual(queueWork);
+      expect(readJson(join(dir, 'queue.json'))).toEqual({ ...queueWork, queueItemSeq: 0 });
     } finally {
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });
@@ -166,7 +195,7 @@ describe('database files', () => {
     const file = join(dir, 'db.json');
     try {
       const data = emptyData();
-      const app = { ...data } as Record<string, unknown>;
+      const app = { ...data, schemaVersion: 6 } as Record<string, unknown>;
       for (const key of queueKeys) delete app[key];
       writeFileSync(file, JSON.stringify(app));
       const legacy = {

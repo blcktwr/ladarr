@@ -7,8 +7,8 @@ import { evidenceOf, matchContent } from '../../../../../library/content.ts';
 import { releaseEpisodes } from '../../../../../library/parse.ts';
 import { catalogPoint, normalizeNumbering } from '../../../../../library/numbering.ts';
 import { probeFile } from '../../../../../library/probe.ts';
-import { HASH, matchEntry, matchSource } from '../../../../../helpers/queue-attach.ts';
-import { catalogTargets } from '../../../../../helpers/queue.ts';
+import { HASH, matchEntry, matchSource, matchSourceKind, preparedFiles, preparedMapping } from '../../../../../helpers/queue-attach.ts';
+import { catalogTargets, label } from '../../../../../helpers/queue.ts';
 import type { Clients } from '../../../../../types.ts';
 
 export function queueEntryFilesGet(clients: Clients): RequestHandler<{ id: string }> {
@@ -17,9 +17,24 @@ export function queueEntryFilesGet(clients: Clients): RequestHandler<{ id: strin
     const entry = matchEntry(req.params.id, hash);
     if (!entry) return void res.status(404).json({ error: 'not_found' });
     const title = db.data.titles[entry.titleKey]!;
-    const selectedSource = req.query.source ?? (entry.transferHash ? 'download' : 'library');
-    if (selectedSource !== 'library' && selectedSource !== 'download') return void res.status(400).json({ error: 'invalid_request' });
-    if (hash !== undefined && (typeof hash !== 'string' || !HASH.test(hash) || selectedSource !== 'download' || entry.season === null)) return void res.status(400).json({ error: 'invalid_request' });
+    const selectedSource = matchSourceKind(entry, req.query.source, hash);
+    if (!selectedSource || (hash !== undefined && (typeof hash !== 'string' || !HASH.test(hash) || selectedSource === 'library'))) return void res.status(400).json({ error: 'invalid_request' });
+    const mapping = selectedSource === 'download' ? preparedMapping(entry, hash) : undefined;
+    if (hash !== undefined && entry.season === null && !mapping) return void res.status(400).json({ error: 'invalid_request' });
+    if (mapping) {
+      const files = preparedFiles(mapping.candidate);
+      if (!files?.length) return void res.status(409).json({ error: 'download_not_found' });
+      const revision = entry.season === null ? null : normalizeNumbering(title.numbering).revision;
+      const matches = mapping.candidate.numberingRevision === revision ? mapping.candidate.manualMatches : undefined;
+      res.json({
+        source: selectedSource,
+        sources: ['download'],
+        files: files.map((file) => ({ ...file, current: matches?.[file.rel] ?? [] })),
+        entries: entry.season === null ? [{ id: entry.id, label: label(entry), season: null, number: null }]
+          : catalogTargets(title).filter((target) => target.season === entry.season),
+      } satisfies QueuePackFiles);
+      return;
+    }
     try {
       const source = await matchSource(entry, clients, selectedSource, hash);
       if ('error' in source) return void res.status(409).json({ error: source.error });

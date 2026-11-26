@@ -1,8 +1,7 @@
-import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
-import { branchOf } from '../helpers/test-queue.ts';
-import { afterEach, describe, expect, it } from 'vitest';
+import { stageOf } from '../../src/library/downloads/queue.ts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { movie } from '../helpers/test-fixtures.ts';
-import { MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
+import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>> | undefined;
 let api: Awaited<ReturnType<Awaited<ReturnType<typeof startPipeline>>['api']>> | undefined;
@@ -21,7 +20,7 @@ const items = [
   { title: THIRD, size: 100 * 120 * MIB },
 ];
 // A movie that came out already, so a search is possible.
-const film = () => movie({ rootId: 'movie', meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
+const film = () => movie({ rootId: 'movie', meta: { ...movie().meta, date: '2019-06-01' } });
 const other = () => movie({ key: 'movie:3', tmdbId: 3, rootId: 'movie', meta: { ...film().meta, tmdbId: 3, title: 'Other Movie', originalTitle: 'Other Movie' } });
 const another = () => movie({ key: 'movie:4', tmdbId: 4, rootId: 'movie', meta: { ...film().meta, tmdbId: 4, title: 'Third Movie', originalTitle: 'Third Movie' } });
 
@@ -97,27 +96,22 @@ describe('download slots', () => {
     Object.assign(pipe!.db.data.downloadClients[0]!, { maxDownloads: 1 });
     const { first, next } = twoMovies();
 
-    const one = pipe!.finder.requestSearch(first.key)[0]!;
-    const two = pipe!.finder.requestSearch(next.key)[0]!;
-    await until(() => [one, two].filter((entry) => stageOf(entry) === 'downloading').length === 1 && [one, two].some((entry) => stageOf(entry) === 'waiting_slot' && entry.release !== null));
-    const running = [one, two].find((entry) => stageOf(entry) === 'downloading')!;
-    const waiting = [one, two].find((entry) => entry !== running)!;
-    expect(stageOf(waiting)).toBe('waiting_slot');
-    expect(waiting.release).not.toBeNull();
-    // The fetch of the waiting target is done, so the indexer is not asked for it again.
-    expect(waiting.source).not.toBeNull();
-    // The target holds a mark, and the file of the torrent stays once for its hash.
-    expect(waiting.source).toEqual({ torrent: true });
-    expect(Object.keys(pipe!.db.data.torrents)).toEqual([waiting.transferHash]);
-    expect(pipe!.qbit.torrents.size).toBe(1);
+    pipe!.finder.requestSearch(first.key);
+    await until(() => pipe!.qbit.torrents.has(hashOf(FIRST)));
+    pipe!.finder.requestSearch(next.key);
+    await until(() => pipe!.tracker.state.downloads.includes(SECOND));
+    await pipe!.worker.drain();
+    const fetching = (await api!.get('/queue?stage=searching')).body.items;
+    expect.soft(fetching).toMatchObject([{ titleKey: next.key, status: 'fetching', release: { title: SECOND } }]);
+    expect.soft((await api!.get('/queue?stage=downloading')).body.items).toMatchObject([{ titleKey: first.key, status: 'downloading' }]);
+    expect(Object.keys(pipe!.db.data.torrents)).toContain(hashOf(SECOND));
+    expect(pipe!.qbit.calls.filter(({ path }) => path === 'torrents/add')).toHaveLength(1);
 
-    // The waiting release stays held.
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(pipe!.qbit.torrents.size).toBe(1);
-
-    pipe!.qbit.progress(running.transferHash!, 1);
-    await until(() => stageOf(waiting) === 'downloading');
-    expect(pipe!.qbit.torrents.size).toBe(2);
+    pipe!.qbit.progress(hashOf(FIRST), 1);
+    pipe!.worker.resume();
+    await until(() => pipe!.qbit.torrents.has(hashOf(SECOND)));
+    expect(pipe!.tracker.state.downloads).toEqual([FIRST, SECOND]);
+    expect(pipe!.qbit.calls.filter(({ path }) => path === 'torrents/add')).toHaveLength(2);
   }, 15_000);
 
   it('sends both releases when the client has no limit', async () => {
@@ -130,7 +124,7 @@ describe('download slots', () => {
     expect(pipe!.qbit.torrents.size).toBe(2);
   });
 
-  it('gives a free slot to the first target of the list, not to the target that fetched first', async () => {
+  it('gives a free slot to the first prepared movie in admission order', async () => {
     await start();
     Object.assign(pipe!.db.data.downloadClients[0]!, { maxDownloads: 1 });
     const first = film();
@@ -139,29 +133,22 @@ describe('download slots', () => {
     for (const title of [first, next, third]) pipe!.db.data.titles[title.key] = title;
     pipe!.tracker.state.items = items;
 
-    // The first title is the oldest, but it fetches its release after the other two.
-    const one = pipe!.queue.ensure(first.key, null, null);
-    const two = pipe!.queue.ensure(next.key, null, null);
-    const three = pipe!.queue.ensure(third.key, null, null);
-    one.createdAt = 1;
-    two.createdAt = 2;
-    three.createdAt = 3;
-
     pipe!.finder.requestSearch(next.key);
-    await until(() => stageOf(two) === 'downloading');
-    pipe!.finder.requestSearch(third.key);
-    await until(() => stageOf(three) === 'waiting_slot' && three.release !== null);
+    await until(() => pipe!.qbit.torrents.has(hashOf(SECOND)));
     pipe!.finder.requestSearch(first.key);
-    await until(() => stageOf(one) === 'waiting_slot' && one.release !== null);
+    pipe!.finder.requestSearch(third.key);
+    await until(() => [FIRST, THIRD].every((name) => pipe!.tracker.state.downloads.includes(name)));
+    await pipe!.worker.drain();
+    const list = (await api!.get('/queue?stage=searching')).body.items;
+    expect.soft(list).toMatchObject([
+      { titleKey: first.key, status: 'fetching' },
+      { titleKey: third.key, status: 'fetching' },
+    ]);
 
-    // The list shows the oldest target first among the targets that wait for a slot.
-    const list = (await api!.get('/queue?stage=downloading')).body.items.filter((item: { status: string }) => item.status === 'waiting_slot');
-    expect(list.map((item: { label: string }) => item.label)).toEqual(['Movie Name (2019)', 'Third Movie (2019)']);
-
-    // When the slot frees, the first target of the list takes it.
-    pipe!.qbit.progress(two.transferHash!, 1);
-    await until(() => stageOf(one) === 'downloading' || stageOf(three) === 'downloading');
-    expect(stageOf(one)).toBe('downloading');
-    expect(stageOf(three)).toBe('waiting_slot');
+    pipe!.qbit.progress(hashOf(SECOND), 1);
+    pipe!.worker.resume();
+    await until(() => pipe!.qbit.torrents.size === 2);
+    expect([...pipe!.qbit.torrents.keys()]).toEqual([hashOf(SECOND), hashOf(FIRST)]);
+    await vi.waitFor(async () => expect((await api!.get('/queue?stage=searching')).body.items).toContainEqual(expect.objectContaining({ titleKey: third.key, status: 'fetching' })));
   }, 15_000);
 });

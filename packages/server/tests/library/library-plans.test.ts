@@ -1,5 +1,5 @@
 import { move, branchOf } from '../helpers/test-queue.ts';
-import { stageOf, reasonOfEntry, createQueue } from '../../src/library/downloads/queue.ts';
+import { stageOf, reasonOfEntry, createQueue, itemFor } from '../../src/library/downloads/queue.ts';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -48,7 +48,7 @@ afterAll(() => {
 });
 beforeEach(() => {
   for (const root of [tv, movies]) for (const name of readdirSync(root)) rmSync(join(root, name), { recursive: true, force: true });
-  Object.assign(app.db.data, { titles: {}, files: {}, imports: {}, queue: {}, jobs: {} });
+  Object.assign(app.db.data, { titles: {}, files: {}, imports: {}, queue: {}, queueItems: {}, jobs: {} });
   app.db.data.roots.tv!.dev = app.db.data.roots.movies!.dev = statSync(tv).dev;
 });
 afterEach(() => vi.restoreAllMocks());
@@ -469,6 +469,12 @@ describe('removal of one season', () => {
     const queue = createQueue(createEvents(), () => {});
     const first = queue.ensure(show.key, 1, 1);
     const second = queue.ensure(show.key, 1, 2);
+    queue.request(first, 'test');
+    queue.request(second, 'test');
+    const turn = itemFor(first)!;
+    expect(turn.entryIds).toEqual([first.id, second.id]);
+    const position = turn.position;
+    queue.updateItem(turn, { emptySearches: { [first.id]: 1, [second.id]: 2 } });
     const job = enqueue({ type: 'queue.search', payload: { titleKey: show.key, season: 1, entryIds: [first.id, second.id] } });
     const request = { action: 'remove', keys: [show.key], season: 3, numberingRevision: 1, deleteFiles: true };
     const plan = await preview(request);
@@ -479,6 +485,8 @@ describe('removal of one season', () => {
     expect(app.db.data.queue[second.id]).toBeUndefined();
     expect(app.db.data.jobs[job.id]?.payload).toMatchObject({ entryIds: [first.id] });
     expect(readFileSync(join(tv, 'Show', 'Season 01', 'Show.S01E01.mkv'), 'utf8')).toBe('one');
+    expect(app.db.data.queueItems[turn.id]).toMatchObject({ entryIds: [first.id], position });
+    expect(app.db.data.queueItems[turn.id]?.emptySearches).toEqual({ [first.id]: 1 });
   });
 
   it('deletes the files of the season, keeps the title, and keeps the other seasons', async () => {
@@ -532,13 +540,17 @@ describe('removal of one season', () => {
     expect(show.episodes.find((item) => item.season === 2)!.override).toBe('unmonitored');
   });
 
-  it('removes the queue targets and the jobs of the season, and keeps the other seasons', async () => {
+  it('removes the turn, targets, and jobs of one season without changing the other season', async () => {
     await seedTwoSeasons();
     const queue = createQueue(createEvents(), () => {});
     const first = queue.ensure('tv:1', 1, 1);
     queue.request(first, 'test');
     const second = queue.ensure('tv:1', 2, 1);
     queue.request(second, 'test');
+    const removed = itemFor(first)!;
+    const kept = structuredClone(itemFor(second)!);
+    expect(removed.entryIds).toEqual([first.id]);
+    expect(kept.entryIds).toEqual([second.id]);
     const own = enqueue({ type: 'queue.search', payload: { titleKey: 'tv:1', season: 1, entryIds: [first.id] } });
     const other = enqueue({ type: 'queue.search', payload: { titleKey: 'tv:1', season: 2, entryIds: [second.id] } });
 
@@ -547,6 +559,11 @@ describe('removal of one season', () => {
     expect(app.db.data.queue[second.id]).toBeDefined();
     expect(app.db.data.jobs[own.id]).toBeUndefined();
     expect(app.db.data.jobs[other.id]).toBeDefined();
+    const afterRemoval = app.db.data.queueItems[removed.id];
+    expect((await app.patch('/library/tv:1/seasons/1', { override: 'monitored' })).status).toBe(200);
+    expect(app.db.data.queueItems[removed.id]).toBeUndefined();
+    expect(afterRemoval).toBeUndefined();
+    expect(app.db.data.queueItems[kept.id]).toEqual(kept);
   });
 
   it.each([

@@ -7,7 +7,7 @@ import { catalog, itemFields } from '../../core/log.ts';
 import { inspectCoverage } from '../coverage.ts';
 import { attachTorrent, recordTorrent } from '../downloads/attach.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
-import { addedByApp, isActive, phaseOfEntry } from '../downloads/queue.ts';
+import { addedByApp, isActive, matchesSentTorrent, phaseOfEntry } from '../downloads/queue.ts';
 import { parseRelease, normalizeTitle } from '../grab/release.ts';
 import { normalizeNumbering, releasePoint } from '../numbering.ts';
 import { isSample, isVideoFile, releaseEpisodes } from '../parse.ts';
@@ -53,7 +53,7 @@ async function attachDownloads({ queue, clients }: { queue: Queue; clients: Clie
   for (const handle of clients.all()) {
     let list: Torrent[];
     try {
-      list = await clients.list(handle);
+      list = await clients.list(handle, { fresh: true });
     } catch (error) {
       if (!(error instanceof ClientError)) throw error;
       // A client that does not answer is not a client without the download. The search waits instead of a second copy.
@@ -102,7 +102,10 @@ async function attachDownloads({ queue, clients }: { queue: Queue; clients: Clie
     const targets = item.targets.filter((target) => current(target) && ![...chosen.values()].some((other) => other.targets.includes(target)));
     if (targets.length) chosen.set(item.torrent.hash, { ...item, targets });
   }
-  for (const item of chosen.values()) await attachTorrent({ queue }, { handle: item.handle, torrent: item.torrent, targets: item.targets, cause: 'download found in the client' });
+  for (const item of chosen.values()) {
+    const { handle, torrent, targets } = item;
+    await attachTorrent({ queue }, { handle, torrent, targets, cause: 'download found in the client', external: !matchesSentTorrent(torrent.hash, torrent.addedAt) });
+  }
   const attached = [...chosen.values()].flatMap((item) => item.targets.filter((target) => target.state.kind !== 'blocked' && target.transferHash === item.torrent.hash).map((target) => target.id));
   const blocked: string[] = [];
   for (const { handle, torrent, target } of unknown.values()) {

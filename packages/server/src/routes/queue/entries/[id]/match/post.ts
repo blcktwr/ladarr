@@ -9,26 +9,91 @@ import { PlanError } from '../../../../../library/imports/plan.ts';
 import { bindJournal } from '../../../../../library/imports/importer.ts';
 import { recordTorrent } from '../../../../../library/downloads/attach.ts';
 import { normalizeNumbering } from '../../../../../library/numbering.ts';
-import { HASH, matchEntry, matchSource, torrentInUse } from '../../../../../helpers/queue-attach.ts';
+import { HASH, matchEntry, matchSource, matchSourceKind, preparedFiles, preparedMapping, resumePreparedMapping, torrentInUse } from '../../../../../helpers/queue-attach.ts';
 import { associationState, catalogTargets, label, resolutionCurrent, resolutionVersion } from '../../../../../helpers/queue.ts';
 import type { Clients, EnqueueInput, Finder, ImportJournal, Job, Queue, QueueEntry } from '../../../../../types.ts';
 
-export function queueEntryMatchPost(queue: Queue, _finder: Finder, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler<{ id: string }> {
+const PREPARED_VERSION = 'prepared.';
+
+export function queueEntryMatchPost(queue: Queue, finder: Finder, clients: Clients, enqueue: (input: EnqueueInput) => Job): RequestHandler<{ id: string }> {
   return async (req, res) => {
     const { file, covers, ids, preview, version, hash, source: requestedSource } = (req.body ?? {}) as { file?: unknown; covers?: unknown; ids?: unknown; preview?: boolean; version?: unknown; hash?: unknown; source?: unknown };
     const entry = matchEntry(req.params.id, hash);
     if (!entry) return void res.status(404).json({ error: 'not_found' });
     if (typeof file !== 'string' || (ids !== undefined && (!Array.isArray(ids) || ids.length > 100 || !ids.every((id) => typeof id === 'string')))) return void res.status(400).json({ error: 'invalid_request' });
     const title = db.data.titles[entry.titleKey]!;
-    const selectedSource = requestedSource ?? (entry.transferHash ? 'download' : 'library');
-    if (selectedSource !== 'library' && selectedSource !== 'download') return void res.status(400).json({ error: 'invalid_request' });
-    if (hash !== undefined && (typeof hash !== 'string' || !HASH.test(hash) || selectedSource !== 'download' || entry.season === null)) return void res.status(400).json({ error: 'invalid_request' });
+    const selectedSource = matchSourceKind(entry, requestedSource, hash);
+    if (!selectedSource) return void res.status(400).json({ error: 'invalid_request' });
+    if (hash !== undefined && (typeof hash !== 'string' || !HASH.test(hash) || selectedSource !== 'download')) return void res.status(400).json({ error: 'invalid_request' });
     let coverage: EpisodeRef[] = entry.season === null ? [] : [{ season: entry.season, number: entry.number! }];
     if (covers !== undefined) {
       if (!Array.isArray(covers) || covers.length > 1000 || !covers.every((item) => Number.isInteger(item?.season) && Number.isInteger(item?.number))) return void res.status(400).json({ error: 'invalid_request' });
       coverage = covers.map(({ season, number }: EpisodeRef) => ({ season, number }));
       if (new Set(coverage.map((point) => `${point.season}:${point.number}`)).size !== coverage.length) return void res.status(400).json({ error: 'invalid_request' });
       if (coverage.some((point) => !title.episodes.some((episode) => episode.season === point.season && episode.number === point.number))) return void res.status(400).json({ error: 'cover_not_in_download' });
+    }
+    const preparedVersion = typeof version === 'string' && version.startsWith(PREPARED_VERSION) ? version.slice(PREPARED_VERSION.length) : undefined;
+    const prepared = selectedSource === 'download' && preparedMapping(entry, hash);
+    if (!preview && preparedVersion !== undefined && !prepared) return void res.status(409).json({ error: 'preview_changed' });
+    if (hash !== undefined && entry.season === null && !prepared) return void res.status(400).json({ error: 'invalid_request' });
+    if (prepared) {
+      return withTitleLock(title.key, async () => {
+        const mapping = preparedMapping(entry, hash);
+        if (!mapping || queue.get(entry.id) !== entry || db.data.titles[title.key] !== title) return void res.status(409).json({ error: 'preview_changed' });
+        const { item, candidate } = mapping;
+        const files = preparedFiles(candidate);
+        if (!files?.length) return void res.status(409).json({ error: 'download_not_found' });
+        if (!files.some((value) => value.rel === file)) return void res.status(400).json({ error: 'file_not_in_download' });
+        const movie = entry.season === null;
+        const selectedIds = [...new Set((ids ?? [entry.id]) as string[])].sort();
+        const selected = selectedIds.map(queue.get);
+        const covers = ({ season, number }: { season: number | null; number: number | null }) => coverage.some((point) => point.season === season && point.number === number);
+        if (!selectedIds.includes(entry.id) || (movie && (selectedIds.length !== 1 || coverage.length !== 0)) || selected.some((target) =>
+          !target || !item.entryIds.includes(target.id) || (!movie && !covers(target)) ||
+          target.state.kind === 'available' || target.state.kind === 'cancelled' || target.state.kind === 'paused' ||
+          preparedMapping(target, candidate.hash)?.candidate !== candidate)) return void res.status(400).json({ error: 'invalid_request' });
+        const catalog = movie ? [{ id: entry.id, label: label(entry), season: null, number: null }] : catalogTargets(title);
+        const numberingRevision = movie ? null : normalizeNumbering(title.numbering).revision;
+        const original = (candidate.numberingRevision === numberingRevision ? candidate.manualMatches : undefined) ?? {};
+        const assignments = Object.fromEntries(Object.entries(original).flatMap(([path, points]) => {
+          if (path === file) return [];
+          const left = points.filter((point) => !covers(point) || !selectedIds.includes(`${entry.titleKey}:${point.season}x${point.number}`));
+          return left.length ? [[path, left] as const] : [];
+        }));
+        const conflicts = Object.entries(assignments).flatMap(([path, points]) => {
+          const ids = catalog.filter((target) => covers(target) && points.some((point) => point.season === target.season && point.number === target.number)).map((target) => target.id);
+          return ids.length ? [{ file: path, ids, code: 'shared_episode' }] : [];
+        });
+        const scope = { action: 'match_prepared', entry: entry.id, hash: candidate.hash, file, coverage, ids: selectedIds };
+        const state = { revision: item.revision, associations: associationState(title.key), candidate, files, selected };
+        const targets = catalog.filter((target) => selectedIds.includes(target.id));
+        const summary: QueueMatchPreview = {
+          file,
+          source: 'download',
+          version: PREPARED_VERSION + resolutionVersion(scope, state),
+          effects: {
+            lostAvailability: [],
+            continued: conflicts.length ? [] : targets.map(({ id }) => ({ id, phase: 'fetching' })),
+            staysBlocked: [],
+            conflicts,
+          },
+          affected: (movie ? targets : catalog.filter(covers)).map(({ id, label, season, number }) => ({
+            id, label, current: movie ? Object.keys(original)[0] ?? null
+              : Object.keys(original).find((path) => original[path]!.some((point) => point.season === season && point.number === number)) ?? null,
+          })),
+          replaces: catalog.filter((target) => !covers(target) && original[file]?.some((point) => point.season === target.season && point.number === target.number)).map(({ id, label }) => ({ id, label })),
+          retries: conflicts.length ? [] : targets.map(({ id, label }) => ({ id, label })),
+        };
+        if (preview) return void res.json(summary);
+        if (typeof version !== 'string' || !version) return void res.status(409).json({ error: 'preview_required' });
+        if (!resolutionCurrent(preparedVersion, scope, state)) return void res.status(409).json({ error: 'preview_changed' });
+        if (conflicts.length) return void res.status(409).json({ error: 'mapping_conflict', ...summary });
+        const next = { ...candidate, numberingRevision, manualMatches: { ...assignments, [file]: coverage }, ...(movie ? { matches: { [entry.id]: file } } : {}) };
+        queue.updateItem(item, { selected: { ...item.selected, [candidate.hash]: next } });
+        resumePreparedMapping(queue, finder, item, selectedIds, 'file selected by the user');
+        await db.write();
+        res.json({ ...summary, done: true });
+      });
     }
     const selected: QueueEntry[] = [];
     for (const id of new Set((ids ?? [entry.id]) as string[])) {

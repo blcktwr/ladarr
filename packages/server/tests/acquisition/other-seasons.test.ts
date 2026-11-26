@@ -102,18 +102,10 @@ const otherSeasonQueries = () => pipe!.tracker.state.searches.filter((url) => ur
 const legacyPartial = (available = range(1, 10)) => partial(available, true);
 
 describe('a partial pack', () => {
-  it('lists the pack as rejected for every requested episode', async () => {
-    const { targets } = await partial();
-    expect(targets.map((entry) => entry.number)).toEqual(range(11, 20));
-    // The search took the pack. The grab read its files, and they hold none of these targets.
+  it('does not add a pack that only contains episodes already in the library', async () => {
+    await partial();
     expect(pipe!.tracker.state.downloads).toContain(FIRST);
-    expect(pipe!.qbit.torrents.size).toBe(0);
-    for (const entry of targets) {
-      expect(reasonOfEntry(entry)).toMatchObject({ code: 'all_rejected' });
-      expect(entry.search?.rejected[0]).toMatchObject({ guid: FIRST, manifestProblem: 'pack_partial' });
-      expect(entry.attempt).toBe(1);
-    }
-    expect(targets.some((entry) => reasonOfEntry(entry)?.code === 'too_many_attempts')).toBe(false);
+    expect(pipe!.acquisition.filter((event) => event.type === 'add')).toEqual([]);
   });
 
   it('sends no query for another season of the releases before the action', async () => {

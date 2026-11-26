@@ -1,6 +1,5 @@
-import { stageOf, reasonOfEntry } from '../../src/library/downloads/queue.ts';
-import { branchOf } from '../helpers/test-queue.ts';
-import { afterEach, describe, expect, it } from 'vitest';
+import { stageOf } from '../../src/library/downloads/queue.ts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { movie } from '../helpers/test-fixtures.ts';
 import { type FakeItem, hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 
@@ -29,8 +28,8 @@ async function rejectedFilm(items: FakeItem[]) {
   pipe.db.data.titles[m.key] = m;
   pipe.tracker.state.items = items;
   const [entry] = pipe.finder.requestSearch(m.key);
-  await until(() => branchOf(entry!) === 'waiting' && reasonOfEntry(entry!)?.code === 'all_rejected');
   const detail = async () => (await api!.get(`/queue/entries/${entry!.id}`)).body.entry;
+  await vi.waitFor(async () => expect(await detail()).toMatchObject({ status: 'stuck' }));
   return { m, entry: entry!, detail };
 }
 
@@ -43,6 +42,10 @@ describe('the rejected releases of a search with no match', () => {
     ]);
 
     const view = await detail();
+    expect((await api!.get('/queue?stage=stuck')).body.items).toMatchObject([{ id: entry.id, status: 'stuck' }]);
+    expect((await api!.get('/queue?stage=queued')).body.total).toBe(0);
+    expect((await api!.get('/queue?stage=searching')).body.total).toBe(0);
+    expect(pipe!.qbit.calls.filter(({ path }) => path === 'torrents/add')).toEqual([]);
     expect(Array.isArray(view.search.rejected)).toBe(true);
     // A 720p BluRay that the default 1080p/2160p profiles reject for its quality is a release that a person can pick.
     // The API lists it without the link, the magnet, or the info hash: the link carries the API key.
@@ -66,8 +69,7 @@ describe('the rejected releases of a search with no match', () => {
     // The list carries the numbers of the check, so the row can show why the file size did not fit.
     const tiny = view.search.rejected.find((release: { title: string }) => release.title === TINY);
     expect(tiny.sizeRejection).toEqual({ code: 'size_below_min', value: 0.1, limit: 12.5 });
-    // A release of another title breaks the identity check, so the search rejected it. A person can take it by hand,
-    // and the list still shows the reason that stopped it.
+    // The list shows why a release of another title failed the identity check.
     const wrong = view.search.rejected.find((release: { title: string }) => release.title === WRONG);
     expect(wrong).toMatchObject({ title: WRONG });
     expect(wrong.reasons).toContain('The title of the release is not this title.');
@@ -84,5 +86,9 @@ describe('the rejected releases of a search with no match', () => {
     await until(() => stageOf(entry) === 'downloading');
     expect(entry.release).toMatchObject({ title: LOW, manual: true });
     expect(pipe!.qbit.torrents.has(hashOf(LOW))).toBe(true);
+    expect(pipe!.acquisition.filter((event) => event.type === 'torrent' || event.type === 'add')).toEqual([
+      { type: 'torrent', title: LOW },
+      { type: 'add', hash: hashOf(LOW) },
+    ]);
   });
 });

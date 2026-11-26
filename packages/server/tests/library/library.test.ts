@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { availability, isMonitored, mergeEpisodes, seriesCounts, titleKey } from '../../src/library/library.ts';
 import { metadataRefreshHandler } from '../../src/jobs/metadata-refresh.ts';
-import { createQueue } from '../../src/library/downloads/queue.ts';
+import { createQueue, itemFor } from '../../src/library/downloads/queue.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { enqueue } from '../../src/core/jobs.ts';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
@@ -371,17 +371,25 @@ describe('library API', () => {
     const queue = createQueue(createEvents(), () => {});
     const old = queue.ensure('tv:2000', 2, 1);
     queue.request(old, 'test');
+    const turn = itemFor(old)!;
+    expect(turn.entryIds).toEqual([old.id]);
     queue.endAttempt(old, 'cancelled');
     move(queue, old, { branch: 'cancelled', reason: null }, 'title removed');
     const job = enqueue({ type: 'queue.search', payload: { titleKey: 'tv:2000', season: 2, entryIds: [old.id] }, dedupeKey: 'search:tv:2000:2:tv:2000:2x1' });
 
-    await app.del('/library/tv:2000');
-    expect((await app.post('/library', body)).status).toBe(201);
+    try {
+      expect((await app.del('/library/tv:2000')).status).toBe(200);
+      const afterRemoval = app.db.data.queueItems[turn.id];
+      expect((await app.post('/library', body)).status).toBe(201);
 
-    // The targets of the record that was removed do not return with the title.
-    expect(Object.values(app.db.data.queue).filter((entry) => entry.titleKey === 'tv:2000')).toEqual([]);
-    expect(app.db.data.jobs[job.id]).toBeUndefined();
-    await app.del('/library/tv:2000');
+      expect(Object.values(app.db.data.queue).filter((entry) => entry.titleKey === 'tv:2000')).toEqual([]);
+      expect(app.db.data.jobs[job.id]).toBeUndefined();
+      expect(app.db.data.queueItems[turn.id]).toBeUndefined();
+      expect(afterRemoval).toBeUndefined();
+    } finally {
+      await app.del('/library/tv:2000');
+      delete app.db.data.queueItems[turn.id];
+    }
   });
 
   it('starts the first search as soon as the episodes arrive', async () => {
@@ -546,21 +554,49 @@ describe('library API', () => {
     const title = app.db.data.titles['tv:1396']!;
     const episode = title.episodes.find((one) => one.season === 1 && one.number === 2)!;
     const before = { override: episode.override, fileId: episode.fileId };
-    const id = 'tv:1396:1x2';
+    const queue = createQueue(createEvents(), () => {});
+    const discarded = queue.ensure(title.key, 1, 2);
+    const sibling = queue.ensure(title.key, 1, 3);
+    queue.request(discarded, 'test');
+    queue.request(sibling, 'test');
+    const turn = itemFor(discarded)!;
+    const hash = '1'.repeat(40);
+    const keptFile = 'Breaking.Bad.S01E03.mkv';
+    queue.updateItem(turn, {
+      emptySearches: { [discarded.id]: 1, [sibling.id]: 2 },
+      selected: { [hash]: {
+        hash,
+        release: {
+          guid: 'pack', indexerId: 1, indexerName: 'Tracker', title: 'Breaking.Bad.S01.1080p.WEB-DL',
+          sizeBytes: 1_000, infoHash: hash, link: null, magnet: `magnet:?xt=urn:btih:${hash}`, kind: 'pack', seeders: 1, manual: false,
+        },
+        source: { magnet: `magnet:?xt=urn:btih:${hash}` },
+        numberingRevision: 0,
+        matches: { [discarded.id]: 'Breaking.Bad.S01E02.mkv', [sibling.id]: keptFile },
+        clientId: null,
+        status: 'prepared',
+      } },
+    });
     app.db.data.files['discard-file'] = {
       id: 'discard-file', titleKey: title.key, path: 'Breaking Bad/S01E02.mkv', sizeBytes: 1, mtimeMs: 1,
       episodes: [{ season: 1, number: 2 }, { season: 1, number: 3 }], missing: true, addedAt: Date.now(),
     } as never;
     episode.fileId = 'discard-file';
-    app.db.data.queue[id] = entryOf({ id, titleKey: title.key, season: 1, number: 2 }) as never;
     try {
       expect((await app.del('/library/tv:1396/episodes/1/2')).status).toBe(200);
       expect(episode).toMatchObject({ override: 'unmonitored', fileId: null });
       expect(isMonitored(title, episode)).toBe(false);
-      expect(app.db.data.queue[id]).toBeUndefined();
+      expect(app.db.data.queue[discarded.id]).toBeUndefined();
       expect(app.db.data.files['discard-file']!.episodes).toEqual([{ season: 1, number: 3 }]);
+      expect(app.db.data.queue[sibling.id]).toBeDefined();
+      const kept = app.db.data.queueItems[turn.id]!;
+      expect(kept.entryIds).toEqual([sibling.id]);
+      expect(kept.emptySearches).toEqual({ [sibling.id]: 2 });
+      expect(kept.selected[hash]?.matches).toEqual({ [sibling.id]: keptFile });
     } finally {
-      delete app.db.data.queue[id];
+      delete app.db.data.queue[discarded.id];
+      delete app.db.data.queue[sibling.id];
+      delete app.db.data.queueItems[turn.id];
       delete app.db.data.files['discard-file'];
       episode.override = before.override;
       episode.fileId = before.fileId;
@@ -659,7 +695,14 @@ describe('library API', () => {
 
   it('removes a title and leaves the files alone', async () => {
     app.db.data.titles['movie:603']!.fileId = 'file-1';
+    const queue = createQueue(createEvents(), () => {});
+    const entry = queue.ensure('movie:603', null, null);
+    queue.request(entry, 'test');
+    const turn = itemFor(entry)!;
+    expect(turn.entryIds).toEqual([entry.id]);
     expect((await app.del('/library/movie:603')).status).toBe(200);
     expect(app.db.data.titles['movie:603']).toBeUndefined();
+    expect(app.db.data.queue[entry.id]).toBeUndefined();
+    expect(app.db.data.queueItems[turn.id]).toBeUndefined();
   });
 });

@@ -37,15 +37,16 @@ type Options = {
   apiKey?: string;
   // The save folder of the client. A torrent that ladarr adds goes there.
   savePath?: string;
+  onAcquisition?: (event: { type: 'magnet' | 'add'; hash: string | null }) => void;
 };
 
 // A small qBittorrent for tests. It speaks the part of the WebUI API that ladarr uses.
-export async function startFakeQbit({ flavor = '5', username = 'admin', password = 'secret', apiKey, savePath = '/downloads' }: Options = {}) {
+export async function startFakeQbit({ flavor = '5', username = 'admin', password = 'secret', apiKey, savePath = '/downloads', onAcquisition }: Options = {}) {
   const torrents = new Map<string, FakeTorrent>();
   const categories = new Map<string, { name: string; savePath: string }>();
   const trackers = new Map<string, FakeTracker[]>();
   // The files of a torrent, with the part of each one that the client reports. A torrent without an entry here has one file.
-  const fileLists = new Map<string, { name: string; size: number; progress: number }[]>();
+  const fileLists = new Map<string, { name: string; size: number; progress?: number }[]>();
   const metadata = new Map<string, string[] | null>();
   // The fields of /app/preferences that the tests use, and one that ladarr must never pass on.
   const preferences: Record<string, unknown> = { queueing_enabled: true, max_active_downloads: 3, max_active_torrents: 5, max_active_uploads: 3, web_ui_password: 'must-not-leave' };
@@ -111,6 +112,7 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
     if (path === 'app/preferences') return send(200, preferences);
     if (path === 'torrents/fetchMetadata') {
       const hash = magnetHash(form.source ?? '');
+      onAcquisition?.({ type: 'magnet', hash: hash ?? null });
       if (!hash || !metadata.has(hash)) return send(404);
       const paths = metadata.get(hash);
       return paths ? send(200, { infohash_v1: hash, info: { files: paths.map((path) => ({ path })) } }) : send(202, { infohash_v1: hash });
@@ -125,23 +127,30 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
       return send(200);
     }
     if (path === 'torrents/add') {
-      if (control.failAdds) return send(200, 'Fails.');
       let hash: string | undefined;
+      try {
+        hash = files[0] ? infoHashOf(files[0]) : magnetHash(form.urls ?? '');
+      } catch {
+        // An unreadable submission is still an add attempt.
+      }
+      onAcquisition?.({ type: 'add', hash: hash ?? null });
+      if (control.failAdds) return send(200, 'Fails.');
+      if (!hash) return send(415);
       let name = 'torrent';
       if (files[0]) {
         receivedTorrents.push(files[0]);
-        hash = infoHashOf(files[0]);
         const text = files[0].toString('latin1');
         const at = text.indexOf('4:name') + 6;
         const colon = text.indexOf(':', at);
         name = text.slice(colon + 1, colon + 1 + Number(text.slice(at, colon)));
-      } else if (form.urls) hash = magnetHash(form.urls);
-      if (!hash) return send(415);
+      }
       const existing = torrents.has(hash);
       if (!existing) {
         if (files[0] && !fileLists.has(hash)) {
           const manifest = torrentFiles(files[0]);
-          if (manifest.some((file) => file.path.includes('/'))) fileLists.set(hash, manifest.map((file) => ({ name: file.path, size: file.length, progress: 0 })));
+          if (manifest.some((file) => file.path.includes('/'))) fileLists.set(hash, manifest.map((file) => ({
+            name: file.path, size: file.length, progress: manifest.length === 1 ? undefined : 0,
+          })));
         }
         torrents.set(hash, { hash, name, size: 1_000_000, progress: 0, state: 'metaDL', category: form.category ?? '', tags: form.tags ?? '', save_path: form.savepath ?? savePath, content_path: `${form.savepath ?? savePath}/${name}`, dlspeed: 0, eta: 8640000, num_seeds: 0, num_leechs: 0, added_on: Math.floor(Date.now() / 1000) });
       }
@@ -164,7 +173,8 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
     if (path === 'torrents/files') {
       const torrent = torrents.get(url.searchParams.get('hash') ?? '');
       if (!torrent) return send(404);
-      return send(200, fileLists.get(torrent.hash) ?? [{ name: `${torrent.name}/${torrent.name}.mkv`, size: torrent.size, progress: torrent.progress }]);
+      return send(200, fileLists.get(torrent.hash)?.map((file) => ({ ...file, progress: file.progress ?? torrent.progress }))
+        ?? [{ name: `${torrent.name}/${torrent.name}.mkv`, size: torrent.size, progress: torrent.progress }]);
     }
     if (path === 'torrents/delete') {
       for (const hash of form.hashes!.split('|')) torrents.delete(hash);

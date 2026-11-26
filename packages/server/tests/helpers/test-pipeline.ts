@@ -28,29 +28,33 @@ import { createWorker } from '../../src/core/worker.ts';
 import { startTestApp } from './test-app.ts';
 import type { ClientConfig, Db, Handler, Indexer, ProbeResult, StateHook } from '../../src/types.ts';
 
-// Series fixtures have video files. The default season fixture contains three episodes.
-function seriesFiles(name: string) {
+function releaseFiles(name: string) {
   const season = /(?:^|\.)S(\d{2})(E\d+)?(?:\.|$)/i.exec(name);
-  if (!season) return undefined;
-  return season[2] ? [`${name}.mkv`] : [1, 2, 3].map((n) => `Show.Name.S${season[1]}E0${n}.mkv`);
+  if (season) return season[2] ? [`${name}.mkv`] : [1, 2, 3].map((n) => `Show.Name.S${season[1]}E0${n}.mkv`);
+  if (/\.(?:19|20)\d{2}\.\d{3,4}p\./i.test(name)) return [`${name}.mkv`];
 }
 
 export const makeTorrent = (name: string, files?: string[], comment?: string) => {
-  files ??= seriesFiles(name);
-  const list = files ? `5:filesl${files.map((file) => `d6:lengthi1000e4:pathl${file.split('/').map((part) => `${part.length}:${part}`).join('')}ee`).join('')}e` : '6:lengthi1000e';
+  files ??= releaseFiles(name);
+  const fileLength = 1000;
+  const pieceLength = 16_384;
+  const pieces = 'A'.repeat(20 * Math.ceil((files?.length ?? 1) * fileLength / pieceLength));
+  const list = files ? `5:filesl${files.map((file) => `d6:lengthi${fileLength}e4:pathl${file.split('/').map((part) => `${part.length}:${part}`).join('')}ee`).join('')}e` : `6:lengthi${fileLength}e`;
   // The comment is a top-level key, outside the info dictionary, so the info hash does not change.
   const commentPart = comment === undefined ? '' : `7:comment${Buffer.byteLength(comment, 'utf8')}:${comment}`;
-  return Buffer.from(`d8:announce5:http:${commentPart}4:infod${list}4:name${name.length}:${name}12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAee`);
+  return Buffer.from(`d8:announce5:http:${commentPart}4:infod${list}4:name${name.length}:${name}12:piece lengthi${pieceLength}e6:pieces${pieces.length}:${pieces}ee`);
 };
 export const hashOf = (name: string, files?: string[]) => infoHashOf(makeTorrent(name, files));
 
-export type FakeItem = { title: string; size: number; seeders?: number; category?: number; bad?: boolean; files?: string[]; comment?: string };
+export type FakeItem = { title: string; size: number; seeders?: number; category?: number; bad?: boolean; files?: string[]; comment?: string; torrent?: Buffer };
+type TrackerEvent = { type: 'search'; season: string | null; episode: string | null } | { type: 'torrent'; title: string };
 
 const xmlEscape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
 // A Torznab server like the one in the indexer manager. `items` is what every search returns.
-export async function startFakeTracker() {
+export async function startFakeTracker(onAcquisition?: (event: TrackerEvent) => void) {
   const state = { items: [] as FakeItem[], searches: [] as URL[], downloads: [] as string[], fail: false, answer: undefined as ((url: URL) => FakeItem[]) | undefined };
+  const advertised = new Map<string, FakeItem>();
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url!, 'http://x');
     const port = (server.address() as AddressInfo).port;
@@ -58,16 +62,19 @@ export async function startFakeTracker() {
     if (url.pathname.endsWith('/download')) {
       const file = url.searchParams.get('file')!;
       state.downloads.push(file);
-      const item = state.items.find((item) => item.title === file);
+      onAcquisition?.({ type: 'torrent', title: file });
+      const item = state.items.find((item) => item.title === file) ?? advertised.get(file);
       if (item?.bad) return void res.end('<html>not a torrent</html>');
-      return void res.end(makeTorrent(file, item?.files, item?.comment));
+      return void res.end(item?.torrent ?? makeTorrent(file, item?.files, item?.comment));
     }
     const t = url.searchParams.get('t');
     if (t === 'caps') {
       return void res.end(`<caps><searching><search available="yes" supportedParams="q"/><tv-search available="yes" supportedParams="q,season,ep"/><movie-search available="yes" supportedParams="q,year,imdbid"/></searching><categories><category id="5000" name="TV"/><category id="2000" name="Movies"/></categories></caps>`);
     }
     state.searches.push(url);
+    onAcquisition?.({ type: 'search', season: url.searchParams.get('season'), episode: url.searchParams.get('ep') });
     const items = state.answer ? state.answer(url) : state.items;
+    for (const item of items) advertised.set(item.title, item);
     res.end(
       `<?xml version="1.0"?><rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed"><channel>${items
         .map(
@@ -112,9 +119,12 @@ type Options = {
   checkDelayMs?: number;
   // The hook of the queue, for a test that watches the state changes.
   onState?: StateHook;
+  onAcquisition?: (event: AcquisitionEvent) => void;
   // More job handlers, for a test that needs the metadata or the first search.
   handlers?: (context: { db: Db; events: ReturnType<typeof createEvents>; queue: ReturnType<typeof createQueue>; finder: ReturnType<typeof createFinder> }) => Record<string, Handler>;
 };
+
+type AcquisitionEvent = TrackerEvent | { type: 'magnet' | 'add'; hash: string | null };
 
 // The whole path with real servers: Torznab and qBittorrent are fakes on local ports, the folders are real.
 export async function startPipeline(options: Options = {}) {
@@ -128,8 +138,13 @@ export async function startPipeline(options: Options = {}) {
     tv: { id: 'tv', path: folders.tv, mediaType: 'tv', dev: statSync(folders.tv).dev },
     movie: { id: 'movie', path: folders.movies, mediaType: 'movie', dev: statSync(folders.movies).dev },
   };
-  const tracker = await startFakeTracker();
-  const qbit = await startFakeQbit({ savePath: folders.downloads });
+  const acquisition: AcquisitionEvent[] = [];
+  function record(event: AcquisitionEvent) {
+    acquisition.push(event);
+    options.onAcquisition?.(event);
+  }
+  const tracker = await startFakeTracker(record);
+  const qbit = await startFakeQbit({ savePath: folders.downloads, onAcquisition: record });
   db.data.indexers[1] = indexerFixture({ baseUrl: `http://127.0.0.1:${tracker.port}/1/`, ...options.indexer });
   const config: ClientConfig = { id: 'client-1', name: 'qBittorrent', type: 'qbittorrent', host: '127.0.0.1', port: qbit.port, auth: { type: 'password', username: 'admin', password: 'secret' }, enabled: true, maxDownloads: 0 };
   db.data.downloadClients = [config];
@@ -202,6 +217,7 @@ export async function startPipeline(options: Options = {}) {
     published,
     tracker,
     qbit,
+    acquisition,
     complete,
     // The HTTP app on top of the same services, with a signed-in owner.
     api: (extra: Parameters<typeof startTestApp>[0] = {}) => startTestApp({ events, enqueue: (input) => real.enqueue(input), cancelJob: (id) => real.cancel(id), services: { queue, finder, poller, clients, importStatus }, ...extra }, db),

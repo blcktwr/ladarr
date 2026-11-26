@@ -1,6 +1,5 @@
 import { db } from '../../core/db.ts';
-import { deleteItemLog } from '../../core/log.ts';
-import { forgetSource } from '../downloads/queue.ts';
+import { dropTargets } from './remove.ts';
 import { titleKey } from '../library.ts';
 import { refreshJob } from '../metadata.ts';
 import { scanJob } from '../scan.ts';
@@ -18,14 +17,10 @@ export class AddError extends Error {
 
 // A title that comes back starts with an empty queue. The targets of the record that was removed before do not return.
 function forgetTargets(key: string) {
-  const ids = new Set(Object.values(db.data.queue).filter((entry) => entry.titleKey === key).map((entry) => entry.id));
-  if (ids.size === 0) return;
-  for (const id of ids) {
-    const entry = db.data.queue[id];
-    if (entry?.release?.uploadPath && entry.source) forgetSource(entry);
-    delete db.data.queue[id];
-    deleteItemLog(id);
-  }
+  const entries = Object.values(db.data.queue).filter((entry) => entry.titleKey === key);
+  if (!entries.length) return;
+  const ids = new Set(entries.map((entry) => entry.id));
+  dropTargets(entries);
   for (const job of Object.values(db.data.jobs)) {
     const entryIds = (job.payload as { entryIds?: string[] } | null)?.entryIds;
     if (job.state === 'waiting' && entryIds?.some((id) => ids.has(id))) delete db.data.jobs[job.id];

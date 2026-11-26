@@ -145,8 +145,12 @@ export function createQbittorrent(config: ClientConfig, { fetch: fetchImpl = fet
     if (!signedIn) await login();
     let res = await send(path, init);
     if (res.status === 403 && config.auth.type === 'password') {
-      await login();
-      res = await send(path, init);
+      signedIn = false;
+      // The send handler checks for the hash before it repeats an add.
+      if (path !== 'torrents/add') {
+        await login();
+        res = await send(path, init);
+      }
     }
     if (res.status === 404 && allow404) return res;
     if (!res.ok) throw new ClientError(res.status === 403 || res.status === 401 ? 'rejected' : 'unexpected', `The download client answered with status ${res.status}.`);
@@ -178,15 +182,17 @@ export function createQbittorrent(config: ClientConfig, { fetch: fetchImpl = fet
 
     // Adds a torrent. The caller must read the client again when this fails with 'unreachable', because the add may have worked.
     // `limits` are the share limits of one torrent. The time is in minutes. The client acts at the limit, as its own settings say.
-    async add(source: { torrent: Buffer } | { magnet: string }, limits?: { ratio: number | null; minutes: number | null } | null) {
+    async add(source: { torrent: Buffer } | { magnet: string }, limits?: { ratio: number | null; minutes: number | null } | null, tag?: string) {
       const form = new FormData();
       if ('torrent' in source) form.set('torrents', new Blob([new Uint8Array(source.torrent)], { type: 'application/x-bittorrent' }), 'release.torrent');
       else form.set('urls', source.magnet);
       if (limits?.ratio) form.set('ratioLimit', String(limits.ratio));
       if (limits?.minutes) form.set('seedingTimeLimit', String(Math.round(limits.minutes)));
+      if (tag) form.set('tags', tag);
       const res = await call('torrents/add', { method: 'POST', body: form });
-      // "Fails." also means that the torrent is in the client already.
-      if ((await res.text()).trim() === 'Fails.') throw new ClientError('rejected', 'The download client did not accept the torrent.');
+      const answer = (await res.text()).trim();
+      if (answer === 'Fails.') throw new ClientError('rejected', 'The download client did not accept the torrent.');
+      if (answer !== 'Ok.' && answer !== '') throw new JobError('uncertain', 'The download client sent an unknown add response.');
     },
 
     // Every torrent of the client.
@@ -194,7 +200,7 @@ export function createQbittorrent(config: ClientConfig, { fetch: fetchImpl = fet
 
     // One torrent by hash. Null when the client does not have it.
     async find(hash: string) {
-      return (await info({ hashes: hash }))[0] ?? null;
+      return (await info({ hashes: hash })).find((torrent) => torrent.hash === hash.toLowerCase()) ?? null;
     },
 
     // Every torrent of the client, in any category. For the choice of a download to attach.

@@ -3,6 +3,7 @@ import { catalog, itemFields, log } from '../../core/log.ts';
 import { withOutboundRequests } from '../../core/outbound.ts';
 import { MAX_IMPORT_ATTEMPTS } from '../imports/limits.ts';
 import { inspectCoverage } from '../coverage.ts';
+import { acceptedPath, matchPath } from './file-evidence.ts';
 import { ClientError } from './qbittorrent.ts';
 import { addedByApp, isActive, phaseOfEntry } from './queue.ts';
 import type { ClientHandle, ClientStatus, PollerDeps, QueueEntry, Torrent, Transfer } from '../../types.ts';
@@ -79,10 +80,10 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
 
   // The part of the torrent that each target has, and its file. The client reports the part of each file, and a pack
   // has one file for each episode. An episode without a matching file has no progress.
-  async function fileParts(handle: ClientHandle, hash: string, entries: QueueEntry[]) {
+  async function fileParts(handle: ClientHandle, torrent: Torrent, entries: QueueEntry[]) {
     let files: { name: string; sizeBytes: number; progress: number }[];
     try {
-      files = await handle.api.files(hash);
+      files = await handle.api.files(torrent.hash);
     } catch {
       // A failed read of the files does not stop the poll.
       return null;
@@ -91,26 +92,26 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
     const found: Record<string, { name: string; sizeBytes: number }> = {};
     const absent = new Set<string>();
     const names = files.map((file) => file.name);
+    const findPath = matchPath(files, (file) => file.name, torrent);
     const manifests = new Map<string, ReturnType<typeof inspectCoverage>>();
     for (const entry of entries) {
       const upload = entry.release?.uploadPath;
       const manual = entry.manualMatch?.file;
+      const path = manual ?? acceptedPath(entry);
       const title = db.data.titles[entry.titleKey];
       const numbering = entry.numbering === undefined ? title?.numbering : entry.numbering;
       const key = JSON.stringify([entry.titleKey, numbering]);
-      if (title && entry.number !== null && !upload && !manual && !manifests.has(key)) manifests.set(key, inspectCoverage(names, title, numbering));
+      if (title && entry.number !== null && !upload && !path && !manifests.has(key)) manifests.set(key, inspectCoverage(names, title, numbering));
       const file =
-        upload && !manual ? files.find((item) => item.name === upload) :
-        entry.number === null && !manual
+        path ? findPath(path) :
+        upload ? files.find((item) => item.name === upload) :
+        entry.number === null
           ? [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)[0]
-          : files.find((item) => {
-              if (manual) return item.name === manual || item.name.endsWith(`/${manual}`);
-              return manifests.get(key)?.byFile.get(item.name)?.some((ep) => ep.season === entry.season && ep.number === entry.number);
-            });
+          : files.find((item) => manifests.get(key)?.byFile.get(item.name)?.some((ep) => ep.season === entry.season && ep.number === entry.number));
       if (file) {
         progress[entry.id] = file.progress;
         found[entry.id] = { name: file.name.split('/').at(-1)!, sizeBytes: file.sizeBytes };
-      } else if (entry.season !== null && entry.number !== null && manifests.get(key)?.status({ season: entry.season, number: entry.number }) === 'absent') {
+      } else if (!path && entry.season !== null && entry.number !== null && manifests.get(key)?.status({ season: entry.season, number: entry.number }) === 'absent') {
         absent.add(entry.id);
       }
     }
@@ -159,7 +160,7 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
       // file, but the names can be unknown after a restart, so they are read once.
       const knownFiles = transfers.get(hash)?.entryFiles;
       const revisions = new Map(group.map((entry) => [entry, entry.revision]));
-      const parts = !torrent.complete || !knownFiles || !Object.keys(knownFiles).length ? await fileParts(handle, hash, group) : null;
+      const parts = !torrent.complete || !knownFiles || !Object.keys(knownFiles).length ? await fileParts(handle, torrent, group) : null;
       observe(group, hash, torrent, parts?.progress ?? null, parts?.files ?? null);
       for (const entry of group) {
         if (entry.state.kind === 'blocked' || db.data.queue[entry.id] !== entry || entry.revision !== revisions.get(entry)) continue;

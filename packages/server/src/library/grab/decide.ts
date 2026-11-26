@@ -3,6 +3,7 @@ import { catalogPoints, normalizeNumbering, rangeOfCatalog, releasePoint } from 
 import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE } from './quality.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import { magnetHash } from './torrent.ts';
+import { hashOfMagnet, linkOf } from './source.ts';
 import type { Covered, DecideContext, Decision, Episode, ExplainedDecision, Numbering, Profile, RawRelease, Title, Want } from '../../types.ts';
 
 // The text for each code. It is the key of the web i18n, and it names the affected title in the user interface, so it has no title in it.
@@ -26,6 +27,10 @@ export const REJECTION_TEXT: Record<string, string> = {
   upgrade_needs_single: 'The release is for several episodes. It cannot replace the file of one episode.',
   already_downloading: 'This release is in the queue.',
   no_download_link: 'The release has no download link.',
+  invalid_torrent: 'The torrent is invalid.',
+  invalid_magnet: 'The magnet link is invalid.',
+  no_video: 'The torrent has no video file.',
+  metadata_unavailable: 'The torrent file list is not available.',
   indexer_removed: 'The indexer of the release was removed.',
   quality_rejected: 'The quality is not good enough (for example a camera copy).',
   no_seeders: 'The release has no seeders.',
@@ -40,7 +45,10 @@ const alias = (title: Title) => [title.meta.title, title.meta.originalTitle, ...
 
 // A manual choice takes any release, also one of another title, but it can not invent the episode that the release
 // holds. A person says which episode a file has through the match of the import.
-const MANUAL_KEEPS = new Set(['wrong_season', 'wrong_episode', 'not_an_episode', 'not_a_pack', 'multi_season_pack', 'daily_ambiguous', 'pack_covers_others']);
+const MANUAL_KEEPS = new Set(['wrong_season', 'wrong_episode', 'not_an_episode', 'not_a_pack', 'multi_season_pack', 'daily_ambiguous', 'pack_covers_others', 'no_download_link', 'invalid_magnet', 'indexer_removed', 'already_downloading']);
+const UNUSABLE = new Set(['no_download_link', 'invalid_magnet', 'invalid_torrent', 'indexer_removed', 'metadata_unavailable', 'no_video']);
+
+export const manualRejection = (code: string) => UNUSABLE.has(code) || MANUAL_KEEPS.has(code) || code === 'file_unmapped';
 
 // The year when the title started. A release cannot be older than the title that it names, and a later year can be the
 // year of a season.
@@ -58,7 +66,7 @@ export function titleMatches(parsedTitle: string, title: Title) {
   return wanted !== '' && alias(title).includes(wanted);
 }
 
-export function decide(release: RawRelease, want: Want, ctx: DecideContext): Decision {
+export function decide(release: RawRelease, want: Want, ctx: DecideContext, { inspect = false, verified }: { inspect?: boolean; verified?: Covered[] } = {}): Decision {
   const { title } = want;
   const parsed = parseRelease(release.title);
   const rejections: string[] = [];
@@ -149,6 +157,7 @@ export function decide(release: RawRelease, want: Want, ctx: DecideContext): Dec
   if (want.kind !== 'movie' && parsed.year !== null && parsed.year < (firstYear(title) ?? parsed.year)) reject('year_mismatch');
 
   // Quality and size.
+  if (verified) covers = verified;
   const profiles = profilesFor(ctx.quality, title);
   const runtimeOf = (episode: Episode | undefined) => episode?.runtime ?? title.meta.runtime;
   const runtimes =
@@ -162,10 +171,10 @@ export function decide(release: RawRelease, want: Want, ctx: DecideContext): Dec
   const quality = evaluateChain(profiles, sizes, { source: parsed.source, resolution: parsed.resolution, sizeBytes: release.sizeBytes, audioLanguages: audio?.length ? audio : null }, { runtimeMinutes, audio: ctx.settings.audio });
   // A pack can hold fewer episodes than TMDB gives the season, so its total needs only the size of one episode of the
   // quality. The files of the download say how many episodes it really holds.
-  const oneEpisode = want.kind === 'season' && runtimeMinutes !== null ? Math.min(...(runtimes as number[])) : null;
+  const oneEpisode = !verified && want.kind === 'season' && runtimeMinutes !== null ? Math.min(...(runtimes as number[])) : null;
   const packFloor = oneEpisode ? release.sizeBytes / (1024 * 1024) / oneEpisode : null;
   const qualityRejections = quality.rejections.filter((code) => !(code === 'size_below_min' && packFloor !== null && quality.limits?.min != null && packFloor >= quality.limits.min));
-  if (!ctx.manual) rejections.push(...qualityRejections);
+  if (!ctx.manual) rejections.push(...qualityRejections.filter((code) => !(inspect && kind === 'pack' && !verified && (code === 'size_below_min' || code === 'size_above_max'))));
 
   // Policy of the library and of the indexer.
   const indexer = ctx.indexers[release.indexerId];
@@ -175,7 +184,8 @@ export function decide(release: RawRelease, want: Want, ctx: DecideContext): Dec
   // A release that the indexer reports with no seeders may never download. It stays a preference of the indexer, so a
   // person can take it by hand.
   if (!ctx.manual && indexer?.rejectZeroSeeders && release.seeders === 0) reject('no_seeders');
-  if (!release.link && !release.magnet) reject('no_download_link');
+  if (!linkOf(release.link) && !release.magnet) reject('no_download_link');
+  else if (!linkOf(release.link) && release.magnet && !hashOfMagnet(release.magnet)) reject('invalid_magnet');
   // An answer can carry the magnet only, and the hash of that magnet is the hash of the torrent.
   const hash = release.infoHash ?? (release.magnet ? (magnetHash(release.magnet) ?? null) : null);
   if (hash && ctx.downloading(hash)) reject('already_downloading');
@@ -229,6 +239,11 @@ export function compareDecisions(a: Decision, b: Decision) {
 }
 
 export const bestOf = (decisions: Decision[]) => decisions.filter((d) => d.accepted).sort(compareDecisions)[0];
+
+export function compareRejected(a: Decision, b: Decision) {
+  const tier = (decision: Decision) => decision.rejections.some((code) => UNUSABLE.has(code)) ? 2 : decision.rejections.some(manualRejection) ? 1 : 0;
+  return tier(a) - tier(b) || a.rejections.length - b.rejections.length || compareDecisions(a, b);
+}
 
 // The codes that stopped the most releases, most frequent first.
 export function topRejections(decisions: Decision[], limit = 3) {

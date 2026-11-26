@@ -1,23 +1,17 @@
 import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
-import { describe } from '@ladarr/shared/queue';
-import { DAY_MS, itemJobs, jobLabel, queueTabCounts, shown } from '../../../helpers/queue.ts';
+import { DAY_MS, itemJobs, jobLabel, queueDescriptions, queueTabCounts } from '../../../helpers/queue.ts';
 import type { Poller } from '../../../types.ts';
 
 export function queueSummaryGet(poller: Poller): RequestHandler {
   return (_req, res) => {
-    // The counters count rows, so a badge equals the rows of its tab. A series counts once for each tab that holds one
-    // of its targets, as its row appears in each of those tabs.
     const counts = queueTabCounts();
     const working: Record<string, number> = {};
     let stopped = 0;
-    let targets = 0;
     let paused = 0;
-    for (const entry of Object.values(db.data.queue)) {
-      if (!shown(entry) || entry.clearedAt) continue;
-      targets++;
-      const description = describe(entry.state);
-      if (entry.state.kind === 'paused') paused++;
+    const { descriptions, targets } = queueDescriptions();
+    for (const description of descriptions) {
+      if (description.status === 'paused') paused++;
       // A target that cannot move without the user waits: it is blocked, paused, or waits for its next search.
       if (description.working) working[description.phase] = (working[description.phase] ?? 0) + 1;
       else if (description.status === 'stuck') stopped++;

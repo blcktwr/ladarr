@@ -1,7 +1,9 @@
-import { describe, isActiveState, phaseOf, type Phase, type Problem, type QueueState, type SearchOutcome, type WorkPhase } from '@ladarr/shared/queue';
+import { describe, isActiveState, itemId, phaseOf, type Phase, type Problem, type QueueState, type SearchOutcome, type WorkPhase } from '@ladarr/shared/queue';
 import { db } from '../../core/db.ts';
 import { catalog, deleteItemLog, itemFields } from '../../core/log.ts';
-import type { Attempt, Db, Events, QueueEntry, StateHook } from '../../types.ts';
+import type { Attempt, Events, QueueEntry, QueueTurn, SearchState, StateHook } from '../../types.ts';
+
+export { itemId };
 
 const MAX_HISTORY = 100;
 const MAX_ATTEMPTS_KEPT = 20;
@@ -19,6 +21,18 @@ export function newEntry(titleKey: string, season: number | null, number: number
   };
 }
 
+export function newTurn(titleKey: string, season: number | null, position: number, now: number): QueueTurn {
+  return {
+    id: itemId(titleKey, season), titleKey, season, position, entryIds: [],
+    state: { kind: 'queued' }, createdAt: now, stateSince: now, revision: 0, priority: null, nextAt: null,
+    clientHold: false, emptySearches: {}, lastEmptyRound: null, candidate: null, selected: {}, search: null,
+  };
+}
+
+export const getItem = (id: string) => db.data.queueItems[id];
+export const findItem = (titleKey: string, season: number | null) => getItem(itemId(titleKey, season));
+export const itemFor = (entry: Pick<QueueEntry, 'titleKey' | 'season'>) => findItem(entry.titleKey, entry.season);
+
 // An entry is active until it is available, or cancelled by the user.
 export const isActive = (entry: QueueEntry) => isActiveState(entry.state);
 
@@ -34,8 +48,12 @@ export const ownsUpload = (entry: QueueEntry) =>
 export function forgetSource(entry: QueueEntry) {
   entry.source = null;
   const hash = sourceHash(entry);
-  if (!hash) return;
-  for (const other of Object.values(db.data.queue)) if (other !== entry && other.source && sourceHash(other) === hash) return;
+  if (hash) forgetUnusedSource(hash);
+}
+
+export function forgetUnusedSource(hash: string) {
+  for (const entry of Object.values(db.data.queue)) if (entry.source && sourceHash(entry) === hash) return;
+  if (Object.values(db.data.queueItems).some((item) => item.selected[hash]?.source && item.selected[hash]?.status !== 'accepted')) return;
   delete db.data.torrents[hash];
 }
 
@@ -53,9 +71,30 @@ export const reasonOfEntry = (entry: QueueEntry) =>
 const EARLY: readonly Phase[] = ['queued', 'searching', 'fetching'];
 const sentThisRelease = (entry: QueueEntry) =>
   entry.release !== null && entry.history.some((event) => event.stage === 'sending' && event.detail === entry.release?.title);
+
+export function matchesSentTorrent(hash: string, addedAt: number) {
+  const sentAt = db.data.sentTorrents[hash];
+  return sentAt !== undefined && addedAt > 0 && addedAt === Math.floor(sentAt / 1_000) * 1_000
+    && db.data.downloadClients.filter(({ enabled }) => enabled).length === 1;
+}
+
+function rememberSent(entry: QueueEntry) {
+  const { release, transferHash: hash, clientId } = entry;
+  if (!hash || !clientId || !release || release.external || release.uploadPath || db.data.sentTorrents[hash] !== undefined) return;
+  const selected = itemFor(entry)?.selected[hash];
+  const accepted = selected?.status === 'accepted' && selected.clientId === clientId && !selected.release.external;
+  if (!accepted && !sentThisRelease(entry)) return;
+  const transfer = entry.history.find(({ stage, attempt }) => attempt === entry.attempt && (stage === 'downloading' || stage === 'importing'));
+  if (transfer) db.data.sentTorrents[hash] = transfer.at;
+}
+
 export function addedByApp(hash: string) {
   if (db.data.sentTorrents[hash]) return true;
-  const entries = Object.values(db.data.queue).filter((entry) => entry.transferHash === hash && !entry.release?.uploadPath);
+  if (Object.values(db.data.queueItems).some((item) => item.selected[hash]?.status === 'accepted' && !item.selected[hash]?.release.external)) return true;
+  const entries = Object.values(db.data.queue).filter((entry) => {
+    const selected = itemFor(entry)?.selected[hash];
+    return entry.transferHash === hash && !entry.release?.uploadPath && (!selected || selected.status === 'accepted');
+  });
   if (entries.some((entry) => entry.release?.external)) return false;
   return entries.some((entry) => !EARLY.includes(phaseOf(entry.state)) || sentThisRelease(entry));
 }
@@ -64,12 +103,32 @@ const clone = (state: QueueState): QueueState => (state.kind === 'blocked' ? { .
 
 const sameState = (a: QueueState, b: QueueState) => JSON.stringify(a) === JSON.stringify(b);
 
-// The permitted changes. A target that is available or cancelled leaves the queue, and only a new request takes it
-// back. Every other change is a step of the journey, a problem, or the pause of a step.
-function canEnter(from: QueueState, to: QueueState) {
+function canEnter(entry: QueueEntry, from: QueueState, to: QueueState) {
   if (from.kind === 'available' || from.kind === 'cancelled') return to.kind === 'queued' || to.kind === from.kind;
+  if (to.kind === 'downloading' && phaseOf(from) !== 'downloading') return Boolean(entry.transferHash && entry.clientId);
   return true;
 }
+
+function canEnterItem(item: QueueTurn, to: QueueState, accepted = false) {
+  const from = item.state;
+  if (from.kind === to.kind) return true;
+  if (from.kind === 'available' || from.kind === 'cancelled') return to.kind === 'queued';
+  if (to.kind === 'paused' || to.kind === 'cancelled' || to.kind === 'blocked') return true;
+  if (from.kind === 'paused') return from.resume === phaseOf(to);
+  if (to.kind === 'downloading') return (accepted || Object.values(item.selected).some((torrent) => torrent.status === 'accepted')) &&
+    (from.kind === 'fetching' || from.kind === 'importing' || (from.kind === 'blocked' && from.at === 'downloading') || accepted);
+  if (to.kind === 'importing') return from.kind === 'downloading' || (from.kind === 'blocked' && from.at === 'importing') || accepted;
+  if (to.kind === 'available') return item.entryIds.some((id) => db.data.queue[id]?.state.kind === 'available') &&
+    item.entryIds.every((id) => !db.data.queue[id] || !isActive(db.data.queue[id]!));
+  if (from.kind === 'blocked') return to.kind === 'fetching' || to.kind === 'queued';
+  if (from.kind === 'importing' || from.kind === 'downloading') return to.kind === 'queued' || to.kind === 'fetching';
+  if (to.kind === 'queued') return true;
+  if (to.kind === 'searching') return from.kind === 'queued' || from.kind === 'waiting' || from.kind === 'fetching';
+  if (to.kind === 'fetching') return from.kind === 'searching';
+  return to.kind === 'waiting' && (from.kind === 'searching' || from.kind === 'fetching');
+}
+
+type ItemPatch = Partial<Pick<QueueTurn, 'candidate' | 'selected' | 'search' | 'nextAt' | 'clientHold' | 'emptySearches'>>;
 
 const statusText = (state: QueueState) => describe(state).status;
 
@@ -85,12 +144,81 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     if (ids.length) events.publish('queue.changed', { cursor: db.data.queueRev, ids: ids.slice(0, 500), overflow: ids.length > 500 });
   }
 
-  // Tells the pages that one target changed. A state change and an observation both use it.
-  function touch(entry: QueueEntry) {
-    entry.revision = ++db.data.queueRev;
-    changed.add(entry.id);
+  function publish(ids: string[]) {
+    for (const id of ids) changed.add(id);
     timer ??= setTimeout(flush, FLUSH_MS);
     persist();
+  }
+
+  function touch(entry: QueueEntry) {
+    entry.revision = ++db.data.queueRev;
+    publish([entry.id]);
+  }
+
+  function touchItem(item: QueueTurn) {
+    item.revision = ++db.data.queueRev;
+    publish(item.entryIds);
+  }
+
+  function ensureItem(entry: QueueEntry) {
+    const id = itemId(entry.titleKey, entry.season);
+    const item = db.data.queueItems[id] ??= newTurn(entry.titleKey, entry.season, db.data.queueItemSeq++, entry.createdAt);
+    if (!item.entryIds.includes(entry.id)) item.entryIds.push(entry.id);
+    return item;
+  }
+
+  function changeItem(item: QueueTurn, state: QueueState, accepted = false) {
+    if (getItem(item.id) !== item || sameState(item.state, state) || !canEnterItem(item, state, accepted)) return false;
+    item.state = state;
+    item.stateSince = Date.now();
+    if (state.kind !== 'waiting' && state.kind !== 'paused') item.nextAt = null;
+    if (state.kind === 'cancelled' || state.kind === 'available' || state.kind === 'blocked') item.clientHold = false;
+    return true;
+  }
+
+  function transitionItem(item: QueueTurn, state: QueueState) {
+    if (!changeItem(item, state)) return false;
+    touchItem(item);
+    return true;
+  }
+
+  function updateItem(item: QueueTurn, patch: ItemPatch) {
+    if (getItem(item.id) !== item) return false;
+    Object.assign(item, patch);
+    touchItem(item);
+    return true;
+  }
+
+  function holdClient(item: QueueTurn, held: boolean) {
+    if (held && !['searching', 'fetching', 'downloading', 'importing'].includes(item.state.kind)) return false;
+    return held !== item.clientHold && updateItem(item, { clientHold: held });
+  }
+
+  function requeueItem(item: QueueTurn, outcome: SearchOutcome, nextAt: number | null, search?: SearchState) {
+    const state = { kind: 'waiting', outcome } as const;
+    if (getItem(item.id) !== item || !canEnterItem(item, state)) return false;
+    changeItem(item, state);
+    if (search) item.search = search;
+    item.position = db.data.queueItemSeq++;
+    item.nextAt = nextAt;
+    item.clientHold = false;
+    touchItem(item);
+    return true;
+  }
+
+  function emptySearch(item: QueueTurn, roundId: string, entryIds: readonly string[], nextAt: number | null, search?: SearchState) {
+    if (getItem(item.id) !== item || item.lastEmptyRound === roundId || item.state.kind !== 'searching') return false;
+    item.lastEmptyRound = roundId;
+    if (search) item.search = search;
+    let stopped: QueueEntry | undefined;
+    for (const id of new Set(entryIds)) {
+      const entry = db.data.queue[id];
+      if (!entry || entry.season === null || itemFor(entry) !== item || !isActive(entry)) continue;
+      const count = item.emptySearches[id] = (item.emptySearches[id] ?? 0) + 1;
+      if (count >= 3) stopped ??= entry;
+    }
+    if (stopped) return transitionItem(item, { kind: 'blocked', at: 'searching', problem: { code: 'no_results', detail: stopped.id } });
+    return requeueItem(item, 'no_results', nextAt);
   }
 
   function ensure(titleKey: string, season: number | null, number: number | null): QueueEntry {
@@ -102,15 +230,67 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     return entry;
   }
 
+  function transferProgress(entry: QueueEntry, before: QueueState, next: QueueState) {
+    if (!['available', 'cancelled', 'paused', 'downloading', 'importing', 'blocked'].includes(next.kind) && before.kind !== 'paused') return;
+    let item = itemFor(entry);
+    const wasAdmitted = item?.entryIds.includes(entry.id);
+    if (!item || !wasAdmitted) {
+      if (next.kind !== 'downloading' && next.kind !== 'importing') return;
+      item = ensureItem(entry);
+    }
+    const others = item.entryIds.flatMap((id) => {
+      const other = db.data.queue[id];
+      return other && other !== entry && isActive(other) ? [other] : [];
+    });
+    if (next.kind === 'available' && !others.length) {
+      transitionItem(item, next);
+    } else if (next.kind === 'cancelled' && !others.length) {
+      transitionItem(item, { kind: 'cancelled', at: phaseOf(item.state) });
+    } else if (next.kind === 'paused' && others.every((other) => other.state.kind === 'paused')) {
+      transitionItem(item, { kind: 'paused', resume: phaseOf(item.state), problem: item.state.kind === 'blocked' ? item.state.problem : null });
+    } else if (item.state.kind === 'paused' && before.kind === 'paused' && next.kind !== 'paused' && next.kind !== 'cancelled') {
+      const { resume, problem } = item.state;
+      if (resume === 'queued' && item.nextAt !== null) {
+        transitionItem(item, { kind: 'waiting', outcome: item.search?.result === 'no_results' ? 'no_results' : 'unspecified' });
+      } else {
+        if (problem && resume !== 'available') transitionItem(item, { kind: 'blocked', at: resume, problem });
+        else if (resume === 'available') transitionItem(item, { kind: 'available' });
+        else transitionItem(item, { kind: resume });
+      }
+    } else if ((next.kind === 'downloading' || next.kind === 'importing') && item.state.kind !== 'paused' && item.state.kind !== 'blocked' && item.state.kind !== 'cancelled') {
+      const torrent = entry.transferHash && item.selected[entry.transferHash];
+      const accepted = Boolean(entry.transferHash && entry.clientId);
+      if (torrent && accepted && torrent.status !== 'accepted') {
+        torrent.status = 'accepted';
+        torrent.clientId = entry.clientId;
+        torrent.source = null;
+        touchItem(item);
+      }
+      const stillDownloading = Object.values(item.selected).some((source) => source.status === 'prepared' || source.status === 'uncertain') ||
+        others.some((other) => other.state.kind === 'downloading');
+      if (next.kind === 'importing' && stillDownloading) return;
+      const acquiring = ['queued', 'waiting', 'searching', 'fetching'].includes(item.state.kind);
+      const otherAcquisition = others.some((other) => ['queued', 'waiting', 'searching', 'fetching'].includes(other.state.kind));
+      if (wasAdmitted && acquiring && otherAcquisition && !torrent) return;
+      if ((accepted || next.kind === 'importing') && changeItem(item, next, true)) touchItem(item);
+    } else if (item.state.kind === 'downloading' || item.state.kind === 'importing') {
+      const active = isActive(entry) ? [entry, ...others] : others;
+      if (active.some(({ state }) => state.kind !== 'blocked' && state.kind !== 'paused')) return;
+      const blocker = active.find(({ state }) => state.kind === 'blocked');
+      if (blocker?.state.kind === 'blocked') transitionItem(item, blocker.state);
+    }
+  }
+
   // The only place that writes the state. Every operation below goes through it.
   function change(entry: QueueEntry, next: QueueState, cause: string, detail?: string, invalidation = false) {
     const before = entry.state;
     if (sameState(before, next)) return;
-    if (!invalidation && !canEnter(before, next)) throw new Error(`The queue does not allow ${before.kind} to become ${next.kind}.`);
+    if (!invalidation && !canEnter(entry, before, next)) return;
     const now = Date.now();
     const phaseBefore = phaseOf(before);
     const phaseAfter = phaseOf(next);
     entry.state = next;
+    transferProgress(entry, before, next);
     if ((next.kind === 'available' || next.kind === 'cancelled') && entry.release?.uploadPath) forgetSource(entry);
     entry.stateSince = now;
     if (phaseAfter !== phaseBefore) entry.phaseSince = now;
@@ -138,6 +318,10 @@ export function createQueue(events: Events, persist: () => void, onState?: State
   function resolve(entry: QueueEntry, phase: WorkPhase, cause: string, detail?: string) {
     if (entry.state.kind === 'available' || entry.state.kind === 'cancelled' || entry.state.kind === 'paused') return;
     change(entry, { kind: phase }, cause, detail);
+    const item = itemFor(entry);
+    if (item?.state.kind === 'blocked' && entry.state.kind === phase && (phase === 'importing' || phase === 'downloading')) {
+      if (changeItem(item, { kind: phase }, Boolean(entry.transferHash && entry.clientId))) touchItem(item);
+    }
   }
 
   // A removed association is not a request for another download.
@@ -182,7 +366,7 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     if (entry.state.kind === 'paused' || entry.state.kind === 'available') return;
     const resume = phaseOf(entry.state);
     const problem = entry.state.kind === 'blocked' ? entry.state.problem : null;
-    transition(entry, { kind: 'paused', resume, problem }, cause);
+    change(entry, { kind: 'paused', resume, problem }, cause);
   }
 
   function resume(entry: QueueEntry, cause: string) {
@@ -242,9 +426,18 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     if (entry.state.kind === 'blocked' || (entry.state.kind === 'paused' && entry.state.problem)) return false;
     // An entry that was made but never requested has no attempt yet.
     if (entry.attempt > 0 && isActive(entry)) return false;
+    rememberSent(entry);
     rememberDownload(entry);
     if (entry.release?.uploadPath) forgetSource(entry);
     Object.assign(entry, { search: null, release: null, transferHash: null, clientId: null, source: null, importTries: 0, importResult: null, clearedAt: null, completedAt: null, manualMatch: entry.manualMatch });
+    let item = ensureItem(entry);
+    if (!isActiveState(item.state)) {
+      const next = newTurn(item.titleKey, item.season, db.data.queueItemSeq++, Date.now());
+      next.entryIds = item.entryIds;
+      item = db.data.queueItems[item.id] = next;
+    }
+    delete item.emptySearches[entry.id];
+    touchItem(item);
     startAttempt(entry, reason);
     // A target that is already queued keeps its state. The record says why the attempt started.
     if (entry.state.kind === 'queued') observe(entry, reason);
@@ -271,6 +464,14 @@ export function createQueue(events: Events, persist: () => void, onState?: State
   function setPriority(entry: QueueEntry, on: boolean) {
     if (on === (entry.priority !== null)) return;
     entry.priority = on ? db.data.prioritySeq++ : null;
+    const item = itemFor(entry);
+    if (item) {
+      item.priority = on ? Math.min(item.priority ?? Infinity, entry.priority!) : item.entryIds.reduce<number | null>((priority, id) => {
+        const other = db.data.queue[id]?.priority;
+        return other == null ? priority : Math.min(priority ?? Infinity, other);
+      }, null);
+      touchItem(item);
+    }
     touch(entry);
   }
 
@@ -310,6 +511,14 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     setPaused,
     notify,
     touch,
+    getItem,
+    itemFor,
+    findItem,
+    transitionItem,
+    updateItem,
+    holdClient,
+    requeueItem,
+    emptySearch,
     get: (id: string) => db.data.queue[id],
   };
 }

@@ -1,4 +1,5 @@
 import { db } from '../../core/db.ts';
+import { enqueueSelection, readySelection } from '../grab/grab.ts';
 import { isActive } from './queue.ts';
 import { uploadHash } from './upload.ts';
 import type { EnqueueInput, Job, Queue, QueueEntry } from '../../types.ts';
@@ -24,11 +25,18 @@ export function createRetry({ queue, enqueue }: { queue: Queue; enqueue: (input:
       return;
     }
     if (entry.state.kind === 'blocked' && entry.release && ['fetching', 'waiting_slot', 'sending'].includes(entry.state.at)) {
-      const phase = entry.state.at;
-      queue.retryAttempt(entry, phase === 'fetching' ? 'retry fetch' : 'retry send');
-      queue.resolve(entry, phase, phase === 'fetching' ? 'retry fetch' : 'retry send');
-      const type = phase === 'fetching' ? 'queue.grab' : 'queue.send';
-      enqueue({ type, payload: { entryIds: [entry.id] }, dedupeKey: `${phase === 'fetching' ? 'grab' : 'send'}:${entry.id}`, priority: entry.priority !== null });
+      const item = queue.itemFor(entry);
+      const members = item ? item.entryIds.flatMap((id) => {
+        const member = queue.get(id);
+        return member?.state.kind === 'blocked' && ['fetching', 'waiting_slot', 'sending'].includes(member.state.at) ? [member] : [];
+      }) : [entry];
+      for (const member of members) {
+        queue.retryAttempt(member, 'retry fetch');
+        queue.resolve(member, 'fetching', 'retry fetch');
+      }
+      if (item?.state.kind === 'blocked') queue.transitionItem(item, { kind: 'fetching' });
+      if (item && readySelection(item)) enqueueSelection(item, enqueue);
+      else enqueue({ type: 'queue.grab', payload: { entryIds: members.map(({ id }) => id) }, dedupeKey: `grab:${item?.id ?? entry.id}`, priority: entry.priority !== null });
       return;
     }
     // An import that failed keeps its download. The retry runs the import checks again, with no limit, and it never
@@ -54,6 +62,8 @@ export function createRetry({ queue, enqueue }: { queue: Queue; enqueue: (input:
     // The target leaves its problem now, so the page shows the new work at the click. The job then reads the files
     // and the client again, and stops at the first phase that resolves it.
     queue.resolve(entry, 'queued', 'retry');
+    const item = queue.itemFor(entry);
+    if (item?.state.kind === 'waiting' || item?.state.kind === 'blocked') queue.transitionItem(item, { kind: 'queued' });
     enqueue({ type: 'queue.retry', payload: { entryIds: [entry.id] }, dedupeKey: `retry:${entry.id}`, priority: entry.priority !== null });
   }
 

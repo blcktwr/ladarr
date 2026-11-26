@@ -3,7 +3,7 @@ import { Low, Memory, type Adapter } from 'lowdb';
 import { TextFile } from 'lowdb/node';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { migrateQueue } from '../library/downloads/queue-migrate.ts';
+import { migrateQueue, migrateTurns } from '../library/downloads/queue-migrate.ts';
 import { DEFAULT_NAMING } from '../library/naming.ts';
 import { defaultProfiles, defaultSizes, QUALITY_TABLE_VERSION, unlimitedSizes } from '../library/grab/quality.ts';
 import type { Data, Db, OneClient, Profile, QueueData, QueueEntry, Settings } from '../types.ts';
@@ -16,7 +16,9 @@ import type { SizeLimits } from '@ladarr/shared/types';
 // Version 7 keeps one state for each queue target, in place of the stage, the branch, and the reason.
 // Version 8 keeps the episode numbering of a series, and the snapshot that each acquisition uses.
 // Version 9 keeps one copy of each fetched torrent, and leaves the history of the targets out of the file.
-export const SCHEMA_VERSION = 9;
+// Version 10 saves one queue turn for each movie or catalog season.
+const QUEUE_TURN_VERSION = 10;
+export const SCHEMA_VERSION = QUEUE_TURN_VERSION;
 
 export const emptyData = (): Data => ({
   schemaVersion: SCHEMA_VERSION,
@@ -49,6 +51,8 @@ export const emptyData = (): Data => ({
   indexerSeq: 0,
   downloadClients: [],
   queue: {},
+  queueItems: {},
+  queueItemSeq: 0,
   queueRev: 0,
   queuePaused: false,
   imports: {},
@@ -187,12 +191,20 @@ export function withDefaults(data: Data): Data {
     if (entry.transferHash && !next.torrents[entry.transferHash]) next.torrents[entry.transferHash] = source.torrent;
     entry.source = { torrent: true };
   }
+  if (!data.queueItems && (data.schemaVersion ?? 0) < QUEUE_TURN_VERSION) migrateTurns(next);
+  for (const [id, item] of Object.entries(next.queueItems)) {
+    item.entryIds = item.entryIds.filter((entryId) => Object.hasOwn(next.queue, entryId));
+    if (!item.entryIds.length) delete next.queueItems[id];
+  }
   // A copy that no target waits for is of no use.
   const waiting = new Set(Object.values(next.queue).flatMap((entry) => {
     if (entry.release?.uploadPath && (entry.state.kind === 'available' || entry.state.kind === 'cancelled')) entry.source = null;
     const hash = entry.transferHash ?? (entry.release?.uploadPath ? entry.release.infoHash : null);
     return entry.source && hash ? [hash] : [];
   }));
+  for (const item of Object.values(next.queueItems)) {
+    for (const torrent of Object.values(item.selected)) if (torrent.source) waiting.add(torrent.hash);
+  }
   for (const hash of Object.keys(next.torrents)) if (!waiting.has(hash)) delete next.torrents[hash];
   // The history is not in the file. The run starts with none, and the log of each target keeps the events.
   for (const entry of Object.values(next.queue)) entry.history = [];
@@ -200,7 +212,8 @@ export function withDefaults(data: Data): Data {
 }
 
 // The fields that hold the work of the queue. They live in a file of their own, separate from the app data.
-export const QUEUE_KEYS = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq', 'torrents'] as const satisfies readonly (keyof Data)[];
+const LEGACY_QUEUE_KEYS = ['queue', 'queueRev', 'queuePaused', 'jobs', 'jobSeq', 'prioritySeq', 'torrents'] as const;
+export const QUEUE_KEYS = [...LEGACY_QUEUE_KEYS, 'queueItems', 'queueItemSeq'] as const satisfies readonly (keyof Data)[];
 
 export const QUEUE_FILE = 'queue.json';
 
@@ -211,6 +224,8 @@ export const queueForFile = (queue: Record<string, QueueEntry>): Record<string, 
 
 const queueDataOf = (data: Data): QueueData => ({
   queue: queueForFile(data.queue),
+  queueItems: data.queueItems,
+  queueItemSeq: data.queueItemSeq,
   queueRev: data.queueRev,
   queuePaused: data.queuePaused,
   jobs: data.jobs,
@@ -220,7 +235,7 @@ const queueDataOf = (data: Data): QueueData => ({
 });
 
 const appDataOf = (data: Data): Omit<Data, keyof QueueData> => {
-  const { queue: _queue, queueRev: _queueRev, queuePaused: _queuePaused, jobs: _jobs, jobSeq: _jobSeq, prioritySeq: _prioritySeq, torrents: _torrents, ...app } = data;
+  const { queue: _queue, queueItems: _queueItems, queueItemSeq: _queueItemSeq, queueRev: _queueRev, queuePaused: _queuePaused, jobs: _jobs, jobSeq: _jobSeq, prioritySeq: _prioritySeq, torrents: _torrents, ...app } = data;
   return app;
 };
 
@@ -238,9 +253,9 @@ class SplitJSONFile implements Adapter<Data> {
     if (text === null) return null;
     const app = JSON.parse(text) as Data;
     // A db.json that still holds the queue fields is a full snapshot, such as a restored backup. It wins.
-    if (QUEUE_KEYS.some((key) => key in app)) return app;
+    if (LEGACY_QUEUE_KEYS.some((key) => key in app)) return app;
     const queue = await this.#queue.read();
-    return queue === null ? app : { ...app, ...(JSON.parse(queue) as Partial<QueueData>) };
+    return queue === null ? app : { ...appDataOf(app), ...(JSON.parse(queue) as QueueData) };
   }
   async write(data: Data): Promise<void> {
     // The queue first: if the second write fails, the old app data still matches the queue on the disk.

@@ -26,15 +26,17 @@ describe('cache', () => {
     pipe.db.data.qualitySizes.movie['bluray-1080'] = { min: 200, preferred: null, max: null };
 
     const [entry] = pipe.finder.requestSearch(m.key);
-    await until(() => branchOf(entry!) === 'waiting');
+    await until(() => entry!.search?.result === 'all_rejected');
     expect(entry!.search!.topRejections).toContain('size_below_min');
     const before = searches();
     expect(before).toBe(1);
 
-    // The user lowers the limit. The search of the sweep uses the cache: no new request, but the new policy.
+    // The search for another catalog record uses the same cache and the new policy.
     pipe.db.data.qualitySizes.movie['bluray-1080'] = { min: 0, preferred: null, max: null };
-    pipe.finder.requestSearch(m.key);
-    await until(() => stageOf(entry!) === 'downloading');
+    const other = movie({ ...m, key: 'movie:3', tmdbId: 3 });
+    pipe.db.data.titles[other.key] = other;
+    const [next] = pipe.finder.requestSearch(other.key);
+    await until(() => stageOf(next!) === 'downloading');
     expect(searches()).toBe(before);
   });
 
@@ -118,29 +120,91 @@ describe('RSS with similar titles', () => {
 });
 
 describe('bad releases', () => {
-  it('asks for the user when the best release is not a torrent', async () => {
+  const read = (title: string) => ({ type: 'torrent', title });
+  const movieSearch = { type: 'search', season: null, episode: null };
+
+  it('tries the next ranked release without repeating the indexer search when the first is corrupt', async () => {
     pipe = await startPipeline();
     const m = film();
     pipe.db.data.titles[m.key] = m;
-    const bad = 'Movie.Name.2019.1080p.WEB-DL-BAD';
-    pipe.tracker.state.items = [{ title: bad, size: 100 * 60 * MIB, bad: true }, { title: NAME, size: 100 * 120 * MIB }];
-    const [entry] = pipe.finder.requestSearch(m.key);
-    // Without a list of failed releases, the search takes the bad release again on each attempt, until the target asks
-    // for the user. No torrent reaches the client.
-    await until(() => reasonOfEntry(entry!)?.code === 'too_many_attempts');
-    expect(entry!.attempt).toBe(3);
-    expect(pipe.qbit.torrents.size).toBe(0);
+    const bad = 'Movie.Name.2019.1080p.BluRay-BAD';
+    pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }, { title: bad, size: 100 * 120 * MIB, bad: true, seeders: 100 }];
+    pipe.finder.requestSearch(m.key);
+
+    await expect.poll(() => pipe!.acquisition).toEqual([movieSearch, read(bad), read(NAME), { type: 'add', hash: hashOf(NAME) }]);
   });
 
-  it('asks for the user after three bad releases', async () => {
+  it('lists more than eight distinct preference rejections in stable rank order', async () => {
+    pipe = await startPipeline({ indexer: { rejectZeroSeeders: true } });
+    const m = film();
+    pipe.db.data.titles[m.key] = m;
+    const quality = Array.from({ length: 9 }, (_, i) => ({ title: `Movie.Name.2019.720p.BluRay-GRP${i}`, size: 100 * 60 * MIB, seeders: i < 2 ? 50 : 50 - i }));
+    const twoReasons = { title: 'Movie.Name.2019.1080p.WEB-DL-TINY', size: MIB, seeders: 0 };
+    pipe.db.data.qualitySizes.movie['webdl-1080'] = { min: 12.5, preferred: null, max: null };
+    pipe.tracker.state.items = [twoReasons, ...quality.toReversed(), quality[0]!];
+    api = await pipe.api();
+    const url = `/queue/entries/${m.key}`;
+    const detail = async () => (await api!.get(url)).body.entry;
+
+    pipe.finder.requestSearch(m.key);
+    await expect.poll(async () => (await detail())?.status).toMatch(/^(stuck|no_match)$/);
+    const stopped = await detail();
+    expect.soft(stopped).toMatchObject({ status: 'stuck', tab: 'stuck' });
+    const rejected: { title: string; reasons: string[] }[] = stopped.search.rejected;
+    expect.soft(rejected.map((item) => item.title)).toEqual([...quality.map((item) => item.title), twoReasons.title]);
+    expect.soft(rejected.find((item) => item.title === twoReasons.title)?.reasons ?? []).toHaveLength(2);
+    for (const row of rejected) {
+      expect(row.reasons.length).toBeGreaterThan(0);
+      expect(row).not.toHaveProperty('link');
+      expect(row).not.toHaveProperty('magnet');
+    }
+    expect((await detail()).search.rejected).toEqual(rejected);
+    expect(pipe.acquisition).toEqual([movieSearch]);
+  });
+
+  it('ranks a corrupt source last and does not let a manual choice add it', async () => {
     pipe = await startPipeline();
     const m = film();
     pipe.db.data.titles[m.key] = m;
-    pipe.tracker.state.items = ['A', 'B', 'C', 'D'].map((x, i) => ({ title: `Movie.Name.2019.1080p.WEB-DL-${x}`, size: 100 * 60 * MIB, bad: true, seeders: 40 - i }));
-    const [entry] = pipe.finder.requestSearch(m.key);
-    await until(() => reasonOfEntry(entry!)?.code === 'too_many_attempts');
-    expect(entry!.attempt).toBe(3);
-    expect(pipe.qbit.torrents.size).toBe(0);
+    const low = 'Movie.Name.2019.720p.BluRay-LOW';
+    pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB, bad: true }, { title: low, size: 100 * 60 * MIB }];
+    api = await pipe.api();
+    const url = `/queue/entries/${m.key}`;
+    const detail = async () => (await api!.get(url)).body.entry;
+
+    pipe.finder.requestSearch(m.key);
+    await expect.poll(async () => (await detail())?.status).toBe('stuck');
+    expect.soft(pipe.acquisition).toEqual([movieSearch, read(NAME)]);
+    expect((await detail()).search.rejected).toEqual([
+      expect.objectContaining({ title: low, reasons: expect.arrayContaining([expect.any(String)]) }),
+      expect.objectContaining({ title: NAME, reasons: expect.arrayContaining([expect.any(String)]) }),
+    ]);
+
+    const chosen = await api.post(`${url}/releases/grab`, { indexerId: 1, guid: NAME });
+    if (chosen.status === 202) {
+      await expect.poll(async () => (await detail()).status).toBe('stuck');
+    } else {
+      expect(chosen.status).toBe(409);
+    }
+    expect(pipe.acquisition.filter((event) => event.type === 'add')).toEqual([]);
+  });
+
+  it('verifies the torrent again before adding a manually chosen quality rejection', async () => {
+    pipe = await startPipeline();
+    const m = film();
+    pipe.db.data.titles[m.key] = m;
+    const low = 'Movie.Name.2019.720p.BluRay-LOW';
+    pipe.tracker.state.items = [{ title: low, size: 100 * 60 * MIB }];
+    api = await pipe.api();
+    const url = `/queue/entries/${m.key}`;
+
+    pipe.finder.requestSearch(m.key);
+    await expect.poll(async () => (await api!.get(url)).body.entry?.status).toMatch(/^(stuck|no_match)$/);
+    expect(pipe.acquisition).toEqual([movieSearch]);
+    const chosen = await api.post(`${url}/releases/grab`, { indexerId: 1, guid: low });
+    expect(chosen.status).toBe(202);
+    await expect.poll(async () => (await api!.get(url)).body.entry?.status).toBe('downloading');
+    expect(pipe.acquisition).toEqual([movieSearch, read(low), { type: 'add', hash: hashOf(low) }]);
   });
 
   it('does not blame the release when the indexer fails to give the file', async () => {
@@ -157,7 +221,7 @@ describe('bad releases', () => {
 });
 
 describe('the sweep', () => {
-  it('searches a new episode from midnight and retries it hourly without advancing older episodes', async () => {
+  it('admits the episode at midnight and uses the hourly retry for its season', async () => {
     const midnight = Date.UTC(2026, 10, 21);
     const hour = 3_600_000;
     let now = midnight - 1;
@@ -165,78 +229,109 @@ describe('the sweep', () => {
     pipe = await startPipeline();
     const series = title({ rootId: 'tv', episodes: [episode(1, 1, '2026-11-20'), episode(1, 2, '2026-11-21'), episode(1, 3, null)] });
     pipe.db.data.titles[series.key] = series;
-    const job = () => Object.values(pipe!.db.data.jobs).find((job) => job.type === 'queue.search' && job.state === 'waiting');
+    const season = () => pipe!.queue.findItem(series.key, 1);
 
+    await pipe.worker.drain();
     pipe.finder.sweep();
     expect(pipe.queue.get('tv:1:1x2')).toBeUndefined();
     now = midnight;
     pipe.finder.sweep();
-    const today = pipe.queue.get('tv:1:1x2');
-    expect(today).toBeDefined();
+    expect(season()?.entryIds).toEqual(['tv:1:1x1', 'tv:1:1x2']);
     expect(pipe.queue.get('tv:1:1x3')).toBeUndefined();
-    await expect.poll(() => job()?.runAt).toBe(midnight + hour);
-    const older = pipe.queue.get('tv:1:1x1')!;
-    expect(older.search!.nextAt).toBe(midnight + 12 * hour);
-    expect(today!.search!.nextAt).toBe(midnight + hour);
+    pipe.worker.resume();
+    await expect.poll(() => season()?.nextAt).toBe(midnight + hour);
 
     now += hour;
-    await expect.poll(() => today!.search!.nextAt).toBe(now + hour);
-    expect(older.search!.at).toBe(midnight);
+    await expect.poll(() => season()?.nextAt).toBe(now + hour);
 
     now += hour;
-    pipe.tracker.state.items = [{ title: 'Show.Name.S01E02.1080p.WEB-DL-GRP', size: 60 * 45 * MIB }];
-    await expect.poll(() => today!.state.kind).toBe('downloading');
-    expect(job()).toMatchObject({ runAt: midnight + 12 * hour, payload: { entryIds: [older.id] } });
+    const pack = 'Show.Name.S01.1080p.WEB-DL-GRP';
+    const files = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'];
+    pipe.tracker.state.items = [{ title: pack, size: 2 * 60 * 45 * MIB, files }];
+    await expect.poll(() => season()?.state.kind).toBe('downloading');
+    expect(pipe.acquisition.filter((event) => event.type === 'add')).toEqual([{ type: 'add', hash: hashOf(pack, files) }]);
   });
 
   it('searches a season again with one request, so a pack that arrived later is taken', async () => {
+    let now = Date.UTC(2026, 10, 26);
+    using clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     pipe = await startPipeline();
     const series = title({ rootId: 'tv', episodes: [1, 2, 3].map((n) => episode(1, n, '2020-01-01')) });
     pipe.db.data.titles[series.key] = series;
-    const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((e) => branchOf(e) === 'waiting'));
-    // The first search asks only for the season: every episode is old, so none gets an individual query.
-    expect(searches()).toBe(1);
-
+    pipe.finder.requestSearch(series.key);
+    const season = () => pipe!.queue.findItem(series.key, 1);
+    await expect.poll(() => season()?.state.kind).toBe('waiting');
+    expect(pipe.tracker.state.searches.map((url) => url.searchParams.get('ep'))).toEqual([null, '1', '2', '3']);
     pipe.tracker.state.items = [{ title: 'Show.Name.S01.1080p.WEB-DL-GRP', size: 3 * 60 * 45 * MIB }];
-    for (const entry of entries) entry.search!.nextAt = Date.now() - 1;
-    pipe.finder.clearCache();
     const before = pipe.tracker.state.searches.length;
+    now = season()!.nextAt!;
     pipe.finder.sweep();
-    await until(() => entries.every((e) => stageOf(e) === 'downloading'));
+    await expect.poll(() => season()?.state.kind).toBe('downloading');
     // The due targets go in one request for the season. The pack covers every episode, so no episode needs its own query.
     expect(pipe.tracker.state.searches.slice(before).map((url) => url.searchParams.get('ep'))).toEqual([null]);
     expect(pipe.qbit.torrents.size).toBe(1);
   });
 
-  it('searches again when the wait is over, and searches every episode that is due', async () => {
+  it('takes a new movie release only when the item is due', async () => {
+    let now = Date.UTC(2026, 10, 26);
+    using clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     pipe = await startPipeline();
     const m = film();
     pipe.db.data.titles[m.key] = m;
     pipe.tracker.state.items = [];
-    const [entry] = pipe.finder.requestSearch(m.key);
-    await until(() => branchOf(entry!) === 'waiting');
+    pipe.finder.requestSearch(m.key);
+    const item = () => pipe!.queue.findItem(m.key, null);
+    await expect.poll(() => item()?.state.kind).toBe('waiting');
     pipe.tracker.state.items = [{ title: NAME, size: 100 * 120 * MIB }];
-    // Not yet: the wait is not over.
+    const due = item()!.nextAt!;
+    now = due - 1;
     pipe.finder.sweep();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(branchOf(entry!)).toBe('waiting');
-    // Twelve hours pass: the cache of five minutes is empty by then.
-    entry!.search!.nextAt = Date.now() - 1;
-    pipe.finder.clearCache();
+    expect(item()?.state.kind).toBe('waiting');
+    expect(searches()).toBe(1);
+    now = due;
     pipe.finder.sweep();
-    await until(() => stageOf(entry!) === 'downloading');
+    await expect.poll(() => item()?.state.kind).toBe('downloading');
+    expect(searches()).toBe(2);
+  });
 
+  it('includes both older and recent missing episodes in a season admitted by the sweep', async () => {
+    pipe = await startPipeline();
     const yesterday = new Date(Date.now() - 24 * 60 * 60_000).toISOString().slice(0, 10);
     const series = title({ rootId: 'tv', episodes: [episode(1, 1, '2020-01-01'), episode(1, 2, yesterday)] });
     pipe.db.data.titles[series.key] = series;
-    pipe.tracker.state.items = [{ title: 'Show.Name.S01E02.1080p.WEB-DL-GRP', size: 60 * 45 * MIB }];
+    pipe.tracker.state.answer = (url) => {
+      const ep = url.searchParams.get('ep');
+      return ep === null ? [] : [{ title: `Show.Name.S01E0${ep}.1080p.WEB-DL-GRP`, size: 60 * 45 * MIB }];
+    };
     pipe.finder.sweep();
     // The sweep searches the new episode and the old missing one. A pause or a stopped app must not leave the old
     // episode without work.
     expect(pipe.queue.get('tv:1:1x2')).toBeDefined();
     expect(pipe.queue.get('tv:1:1x1')).toBeDefined();
-    await until(() => stageOf(pipe!.queue.get('tv:1:1x2')!) === 'downloading');
+    await expect.poll(() => pipe!.queue.findItem(series.key, 1)?.state.kind).toBe('downloading');
+    expect(pipe.tracker.state.searches.map((url) => url.searchParams.get('ep'))).toEqual([null, '1', '2']);
+    expect(pipe.qbit.torrents.size).toBe(2);
+  });
+
+  it('keeps retrying an empty movie search after three completed rounds', async () => {
+    let now = Date.UTC(2026, 10, 26);
+    using clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    pipe = await startPipeline();
+    api = await pipe.api();
+    const m = film();
+    pipe.db.data.titles[m.key] = m;
+    const status = async () => (await api!.get(`/queue/entries/${m.key}`)).body.entry?.status;
+    pipe.finder.requestSearch(m.key);
+
+    for (const round of [1, 2, 3, 4]) {
+      await expect.poll(searches).toBe(round);
+      await expect.poll(status).toBe('not_found');
+      if (round < 4) {
+        now += 24 * 60 * 60 * 1000;
+        pipe.finder.sweep();
+      }
+    }
+    expect(pipe.acquisition).toEqual(Array.from({ length: 4 }, () => ({ type: 'search', season: null, episode: null })));
   });
 });
 
@@ -287,16 +382,14 @@ describe('the next search', () => {
     expect(pipe.db.data.jobs[job.id]).toMatchObject({ state: 'waiting' });
   });
 
-  it('moves the waiting search job to now when the sweep finds the target due', async () => {
+  it('restores a lost waiting search at the due time stored on the item', async () => {
     pipe = await startPipeline();
     const { m, entry } = await waitingFilm();
     expect(searchJobs()).toHaveLength(1);
+    const item = pipe.queue.findItem(m.key, null)!;
 
-    // The queue is held, so the due job stays waiting while the test reads it.
-    pipe.db.data.queuePaused = true;
-    entry.search!.nextAt = Date.now() - 1;
-    pipe.finder.clearCache();
-    const before = Date.now();
+    await pipe.worker.drain();
+    expect(pipe.worker.cancel(searchJobs()[0]!.id)).toBe(false);
     pipe.finder.sweep();
 
     const matching = searchJobs().filter((job) => {
@@ -306,11 +399,10 @@ describe('the next search', () => {
     expect(matching).toHaveLength(1);
     expect(payloadOf(matching[0]!)).toMatchObject({ entryIds: [entry.id] });
     expect(matching[0]!.state).toBe('waiting');
-    expect(matching[0]!.runAt).toBeGreaterThanOrEqual(before - 2_000);
-    expect(matching[0]!.runAt).toBeLessThanOrEqual(Date.now() + 2_000);
+    expect(matching[0]!.runAt).toBe(item.nextAt);
   });
 
-  it('puts a new episode into the search job that waits for its season', async () => {
+  it('joins a new episode to its existing season without adding a second turn', async () => {
     pipe = await startPipeline();
     const series = title({ rootId: 'tv', episodes: [episode(1, 1), episode(1, 2)] });
     pipe.db.data.titles[series.key] = series;
@@ -318,11 +410,14 @@ describe('the next search', () => {
     const [first] = pipe.finder.requestSearch(series.key, { season: 1, number: 1 });
     await until(() => branchOf(first!) === 'waiting');
     await until(idle);
+    const item = pipe.queue.findItem(series.key, 1)!;
 
     // The second episode is requested before the next search of the season runs.
     pipe.db.data.queuePaused = true;
     const [second] = pipe.finder.requestSearch(series.key, { season: 1, number: 2 });
 
+    expect(pipe.queue.findItem(series.key, 1)?.id).toBe(item.id);
+    expect(pipe.queue.findItem(series.key, 1)?.entryIds).toEqual([first!.id, second!.id]);
     const matching = searchJobs().filter((job) => {
       const payload = payloadOf(job);
       return job.state !== 'failed' && payload.titleKey === series.key && payload.season === 1;
@@ -335,51 +430,19 @@ describe('the next search', () => {
   });
 });
 
-describe('the order of the searches of a series', () => {
-  it('starts the first season and its first episode, whatever the order of the episodes of the title', async () => {
+describe('admission of a series', () => {
+  it('groups a mixed catalog response into one item per season', async () => {
     pipe = await startPipeline();
     const series = title({ rootId: 'tv', episodes: [episode(2, 2), episode(1, 2), episode(2, 1), episode(1, 1)] });
     pipe.db.data.titles[series.key] = series;
-    // The queue is held, so the search jobs stay waiting while the test reads them.
+    // Keep the worker from claiming an item while admission is checked.
     pipe.db.data.queuePaused = true;
     pipe.finder.requestSearch(series.key);
 
-    const payloads = Object.values(pipe.db.data.jobs)
-      .filter((job) => job.type === 'queue.search')
-      .sort((a, b) => a.seq - b.seq)
-      .map((job) => job.payload as { season: number; entryIds: string[] });
-    expect(payloads.map((payload) => payload.season)).toEqual([1, 2]);
-    expect(payloads.map((payload) => payload.entryIds)).toEqual([
-      ['tv:1:1x1', 'tv:1:1x2'],
-      ['tv:1:2x1', 'tv:1:2x2'],
-    ]);
-  });
-});
-
-describe('the order of the sweep', () => {
-  // A target that waits for its next search, with the result of the search that left it waiting.
-  function waitingWith(tmdbId: number, result: 'no_results' | 'all_rejected') {
-    const m = movie({ key: `movie:${tmdbId}`, tmdbId, rootId: 'movie', manualRelease: true });
-    pipe!.db.data.titles[m.key] = m;
-    const entry = pipe!.queue.ensure(m.key, null, null);
-    pipe!.queue.request(entry, 'test');
-    move(pipe!.queue, entry, { stage: 'queued', branch: 'waiting', reason: { code: result } }, 'test');
-    entry.search = { at: 0, indexers: [], candidates: 0, accepted: 0, result, topRejections: [], nextAt: Date.now() - 1, rejected: [] };
-    return m;
-  }
-
-  it('searches a target that found no release after a target that has no match', async () => {
-    pipe = await startPipeline();
-    // The target without a release came first, so the order of creation alone would put it first.
-    const none = waitingWith(11, 'no_results');
-    const rejected = waitingWith(12, 'all_rejected');
-    // The queue is held, so the searches that the sweep starts stay in it.
-    pipe.db.data.queuePaused = true;
-    pipe.finder.sweep();
-
-    const searchJobs = Object.values(pipe.db.data.jobs).filter((job) => job.type === 'queue.search');
-    const seqOf = (titleKey: string) => searchJobs.find((job) => (job.payload as { titleKey: string }).titleKey === titleKey)!.seq;
-    expect(seqOf(none.key)).toBeGreaterThan(seqOf(rejected.key));
+    const items = Object.values(pipe.db.data.queueItems).filter((item) => item.titleKey === series.key);
+    expect(items.map((item) => item.season).sort()).toEqual([1, 2]);
+    expect(pipe.queue.findItem(series.key, 1)?.entryIds).toEqual(['tv:1:1x1', 'tv:1:1x2']);
+    expect(pipe.queue.findItem(series.key, 2)?.entryIds).toEqual(['tv:1:2x1', 'tv:1:2x2']);
   });
 });
 
@@ -438,7 +501,7 @@ describe('the repair of a blocked import', () => {
   it('keeps a target stuck before the import after a delay', async () => {
     pipe = await startPipeline();
     const { entry } = blockedImport();
-    entry.state = { kind: 'blocked', at: 'downloading', problem: { code: 'torrent_missing' } };
+    move(pipe.queue, entry, { stage: 'downloading', reason: { code: 'torrent_missing' } }, 'torrent left the client');
     entry.stateSince = Date.now() - 31 * 60_000;
     const before = structuredClone(entry);
     pipe.db.data.queuePaused = true;
@@ -459,38 +522,36 @@ describe('the repair of a blocked import', () => {
     pipe = await startPipeline();
     const m = film();
     pipe.db.data.titles[m.key] = m;
-    const entry = pipe.queue.ensure(m.key, null, null);
-    pipe.queue.request(entry, 'attached download');
-    // The second attempt of the repair stays open, and the job that would run it is gone.
-    pipe.queue.endAttempt(entry, 'failed', 'file_not_found');
-    pipe.queue.startAttempt(entry, 'verification repair');
-    pipe.db.data.queuePaused = true;
+    await pipe.worker.drain();
+    const [entry] = pipe.finder.requestSearch(m.key);
+    expect(entry).toBeDefined();
+    const before = structuredClone(entry!.attempts);
+    expect(searchJobs()).toHaveLength(1);
+    expect(pipe.worker.cancel(searchJobs()[0]!.id)).toBe(false);
     pipe.finder.sweep();
 
-    expect(entry.state).toEqual({ kind: 'queued' });
-    expect(entry.attempts.at(-1)).toMatchObject({ n: 3, outcome: 'running', endedAt: null });
+    expect(pipe.queue.findItem(m.key, null)?.state).toEqual({ kind: 'queued' });
+    expect(entry!.attempts).toEqual(before);
+    expect(entry!.attempts.at(-1)).toMatchObject({ outcome: 'running', endedAt: null });
     const jobs = searchJobs();
     expect(jobs).toHaveLength(1);
-    expect(holds(jobs[0]!, entry.id)).toBe(true);
+    expect(holds(jobs[0]!, entry!.id)).toBe(true);
   });
 
   it('leaves a target that a waiting search job holds alone', async () => {
     pipe = await startPipeline();
     const m = film();
     pipe.db.data.titles[m.key] = m;
-    const entry = pipe.queue.ensure(m.key, null, null);
-    pipe.queue.request(entry, 'attached download');
-    // The job that holds the open attempt waits, so the target has its search already.
-    pipe.db.data.queuePaused = true;
-    pipe.finder.enqueueSearch({ titleKey: m.key, season: null, entryIds: [entry.id], fresh: true });
+    await pipe.worker.drain();
+    const [entry] = pipe.finder.requestSearch(m.key, { fresh: true });
     expect(searchJobs()).toHaveLength(1);
 
     pipe.finder.sweep();
 
-    expect(entry.attempt).toBe(1);
+    expect(entry!.attempt).toBe(1);
     const jobs = searchJobs();
     expect(jobs).toHaveLength(1);
-    expect(holds(jobs[0]!, entry.id)).toBe(true);
+    expect(holds(jobs[0]!, entry!.id)).toBe(true);
   });
 });
 
@@ -522,9 +583,12 @@ describe('manual reservation', () => {
       entry.clientId = 'client-1';
       return entry;
     });
-    const chosen = release('Show.Name.S01.1080p.WEB-DL-GRP', { sizeBytes: 2 * 60 * 45 * MIB });
+    const name = 'Show.Name.S01.1080p.WEB-DL-GRP';
+    const files = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'];
+    const chosen = release(name, { sizeBytes: 2 * 60 * 45 * MIB, link: `http://127.0.0.1:${pipe.tracker.port}/1/download?file=${encodeURIComponent(name)}` });
+    pipe.tracker.state.items = [{ title: name, size: chosen.sizeBytes, files }];
     const want = pipe.finder.wantForRelease(series, chosen, 1)!;
-    return { series, entries, chosen, want };
+    return { series, entries, chosen, want, files };
   }
 
   it.each(['busy target', 'stale numbering'] as const)('refuses a %s without changes to targets, attempts, or jobs', async (cause) => {
@@ -540,7 +604,7 @@ describe('manual reservation', () => {
   });
 
   it('reserves the selected blocked targets when the complete selection is valid', async () => {
-    const { entries, chosen, want } = await selected();
+    const { series, entries, chosen, want, files } = await selected();
     const attempts = entries.map((entry) => entry.attempt);
 
     expect(pipe!.finder.grabManual(entries, chosen, want)).toEqual({ reserved: true });
@@ -548,9 +612,12 @@ describe('manual reservation', () => {
     expect(entries.map((entry) => entry.state.kind)).toEqual(['fetching', 'fetching']);
     expect(entries.map((entry) => entry.attempt)).toEqual(attempts.map((attempt) => attempt + 1));
     expect(entries.every((entry) => entry.release?.guid === chosen.guid && entry.release.manual)).toBe(true);
-    const jobs = Object.values(pipe!.db.data.jobs).filter((job) => job.type === 'queue.grab');
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0]!.payload).toEqual({ entryIds: entries.map((entry) => entry.id) });
-    expect(pipe!.tracker.state.downloads).toEqual([]);
+    expect(pipe!.queue.findItem(series.key, 1)?.entryIds).toEqual(entries.map((entry) => entry.id));
+    expect(pipe!.acquisition).toEqual([]);
+    pipe!.db.data.queuePaused = false;
+    await expect.poll(() => pipe!.acquisition).toEqual([
+      { type: 'torrent', title: chosen.title },
+      { type: 'add', hash: hashOf(chosen.title, files) },
+    ]);
   });
 });

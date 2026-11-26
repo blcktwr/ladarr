@@ -77,7 +77,7 @@ async function removeDownloads() {
     ownsUpload(entry) || (entry.transferHash && !entry.release?.external && db.data.sentTorrents[entry.transferHash]),
   );
   const files = Object.values(db.data.files).filter((file) => file.download?.external === false);
-  const refs = torrentsForRemoval(entries, [], files);
+  const refs = torrentsForRemoval(entries, [], files, [], db.data.queueItems);
   if (refs.some(({ hash }) => !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(hash))) throw new Error('A torrent hash is not valid.');
   for (const config of db.data.downloadClients) {
     const owned = refs.filter(({ clientId }) => clientId === config.id);

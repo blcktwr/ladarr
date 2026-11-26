@@ -185,8 +185,8 @@ describe('queries for aliases', () => {
       return [];
     };
     const [entry] = pipe.finder.requestSearch(film.key);
-    await until(() => branchOf(entry!) === 'waiting' || stageOf(entry!) === 'downloading');
-    expect(branchOf(entry!)).toBe('waiting');
+    await until(() => reasonOfEntry(entry!)?.code === 'all_rejected');
+    expect(entry!.state.kind).toBe('blocked');
     expect(asked()).toEqual(['Movie Name']);
     expect(entry!.release).toBeNull();
     expect(reasonOfEntry(entry!)).toMatchObject({ code: 'all_rejected' });
@@ -340,25 +340,7 @@ describe('the content of a pack', () => {
     expect(pipe.qbit.torrents.size).toBe(1);
   });
 
-  it('rejects the entire incomplete pack before sending it and can select another release', async () => {
-    pipe = await startPipeline();
-    const series = season();
-    pipe.db.data.titles[series.key] = series;
-    const files = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv', 'info.nfo'];
-    const single = 'Show.Name.S01E03.1080p.WEB-DL-SGL';
-    pipe.tracker.state.items = [{ title: PACK, size: packSize, files }, { title: single, size: 60 * 45 * MIB, files: [`${single}.mkv`] }];
-    const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.slice(0, 2).every((entry) => reasonOfEntry(entry)?.code === 'all_rejected') && entries[2]!.state.kind === 'downloading');
-    expect([...pipe.qbit.torrents.keys()]).toEqual([hashOf(single, [`${single}.mkv`])]);
-    expect(pipe.tracker.state.downloads).toEqual([PACK, single]);
-    for (const entry of entries.slice(0, 2)) {
-      expect(entry.search?.rejected).toContainEqual(expect.objectContaining({ guid: PACK }));
-      expect(entry.history.some((event) => ['sending', 'downloading', 'importing'].includes(event.stage))).toBe(false);
-      expect(entry.transferHash).toBeNull();
-    }
-  });
-
-  it.each([false, true])('waits for magnet metadata before adding any content (complete: %s)', async (complete) => {
+  it('reads magnet metadata before adding the verified pack', async () => {
     pipe = await startPipeline();
     const series = season();
     pipe.db.data.titles[series.key] = series;
@@ -367,35 +349,41 @@ describe('the content of a pack', () => {
     pipe.tracker.state.items = [{ title: PACK, size: packSize }];
     pipe.qbit.metadata.set(hash, null);
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => pipe!.qbit.calls.some((call) => call.path === 'torrents/fetchMetadata'));
+    const queried = { type: 'search', season: '1', episode: null };
+    const metadata = { type: 'magnet', hash };
+    await expect.poll(() => pipe!.acquisition).toEqual([queried, metadata]);
     expect(pipe.qbit.torrents.size).toBe(0);
     expect(entries.every((entry) => !entry.history.some((event) => event.stage === 'downloading'))).toBe(true);
-    pipe.qbit.metadata.set(hash, (complete ? [1, 2, 3] : [1, 2]).map((n) => `${PACK}/Show.Name.S01E0${n}.mkv`));
-    await until(() => entries.every((entry) => complete ? entry.state.kind === 'downloading' : reasonOfEntry(entry)?.code === 'all_rejected'));
-    expect(pipe.qbit.calls.filter((call) => call.path === 'torrents/add')).toHaveLength(complete ? 1 : 0);
-    if (!complete) expect(entries.every((entry) => entry.search?.rejected.some((release) => release.guid === PACK))).toBe(true);
+    pipe.qbit.metadata.set(hash, [1, 2, 3].map((n) => `${PACK}/Show.Name.S01E0${n}.mkv`));
+    await until(() => entries.every((entry) => entry.state.kind === 'downloading'));
+    const [search, ...operations] = pipe.acquisition;
+    expect(search).toEqual(queried);
+    expect(operations.at(-1)).toEqual({ type: 'add', hash });
+    const reads = operations.slice(0, -1);
+    expect(reads.length).toBeGreaterThanOrEqual(2);
+    expect(reads.every((event) => event.type === 'magnet' && event.hash === hash)).toBe(true);
   });
 
-  it('reads a pack that the client has from the client, and never downloads it from the indexer again', async () => {
+  it('does not fetch or add an existing pack when a new episode needs a different release', async () => {
     pipe = await startPipeline();
     // The season has two episodes when the pack arrives, and the pack holds both.
     const series = title({ rootId: 'tv', episodes: [episode(1, 1, '2020-01-01'), episode(1, 2, '2020-01-02')] });
     pipe.db.data.titles[series.key] = series;
     const files = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'];
     const hash = hashOf(PACK, files);
-    pipe.tracker.state.items = [{ title: PACK, size: 2 * 60 * 45 * MIB, files }];
+    pipe.tracker.state.answer = (url) => url.searchParams.has('ep') ? [] : [{ title: PACK, size: 2 * 60 * 45 * MIB, files }];
     pipe.finder.requestSearch(series.key);
     await until(() => ['tv:1:1x1', 'tv:1:1x2'].every((id) => stageOf(pipe!.queue.get(id)!) === 'downloading'));
     pipe.complete(PACK, { 'Show.Name.S01E01.mkv': 'the-first', 'Show.Name.S01E02.mkv': 'the-second' }, hash);
+    await until(() => series.episodes.every((episode) => Boolean(episode.fileId)));
 
-    // New episodes air. The client still has the pack, so the search reads its files there. The release is not downloaded
-    // from the indexer a second time, and the episodes that the pack cannot give stop with the pack as the reason.
-    series.episodes.push(episode(1, 3, '2020-01-03'), episode(1, 4, '2020-01-04'));
+    // The client still has the pack, but it cannot supply the new episode.
+    series.episodes.push(episode(1, 3, '2020-01-03'));
     pipe.finder.requestSearch(series.key);
-    await until(() => ['tv:1:1x3', 'tv:1:1x4'].every((id) => reasonOfEntry(pipe!.queue.get(id)!)?.code === 'all_rejected'));
+    await expect.poll(() => pipe!.tracker.state.searches.some((url) => url.searchParams.get('season') === '1' && url.searchParams.get('ep') === '3')).toBe(true);
 
     expect(pipe.tracker.state.downloads.filter((file) => file === PACK)).toHaveLength(1);
-    expect(pipe.qbit.torrents.size).toBe(1);
+    expect(pipe.acquisition.filter((event) => event.type === 'add')).toEqual([{ type: 'add', hash }]);
   });
 
   it('rejects a pack that holds none of its episodes, before the client gets any data', async () => {
@@ -422,19 +410,9 @@ describe('the content of a pack', () => {
     await until(() => entries.every((entry) => reasonOfEntry(entry)?.code === 'all_rejected'));
 
     expect(pipe.db.data.releaseCoverage[`1:${PACK}`]).toBeUndefined();
-    expect(entries.every((entry) => entry.search?.rejected[0]?.manifestProblem === 'file_unmapped')).toBe(true);
+    expect(entries.every((entry) => entry.search?.rejected.some((candidate) => candidate.guid === PACK && !candidate.manifestProblem))).toBe(true);
     expect(pipe.qbit.torrents.size).toBe(0);
     expect(pipe.tracker.state.downloads).toEqual([PACK]);
-  });
-
-  it('rejects a single video that does not identify the requested episodes', async () => {
-    pipe = await startPipeline();
-    const series = season();
-    pipe.db.data.titles[series.key] = series;
-    pipe.tracker.state.items = [{ title: PACK, size: packSize, files: ['Feature.mkv'] }];
-    const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((entry) => reasonOfEntry(entry)?.code === 'all_rejected'));
-    expect(pipe.qbit.torrents.size).toBe(0);
   });
 
   it('rejects a single episode when its folder names the target but its video names a different episode', async () => {

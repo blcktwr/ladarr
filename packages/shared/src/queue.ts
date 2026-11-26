@@ -7,6 +7,8 @@ export type Stage = 'queued' | 'searching' | 'fetching' | 'waiting_slot' | 'send
 export type Phase = Stage;
 export type WorkPhase = Exclude<Stage, 'available'>;
 
+export const itemId = (titleKey: string, season: number | null) => season === null ? titleKey : `${titleKey}:${season}`;
+
 // Why a target waits for its next search.
 export type SearchOutcome = 'no_results' | 'all_rejected' | 'deferred' | 'indexers_failed' | 'unspecified';
 

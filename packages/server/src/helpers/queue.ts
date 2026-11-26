@@ -1,16 +1,17 @@
 import { qualityLabel } from '../library/grab/quality.ts';
 import { parseRelease } from '../library/grab/release.ts';
-import { REJECTION_TEXT } from '../library/grab/decide.ts';
-import { aggregate, describe, needsOtherSeasons, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
+import { manualRejection, REJECTION_TEXT } from '../library/grab/decide.ts';
+import { aggregate, describe, itemId, needsOtherSeasons, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
 import { createHash } from 'node:crypto';
-import type { QueueGroupRow, QueuePage, QueueResolution, QueueRow } from '@ladarr/shared/types';
+import type { QueueGroupRow, QueuePage, QueueRejectedRelease, QueueResolution, QueueRow, QueueSelection } from '@ladarr/shared/types';
 import { normalizeNumbering, releasePoint, seasonRevision } from '../library/numbering.ts';
 import { db } from '../core/db.ts';
-import { seasonOf } from '../core/jobs.ts';
+import { redact } from '../core/log.ts';
 import { reasonInfo } from '../core/reasons.ts';
 import { availability } from '../library/library.ts';
-import { isActive, phaseOfEntry, reasonOfEntry } from '../library/downloads/queue.ts';
-import type { Db, Filters, Finder, ImportStatus, Job, Poller, QueueEntry, ReasonInfo, RowGroup, Title, Transfer } from '../types.ts';
+import { acceptedPath } from '../library/downloads/file-evidence.ts';
+import { findItem, getItem, isActive, itemFor, phaseOfEntry, reasonOfEntry } from '../library/downloads/queue.ts';
+import type { Filters, Finder, ImportStatus, Job, Poller, QueueEntry, QueueTurn, ReasonInfo, RejectedRelease, ReleaseRef, RowGroup, SearchState, Title, Transfer } from '../types.ts';
 
 export const DAY_MS = 24 * 60 * 60_000;
 export const MAX_PAGE = 200;
@@ -20,11 +21,14 @@ export const STAGE_ORDER = ['queued', 'searching', 'fetching', 'waiting_slot', '
 export const STAGE_RANK = new Map(STAGE_ORDER.map((stage, index) => [stage, index]));
 // A target that waits for its next search or fetches its release ranks with the search. One that found nothing ranks
 // where it waits, because only a new release moves it.
-export const progressOf = (entry: QueueEntry) => {
-  const status = statusOf(entry);
-  const phase = status === 'searching' || status === 'fetching' ? 'searching' : status === 'not_found' || status === 'no_match' ? 'queued' : phaseOfEntry(entry);
+function progressOfState(state: QueueEntry['state']) {
+  const description = describe(state);
+  const { status } = description;
+  const phase = status === 'searching' || status === 'fetching' ? 'searching' : status === 'not_found' || status === 'no_match' ? 'queued' : description.phase;
   return STAGE_RANK.get(phase)!;
-};
+}
+
+export const progressOf = (entry: QueueEntry) => progressOfState(entry.state);
 
 export const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -53,20 +57,31 @@ export const tabOf = (entry: QueueEntry): Tab | null => describe(entry.state).ta
 
 // The problem of a stuck target, or the result of the search that keeps it waiting. A target that moves has none.
 export function problemOf(entry: QueueEntry): StateProblem | null {
-  return reasonOfEntry(entry);
+  const problem = reasonOfEntry(entry);
+  if (problem?.code === 'pack_partial' && entry.state.kind === 'blocked' &&
+    (entry.state.at === 'downloading' || entry.state.at === 'importing') && acceptedPath(entry)) {
+    return { ...problem, code: 'file_not_found' };
+  }
+  return problem;
 }
 
 export function reasonOf(entry: QueueEntry): (ReasonInfo & { code: string; detail: string | null }) | null {
   const problem = problemOf(entry);
   if (!problem) return null;
-  const specific = problem.code === 'too_many_attempts' && problem.detail ? reasonInfo(problem.detail) : reasonInfo(problem.code);
+  const specific = infoOfProblem(problem, entry.state.kind === 'blocked');
   return { code: problem.code, ...specific, detail: problem.detail ?? null };
 }
-// The reason of a group, from the problem that aggregate() chose.
-export const reasonOfProblem = (problem: StateProblem | null) => {
+
+function infoOfProblem(problem: StateProblem, stopped: boolean): ReasonInfo {
+  if (stopped && problem.code === 'no_results') return { message: 'The searches found no release.', action: 'retry' };
+  return reasonInfo(problem.code === 'too_many_attempts' && problem.detail ? problem.detail : problem.code);
+}
+
+export const reasonOfProblem = (problem: StateProblem | null, stopped = true, phase?: string) => {
   if (!problem) return null;
-  const info = reasonInfo(problem.code === 'too_many_attempts' && problem.detail ? problem.detail : problem.code);
-  return { code: problem.code, message: info.message, action: info.action, settings: info.settings ?? null, detail: problem.detail ?? null };
+  const info = infoOfProblem(problem, stopped);
+  const message = stopped && phase === 'fetching' && problem.code === 'file_unmapped' ? REJECTION_TEXT.file_unmapped! : info.message;
+  return { code: problem.code, message, action: info.action, settings: info.settings ?? null, detail: problem.detail ?? null };
 };
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -110,7 +125,7 @@ export function actionsOf(entries: QueueEntry[]): QueueResolution[] {
   const result = new Map<string, QueueResolution>();
   for (const entry of entries) {
     if (entry.state.kind !== 'blocked') continue;
-    const problem = entry.state.problem;
+    const problem = problemOf(entry)!;
     const cause = problem.code === 'too_many_attempts' && problem.detail ? problem.detail : problem.code;
     const phase = entry.state.at;
     const source = entry.transferHash ?? (cause === 'pack_partial' ? problem.detail : null) ?? entry.release?.title ?? entry.manualMatch?.file ?? null;
@@ -151,7 +166,7 @@ export function pendingTitleKeys() {
   }
   for (const key of [...keys]) {
     const title = db.data.titles[key];
-    const target = Object.values(db.data.queue).some((entry) => entry.titleKey === key && entry.attempt > 0 && !entry.clearedAt);
+    const target = Object.values(db.data.queue).some((entry) => entry.titleKey === key && shown(entry) && !entry.clearedAt);
     if (!title || title.mediaType !== 'tv' || title.paused || target) keys.delete(key);
   }
   return keys;
@@ -160,7 +175,10 @@ export function pendingTitleKeys() {
 // A search that waits for its next run is future work only while one of its targets still waits. A target that
 // finished, stopped, or paused leaves no future search behind.
 export const showsSearch = (job: Job) => {
-  if (job.type !== 'queue.search' || job.state !== 'waiting' || job.runAt <= Date.now()) return true;
+  if (job.type !== 'queue.search' || job.state !== 'waiting') return true;
+  const item = jobItem(job);
+  if (item) return ['queued', 'waiting', 'searching', 'fetching'].includes(item.state.kind) && !db.data.titles[item.titleKey]?.paused;
+  if (job.runAt <= Date.now()) return true;
   const payload = job.payload as { entryIds?: string[] } | null;
   return Boolean(
     payload?.entryIds?.some((id) => {
@@ -172,7 +190,7 @@ export const showsSearch = (job: Job) => {
 };
 
 export const titleOf = (entry: QueueEntry): Title | undefined => db.data.titles[entry.titleKey];
-export const shown = (entry: QueueEntry) => entry.attempt > 0 && Boolean(titleOf(entry));
+export const shown = (entry: QueueEntry) => Boolean(titleOf(entry)) && (entry.attempt > 0 || Boolean(itemFor(entry)?.entryIds.includes(entry.id)));
 export const titleName = (title: Title) => `${title.meta.title}${title.meta.year ? ` (${title.meta.year})` : ''}`;
 
 export function queueEpisode(entry: QueueEntry) {
@@ -188,12 +206,23 @@ export function label(entry: QueueEntry) {
 }
 
 // The target of a job. A job without a target has no entry.
+function jobItem(job: Job) {
+  const payload = job.payload as { itemId?: string; titleKey?: string; season?: number | null; entryIds?: string[] } | null;
+  if (payload?.itemId) return getItem(payload.itemId);
+  const entry = payload?.entryIds?.map((id) => db.data.queue[id]).find(Boolean);
+  if (entry) return itemFor(entry);
+  if (job.type === 'queue.search' && payload?.titleKey && payload.season !== undefined) return findItem(payload.titleKey, payload.season);
+  return undefined;
+}
+
 export function jobEntry(job: Job): QueueEntry | undefined {
   const payload = job.payload as { entryIds?: string[]; hash?: string } | null;
   const targets = payload?.entryIds?.map((id) => db.data.queue[id]).filter((entry): entry is QueueEntry => Boolean(entry)) ?? [];
   // A future search names a target that still waits, not one that its payload kept after the target moved on.
   const first = job.type === 'queue.search' && job.state === 'waiting' ? (targets.find((entry) => entry.state.kind === 'waiting') ?? targets[0]) : targets[0];
   if (first) return first;
+  const item = jobItem(job);
+  if (item) return item.entryIds.map((id) => db.data.queue[id]).find(Boolean);
   if (payload?.hash) return Object.values(db.data.queue).find((entry) => entry.transferHash === payload.hash);
   return undefined;
 }
@@ -209,19 +238,13 @@ export function jobTitle(job: Job): Title | undefined {
 
 // The target of a job, as the queue names it. A job without a target has no label.
 export function jobLabel(job: Job): string | null {
-  const payload = job.payload as { titleKey?: string; season?: number | null; entryIds?: string[] } | null;
-  // A search covers a whole season. Its label names the season, so the row does not look like one episode.
-  if (job.type === 'queue.search' && typeof payload?.season === 'number' && (payload.entryIds?.length ?? 0) > 1) {
-    const title = payload.titleKey ? db.data.titles[payload.titleKey] : undefined;
-    if (title) {
-      const seasons = new Set(payload.entryIds!.flatMap((id) => db.data.queue[id] ? queueEpisode(db.data.queue[id]!)?.season ?? [] : []));
-      if (seasons.size > 1) return titleName(title);
-      return `${titleName(title)} S${pad(seasons.values().next().value ?? payload.season)}`;
-    }
-  }
   const entry = jobEntry(job);
-  if (entry && titleOf(entry)) return label(entry);
   const title = jobTitle(job);
+  if (title && (job.type.startsWith('item.') || ['queue.search', 'queue.grab', 'queue.send'].includes(job.type))) {
+    const season = jobItem(job)?.season ?? entry?.season ?? null;
+    return season === null ? titleName(title) : `${titleName(title)} S${pad(season)}`;
+  }
+  if (entry && titleOf(entry)) return label(entry);
   return title ? titleName(title) : null;
 }
 
@@ -229,6 +252,7 @@ export function jobLabel(job: Job): string | null {
 // job comes first, because it is the current work of the Activity page. Then the waiting jobs follow in the order
 // that the worker starts them.
 export function itemJobs() {
+  const now = Date.now();
   const list = Object.values(db.data.jobs)
     .filter((job) => (job.state === 'waiting' || job.state === 'running') && isItemJob(job) && showsSearch(job))
     .sort((a, b) => {
@@ -240,20 +264,14 @@ export function itemJobs() {
       }
       return a.runAt - b.runAt || a.seq - b.seq;
     });
-  // The searches of one series show from the first season up, as the worker starts them. A marked job keeps its place.
-  const slots = new Map<string, number[]>();
-  for (const [index, job] of list.entries()) {
-    const own = job.state === 'waiting' && job.priority === null ? seasonOf(job) : null;
-    if (!own) continue;
-    slots.set(own.titleKey, [...(slots.get(own.titleKey) ?? []), index]);
-  }
-  for (const group of slots.values()) {
-    if (group.length < 2) continue;
-    const ordered = group.map((index) => list[index]!).sort((a, b) => seasonOf(a)!.season - seasonOf(b)!.season);
-    group.forEach((slot, position) => {
-      list[slot] = ordered[position]!;
-    });
-  }
+  const turns = list.flatMap((job, index) => {
+    if (job.state !== 'waiting' || job.type !== 'queue.search' || job.runAt > now) return [];
+    const item = jobItem(job);
+    return item && (item.nextAt ?? 0) <= now ? [{ job, index, item }] : [];
+  });
+  const ordered = [...turns].sort((a, b) => (a.item.priority ?? a.job.priority ?? Infinity) - (b.item.priority ?? b.job.priority ?? Infinity)
+    || a.item.position - b.item.position || a.job.seq - b.job.seq);
+  turns.forEach(({ index }, position) => { list[index] = ordered[position]!.job; });
   return list;
 }
 
@@ -274,7 +292,7 @@ export function indexerWaitOf(finder: Finder, job: Job): number {
   return 0;
 }
 
-export const jobEta = (finder: Finder, job: Job) => Math.max(job.runAt, Date.now(), indexerWaitOf(finder, job));
+export const jobEta = (finder: Finder, job: Job) => Math.max(job.runAt, Date.now(), job.type === 'queue.search' ? jobItem(job)?.nextAt ?? 0 : 0, indexerWaitOf(finder, job));
 
 export function lanePositions() {
   const lane = Object.values(db.data.queue).filter((entry) => entry.priority !== null && isActive(entry) && entry.attempt > 0);
@@ -312,21 +330,114 @@ const RENAMED_REASONS: Record<string, string> = {
   'The quality of the release is not in any quality profile of the title.': REJECTION_TEXT.quality_not_in_profile!,
 };
 const currentText = (text: string) => RENAMED_REASONS[text] ?? text;
+const manualStops = Object.entries(REJECTION_TEXT).filter(([code]) => manualRejection(code));
 
 // The reasons of a release that the search rejected.
-function rejectedReasons(release: { reasons?: string[] }) {
-  return (release.reasons ?? []).map(currentText);
+export const rejectedId = (release: Pick<RejectedRelease, 'indexerId' | 'guid'>) => digest([release.indexerId, release.guid]);
+
+function publicRejectionId(entry: QueueEntry, release: RejectedRelease) {
+  return release.guid === release.title && /^[\p{L}\p{N}][\p{L}\p{N} ._'()-]*$/u.test(release.guid)
+    ? release.guid
+    : digest([itemId(entry.titleKey, entry.season), release.indexerId, release.guid]);
+}
+
+export function manualStopsOf(release: RejectedRelease) {
+  const reasons = (release.reasons ?? []).map(currentText);
+  return manualStops.flatMap(([code, message]) => reasons.includes(code) || reasons.includes(message) ? [{ code, message }] : []);
+}
+
+function rejectedView(entry: QueueEntry, release: RejectedRelease): QueueRejectedRelease {
+  const reasons = (release.reasons ?? []).map(currentText);
+  return {
+    indexerId: release.indexerId,
+    guid: publicRejectionId(entry, release),
+    title: release.title,
+    sizeBytes: release.sizeBytes,
+    seeders: release.seeders,
+    resolution: release.resolution,
+    source: release.source,
+    kind: release.kind,
+    reasons,
+    selectable: !manualStopsOf(release).length,
+    sizeRejection: release.sizeRejection,
+  };
+}
+
+export function rejectedOf(entry: QueueEntry) {
+  const item = itemFor(entry);
+  if (!item) return entry.search?.rejected ?? [];
+  return item.entryIds.includes(entry.id) ? item.search?.rejected ?? [] : [];
+}
+
+export function findRejected(entry: QueueEntry, indexerId: number, guid: string) {
+  return rejectedOf(entry).find((release) => release.indexerId === indexerId && publicRejectionId(entry, release) === guid);
+}
+
+function searchView(entry: QueueEntry, search: SearchState | null, nextAt?: number | null) {
+  return search ? {
+    ...search,
+    indexers: search.indexers.map((indexer) => indexer.error ? { ...indexer, error: publicText(indexer.error.replace(/\b(?:https?|ftp):\/\/[^\s"'<>]+/gi, '[redacted]')) } : indexer),
+    nextAt: nextAt === undefined ? search.nextAt : nextAt,
+    rejected: rejectedOf(entry).map((release) => rejectedView(entry, release)),
+  } : null;
+}
+
+export function publicText(text: string, link?: string | null): string {
+  const value = redact((link ? text.replaceAll(link, '[redacted]') : text).replace(/\bmagnet:\?[^\s"'<>]+/gi, '[redacted]'));
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+function releaseView(release: ReleaseRef) {
+  const parsed = parseRelease(release.title);
+  const quality = parsed.source !== 'unknown' || parsed.resolution !== null ? qualityLabel(parsed.source, parsed.resolution) : null;
+  return { title: release.title, indexer: release.indexerName, sizeBytes: release.sizeBytes, kind: release.kind, manual: release.manual, comment: release.comment ? publicText(release.comment, release.link) : null, quality };
+}
+
+function torrentsOf(entries: QueueEntry[], item: QueueTurn | undefined): QueueSelection[] {
+  const first = entries[0];
+  if (!first) return [];
+  const torrents = new Map<string, QueueSelection>();
+  for (const selected of Object.values(item?.selected ?? {})) {
+    torrents.set(selected.hash, {
+      key: selected.hash,
+      entryId: entries.find((entry) => Object.hasOwn(selected.matches, entry.id))?.id ?? first.id,
+      hash: selected.hash,
+      status: selected.status === 'accepted' ? 'accepted' : selected.status === 'verify' ? 'inspecting' : 'prepared',
+      release: releaseView(selected.release),
+    });
+  }
+  if (item?.state.kind === 'fetching' && item.candidate) {
+    const candidate = item.candidate;
+    const key = rejectedId(candidate);
+    if (!(candidate.infoHash && torrents.has(candidate.infoHash)) && !Object.values(item.selected).some(({ release }) => rejectedId(release) === key)) {
+      torrents.set(key, { key, entryId: first.id, hash: candidate.infoHash, status: 'inspecting', release: releaseView(candidate) });
+    }
+  }
+  for (const entry of entries) {
+    if (!entry.release || (item && !entry.transferHash)) continue;
+    const hash = entry.transferHash ?? entry.release.infoHash;
+    const key = hash ?? rejectedId(entry.release);
+    if (!torrents.has(key)) {
+      torrents.set(key, { key, entryId: entry.id, hash, status: entry.transferHash ? 'accepted' : 'inspecting', release: releaseView(entry.release) });
+    }
+  }
+  return [...torrents.values()];
+}
+
+export function visibleState(entry: QueueEntry) {
+  return entry.season === null && !entry.clearedAt ? itemFor(entry)?.state ?? entry.state : entry.state;
 }
 
 export function view(poller: Poller, importStatus: ImportStatus | undefined, entry: QueueEntry, lane: Map<string, number>, detail = false) {
   const title = titleOf(entry)!;
-  const description = describe(entry.state);
+  const item = itemFor(entry);
+  const movie = entry.season === null && !entry.clearedAt ? item : undefined;
+  const state = visibleState(entry);
+  const description = describe(state);
   const episode = entry.season === null ? undefined : title.episodes.find((e) => e.season === entry.season && e.number === entry.number);
   const transfer = entry.transferHash ? poller.transfer(entry.transferHash) : undefined;
-  const parsed = entry.release ? parseRelease(entry.release.title) : null;
-  // A release name that gives neither a source nor a resolution has no quality to show.
-  const quality = parsed && (parsed.source !== 'unknown' || parsed.resolution !== null) ? qualityLabel(parsed.source, parsed.resolution) : null;
-  const info = reasonOf(entry);
+  const info = reasonOf(state === entry.state ? entry : { ...entry, state });
+  const torrents = movie ? torrentsOf([entry], movie) : undefined;
   const base = {
     id: entry.id,
     titleKey: entry.titleKey,
@@ -344,35 +455,20 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
     phase: description.phase,
     reason: info ? { code: info.code, message: info.message, action: info.action, settings: info.settings ?? null, detail: info.detail } : null,
     actions: actionsOf([entry]),
-    stateSince: entry.stateSince,
+    stateSince: movie?.stateSince ?? entry.stateSince,
     revision: entry.revision,
     lane: lane.get(entry.id) ?? null,
     attempt: entry.attempt,
     completedAt: entry.completedAt,
     clearedAt: entry.clearedAt,
-    release: entry.release ? { title: entry.release.title, indexer: entry.release.indexerName, sizeBytes: entry.release.sizeBytes, kind: entry.release.kind, manual: entry.release.manual, comment: entry.release.comment ?? null, quality } : null,
+    release: torrents ? torrents[0]?.release ?? null : entry.release ? releaseView(entry.release) : null,
+    ...(movie ? { torrents, position: movie.position, nextAt: movie.nextAt } : {}),
     file: fileOf(entry, title, transfer),
     // The client has a torrent for this target. An attached torrent is one that the user chose. ladarr did not add it.
     hasTorrent: Boolean(entry.transferHash),
     attached: Boolean(entry.release?.external),
     // The link and the magnet stay on the server: they carry the API key of the indexer.
-    search: entry.search
-      ? {
-          ...entry.search,
-          rejected: (entry.search.rejected ?? []).map((release) => ({
-            indexerId: release.indexerId,
-            guid: release.guid,
-            title: release.title,
-            sizeBytes: release.sizeBytes,
-            seeders: release.seeders,
-            resolution: release.resolution,
-            source: release.source,
-            kind: release.kind,
-            reasons: rejectedReasons(release),
-            sizeRejection: release.sizeRejection,
-          })),
-        }
-      : null,
+    search: searchView(entry, movie ? movie.search ?? entry.search : entry.search ?? item?.search ?? null, item?.nextAt ?? (item?.state.kind === 'blocked' ? null : undefined)),
     // A pack gives one transfer to several entries. The numbers are the numbers of the torrent, and they count once.
     // The part of an episode comes from its own file when the client reports it.
     transfer: transfer
@@ -427,22 +523,22 @@ export function matches(entry: QueueEntry, f: Filters) {
   return true;
 }
 
-export const bySeasonNumber = (a: QueueEntry, b: QueueEntry) => {
-  const left = queueEpisode(a);
-  const right = queueEpisode(b);
-  return (left?.season ?? 0) - (right?.season ?? 0) || (left?.number ?? 0) - (right?.number ?? 0);
-};
+export const bySeasonNumber = (a: QueueEntry, b: QueueEntry) => (a.season ?? 0) - (b.season ?? 0) || (a.number ?? 0) - (b.number ?? 0);
+
+const groupPriority = (group: RowGroup) => findItem(group.title.key, group.season)?.priority
+  ?? Math.min(...group.entries.flatMap((entry) => entry.priority !== null && isActive(entry) ? [entry.priority] : []));
+const positionOf = (group: RowGroup) => findItem(group.title.key, group.season)?.position ?? group.first;
 
 // The rows of the queue, before the page and after the filters. The counters read the same rows, so a badge and the
 // rows of its tab always agree.
 function groupsOf(f: Filters, poller?: Poller): RowGroup[] {
   const groups = new Map<string, RowGroup>();
-  const entryFilters = { ...f, key: undefined };
+  const entryFilters = { ...f, key: undefined, priority: false };
   for (const entry of Object.values(db.data.queue)) {
     if (!shown(entry) || (!f.cleared && entry.clearedAt)) continue;
     const title = titleOf(entry)!;
-    const season = queueEpisode(entry)?.season ?? null;
-    const key = season === null ? entry.id : `${entry.titleKey}:${season}`;
+    const season = entry.season;
+    const key = itemId(entry.titleKey, season);
     const group = groups.get(key) ?? {
       key,
       title,
@@ -509,16 +605,30 @@ function groupsOf(f: Filters, poller?: Poller): RowGroup[] {
   // A group with a target that found no release goes after every other row, because a new release is its only next
   // step. A title that waits for its release has no work yet, so its row goes after the rest.
   return [...groups.values()]
-    .filter((group) => group.matching > 0 && Number.isFinite(group.progress) && (!f.key || group.pending || groupAggregate(group.entries).tabs.some((tab) => tab === f.key)))
+    .filter((group) => {
+      if (group.pending) return true;
+      const item = findItem(group.title.key, group.season);
+      const description = item ? describe(item.state) : null;
+      if (description) {
+        group.progress = description.status === 'available' ? Infinity : progressOfState(item!.state);
+        group.ready = description.status === 'fetching';
+        group.searching = description.status === 'searching' && description.working;
+        group.notFound = false;
+      }
+      const matching = f.priority ? Number.isFinite(groupPriority(group)) && (!description || description.active) : true;
+      return matching && group.matching > 0 && Number.isFinite(group.progress) && (!f.key || (description ? description.tab === f.key : aggregateEntries(group.entries).tabs.some((tab) => tab === f.key)));
+    })
     .sort(
       (a, b) =>
-        Number(a.notFound) - Number(b.notFound) ||
-        Number(a.upcoming) - Number(b.upcoming) ||
-        b.progress - a.progress ||
-        b.part - a.part ||
-        Number(b.ready) - Number(a.ready) ||
-        Number(b.searching) - Number(a.searching) ||
-        a.first - b.first ||
+        (f.priority ? groupPriority(a) - groupPriority(b) : 0) ||
+        (f.key === 'queued' ? 0
+          : Number(a.notFound) - Number(b.notFound) ||
+            Number(a.upcoming) - Number(b.upcoming) ||
+            b.progress - a.progress ||
+            b.part - a.part ||
+            Number(b.ready) - Number(a.ready) ||
+            Number(b.searching) - Number(a.searching)) ||
+        positionOf(a) - positionOf(b) ||
         a.key.localeCompare(b.key),
     );
 }
@@ -527,38 +637,80 @@ function groupsOf(f: Filters, poller?: Poller): RowGroup[] {
 // of the season stops them, and the search of the other seasons is the way out.
 export const otherSeasonsTargets = (titleKey: string, season: number | null) =>
   Object.values(db.data.queue).filter(
-    (entry) => entry.titleKey === titleKey && (season === null || entry.season === season) && shown(entry) && needsOtherSeasons(entry.state),
+    (entry) => entry.titleKey === titleKey && (season === null || entry.season === season) && shown(entry) &&
+      needsOtherSeasons(entry.state) && problemOf(entry)?.code !== 'file_not_found',
   );
 
 export function aggregateEntries(entries: QueueEntry[]) {
-  const result = aggregate(entries.map((entry) => entry.state));
-  if (result.status !== 'no_match') return result;
-
-  const releaseSeasons = new Set(entries.filter((entry) => entry.release && entry.season !== null).map((entry) => queueEpisode(entry)!.season));
-  if (releaseSeasons.size && entries.some((entry) => entry.season !== null && statusOf(entry) === 'no_match' && releaseSeasons.has(queueEpisode(entry)!.season))) {
-    result.status = 'stuck';
-    result.tabs = ['stuck'];
+  const states = new Map<string, QueueEntry['state']>();
+  for (const entry of entries) {
+    const item = !entry.clearedAt ? itemFor(entry) : undefined;
+    states.set(item?.id ?? entry.id, item?.state ?? entry.state);
   }
-  return result;
+  return aggregate(states.values());
 }
 
-// The aggregate of a group. It covers every member of the season, before the tab filter and the page.
-export function groupAggregate(entries: QueueEntry[]) {
-  const result = aggregateEntries(entries);
+// The status belongs to the queue item. The counts describe its episodes.
+export function groupAggregate(entries: QueueEntry[], item?: QueueTurn) {
+  const first = entries[0];
+  if (!item && first && entries.every((entry) => entry.season === first.season)) item = itemFor(first);
+  const states = aggregate(entries.map((entry) => entry.state));
+  const result = item ? states : aggregateEntries(entries);
+  const description = item ? describe(item.state) : null;
+  const status = description?.status ?? result.status;
+  const rejected = new Map<string, { entryId: string; release: QueueRejectedRelease }>();
+  if (status === 'stuck' || status === 'no_match') {
+    const members = item ? entries.filter(({ id }) => item!.entryIds.includes(id)) : entries;
+    const lead = members.find(({ state }) => state.kind === 'blocked') ?? members[0];
+    const sources = item
+      ? lead ? [{ entry: lead, releases: rejectedOf(lead) }] : []
+      : entries.map((entry) => ({ entry, releases: rejectedOf(entry) }));
+    for (const { entry, releases } of sources) {
+      for (const release of releases) {
+        const parsed = item ? parseRelease(release.title) : null;
+        const target = parsed?.season == null ? entry : members.find((member) => {
+          if (member.state.kind !== 'blocked') return false;
+          const point = queueEpisode(member);
+          return point?.season === parsed.season && (release.kind === 'pack' || parsed.episodes.includes(point.number));
+        }) ?? entry;
+        const view = rejectedView(target, release);
+        const key = rejectedId(release);
+        if (!rejected.has(key)) rejected.set(key, { entryId: target.id, release: view });
+      }
+    }
+  }
+  const actions = actionsOf(entries);
+  const itemProblem = item && first ? reasonOfEntry({ ...first, state: item.state }) : result.problem;
+  const missingFile = itemProblem?.code === 'pack_partial' && entries.some((entry) =>
+    entry.state.kind === 'blocked' && entry.state.problem.code === 'pack_partial' && problemOf(entry)?.code === 'file_not_found');
+  const problem = missingFile ? { ...itemProblem!, code: 'file_not_found' } : itemProblem;
+  if (description?.status === 'stuck' && description.phase === 'fetching' && problem && ['file_unmapped', 'numbering_required'].includes(problem.code) && !actions.some((action) => action.action === 'match')) {
+    actions.push({ action: 'match', label: 'Map episodes', ids: entries.map(({ id }) => id), phase: 'fetching', cause: problem.code, source: item?.candidate?.title ?? null });
+  }
   return {
-    status: result.status,
-    counts: result.counts,
-    tabs: result.tabs,
-    total: result.total,
-    problem: reasonOfProblem(result.problem),
-    actions: actionsOf(entries),
-    otherSeasons: entries.filter((entry) => needsOtherSeasons(entry.state)).length,
+    status,
+    counts: states.counts,
+    tabs: description ? description.tab ? [description.tab] : [] : result.tabs,
+    total: entries.length,
+    problem: reasonOfProblem(problem, status === 'stuck', description?.phase),
+    actions,
+    otherSeasons: entries.filter((entry) => needsOtherSeasons(entry.state) && problemOf(entry)?.code !== 'file_not_found').length,
+    torrents: torrentsOf(entries, item),
+    rejected: [...rejected.values()],
+    missing: status === 'stuck' && problem?.code === 'no_results' ? entries.flatMap(({ id, season, number }) => {
+      const rounds = item?.emptySearches[id] ?? 0;
+      const covered = Object.values(item?.selected ?? {}).some(({ status, matches }) => status !== 'verify' && Object.hasOwn(matches, id));
+      return !covered && rounds >= 3 && season !== null && number !== null ? [{ season, number, rounds }] : [];
+    }) : [],
+    position: item?.position ?? null,
+    nextAt: item?.nextAt ?? null,
   };
 }
 
 function groupRow(group: RowGroup): QueueGroupRow {
-  const summary = groupAggregate(group.entries);
+  const summary = groupAggregate(group.entries, findItem(group.title.key, group.season));
   return {
+    ...summary,
     kind: 'group',
     key: group.key,
     titleKey: group.entries[0]!.titleKey,
@@ -567,17 +719,10 @@ function groupRow(group: RowGroup): QueueGroupRow {
     posterPath: group.title.meta.posterPath,
     season: group.season,
     numberingRevision: seasonRevision(group.title.numbering, group.season),
-    status: summary.status,
-    total: summary.total,
     reached: reachedOf(group.entries),
     download: group.download < 0 ? null : group.download,
     matching: group.matching,
-    counts: summary.counts,
-    tabs: summary.tabs,
-    problem: summary.problem,
-    actions: summary.actions,
-    otherSeasons: summary.otherSeasons,
-    priority: group.entries.some((entry) => entry.priority !== null && isActive(entry)),
+    priority: Number.isFinite(groupPriority(group)),
   };
 }
 
@@ -600,10 +745,34 @@ export function queuePage(poller: Poller, importStatus: ImportStatus | undefined
 export function queueTabCounts(): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const group of groupsOf(filtersOf({}))) {
-    const tabs = group.pending ? ['searching' as Tab] : groupAggregate(group.entries).tabs;
+    const item = findItem(group.title.key, group.season);
+    const tab = item ? describe(item.state).tab : null;
+    const tabs = group.pending ? ['searching' as Tab] : item ? tab ? [tab] : [] : aggregateEntries(group.entries).tabs;
     for (const tab of tabs) counts[tab] = (counts[tab] ?? 0) + 1;
   }
   return counts;
+}
+
+export function queueDescriptions() {
+  const states = new Map<string, QueueEntry['state'][]>();
+  let targets = 0;
+  for (const entry of Object.values(db.data.queue)) {
+    if (!shown(entry) || entry.clearedAt) continue;
+    targets++;
+    const key = itemId(entry.titleKey, entry.season);
+    const item = itemFor(entry);
+    if (item) states.set(key, [item.state]);
+    else {
+      const group = states.get(key);
+      if (group) group.push(entry.state);
+      else states.set(key, [entry.state]);
+    }
+  }
+  const descriptions = [...states.values()].map((group) => {
+    const { status } = aggregate(group);
+    return describe(group.find((state) => describe(state).status === status)!);
+  });
+  return { descriptions, targets };
 }
 
 export { aggregate, describe, phaseOf };

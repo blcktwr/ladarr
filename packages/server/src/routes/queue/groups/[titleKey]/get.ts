@@ -3,7 +3,9 @@ import { join } from 'node:path';
 import { db } from '../../../../core/db.ts';
 import type { QueueGroupPage, QueueMappingEpisode } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import { bySeasonNumber, filtersOf, groupAggregate, lanePositions, queueEpisode, reachedOf, shown, view } from '../../../../helpers/queue.ts';
+import { preparedMapping } from '../../../../helpers/queue-attach.ts';
+import { bySeasonNumber, filtersOf, groupAggregate, lanePositions, reachedOf, shown, view } from '../../../../helpers/queue.ts';
+import { findItem } from '../../../../library/downloads/queue.ts';
 import { inside, torrentVideos } from '../../../../library/imports/importer.ts';
 import { normalizeNumbering, releasePoint } from '../../../../library/numbering.ts';
 import { recoverMappingSources } from '../../../../library/scan.ts';
@@ -59,6 +61,11 @@ async function mappingOf(title: Title, clients: Clients, fixedSeason: number | n
     return (await found).has(inode);
   }
   const mapping = await Promise.all(rows.map(async ({ id, season, number, releaseSeason, entry, file }) => {
+    const prepared = entry && preparedMapping(entry)?.candidate;
+    if (prepared && Object.hasOwn(prepared.matches, id)) {
+      const manual = Object.entries(prepared.manualMatches ?? {}).find(([, points]) => points.some((point) => point.season === season && point.number === number));
+      return { id, season, number, releaseSeason, torrent: { hash: prepared.hash, name: prepared.release.title }, match: manual ? { file: manual[0], path: null } : null };
+    }
     const current = find(entry?.clientId, entry?.transferHash);
     const imported = entry?.importResult;
     const origin = file?.download ? (fixedSeason === null && file.download.name ? file.download : find(file.download.clientId, file.download.hash))
@@ -84,7 +91,7 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
     const season = req.query.season === undefined ? null : Number(req.query.season);
     const mappingRequested = req.query.mapping === 'true';
     const all = Object.values(db.data.queue).filter(
-      (entry) => entry.titleKey === req.params.titleKey && entry.season !== null && (season === null || (mappingRequested ? entry.season : queueEpisode(entry)?.season) === season) && shown(entry) && (f.cleared || !entry.clearedAt),
+      (entry) => entry.titleKey === req.params.titleKey && entry.season !== null && (season === null || entry.season === season) && shown(entry) && (f.cleared || !entry.clearedAt),
     );
     const items = [...all].sort(bySeasonNumber);
     // The download of the group is the part of the least advanced torrent that the client reports.
@@ -95,22 +102,16 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
       if (!transfer) continue;
       download = download === null ? transfer.progress : Math.min(download, transfer.progress);
     }
-    const summary = groupAggregate(all);
+    const summary = groupAggregate(items, season !== null ? findItem(req.params.titleKey, season) : undefined);
     const title = db.data.titles[req.params.titleKey];
     const numberingRevision = title?.numbering?.revision ?? 0;
     const mapping = mappingRequested && title ? await mappingOf(title, clients, season, persist) : undefined;
     res.json({
       cursor: db.data.queueRev,
       group: {
-        status: summary.status,
-        counts: summary.counts,
-        tabs: summary.tabs,
-        total: all.length,
+        ...summary,
         reached: reachedOf(all),
         download,
-        problem: summary.problem,
-        actions: summary.actions,
-        otherSeasons: summary.otherSeasons,
       },
       items: items.map((entry) => view(poller, importStatus, entry, lane)),
       ...(mapping ? { mapping, numberingRevision } : {}),

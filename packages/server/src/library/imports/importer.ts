@@ -13,6 +13,7 @@ import { inspectCoverage } from '../coverage.ts';
 import { recoverCorrection } from '../mapping.ts';
 import { parseRelease } from '../grab/release.ts';
 import { probeFile } from '../probe.ts';
+import { acceptedPath, matchPath } from '../downloads/file-evidence.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
 import { entryId, isActive, ownsUpload, phaseOfEntry } from '../downloads/queue.ts';
 import { checkRoot, sameIdentity } from '../roots.ts';
@@ -180,12 +181,13 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
   type Pick = { file: ImporterFound; entries: QueueEntry[]; episodes: Episode[]; source: 'manual' | 'numbering' | 'automatic'; probe?: ProbeResult; identity?: JournalStep['sourceIdentity'] };
   type Picks = { picks: Pick[]; missing: QueueEntry[]; unknown: QueueEntry[]; coverage: Episode[]; complete: boolean };
 
-  async function pick(title: Title, group: QueueEntry[], files: (ImporterFound & { clientPath: string })[], content: string): Promise<Picks> {
+  async function pick(title: Title, group: QueueEntry[], files: (ImporterFound & { clientPath: string })[], torrent: Torrent, content: string): Promise<Picks> {
     const picks: Pick[] = [];
     const taken = new Set<string>();
     const episodesOf = (refs: { season: number; number: number }[]) => refs.map((ref) => title.episodes.find((episode) => episode.season === ref.season && episode.number === ref.number)).filter((episode): episode is Episode => Boolean(episode));
     const sameCoverage = (a: { season: number; number: number }[], b: { season: number; number: number }[]) => a.length === b.length && a.every((one) => b.some((other) => one.season === other.season && one.number === other.number));
     const upload = Boolean(group[0]!.release?.uploadPath);
+    const findPath = matchPath(files, (file) => file.clientPath, torrent);
     // The name of the release, or the folder of the download, can give the season that the client leaves out of each
     // file name. A group of several seasons has no one season for these files.
     const seasons = new Set(group.map((entry) => entry.season));
@@ -194,27 +196,33 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
 
     if (title.mediaType === 'movie') {
       const entry = group[0]!;
-      const chosen = entry.manualMatch ? files.find((file) => file.rel === entry.manualMatch!.file)
+      const path = entry.manualMatch?.file ?? acceptedPath(entry);
+      const chosen = path ? findPath(path)
         : upload ? files.find((file) => file.clientPath === entry.release?.uploadPath) : files.length === 1 ? files[0] : undefined;
       return chosen
         ? { picks: [{ file: chosen, entries: [entry], episodes: [], source: entry.manualMatch || upload ? 'manual' : 'automatic' }], missing: [], unknown: [], coverage: [], complete: true }
-        : { picks, missing: upload || !files.length ? group : [], unknown: !upload && files.length ? group : [], coverage: [], complete: false };
+        : { picks, missing: path || upload || !files.length ? group : [], unknown: !path && !upload && files.length ? group : [], coverage: [], complete: false };
     }
 
-    const assignments = new Map(assignmentsOf(group[0]!).map((assignment) => [assignment.file, assignment]));
-    for (const entry of group) {
-      const match = entry.manualMatch;
-      if (!match?.covers.length || (entry.manualMatchRevision ?? 0) < (assignments.get(match.file)?.revision ?? 0)) continue;
-      assignments.set(match.file, { ...match, revision: entry.manualMatchRevision ?? 0 });
+    const assignments = new Map<string, ReturnType<typeof assignmentsOf>[number]>();
+    for (const assignment of assignmentsOf(group[0]!)) {
+      const path = findPath(assignment.file)?.clientPath ?? assignment.file;
+      const previous = assignments.get(path);
+      if (!previous || assignment.revision > previous.revision || (assignment.revision === previous.revision && !assignment.covers.length)) {
+        assignments.set(path, { ...assignment, file: path });
+      }
     }
-    const unassigned = new Set([...assignments.values()].filter((match) => !match.covers.length && files.some((file) => file.rel === match.file)).map((match) => match.file));
+    const unassigned = new Set([...assignments.values()].flatMap((match) => {
+      const file = !match.covers.length && findPath(match.file);
+      return file ? [file.rel] : [];
+    }));
     // A match that the user made comes first. It survives a retry.
     for (const manual of assignments.values()) {
-      const file = files.find((item) => item.rel === manual.file);
+      const file = findPath(manual.file);
       if (!file || taken.has(file.rel) || !manual.covers.length) continue;
       const episodes = episodesOf(manual.covers);
       if (!episodes.length || episodes.length !== manual.covers.length) continue;
-      const covered = group.filter((other) => manual.covers.some((c) => c.season === other.season && c.number === other.number) && (!other.manualMatch || (other.manualMatch.file === manual.file && ((other.manualMatchRevision ?? 0) < manual.revision || !other.manualMatch.covers.length || sameCoverage(other.manualMatch.covers, manual.covers)))));
+      const covered = group.filter((other) => manual.covers.some((c) => c.season === other.season && c.number === other.number) && (!other.manualMatch || (findPath(other.manualMatch.file) === file && ((other.manualMatchRevision ?? 0) < manual.revision || !other.manualMatch.covers.length || sameCoverage(other.manualMatch.covers, manual.covers)))));
       if (!covered.length || [...assignments.values()].some((other) => other.file !== manual.file && other.covers.some((ref) => manual.covers.some((one) => ref.season === one.season && ref.number === one.number)))) continue;
       picks.push({ file, entries: covered, episodes, source: 'manual' });
       taken.add(file.rel);
@@ -223,7 +231,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     const done = () => new Set(picks.flatMap((p) => p.entries.map((e) => e.id)));
     if (upload) {
       const explicit = done();
-      const byPath = new Map(files.filter((file) => !taken.has(file.rel) && !assignments.has(file.rel)).map((file) => [file.clientPath, file]));
+      const byPath = new Map(files.filter((file) => !taken.has(file.rel) && !assignments.has(file.clientPath)).map((file) => [file.clientPath, file]));
       const chosen = new Map<string, QueueEntry[]>();
       for (const entry of group) {
         if (explicit.has(entry.id) || entry.manualMatch || [...assignments.values()].some((match) => match.covers.some((ref) => ref.season === entry.season && ref.number === entry.number))) continue;
@@ -237,6 +245,34 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       const imported = done();
       return { picks, missing: group.filter((entry) => !imported.has(entry.id)), unknown: [], coverage: [], complete: false };
     }
+    const verified = new Map(group.flatMap((entry) => {
+      const path = acceptedPath(entry);
+      return path ? [[entry.id, path] as const] : [];
+    }));
+    const explicit = done();
+    const byFile = new Map<ImporterFound, QueueEntry[]>();
+    const assigned = new Set([...assignments.values()].flatMap(({ covers }) => covers.map(({ season, number }) => `${season}:${number}`)));
+    for (const entry of group) {
+      const path = verified.get(entry.id);
+      if (!path || explicit.has(entry.id) || entry.manualMatch || assigned.has(`${entry.season}:${entry.number}`)) continue;
+      const file = findPath(path);
+      if (!file || taken.has(file.rel)) continue;
+      byFile.set(file, [...(byFile.get(file) ?? []), entry]);
+    }
+    for (const [file, entries] of byFile) {
+      const episodes = episodesOf(entries.map(({ season, number }) => ({ season: season!, number: number! })));
+      if (episodes.length !== entries.length) continue;
+      picks.push({ file, entries, episodes, source: numberingOf(entries[0]!)?.ranges.length ? 'numbering' : 'automatic' });
+      taken.add(file.rel);
+    }
+    const imported = done();
+    if (group.every((entry) => verified.has(entry.id) || imported.has(entry.id))) {
+      return {
+        picks, missing: group.filter((entry) => !imported.has(entry.id)), unknown: [],
+        coverage: picks.flatMap((item) => item.episodes), complete: files.length > 0 && picks.length === files.length,
+      };
+    }
+    const verifiedEpisodes = new Set(group.filter((entry) => verified.has(entry.id)).map((entry) => `${entry.season}:${entry.number}`));
     // The numbering of the acquisition, saved with its release. A target of an older version has none, so the title map
     // applies. The release numbers go to the catalog episodes through it.
     const numbering = numberingOf(group[0]!);
@@ -273,7 +309,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
         || (exact.length && named.length && !sameCoverage(exact, named))
         || (tagEpisodes.length && named.length && !sameCoverage(tagEpisodes, named))
         || (tagEpisodes.length && exact.length && !sameCoverage(tagEpisodes, exact));
-      const manualConflict = assignments.has(file.rel);
+      const manualConflict = assignments.has(file.clientPath);
       // A partial title, similarity, or elimination is a proposal, not an identity.
       const weakTitle = tags.title?.includes('/') && !exact.length;
       if (conflict || manualConflict || weakTitle || (!exact.length && !named.length && !tagEpisodes.length)) {
@@ -281,13 +317,13 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
         for (const episode of [...named, ...exact, ...tagEpisodes]) uncertain.add(point(episode));
         continue;
       }
-      const episodes = exact.length ? exact : named.length ? named : tagEpisodes;
+      const episodes = (exact.length ? exact : named.length ? named : tagEpisodes).filter((episode) => !verifiedEpisodes.has(point(episode)));
       coverage.push(...episodes);
       if (picks.some((item) => item.episodes.some((one) => episodes.some((other) => one.season === other.season && one.number === other.number)))) {
         unknown.add(file.rel);
         continue;
       }
-      const covered = group.filter((entry) => !entry.manualMatch && episodes.some((one) => one.season === entry.season && one.number === entry.number) && !done().has(entry.id));
+      const covered = group.filter((entry) => !entry.manualMatch && !verified.has(entry.id) && episodes.some((one) => one.season === entry.season && one.number === entry.number) && !done().has(entry.id));
       // A file for an episode that was not asked for is part of the pack. It is not imported.
       if (!covered.length) continue;
       const parsed = parseEpisodes(file.rel, seasonHint);
@@ -298,13 +334,14 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     const left = group.filter((entry) => !done().has(entry.id));
     const pending = inspectCoverage([...unknown], title, numbering, seasonHint);
     const unresolved = left.filter((entry) => {
-      if (entry.manualMatch) return files.some((file) => file.rel === entry.manualMatch!.file);
+      if (entry.manualMatch) return Boolean(findPath(entry.manualMatch.file));
+      if (verified.has(entry.id)) return false;
       if (unassigned.size) return true;
       if (!unknown.size) return false;
       const episode = { season: entry.season!, number: entry.number! };
       return uncertain.has(point(episode)) || pending.status(episode) !== 'absent';
     });
-    return { picks, missing: left.filter((entry) => !unresolved.includes(entry)), unknown: unresolved, coverage, complete: files.length > 0 && unknown.size === 0 };
+    return { picks, missing: left.filter((entry) => !unresolved.includes(entry)), unknown: unresolved, coverage, complete: !verified.size && files.length > 0 && unknown.size === 0 };
   }
 
   async function plan(hash: string, group: QueueEntry[], handle: ClientHandle): Promise<ImportJournal | undefined> {
@@ -419,7 +456,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
     try {
       picked = await run('files_found', async () => {
         const files = await torrentVideos(handle, clientTorrent);
-        const result = await pick(title, group, files ?? [], content);
+        const result = await pick(title, group, files ?? [], clientTorrent, content);
         currentPlan();
         const ref = group[0]!.release;
         const season = result.missing[0]?.season;

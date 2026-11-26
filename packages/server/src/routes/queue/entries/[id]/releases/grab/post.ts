@@ -1,23 +1,28 @@
 import { db } from '../../../../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { REJECTION_TEXT } from '../../../../../../library/grab/decide.ts';
-import { catalogTargets, shown, titleOf } from '../../../../../../helpers/queue.ts';
+import { catalogTargets, findRejected, manualStopsOf, shown, titleOf } from '../../../../../../helpers/queue.ts';
 import type { Finder, Queue, RawRelease } from '../../../../../../types.ts';
 
-// A release of the last search that the user picks by hand after a no-match. The preferences are skipped, the
-// safety checks are not.
+// A manual selection uses a rejection ID from the queue item. The source stays on the server.
 export function queueEntryReleaseGrabPost(queue: Queue, finder: Finder): RequestHandler<{ id: string }> {
   return (req, res) => {
     const entry = db.data.queue[req.params.id];
     const { indexerId, guid, ids } = (req.body ?? {}) as { indexerId?: unknown; guid?: unknown; ids?: unknown };
     if (!entry || !shown(entry)) return void res.status(404).json({ error: 'not_found' });
-    if (typeof indexerId !== 'number' || typeof guid !== 'string') return void res.status(400).json({ error: 'invalid_request' });
-    const candidate = (entry.search?.rejected ?? []).find((release) => release.indexerId === indexerId && release.guid === guid);
+    if (typeof indexerId !== 'number' || !Number.isInteger(indexerId) || typeof guid !== 'string' || !guid) return void res.status(400).json({ error: 'invalid_request' });
+    const candidate = findRejected(entry, indexerId, guid);
     if (!candidate) return void res.status(404).json({ error: 'release_not_found' });
+    const rejections = manualStopsOf(candidate);
+    if (rejections.length) return void res.status(409).json({ error: 'release_rejected', rejections });
     const title = titleOf(entry)!;
     const catalog = catalogTargets(title);
+    const item = queue.itemFor(entry);
     const selected = ids ?? [entry.id];
-    if (!Array.isArray(selected) || !selected.length || selected.length > 1000 || !selected.every((id) => typeof id === 'string' && (title.mediaType === 'movie' ? id === entry.id : catalog.some((target) => target.id === id)))) return void res.status(400).json({ error: 'invalid_request' });
+    if (!Array.isArray(selected) || !selected.length || selected.length > 1000 || !selected.every((id) =>
+      typeof id === 'string' && (!item || item.entryIds.includes(id))
+      && (title.mediaType === 'movie' ? id === entry.id : catalog.some((target) => target.id === id && target.season === entry.season))
+    )) return void res.status(400).json({ error: 'invalid_request' });
     const release: RawRelease = {
       indexerId: candidate.indexerId,
       guid: candidate.guid,

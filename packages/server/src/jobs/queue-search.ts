@@ -5,6 +5,7 @@ export function queueSearchHandler(finder: Finder): Handler {
   return {
     concurrency: 1,
     maxAttempts: 6,
+    canStart: finder.canStartSearch,
     run: (job, { signal }) => {
       const payload = job.payload as SearchPayload;
       // The verification reads the files and the client for the same title. A search that waits for the lock reads

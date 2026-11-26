@@ -3,11 +3,11 @@ import { basename, dirname, join } from 'node:path';
 import { db } from '../../core/db.ts';
 import { deleteItemLog } from '../../core/log.ts';
 import { inside } from '../imports/folder-files.ts';
-import { forgetSource, isActive, ownsUpload, phaseOfEntry } from '../downloads/queue.ts';
-import type { Db, Job, MediaFile, Queue, QueueEntry, Retired, Seen, Title } from '../../types.ts';
+import { forgetUnusedSource, isActive, itemFor, itemId, ownsUpload, phaseOfEntry } from '../downloads/queue.ts';
+import type { Data, Job, MediaFile, Queue, QueueEntry, Retired, Seen, Title } from '../../types.ts';
 
 // Keep a torrent if an entry or a file outside the removal still uses it.
-export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[], files: MediaFile[] = [], keptFiles: MediaFile[] = []) {
+export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[], files: MediaFile[] = [], keptFiles: MediaFile[] = [], items: Data['queueItems'] = {}) {
   const used = new Set(remaining.map((entry) => `${entry.clientId}\n${entry.transferHash}`));
   for (const file of keptFiles) if (file.download) used.add(`${file.download.clientId}\n${file.download.hash}`);
   const refs: { clientId: string; hash: string }[] = [];
@@ -19,12 +19,41 @@ export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[
     refs.push({ clientId, hash });
   };
   for (const entry of removed) {
+    const selection = entry.transferHash && items[itemId(entry.titleKey, entry.season)]?.selected[entry.transferHash];
+    if (selection && selection.status !== 'accepted') continue;
     // An upload has a hash and a client even before the client has the torrent.
     if (entry.release?.uploadPath && !ownsUpload(entry) && !['downloading', 'importing', 'available'].includes(phaseOfEntry(entry))) continue;
     add(entry.clientId, entry.transferHash);
   }
   for (const file of files) if (file.download) add(file.download.clientId, file.download.hash);
   return refs;
+}
+
+export function dropTargets(entries: QueueEntry[]) {
+  const ids = new Set(entries.map((entry) => entry.id));
+  const sources = new Set<string>();
+  for (const item of new Set(entries.map(itemFor))) {
+    if (!item) continue;
+    item.entryIds = item.entryIds.filter((id) => !ids.has(id));
+    for (const id of Object.keys(item.emptySearches)) if (ids.has(id)) delete item.emptySearches[id];
+    for (const torrent of Object.values(item.selected)) {
+      const members = Object.keys(torrent.matches);
+      for (const id of members) if (ids.has(id)) delete torrent.matches[id];
+      if (!item.entryIds.length || (members.length > 0 && !Object.keys(torrent.matches).length)) {
+        delete item.selected[torrent.hash];
+        sources.add(torrent.hash);
+      }
+    }
+    if (!item.entryIds.length) delete db.data.queueItems[item.id];
+    else item.revision = ++db.data.queueRev;
+  }
+  for (const entry of entries) {
+    const hash = entry.transferHash ?? entry.release?.infoHash;
+    if (entry.source && hash) sources.add(hash);
+    delete db.data.queue[entry.id];
+    deleteItemLog(entry.id);
+  }
+  for (const hash of sources) forgetUnusedSource(hash);
 }
 
 // Removes the title, its file records, its targets, their logs, and its jobs. The files on the disk stay where they are.
@@ -57,11 +86,7 @@ export function dropTitle(key: string, queue?: Queue, cancelJob?: (id: string) =
       queue.cancel(entry, 'title removed');
     }
   }
-  for (const entry of entries) {
-    if (entry.release?.uploadPath && entry.source) forgetSource(entry);
-    deleteItemLog(entry.id);
-    delete db.data.queue[entry.id];
-  }
+  dropTargets(entries);
   // The episodes that the files of a release held are facts of the title, so they go with it.
   for (const [id, held] of Object.entries(db.data.releaseCoverage)) if (held.titleKey === key) delete db.data.releaseCoverage[id];
   // The file of the title holds the lines of its targets, so it goes with the title.
@@ -102,11 +127,7 @@ export function dropSeason(key: string, season: number, queue?: Queue, cancelJob
       queue.cancel(entry, 'season removed');
     }
   }
-  for (const entry of entries) {
-    if (entry.release?.uploadPath && entry.source) forgetSource(entry);
-    deleteItemLog(entry.id);
-    delete db.data.queue[entry.id];
-  }
+  dropTargets(entries);
   // The episodes that the files of a release of this season held go with the season.
   for (const [id, held] of Object.entries(db.data.releaseCoverage)) {
     if (held.titleKey !== key) continue;

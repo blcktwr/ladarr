@@ -4,9 +4,11 @@ import { join } from 'node:path';
 import { db } from '../core/db.ts';
 import { inside, torrentVideos } from '../library/imports/importer.ts';
 import { titleFiles } from '../library/imports/local.ts';
-import { entryId, isActive, newEntry, phaseOfEntry } from '../library/downloads/queue.ts';
+import { entryId, isActive, itemFor, newEntry, phaseOfEntry } from '../library/downloads/queue.ts';
+import { infoHashOf, magnetHash, torrentFiles } from '../library/grab/torrent.ts';
+import { isSample, isVideoFile } from '../library/parse.ts';
 import { shown } from './queue.ts';
-import type { AttachCache, ClientHandle, Clients, QueueEntry, Torrent } from '../types.ts';
+import type { AttachCache, ClientHandle, Clients, Finder, Queue, QueueEntry, QueueTorrent, QueueTurn, Torrent } from '../types.ts';
 
 export const HASH = /^[0-9a-f]{40}$/;
 export const MAX_TORRENTS = 100;
@@ -22,6 +24,66 @@ export function matchEntry(id: string, hash: unknown) {
   const episode = title?.episodes.find((point) => entryId(title.key, point.season, point.number) === id);
   // A catalog episode enters the queue only when the user applies its mapping.
   if (title && episode) return entry ?? newEntry(title.key, episode.season, episode.number, 0);
+}
+
+const mappingProblem = (code: string) => ['file_unmapped', 'coverage_unknown', 'numbering_required'].includes(code);
+
+export function preparedMapping(entry: QueueEntry, hash?: string) {
+  const item = itemFor(entry);
+  if (!item?.entryIds.includes(entry.id)) return;
+  if (item.state.kind !== 'fetching' && !(item.state.kind === 'blocked' && mappingProblem(item.state.problem.code))) return;
+  const unresolved = Object.values(item.selected).filter(({ status }) => status === 'verify');
+  const candidate = unresolved.find((source) => source.hash === (hash ?? item.candidate?.infoHash)) ??
+    (hash === undefined ? unresolved.find(({ matches }) => Object.hasOwn(matches, entry.id)) : undefined);
+  if (!candidate?.source) return;
+  if (entry.transferHash && entry.clientId && item.selected[entry.transferHash]?.status !== 'prepared') return;
+  return { item, candidate };
+}
+
+export function resumePreparedMapping(queue: Queue, finder: Finder, item: QueueTurn, entryIds: string[], cause: string) {
+  queue.transitionItem(item, { kind: 'fetching' });
+  for (const id of entryIds) {
+    const entry = queue.get(id);
+    if (!entry || entry.state.kind !== 'blocked' || !mappingProblem(entry.state.problem.code)) continue;
+    if (entry.transferHash && entry.clientId && item.selected[entry.transferHash]?.status !== 'prepared') continue;
+    queue.retryAttempt(entry, cause);
+    queue.resolve(entry, 'fetching', cause);
+  }
+  const supplied = Object.values(item.selected).flatMap(({ status, release }) => status === 'verify'
+    ? [{ ...release, publishedAt: null, peers: null, categories: [] }]
+    : []);
+  finder.enqueueSearch({
+    titleKey: item.titleKey, season: item.season, entryIds,
+    ...(supplied.length ? { supplied, episodeRound: true } : {}), work: undefined,
+  }, { afterRun: true });
+}
+
+export function preparedFiles(candidate: QueueTorrent) {
+  const source = candidate.source;
+  if (!source) return;
+  try {
+    let files: { path: string; length: number }[];
+    if ('torrent' in source) {
+      const data = db.data.torrents[candidate.hash];
+      if (!data) return;
+      const bytes = Buffer.from(data, 'base64');
+      if (infoHashOf(bytes) !== candidate.hash) return;
+      files = torrentFiles(bytes);
+    } else {
+      if (magnetHash(source.magnet) !== candidate.hash || !candidate.manifest?.length) return;
+      files = candidate.manifest.map((path) => ({ path, length: 0 }));
+    }
+    return files.filter(({ path }) => isVideoFile(path) && !isSample(path)).map(({ path, length }) => ({ rel: path, sizeBytes: length }));
+  } catch {
+    return;
+  }
+}
+
+export function matchSourceKind(entry: QueueEntry, requested: unknown, hash: unknown) {
+  if (requested === 'library' || requested === 'download') return requested;
+  if (requested != null) return null;
+  if ((hash === undefined || typeof hash === 'string') && preparedMapping(entry, hash)) return 'download';
+  return entry.transferHash ? 'download' : 'library';
 }
 
 // Says if a download can be attached to the entry. Work that runs now keeps its own path.
@@ -76,6 +138,9 @@ export async function matchSource(entry: QueueEntry, clients: Clients, source: '
     }));
     return { files, manifest: files, download: null };
   }
+  const transfer = hash ?? entry.transferHash;
+  const pending = transfer && itemFor(entry)?.selected[transfer];
+  if (pending && pending.status !== 'accepted') return { error: 'download_not_found' } as const;
   const download = await findDownload(entry, clients, hash);
   if ('error' in download) return download;
   const { handle, torrent } = download;

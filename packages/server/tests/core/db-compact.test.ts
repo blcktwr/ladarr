@@ -24,7 +24,7 @@ const job = {
   priority: null,
 } as unknown as Job;
 
-const queueWork = {
+const legacyQueue = {
   queue: { [entry.id]: entry },
   queueRev: 7,
   queuePaused: true,
@@ -33,6 +33,7 @@ const queueWork = {
   prioritySeq: 2,
   torrents: {},
 };
+const queueWork = { ...legacyQueue, queueItems: {}, queueItemSeq: 0 };
 
 const seed = (data: Data) => {
   data.queue[entry.id] = entry;
@@ -84,9 +85,9 @@ describe('database files hold compact JSON', () => {
     try {
       const data = emptyData();
       seed(data);
-      const { queue: _queue, queueRev: _queueRev, queuePaused: _queuePaused, jobs: _jobs, jobSeq: _jobSeq, prioritySeq: _prioritySeq, torrents: _torrents, ...app } = data;
-      writeFileSync(file, JSON.stringify(app, null, 2));
-      writeFileSync(queueFile, JSON.stringify(queueWork, null, 2));
+      const { queue: _queue, queueRev: _queueRev, queuePaused: _queuePaused, jobs: _jobs, jobSeq: _jobSeq, prioritySeq: _prioritySeq, torrents: _torrents, queueItems: _items, queueItemSeq: _itemSeq, ...app } = data;
+      writeFileSync(file, JSON.stringify({ ...app, schemaVersion: 9 }, null, 2));
+      writeFileSync(queueFile, JSON.stringify(legacyQueue, null, 2));
       expect(text(file)).toMatch(/\n {2}"/);
 
       vi.stubEnv('NODE_ENV', 'production');

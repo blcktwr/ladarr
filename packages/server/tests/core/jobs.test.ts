@@ -42,22 +42,12 @@ describe('claim', () => {
     expect(first.runAt).toBe(1_000);
   });
 
-  it('starts the first season of a series before a later season that is due earlier', async () => {
+  it('does not promote a lower season number in the job queue', async () => {
     const db = await newDb();
     const later = add({ type: 'queue.search', payload: { titleKey: 'tv:1', season: 9, entryIds: ['tv:1:9x1'] }, runAt: 1 });
     const first = add({ type: 'queue.search', payload: { titleKey: 'tv:1', season: 1, entryIds: ['tv:1:1x1'] }, runAt: 5 });
 
-    expect(claim(10, LEASE)!.id).toBe(first.id);
-    expect(claim(10, LEASE)!.id).toBe(later.id);
-  });
-
-  it('keeps the season that the user marked ahead of the first season', async () => {
-    const db = await newDb();
-    const marked = add({ type: 'queue.search', payload: { titleKey: 'tv:1', season: 9, entryIds: ['tv:1:9x1'] } });
-    prioritize(marked.id);
-    add({ type: 'queue.search', payload: { titleKey: 'tv:1', season: 1, entryIds: ['tv:1:1x1'] } });
-
-    expect(claim(10, LEASE)!.id).toBe(marked.id);
+    expect([claim(10, LEASE)?.id, claim(10, LEASE)?.id]).toEqual([later.id, first.id]);
   });
 });
 

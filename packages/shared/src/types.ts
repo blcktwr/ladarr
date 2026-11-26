@@ -473,8 +473,7 @@ export type QueueTransfer = {
   peers: number;
 };
 
-// A release that the last search found and rejected. A person can take any of them by hand; the row says the reason
-// that stopped the automatic search.
+// A release that the last search rejected. Its reasons explain why the search did not select it.
 export type QueueRejectedRelease = {
   indexerId: number;
   guid: string;
@@ -485,8 +484,17 @@ export type QueueRejectedRelease = {
   source: string;
   kind: 'single' | 'multi' | 'pack';
   reasons: string[];
+  selectable: boolean;
   // The size check that stopped the release, with the numbers. Null when the size did not stop it.
   sizeRejection: { code: 'size_below_min' | 'size_above_max'; value: number; limit: number } | null;
+};
+
+export type QueueSelection = {
+  key: string;
+  entryId: string;
+  hash: string | null;
+  status: 'inspecting' | 'prepared' | 'accepted';
+  release: NonNullable<QueueEntryView['release']>;
 };
 
 export type QueueSearch = {
@@ -537,6 +545,9 @@ export type QueueEntryView = {
   clearedAt: number | null;
   // `quality` is the source and the resolution that the release name gives, for example "BluRay 1080p".
   release: { title: string; indexer: string; sizeBytes: number; kind: 'single' | 'multi' | 'pack'; manual: boolean; quality: string | null; comment: string | null } | null;
+  torrents?: QueueSelection[];
+  position?: number;
+  nextAt?: number | null;
   // The file of the target: the file of its open import, or its record in the library.
   file: { name: string; sizeBytes: number } | null;
   search: QueueSearch | null;
@@ -570,7 +581,7 @@ export type QueueGroupRow = {
   // A group is one season of a series.
   season: number | null;
   numberingRevision?: number;
-  // The status of the whole group, from all of its targets, independent of the selected tab.
+  // The status of the catalog season, independent of the selected tab.
   status: Status | null;
   total: number;
   reached: QueueReached;
@@ -588,6 +599,11 @@ export type QueueGroupRow = {
   // search of the other seasons of the releases while the count is above zero.
   otherSeasons: number;
   priority: boolean;
+  torrents: QueueSelection[];
+  rejected: { entryId: string; release: QueueRejectedRelease }[];
+  missing: (EpisodeRef & { rounds: number })[];
+  position: number | null;
+  nextAt: number | null;
 };
 
 // A series that waits for its episodes. Its initial job has no target yet, so the row is not a group of entries.
@@ -609,7 +625,7 @@ export type QueuePage = { cursor: number; total: number; items: QueueRow[] };
 
 // The aggregate of a whole group, before the tab filter and the page. The inspector header reads it beside the
 // filtered items, so the row and the header show the same status.
-export type QueueGroupSummary = Pick<QueueGroupRow, 'status' | 'counts' | 'tabs' | 'total' | 'reached' | 'download' | 'problem' | 'otherSeasons' | 'actions'>;
+export type QueueGroupSummary = Pick<QueueGroupRow, 'status' | 'counts' | 'tabs' | 'total' | 'reached' | 'download' | 'problem' | 'otherSeasons' | 'actions' | 'torrents' | 'rejected' | 'missing' | 'position' | 'nextAt'>;
 
 export type QueueMappingEpisode = EpisodeRef & {
   id: string;
@@ -768,6 +784,10 @@ export type QueueTorrent = {
   pieceLength: number | null;
   pieceCount: number | null;
   private: boolean | null;
+};
+
+export type QueueTorrentDetail = Omit<QueueTorrent, 'files'> & {
+  files: { path: string; sizeBytes: number | null }[];
 };
 
 // --- Indexers and client -------------------------------------------------------------------

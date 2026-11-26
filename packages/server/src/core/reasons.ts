@@ -2,7 +2,7 @@ import type { ReasonInfo } from '../types.ts';
 export const REASONS: Record<string, ReasonInfo> = {
   // The search found nothing to take.
   no_results: { message: 'Not found in any indexers, we will search again.', action: 'retry' },
-  all_rejected: { message: 'The indexers have releases, but none fits your selected qualities.', action: 'retry' },
+  all_rejected: { message: 'None of the releases passed the checks.', action: 'retry' },
   indexers_failed: { message: 'No indexer answered. The search tries again.', action: 'retry' },
   search_deferred: { message: 'The search reached its request budget. It continues in the next run.', action: 'none' },
   // The pack held a part of its season. The releases count the season in another way, so the user starts the search of

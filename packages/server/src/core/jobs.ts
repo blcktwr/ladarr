@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { itemId } from '@ladarr/shared/queue';
 import { db } from './db.ts';
 import type { EnqueueInput, ErrorKind, Job } from '../types.ts';
 
@@ -71,35 +72,42 @@ export function seasonOf(job: Job): { titleKey: string; season: number } | null 
   return { titleKey: payload.titleKey, season: payload.season };
 }
 
-// The first season of the series of the chosen job, among the jobs that are due. A job that the user marked is
-// already out of the rule, because the mark says which target goes first.
-function firstSeasonOf(best: Job, due: Job[]) {
-  const own = seasonOf(best);
-  if (!own || best.priority !== null) return best;
-  let first = best;
-  let season = own.season;
-  for (const job of due) {
-    const other = seasonOf(job);
-    if (!other || other.titleKey !== own.titleKey || job.priority !== null || other.season >= season) continue;
-    season = other.season;
-    first = job;
+function turnOf(job: Job) {
+  if (job.type !== 'queue.search') return;
+  const payload = job.payload as { itemId?: unknown; titleKey?: unknown; season?: unknown } | null;
+  if (typeof payload?.itemId === 'string') return db.data.queueItems[payload.itemId];
+  if (typeof payload?.titleKey === 'string' && (typeof payload.season === 'number' || payload.season === null)) {
+    return db.data.queueItems[itemId(payload.titleKey, payload.season)];
   }
-  return first;
 }
 
 // The check and the change run in one synchronous step, so two callers never get the same job.
 export function claim(now: number, leaseMs: number, canStart: (job: Job) => boolean = () => true) {
   const due: Job[] = [];
-  for (const job of Object.values(db.data.jobs)) {
-    if (job.state !== 'waiting' || job.runAt > now || !canStart(job)) continue;
-    due.push(job);
-  }
   let best: Job | undefined;
-  for (const job of due) if (!best || precedes(job, best)) best = job;
+  for (const job of Object.values(db.data.jobs)) {
+    if (job.state !== 'waiting' || job.runAt > now) continue;
+    const turn = turnOf(job);
+    if (turn?.nextAt != null && turn.nextAt > now) continue;
+    if (!canStart(job)) continue;
+    due.push(job);
+    if (!best || precedes(job, best)) best = job;
+  }
   if (!best) return;
-  // The searches of one series go from the first season up, so a later season never takes the slot of an earlier
-  // season that is due. A job that the user marked stays first, because the mark says which target goes first.
-  best = firstSeasonOf(best, due);
+  // FIFO applies only to search turns. Other job types keep their place by due time.
+  let turn = turnOf(best);
+  if (turn) {
+    for (const job of due) {
+      const other = turnOf(job);
+      if (!other) continue;
+      const priority = turn.priority ?? best.priority ?? Infinity;
+      const otherPriority = other.priority ?? job.priority ?? Infinity;
+      if (otherPriority < priority || (otherPriority === priority && other.position < turn.position)) {
+        best = job;
+        turn = other;
+      }
+    }
+  }
   best.state = 'running';
   best.attempts++;
   best.leaseOwner = randomUUID();

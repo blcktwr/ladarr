@@ -6,6 +6,7 @@ import { createApp } from './app.ts';
 import { createClients } from './library/downloads/client-api.ts';
 import { createImportStatus } from './library/imports/status.ts';
 import { createFinder } from './library/grab/finder.ts';
+import { enqueueSelection } from './library/grab/grab.ts';
 import { unfinishedImports } from './library/imports/importer.ts';
 import { createLimiter } from './core/limiter.ts';
 import { createPoller } from './library/downloads/poller.ts';
@@ -15,6 +16,7 @@ import { createIndexerService } from './library/grab/torznab.ts';
 import { UpdateError, installUpdate } from './system/update.ts';
 import { SCHEMA_VERSION, createSaver, db, open } from './core/db.ts';
 import { createEvents } from './core/events.ts';
+import { release } from './core/jobs.ts';
 import { sonarr } from './proxy/sonarr.ts';
 import { radarr } from './proxy/radarr.ts';
 import { seerr } from './proxy/seerr.ts';
@@ -76,6 +78,10 @@ const worker = createWorker(
   save,
   jobHandlers({ backupDir: config.backupDir, events, save, tmdb, enqueue: (input) => worker.enqueue(input), clients, queue, finder, indexers, importStatus }),
 );
+// A lease from the previous process cannot still have a worker.
+for (const job of Object.values(db.data.jobs)) {
+  if (job.type === 'queue.send' && job.state === 'running' && job.leaseOwner) release(job.id, job.leaseOwner);
+}
 worker.start();
 poller.start();
 // An import that stopped in the middle runs again. Its journal says where to go on.
@@ -88,18 +94,13 @@ for (const titleKey of local) worker.enqueue({ type: 'import.local', payload: { 
 const uploads = new Map<string, (typeof db.data.queue)[string][]>();
 for (const entry of Object.values(db.data.queue)) {
   const hash = uploadHash(entry);
-  if (hash) {
-    if (entry.state.kind === 'waiting_slot' || entry.state.kind === 'sending') {
-      const entries = uploads.get(hash) ?? [];
-      entries.push(entry);
-      uploads.set(hash, entries);
-    }
-    continue;
-  }
-  if (entry.state.kind !== 'waiting_slot' || !entry.source) continue;
-  worker.enqueue({ type: 'queue.send', payload: { entryIds: [entry.id] }, dedupeKey: `send:${entry.id}`, runAt: entry.createdAt });
+  if (!hash || (entry.state.kind !== 'waiting_slot' && entry.state.kind !== 'sending')) continue;
+  const entries = uploads.get(hash) ?? [];
+  entries.push(entry);
+  uploads.set(hash, entries);
 }
 for (const [hash, entries] of uploads) enqueueUpload(worker.enqueue, entries, hash);
+for (const item of Object.values(db.data.queueItems)) enqueueSelection(item, worker.enqueue);
 
 const restorer = createRestorer({ dir: config.backupDir, worker });
 const services = { queue, finder, poller, clients, importStatus };

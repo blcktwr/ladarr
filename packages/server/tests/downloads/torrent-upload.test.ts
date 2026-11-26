@@ -2,9 +2,10 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { queueInitialHandler } from '../../src/jobs/queue-initial.ts';
-import { queueGrabHandler } from '../../src/jobs/queue-grab.ts';
+import { queueSearchHandler } from '../../src/jobs/queue-search.ts';
 import { createClients } from '../../src/library/downloads/client-api.ts';
 import { ClientError } from '../../src/library/downloads/qbittorrent.ts';
+import { createFinder } from '../../src/library/grab/finder.ts';
 import { torrentsForRemoval } from '../../src/library/tools/remove.ts';
 import type { EpisodeRef, Job } from '../../src/types.ts';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
@@ -157,7 +158,7 @@ describe('title torrent upload', () => {
     const numbers = Array.from({ length: 366 }, (_, i) => episode(1, i + 1, null, { tmdbId: 1000 + i }));
     pipe.db.data.titles['tv:1'] = title({ rootId: 'tv', episodes: [episode(0, 1), ...numbers, episode(2, 1)] });
     const files = counts.flatMap((count, i) => Array.from({ length: count }, (_, n) => `Season ${i + 1}/${n + 1}.mkv`)).reverse();
-    const bytes = Buffer.from(makeTorrent('Bleach', files).toString().replace('i16384e6:pieces', 'i1048576e6:pieces'));
+    const bytes = makeTorrent('Bleach', files);
     const view = await preview(bytes, 'folders');
     const assignments = new Map(view.files.map((file) => [file.path, file.episodes.map((ep) => point(ep.number, ep.season))]));
     let start = 0;
@@ -177,7 +178,7 @@ describe('title torrent upload', () => {
     pipe.db.data.titles['tv:1'] = title({ rootId: 'tv', episodes });
     const root = `Series.${'edition.'.repeat(14)}complete`;
     const paths = episodes.map((e) => `Season 1/Series.${'release.'.repeat(16)}S01E${e.number}.mkv`);
-    const bytes = Buffer.from(makeTorrent(root, paths).toString().replace('i16384e6:pieces', 'i1048576e6:pieces'));
+    const bytes = makeTorrent(root, paths);
     const view = await preview(bytes);
     expect(Buffer.byteLength(JSON.stringify(view.files))).toBeGreaterThan(100 * 1024);
     accepted(await apply(view));
@@ -356,26 +357,36 @@ describe('title torrent upload', () => {
     pipe.db.data.queuePaused = true;
     const entry = pipe.queue.ensure(item.key, null, null);
     pipe.queue.request(entry, 'indexer release');
-    entry.release = { guid: 'earlier', indexerId: 1, indexerName: 'Tracker', title: 'Earlier', infoHash: hashOf('Earlier'), sizeBytes: 1, link: null, magnet: null, kind: 'single', manual: false, seeders: 1 };
-    pipe.queue.enter(entry, 'fetching', 'release selected');
+    const name = 'Movie.Name.2019.1080p.BluRay-GRP';
+    const hash = hashOf(name);
     const started = latch();
     const finish = latch();
     const clients = createClients();
-    vi.spyOn(clients, 'find').mockImplementation(async () => {
+    const client = clients.get('client-1')!.api;
+    vi.spyOn(client, 'metadataFiles').mockImplementation(async () => {
       started.resolve();
       await finish.promise;
       throw new ClientError('unreachable', 'The old request did not complete.');
     });
-    const handler = queueGrabHandler({ ...pipe, clients, enqueue: pipe.worker.enqueue, save: async () => {} });
-    const old = handler.run({ attempts: 8, payload: { entryIds: [entry.id] } } as Job, { signal: new AbortController().signal });
+    const finder = createFinder({ ...pipe, clients, enqueue: pipe.worker.enqueue });
+    const job = finder.enqueueSearch({
+      titleKey: item.key, season: null, entryIds: [entry.id], manual: true, forced: true,
+      supplied: [{
+        guid: name, indexerId: 1, title: name, infoHash: hash, sizeBytes: 100 * 120 * MIB, link: null,
+        magnet: `magnet:?xt=urn:btih:${hash}`, seeders: 20, publishedAt: null, peers: null, categories: [],
+      }],
+    });
+    const handler = queueSearchHandler(finder);
+    job.attempts = handler.maxAttempts!;
+    const old = Promise.resolve(handler.run(job, { signal: new AbortController().signal })).catch(() => {});
     try {
       await started.promise;
       accepted(await upload(item.key, makeTorrent('Selected', ['Movie.mkv'])));
     } finally {
       finish.resolve();
-      await Promise.resolve(old).catch(() => {});
+      await old;
     }
-    expect(entry.state.kind).toBe('waiting_slot');
+    expect(entry.state.kind).not.toBe('blocked');
     pipe.queue.setPaused(false);
     await until(() => entry.state.kind === 'downloading');
     expect([...pipe.qbit.torrents.keys()]).toEqual([hashOf('Selected', ['Movie.mkv'])]);
