@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import { api, upload } from '../../lib/api.ts';
-import { Button, Modal } from 'nebula';
-import { Alert } from '../../components/index.ts';
+import { Button, Modal, Text } from 'nebula';
 import { describeError } from '../../lib/format.ts';
 import { getLanguage, t } from '../../i18n/index.ts';
 
@@ -59,7 +58,7 @@ function RestoreAlert({ intro, send, onCancel }: { intro: string; send: () => Pr
       }
     >
       <p>{intro}</p>
-      {error && <Alert tone="danger">{error}</Alert>}
+      <div role="alert">{error && <Text>{error}</Text>}</div>
     </Modal>
   );
 }

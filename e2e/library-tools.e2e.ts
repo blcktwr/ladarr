@@ -67,15 +67,23 @@ test('a search on the selected titles', async ({ page }) => {
 test('a file that is not a backup is refused and nothing changes', async ({ page }) => {
   await page.goto(URL_BASE);
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await page.getByRole('tab', { name: 'System' }).click();
+  await page.getByRole('tab', { name: 'Backups' }).click();
   const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: 'Restore from file' }).click();
-  await (await chooser).setFiles({ name: 'not-a-backup.zip', mimeType: 'application/zip', buffer: Buffer.from('not a zip file') });
+  await page.getByRole('button', { name: 'Import backup' }).click();
+  const file = { name: 'not-a-backup.zip', mimeType: 'application/zip', buffer: Buffer.from('not a zip file') };
+  await (await chooser).setFiles(file);
 
   const dialog = page.getByRole('dialog', { name: 'Restore this backup?' });
-  await expect(dialog).toContainText('the file not-a-backup.zip');
+  await expect(dialog).toContainText('This replaces the app data with the data of the file.');
+  await expect(dialog).not.toContainText(file.name);
+  const upload = page.waitForRequest((request) => request.method() === 'POST' && request.url() === `${URL_BASE}/api/backups/restore`);
   await dialog.getByRole('button', { name: 'Restore' }).click();
-  await expect(page.getByRole('region', { name: 'Notifications' }).getByText('The file is not a backup of this app.')).toBeVisible();
+  const request = await upload;
+  expect(request.headers()['content-type']).toBe(file.mimeType);
+  expect(request.postDataBuffer()).toEqual(file.buffer);
+  const rejection = dialog.getByRole('alert');
+  await expect(rejection).toBeVisible();
+  await expect(rejection).toHaveText('The file is not a backup of this app.');
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toHaveCount(0);
 
