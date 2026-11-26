@@ -29,6 +29,7 @@ const trackerEntry = (value: object) =>
   'url' in value && ('tier' in value || 'num_peers' in value || 'num_seeds' in value || 'num_leeches' in value);
 
 function redactText(text: string) {
+  if (/^magnet:\?/i.test(text)) return '[redacted]';
   const out = text
     .replace(SECRET_JSON, '$1"[redacted]"')
     .replace(SECRET_XML_TAG, (match: string, tag: string) => `<${tag}>[redacted]</${tag}>`)

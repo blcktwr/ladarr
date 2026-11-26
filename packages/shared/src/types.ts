@@ -747,8 +747,7 @@ export type QueuePackFiles = {
   entries: { id: string; label: string; season: number | null; number: number | null }[];
 };
 
-// The files that the .torrent of a release holds, and what the file says about itself. The server reads them from the
-// indexer, so the client is not needed.
+// The server reads the file list from the indexer or the download client.
 export type QueueTorrent = {
   name: string;
   // The info hash of the torrent, in hexadecimal.
@@ -767,7 +766,7 @@ export type QueueTorrent = {
   createdAt: number | null;
   pieceLength: number | null;
   pieceCount: number | null;
-  private: boolean;
+  private: boolean | null;
 };
 
 // --- Indexers and client -------------------------------------------------------------------

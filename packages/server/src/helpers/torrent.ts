@@ -1,19 +1,34 @@
 import type { QueueTorrent } from '@ladarr/shared/types';
+import type { Response } from 'express';
 import { downloaderOf } from '../library/grab/grab.ts';
 import { torrentInfo } from '../library/grab/torrent.ts';
+import { IndexerError } from '../library/grab/torznab.ts';
 import type { IndexerService } from '../types.ts';
 
-// What the .torrent of a link holds. ladarr does not keep the file, so the indexer sends it again. The indexer sends a
-// magnet when it has no file to send, and a magnet carries no file list.
-export async function readTorrent(indexers: IndexerService, link: string): Promise<{ torrent: QueueTorrent } | { error: 'torrent_unavailable' | 'no_indexers' }> {
+type TorrentSource = { torrent: QueueTorrent } | { magnet: string } | { error: 'torrent_unavailable' | 'no_indexers' | 'indexer_unreachable' };
+
+export async function readTorrent(indexers: IndexerService, link: string | null, magnet: string | null): Promise<TorrentSource> {
+  const fallback = magnet?.startsWith('magnet:') ? { magnet } : null;
+  if (!link) return fallback ?? { error: 'torrent_unavailable' };
   const indexer = downloaderOf(link);
-  if (!indexer) return { error: 'no_indexers' };
-  const got = await indexers.download(indexer, link);
-  if ('magnet' in got) return { error: 'torrent_unavailable' };
+  if (!indexer) return fallback ?? { error: 'no_indexers' };
+  let got: Awaited<ReturnType<IndexerService['download']>>;
+  try {
+    got = await indexers.download(indexer, link);
+  } catch (error) {
+    if (!(error instanceof IndexerError)) throw error;
+    return fallback ?? { error: 'indexer_unreachable' };
+  }
+  if ('magnet' in got) return got;
   try {
     return { torrent: torrentInfo(got.torrent) };
   } catch {
-    // The indexer sent something that is not a torrent.
-    return { error: 'torrent_unavailable' };
+    return fallback ?? { error: 'torrent_unavailable' };
   }
+}
+
+// A magnet can contain a tracker key. Only an owner session can read the magnet.
+export function sendMagnet(res: Response, magnet: string) {
+  if (!res.locals.session) return void res.status(403).json({ error: 'session_required' });
+  res.json({ magnet });
 }

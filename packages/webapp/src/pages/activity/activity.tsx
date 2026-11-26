@@ -6,7 +6,7 @@ import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, File
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { api, ApiError } from '../../lib/api.ts';
-import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, List, Modal, Pagination, Pane, Panel, Progress, Row, Section, Spinner, SubMenu, Table, Text, Thumbnail, Tree, type TreeNode } from 'nebula';
+import { ActionMenu, Button, Details, Divider, Dropdown, EmptyState, Field, List, Modal, Pagination, Pane, Panel, Progress, Row, Section, Spinner, SubMenu, Table, Text, Thumbnail, Tree, type TreeNode } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { Confirm } from '../../components/confirm.tsx';
 import { JobsPanel } from './activity-jobs.tsx';
@@ -189,10 +189,12 @@ function torrentTree(data: QueueTorrent): TreeNode[] {
   return items;
 }
 
-// What the .torrent of the release holds: what the file says about itself, and its files. The modal is the pane, so the
-// blocks follow each other with a groove between them, and no other box goes inside.
+// The torrent metadata and file list.
 function TorrentInfo({ path }: { path: string }) {
-  const { data, error } = useQuery<QueueTorrent>({ queryKey: [path] });
+  const { data, error } = useQuery<QueueTorrent | { magnet: string } | null>({
+    queryKey: [path],
+    refetchInterval: (query) => query.state.data === null && !query.state.error ? 2_000 : false,
+  });
   // The alert of the app shows under the modal, so the error shows in the modal.
   if (error) return <p role="alert">{t('The file list of the torrent is not available.')}</p>;
   if (!data) {
@@ -203,6 +205,7 @@ function TorrentInfo({ path }: { path: string }) {
       </div>
     );
   }
+  if ('magnet' in data) return <Field label={t('Magnet')} value={data.magnet} readOnly width="full" />;
   return (
     <>
       <Details
@@ -226,8 +229,7 @@ function TorrentInfo({ path }: { path: string }) {
   );
 }
 
-// The release of a target: its name, its quality, and its size. The button at the end of the name opens what the .torrent
-// of the release holds.
+// The release name, quality, and size. The button opens the torrent details.
 function ReleaseDetails({ entryId, release }: { entryId: string; release: NonNullable<QueueEntryView['release']> }) {
   return (
     <Details

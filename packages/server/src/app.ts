@@ -298,7 +298,7 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
     api.post('/queue/actions', queueActionsPost(services.queue, services.finder, services.poller, services.clients, enqueue));
     api.get('/queue/entries/:id/files', queueEntryFilesGet(services.clients));
     if (indexers) {
-      api.get('/queue/entries/:id/torrent', queueEntryTorrentGet(indexers));
+      api.get('/queue/entries/:id/torrent', queueEntryTorrentGet(indexers, services.clients));
       api.get('/queue/entries/:id/releases/torrent', queueEntryReleaseTorrentGet(indexers));
     }
     api.post('/queue/entries/:id/match', queueEntryMatchPost(services.queue, services.finder, services.clients, enqueue));
