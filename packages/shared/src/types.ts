@@ -123,6 +123,8 @@ export type TitleSummary = {
 
 export type SeasonRow = { seasonNumber: number; episodeCount: number; counts: EpisodeCounts; override: Override | null; numberingRevision?: number };
 
+export type DownloadedQuality = { resolution: number; label: string };
+
 export type TitleDetail = TitleSummary & {
   overview: string;
   aliases: string[];
@@ -147,8 +149,8 @@ export type TitleDetail = TitleSummary & {
   metaLoadedAt: number | null;
   episodesLoadedAt: number | null;
   seasons: SeasonRow[];
-  // The resolutions of the files of the title, the highest first, without duplicates.
-  resolutions: number[];
+  // The distinct qualities of the files on disk, with the highest resolution first.
+  downloadedQualities: DownloadedQuality[];
   // Series only. How the releases number the seasons and the episodes.
   numbering: Numbering;
 };
@@ -181,6 +183,7 @@ export type FileRow = {
   episodes: EpisodeRef[];
   // The resolution of the file, from its release or from its name. Null when neither says.
   resolution: number | null;
+  quality: string | null;
   torrent: { hash: string; name?: string; file?: string } | null;
 };
 

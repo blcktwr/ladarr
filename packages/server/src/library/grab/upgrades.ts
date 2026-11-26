@@ -1,8 +1,8 @@
 import { basename } from 'node:path';
-import type { UpgradeQuality } from '@ladarr/shared/types';
+import type { DownloadedQuality, UpgradeQuality } from '@ladarr/shared/types';
 import { db, profilesFor } from '../../core/db.ts';
 import { isMonitored } from '../library.ts';
-import { chainFileRank, QUALITIES, RANK_STRIDE } from './quality.ts';
+import { chainFileRank, QUALITIES, RANK_STRIDE, sourceLabel } from './quality.ts';
 import { parseRelease } from './release.ts';
 import type { ChainQuality, MediaFile, Profile, ReleaseSource, Title, UpgradeFile } from '../../types.ts';
 
@@ -10,6 +10,12 @@ import type { ChainQuality, MediaFile, Profile, ReleaseSource, Title, UpgradeFil
 export function qualityOfFile(file: MediaFile): { source: ReleaseSource; resolution: number | null } {
   const parsed = file.source ? null : parseRelease(basename(file.path));
   return { source: file.source ?? parsed!.source, resolution: file.source ? (file.resolution ?? null) : parsed!.resolution };
+}
+
+export function downloadedQuality(file: MediaFile): DownloadedQuality | null {
+  const { source, resolution } = qualityOfFile(file);
+  if (resolution === null) return null;
+  return { resolution, label: source === 'unknown' ? `${resolution}p` : `${sourceLabel(source)} ${resolution}p` };
 }
 
 // The files of a title, with the episode of each one. A paused title has none.

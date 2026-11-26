@@ -571,7 +571,7 @@ export const es: Record<string, string> = {
   'Hash': 'Hash',
   'Original file': 'Archivo original',
   'No torrent for this file.': 'Este archivo no tiene un torrent asociado.',
-  'Show details of {resolution}p': 'Mostrar detalles de {resolution}p',
+  'Show details of {quality}': 'Mostrar detalles de {quality}',
   'Format': 'Formato',
   'Codec': 'Códec',
   'Aspect ratio': 'Relación de aspecto',

@@ -64,7 +64,7 @@ describe('file list', () => {
     const all = await app.get('/library/tv:1/files');
     expect(all.body.files.map((file: { path: string }) => file.path)).toEqual(['Show/Season 01/Show.S01E01.mkv', 'Show/Season 01/Show.S01E02.mkv']);
     const one = await app.get('/library/tv:1/files?season=1&number=2');
-    expect(one.body.files).toMatchObject([{ path: 'Show/Season 01/Show.S01E02.mkv', episodes: [{ season: 1, number: 2 }], missing: false, resolution: null }]);
+    expect(one.body.files).toMatchObject([{ path: 'Show/Season 01/Show.S01E02.mkv', episodes: [{ season: 1, number: 2 }], missing: false, resolution: null, quality: null }]);
     expect((await app.get('/library/tv:1/files?season=1&number=9')).body.files).toEqual([]);
   });
 
@@ -72,11 +72,13 @@ describe('file list', () => {
     expect((await app.get(`/library/tv:1/files${query}`)).body).toEqual({ error: 'invalid_episode' });
   });
 
-  it('reports the resolution of a file from its record, or from its name', () => {
+  it('reports the resolution and quality of a file from its record or its name', () => {
     const file = { id: 'a', titleKey: 'movie:1', sizeBytes: 1, mtimeMs: 1, episodes: [], missing: false, addedAt: 0 };
 
-    expect(fileRow({ ...file, path: 'Movie/Movie.2019.2160p.WEB-DL.mkv' }).resolution).toBe(2160);
-    expect(fileRow({ ...file, path: 'Movie/Movie.2019.mkv', source: 'bluray', resolution: 1080 }).resolution).toBe(1080);
+    expect(fileRow({ ...file, path: 'Movie/Movie.2019.2160p.WEB-DL.mkv' })).toMatchObject({ resolution: 2160, quality: 'WEB-DL 2160p' });
+    expect(fileRow({ ...file, path: 'Movie/Movie.2019.mkv', source: 'bluray', resolution: 1080 })).toMatchObject({ resolution: 1080, quality: 'BluRay 1080p' });
+    expect(fileRow({ ...file, path: 'Movie/Movie.2019.1080p.mkv' })).toMatchObject({ resolution: 1080, quality: '1080p' });
+    expect(fileRow({ ...file, path: 'Movie/Movie.2019.mkv', source: 'bluray' })).toMatchObject({ resolution: null, quality: null });
   });
 
   it('answers 404 for a title or a file that does not exist, or that belongs to another title', async () => {

@@ -5,7 +5,7 @@ import { expect, test } from './fixtures.ts';
 import { configure, startStack, URL_BASE } from './stack.ts';
 
 for (const mediaType of ['movie', 'tv'] as const) {
-  test(`the quality badge shows the selected file and its torrent on a ${mediaType} title`, async ({ page, context }) => {
+  test(`the quality badge shows only files of that quality on a ${mediaType} title`, async ({ page, context }) => {
     const stack = await startStack();
     try {
       const cookie = await stack.createOwner();
@@ -22,8 +22,10 @@ for (const mediaType of ['movie', 'tv'] as const) {
       const data: Data = JSON.parse(readFileSync(database, 'utf8'));
       const title = data.titles[key]!;
       const source = { name: 'Original.Release.1080p', file: 'release/feature.mkv', hash: 'a'.repeat(40), clientId: 'retired', external: false };
-      for (const number of series ? [1, 2] : [1]) {
-        const path = `Library.File.${number}.1080p.mkv`;
+      const sources = series ? ['WEB-DL', 'WEB-DL', 'BluRay'] : ['WEB-DL', null];
+      for (const [index, qualitySource] of sources.entries()) {
+        const number = index + 1;
+        const path = `Library.File.${number}.1080p${qualitySource ? `.${qualitySource}` : ''}.mkv`;
         const abs = join(series ? stack.folders.tv : stack.folders.movies, path);
         writeFileSync(abs, 'video');
         const { size, mtimeMs } = statSync(abs);
@@ -32,30 +34,49 @@ for (const mediaType of ['movie', 'tv'] as const) {
           episodes: series ? [{ season: 1, number }] : [], download: number === 1 ? source : null,
         };
         if (series) title.episodes.find((e) => e.season === 1 && e.number === number)!.fileId = path;
-        else title.fileId = path;
+        else if (number === 1) title.fileId = path;
       }
       writeFileSync(database, JSON.stringify(data));
       await stack.server.start();
 
       await page.goto(`${URL_BASE}/catalog/${mediaType}/${id}`);
-      await page.getByRole('button', { name: 'Show details of 1080p' }).click();
-      const dialog = page.getByRole('dialog', { name: 'Downloaded file 1080p' });
+      const web = page.getByRole('button', { name: 'Show details of WEB-DL 1080p', exact: true });
+      const otherQuality = series ? 'BluRay 1080p' : '1080p';
+      const other = page.getByRole('button', { name: `Show details of ${otherQuality}`, exact: true });
+      await expect(web).toHaveText('WEB-DL 1080p');
+      await expect(other).toHaveText(otherQuality);
+      await expect(page.getByRole('button', { name: /^Show details of / })).toHaveCount(2);
+
+      await web.click();
+      const dialog = page.getByRole('dialog', { name: 'Downloaded file 1080p', exact: true });
       const file = dialog.getByRole('tab', { name: 'File', exact: true });
       const torrent = dialog.getByRole('tab', { name: 'Torrent', exact: true });
+      const picker = dialog.getByRole('combobox', { name: 'File', exact: true });
       await expect(file).toHaveAttribute('aria-selected', 'true');
       await expect(dialog.getByRole('tabpanel', { name: 'File' })).toContainText('matroska,webm');
+      if (!series) await expect(picker).toHaveCount(0);
       await torrent.click();
       const panel = dialog.getByRole('tabpanel', { name: 'Torrent' });
       for (const field of [source.name, source.hash, source.file]) await expect(panel.getByText(field, { exact: true })).toBeVisible();
 
       if (series) {
         await file.click();
-        await dialog.getByRole('combobox', { name: 'File' }).click();
-        await page.getByRole('option', { name: 'S01E02' }).click();
+        await picker.click();
+        await expect(page.getByRole('option')).toHaveCount(2);
+        await expect(page.getByRole('option', { name: 'S01E01', exact: true })).toBeVisible();
+        await page.getByRole('option', { name: 'S01E02', exact: true }).click();
         await torrent.click();
         await expect(panel).not.toContainText(source.hash);
         await expect(panel).toContainText(/no .*torrent|torrent.*not |no .*download/i);
       }
+
+      await dialog.getByText('Close', { exact: true }).click();
+      await other.click();
+      await expect(dialog.getByRole('tabpanel', { name: 'File' })).toContainText('matroska,webm');
+      await expect(picker).toHaveCount(0);
+      await torrent.click();
+      await expect(panel).not.toContainText(source.hash);
+      await expect(panel).toContainText(/no .*torrent|torrent.*not |no .*download/i);
     } finally {
       await stack.stop();
     }

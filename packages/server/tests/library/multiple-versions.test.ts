@@ -11,7 +11,7 @@ import { hashOf, MIB, startPipeline, until } from '../helpers/test-pipeline.ts';
 import { movie } from '../helpers/test-fixtures.ts';
 
 describe('multiple versions of a title', () => {
-  it('keeps the old file of an upgrade, shows both resolutions, and removes both torrents', async () => {
+  it('keeps the old file of an upgrade, shows both qualities, and removes both torrents', async () => {
     const pipe = await startPipeline({ handlers: ({ finder }) => ({ [BULK_SEARCH_JOB]: librarySearchHandler({ finder, enqueue: (input) => enqueue(input) }) }) });
     const api = await pipe.api();
     try {
@@ -69,7 +69,12 @@ describe('multiple versions of a title', () => {
       expect(pipe.db.data.titles[film.key]!.fileId).toBe(added.id);
       expect(readFileSync(join(pipe.folders.movies, oldPath), 'utf8')).toBe('old-data');
       expect(readFileSync(join(pipe.folders.movies, added.path), 'utf8')).toBe('new-data');
-      expect((await api.get(`/library/${film.key}`)).body.title.resolutions).toEqual([1080, 720]);
+      const { title } = (await api.get(`/library/${film.key}`)).body;
+      expect(title.downloadedQualities).toEqual([
+        { resolution: 1080, label: 'WEB-DL 1080p' },
+        { resolution: 720, label: 'WEB-DL 720p' },
+      ]);
+      expect(title).not.toHaveProperty('resolutions');
 
       // A rescan keeps both versions.
       const scan = await scanTitle(film.key);

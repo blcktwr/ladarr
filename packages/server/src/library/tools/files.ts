@@ -5,23 +5,27 @@ import { db } from '../../core/db.ts';
 import { inside } from '../imports/folder-files.ts';
 import { seeFile } from './remove.ts';
 import { ffprobeRaw } from '../probe.ts';
-import { qualityOfFile } from '../grab/upgrades.ts';
+import { downloadedQuality } from '../grab/upgrades.ts';
 import type { Db, FilesDeps, MediaFile, ProbeRaw, Stream, Title } from '../../types.ts';
 
 const KEY = /^(movie|tv):[1-9]\d*$/;
 // ffprobe can read a big file for a while. A few at the same time are enough for one person.
 const MAX_PROBES = 3;
 
-export const fileRow = (file: MediaFile): FileRow => ({
-  id: file.id,
-  path: file.path,
-  sizeBytes: file.sizeBytes,
-  mtimeMs: file.mtimeMs,
-  missing: file.missing,
-  episodes: file.episodes,
-  resolution: qualityOfFile(file).resolution,
-  torrent: file.download ? { hash: file.download.hash, name: file.download.name, file: file.download.file } : null,
-});
+export const fileRow = (file: MediaFile): FileRow => {
+  const quality = downloadedQuality(file);
+  return {
+    id: file.id,
+    path: file.path,
+    sizeBytes: file.sizeBytes,
+    mtimeMs: file.mtimeMs,
+    missing: file.missing,
+    episodes: file.episodes,
+    resolution: quality?.resolution ?? null,
+    quality: quality?.label ?? null,
+    torrent: file.download ? { hash: file.download.hash, name: file.download.name, file: file.download.file } : null,
+  };
+};
 
 // The file records of each title, sorted by path.
 export function filesByTitle() {

@@ -1,4 +1,4 @@
-import type { EpisodeRef, FileDetails, FileRow, PlanRequest } from '@ladarr/shared/types';
+import type { DownloadedQuality, EpisodeRef, FileDetails, FileRow, PlanRequest } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Badge, Button, Details as Fields, Dropdown, EmptyState, List, Modal, Row, Section, Spinner } from 'nebula';
@@ -80,11 +80,11 @@ function FileInfo({ titleKey, fileId }: { titleKey: string; fileId: string }) {
   );
 }
 
-// The file of a resolution that the page shows as a badge. A title can have more than one, so the user picks one.
-export function FileInfoDialog({ titleKey, resolution, onClose }: { titleKey: string; resolution: number; onClose: () => void }) {
+// The user can select a file when the badge matches more than one file.
+export function FileInfoDialog({ titleKey, quality, onClose }: { titleKey: string; quality: DownloadedQuality; onClose: () => void }) {
   const { data, error, refetch } = useQuery<{ files: FileRow[] }>({ queryKey: [`/library/${titleKey}/files`] });
   const [chosen, setChosen] = useState<string | null>(null);
-  const files = (data?.files ?? []).filter((file) => file.resolution === resolution);
+  const files = (data?.files ?? []).filter((file) => !file.missing && file.quality === quality.label);
   const current = files.find((file) => file.id === chosen) ?? files[0];
   const status = error && !data ? (
     <LoadFailed onRetry={() => void refetch()} />
@@ -101,7 +101,7 @@ export function FileInfoDialog({ titleKey, resolution, onClose }: { titleKey: st
     <Modal
       open
       onOpenChange={(open) => !open && onClose()}
-      title={`${t('Downloaded file')} ${resolution}p`}
+      title={`${t('Downloaded file')} ${quality.resolution}p`}
       hideTitle
       width="lg"
       tabs={[

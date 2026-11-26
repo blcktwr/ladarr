@@ -1,9 +1,9 @@
-import type { SeasonRow, TitleDetail } from '@ladarr/shared/types';
+import type { DownloadedQuality, SeasonRow, TitleDetail } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { db, profilesInOrder } from '../core/db.ts';
 import { clock, summarize } from '../library/tools/api.ts';
 import { seriesCounts } from '../library/library.ts';
-import { qualityOfFile } from '../library/grab/upgrades.ts';
+import { downloadedQuality } from '../library/grab/upgrades.ts';
 import type { Db, Episode, Events, Title } from '../types.ts';
 import { normalizeNumbering, releasePoint, seasonRevision } from '../library/numbering.ts';
 import type { Override } from '@ladarr/shared/enums';
@@ -51,15 +51,14 @@ export function titleParam(): RequestHandler<{ key: string }> {
   };
 }
 
-// The resolutions of the files of the title that are on the disk, the highest first, without duplicates.
-function resolutionsOf(title: Title): number[] {
-  const resolutions = new Set<number>();
+function downloadedQualitiesOf(title: Title): DownloadedQuality[] {
+  const qualities = new Map<string, DownloadedQuality>();
   for (const file of Object.values(db.data.files)) {
     if (file.titleKey !== title.key || file.missing) continue;
-    const { resolution } = qualityOfFile(file);
-    if (resolution !== null) resolutions.add(resolution);
+    const quality = downloadedQuality(file);
+    if (quality) qualities.set(quality.label, quality);
   }
-  return [...resolutions].sort((a, b) => b - a);
+  return [...qualities.values()].sort((a, b) => b.resolution - a.resolution);
 }
 
 export function seasonGroups(title: Title) {
@@ -110,7 +109,7 @@ export function detail(title: Title): TitleDetail {
     metaLoadedAt: title.metaLoadedAt === null ? null : (title.metaLoadedAt ?? title.refreshedAt),
     episodesLoadedAt: title.episodesLoadedAt,
     seasons,
-    resolutions: resolutionsOf(title),
+    downloadedQualities: downloadedQualitiesOf(title),
     numbering: title.numbering ?? { revision: 0, ranges: [] },
   };
 }

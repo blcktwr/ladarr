@@ -1,5 +1,5 @@
 import type { LibraryType } from '@ladarr/shared/enums';
-import type { CastMember, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary, TorrentUploadPreview, UpgradeQuality } from '@ladarr/shared/types';
+import type { CastMember, DownloadedQuality, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary, TorrentUploadPreview, UpgradeQuality } from '@ladarr/shared/types';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { ArrowLeft, ChevronDown, ChevronUp, Download, Plus, Trash2 } from 'lucide-react';
@@ -164,19 +164,20 @@ async function search(body: Target) {
   return started.length;
 }
 
-// The Upgrade button of a title page. The dialog offers the qualities that the profile chain defines above a file.
+// The dialog offers the qualities that the profile chain defines above a file.
 // The user picks one, and ladarr searches the files below it for a release of exactly that quality.
-function UpgradeDialog({ titleKey, qualities, error }: { titleKey: string; qualities?: UpgradeQuality[]; error?: unknown }) {
-  const [open, setOpen] = useState(false);
+function UpgradeDialog({ titleKey, qualities, error, open, onClose }: { titleKey: string; qualities?: UpgradeQuality[]; error?: unknown; open: boolean; onClose: () => void }) {
   const [choice, setChoice] = useState('');
   const [message, setMessage] = useState('');
   const [pending, setPending] = useState(false);
   const queueNotice = useQueueNotice();
   const id = useId();
   const options = qualities ?? [];
-  // With no quality left, the button is disabled and says why. A read that failed keeps it enabled, so the dialog shows the error.
-  const empty = qualities !== undefined && options.length === 0;
   const selected = options.some((option) => option.id === choice) ? choice : (options[0]?.id ?? '');
+
+  useEffect(() => {
+    if (open) setMessage('');
+  }, [open]);
 
   async function start() {
     if (!selected) return;
@@ -187,7 +188,7 @@ function UpgradeDialog({ titleKey, qualities, error }: { titleKey: string; quali
       if (!plan.planId) throw new ApiError(409, 'nothing_to_search');
       await api('/library/search', { method: 'POST', body: { planId: plan.planId } });
       queueNotice(plan.targets);
-      setOpen(false);
+      onClose();
     } catch (err) {
       setMessage(describeError(err));
     } finally {
@@ -198,18 +199,8 @@ function UpgradeDialog({ titleKey, qualities, error }: { titleKey: string; quali
   return (
     <Modal
       open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) setMessage('');
-      }}
+      onOpenChange={(next) => !next && onClose()}
       title={t('Search for upgrades')}
-      trigger={
-        <span title={empty ? t('You already have the latest quality.') : undefined}>
-          <Button variant="primary" disabled={empty}>
-            {t('Upgrade')}
-          </Button>
-        </span>
-      }
     >
       {message && <Alert tone="danger">{message}</Alert>}
       {error != null && !qualities && <Alert tone="danger">{describeError(error)}</Alert>}
@@ -222,7 +213,7 @@ function UpgradeDialog({ titleKey, qualities, error }: { titleKey: string; quali
       <ModalActions>
         {options.length > 0 ? (
           <>
-            <Button variant="ghost" autoFocus onClick={() => setOpen(false)}>
+            <Button variant="ghost" autoFocus onClick={onClose}>
               {t('Cancel')}
             </Button>
             <Button pending={pending} onClick={() => void start()}>
@@ -230,7 +221,7 @@ function UpgradeDialog({ titleKey, qualities, error }: { titleKey: string; quali
             </Button>
           </>
         ) : (
-          <Button autoFocus onClick={() => setOpen(false)}>
+          <Button autoFocus onClick={onClose}>
             {t('Close')}
           </Button>
         )}
@@ -492,7 +483,7 @@ const factsOf = (header: Header, mediaType?: string) =>
 
 // The hero of a title has one shape for a movie and for a series. The parts below it are the ones that differ.
 // The children are the extra facts of a person. A photo of a person is not a poster, so it has its own size.
-function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutions, onResolution, type, state, stateLabel, controls, children }: { header: Header; posterSize?: 'w342' | 'h632'; mediaType?: string; tmdbId?: number; resolutions?: number[]; onResolution?: (resolution: number) => void; type?: string; state?: ThumbnailState; stateLabel?: string; controls?: ReactNode; children?: ReactNode }) {
+function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, qualities, onQuality, type, state, stateLabel, controls, children }: { header: Header; posterSize?: 'w342' | 'h632'; mediaType?: string; tmdbId?: number; qualities?: DownloadedQuality[]; onQuality?: (quality: DownloadedQuality) => void; type?: string; state?: ThumbnailState; stateLabel?: string; controls?: ReactNode; children?: ReactNode }) {
   const facts = factsOf(header, mediaType);
   return (
     <Backdrop image={posterUrl(header.backdropPath, 'w1280') ?? ''} className="mb-8">
@@ -514,12 +505,12 @@ function TitleHeader({ header, posterSize = 'w342', mediaType, tmdbId, resolutio
             {header.overview && <Text>{header.overview}</Text>}
             {mediaType !== undefined && tmdbId !== undefined && <TitleLinks imdbId={header.imdbId} tmdbId={tmdbId} mediaType={mediaType} />}
             {header.date && <Text variant="small">{formatDate(header.date)}</Text>}
-            {resolutions && resolutions.length > 0 && (
+            {qualities && qualities.length > 0 && (
               <div className="mt-4 flex items-center gap-2">
-                {resolutions.map((resolution) => (
-                  <Badge key={resolution} onClick={onResolution ? () => onResolution(resolution) : undefined} label={onResolution ? t('Show details of {resolution}p', { resolution }) : undefined}>
+                {qualities.map((quality) => (
+                  <Badge key={quality.label} onClick={onQuality ? () => onQuality(quality) : undefined} label={onQuality ? t('Show details of {quality}', { quality: quality.label }) : undefined}>
                     <Download aria-hidden="true" />
-                    {`${resolution}p`}
+                    {quality.label}
                   </Badge>
                 ))}
               </div>
@@ -596,9 +587,9 @@ type TorrentSelection = { titleKey: string; method: TorrentMethod; file?: File; 
 function TitleView({ header, title, reload }: { header: TitleDetail | TitlePreview; title?: TitleDetail; reload: () => Promise<unknown> }) {
   const [message, setMessage] = useState('');
   const [plan, setPlan] = useState<{ request: PlanRequest; subject: string | null } | null>(null);
-  // The resolution badge whose downloaded file the user opened.
-  const [info, setInfo] = useState<number | null>(null);
+  const [info, setInfo] = useState<DownloadedQuality | null>(null);
   const [adding, setAdding] = useState<{ season: number | null } | null>(null);
+  const [upgrading, setUpgrading] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const [torrent, setTorrent] = useState<TorrentSelection | null>(null);
   const previewQueue = useRef(Promise.resolve());
@@ -718,7 +709,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
   const oneSeason = !title && seasonList.length === 1 ? seasonList[0]!.seasonNumber : null;
   // Search looks for what is missing, and Upgrade replaces a file that the library has. A series that lacks some episodes can need both.
   const hasFile = title ? (series ? (title.counts?.available ?? 0) > 0 : title.availability === 'available') : false;
-  // The qualities that an upgrade can reach, so the button knows whether it has an option before the dialog opens.
+  // The menu item is disabled when the query finds no higher quality.
   const upgrades = useQuery<{ qualities: UpgradeQuality[] }>({ queryKey: [`/library/${title?.key}/upgrades`], enabled: hasFile });
   useLive('library.changed', () => void upgrades.refetch());
   // A title that was searched has a target in the queue, so it has no Search of its own.
@@ -741,8 +732,8 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
         type={contentType(header.mediaType, header.seriesType)}
         state={state?.state}
         stateLabel={state?.label}
-        resolutions={title?.resolutions}
-        onResolution={title ? setInfo : undefined}
+        qualities={title?.downloadedQualities}
+        onQuality={title ? setInfo : undefined}
         controls={
           <Actions>
             {pendingAdd && addLoading && (pendingAdd.kind === 'movie' || pendingAdd.season === null || oneSeason !== null) ? (
@@ -756,7 +747,6 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
                     </Button>
                   </span>
                 )}
-                {hasFile && <UpgradeDialog titleKey={title.key} qualities={upgrades.data?.qualities} error={upgrades.error} />}
                 <Button variant="danger" onClick={() => setPlan({ request: { action: 'remove', keys: [title.key] }, subject: title.title })}>
                   {t('Delete')}
                 </Button>
@@ -769,10 +759,12 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
             <ActionMenu label={t('More actions')} items={[
               { label: t('Upload torrent'), onClick: () => { setMessage(''); selectTorrent(titleKey, 'default'); } },
               { label: t('Attach download'), onClick: () => setAttaching(true) },
+              ...(hasFile ? [{ label: t('Upgrade'), disabled: upgrades.data?.qualities.length === 0, onClick: () => setUpgrading(true) }] : []),
             ]} />
           </Actions>
         }
       />
+      {hasFile && <UpgradeDialog titleKey={titleKey} qualities={upgrades.data?.qualities} error={upgrades.error} open={upgrading} onClose={() => setUpgrading(false)} />}
       {message && <Alert tone="danger">{message}</Alert>}
       {torrent && titleKey === torrent.titleKey && (
         <TorrentDialog
@@ -785,7 +777,7 @@ function TitleView({ header, title, reload }: { header: TitleDetail | TitlePrevi
         />
       )}
       <PlanDialog request={plan?.request ?? null} subject={plan?.subject} onClose={() => setPlan(null)} onDone={() => void reload()} />
-      {title && info !== null && <FileInfoDialog titleKey={title.key} resolution={info} onClose={() => setInfo(null)} />}
+      {title && info !== null && <FileInfoDialog titleKey={title.key} quality={info} onClose={() => setInfo(null)} />}
       <AttachDownloadDialog titleKey={titleKey} label={header.title} canAttachFolder={!!title} isOpen={attaching} onClose={() => setAttaching(false)} onAttached={() => { if (!title) void reload(); }} />
       {series && (
         <>
