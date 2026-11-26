@@ -64,11 +64,13 @@ function CredentialsForm({ setup, restore, onDone }: { setup: boolean; restore?:
           )}
         </Form>
       </Pane>
-      <div className={`flex w-[min(24rem,calc(100%-40px))] ${restore ? 'justify-between' : 'justify-end'} gap-2`}>
+      <div className="flex w-[min(24rem,calc(100%-40px))] flex-wrap gap-2">
         {restore && <RestoreFile setup route={restore} />}
-        <Button type="submit" form={formId} pending={pending}>
-          {setup ? t('Set password') : t('Sign in')}
-        </Button>
+        <div className="ml-auto">
+          <Button type="submit" form={formId} pending={pending}>
+            {setup ? t('Set password') : t('Sign in')}
+          </Button>
+        </div>
       </div>
     </div>
   );

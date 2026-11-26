@@ -45,7 +45,7 @@ export const modalSurface = `${surface} flex flex-col gap-5`;
 export const danger = 'bg-(image:--danger) shadow-(--danger-edge) text-ink-light pointed:bg-(image:--danger-lit) pressed:bg-none pressed:bg-(--danger-sunk) pressed:shadow-(--edge-sunk)';
 
 // A wheel that turns while something loads. Add its size.
-export const wheel = 'box-border shrink-0 border-2 border-haze/20 border-t-ink rounded-full animate-turn motion-reduce:[animation-duration:3s]';
+export const wheel = 'box-border shrink-0 border-2 border-haze/20 border-t-ink rounded-full animate-turn motion-reduce:animate-none';
 
 // A tab of the navbar, such as a section link: a key at 17px. Add ghost to it, or current if it is the current tab. Its bar reaches up to the top edge of the page.
 export const tab = `${label} [--bar-top:-0.75rem] sm:[--bar-top:-1rem] flex items-center justify-center gap-2 h-10 px-4.5 rounded-md text-[17px]/none no-underline cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-3 [&>svg]:size-4.5 [&>svg]:shrink-0`;

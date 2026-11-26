@@ -22,7 +22,7 @@ export function FinishedPanel() {
   });
 
   return (
-    <Panel open={open} onOpenChange={setOpen} label={t('Finished')} title={t('Finished')} size="lg" trigger={<Button variant="ghost"><CircleCheck />{t('Completed')}</Button>}>
+    <Panel open={open} onOpenChange={setOpen} label={t('Completed')} title={t('Finished')} size="lg" trigger={<Button variant="ghost"><CircleCheck />{t('Completed')}</Button>}>
       {error && !data ? (
         <LoadFailed onRetry={() => void refetch()} />
       ) : !data ? (

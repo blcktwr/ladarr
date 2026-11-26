@@ -206,7 +206,7 @@ export function Discovery() {
               { value: 'tv', label: t('Series') },
             ]}
           />
-          <Dropdown value={sort} options={sorts} onValueChange={(value) => update({ sort: value === 'popularity.desc' ? '' : value ?? '' })} />
+          <Dropdown label={t('Sort by')} hideLabel reserve={false} value={sort} options={sorts} onValueChange={(value) => update({ sort: value === 'popularity.desc' ? '' : value ?? '' })} />
           <Panel
             label={t('Filters')}
             title={t('Apply filter')}

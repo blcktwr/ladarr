@@ -42,7 +42,7 @@ export function Activity({ status, task, queue, thumbnail, alert, done, download
         className={`${tab} ${ghost} min-w-0 max-w-full`}
       >
         {/* A new task makes a new line, so it fades in and does not slide back from the right. It moves less than the padding, so it does not overflow. */}
-        <span key={task ?? status} className={`flex items-center gap-2 min-w-0 transition-[translate,opacity] duration-500 ease-stone starting:opacity-0 ${done ? 'translate-x-4 opacity-0 delay-400 motion-reduce:translate-x-0' : ''}`}>
+        <span key={task ?? status} className={`flex items-center gap-2 min-w-0 transition-[translate,opacity] duration-500 ease-stone starting:opacity-0 motion-reduce:transition-none ${done ? 'translate-x-4 opacity-0 delay-400 motion-reduce:translate-x-0' : ''}`}>
           {done ? <Check className="size-4.5 shrink-0" /> : alert ? <TriangleAlert className="size-4.5 shrink-0 text-warning" /> : download ? <DownloadIcon className="size-4.5 shrink-0" /> : state ? <span className={`flex shrink-0 [&>svg]:size-4.5 ${state.className ?? ''}`}>{state.icon}</span> : <span className={`${wheel} size-4.5`} />}
           {thumbnail && <img src={thumbnail} alt="" className="h-7 aspect-2/3 shrink-0 rounded-[3px] object-cover bg-field" />}
           <span className={`relative flex gap-[.25em] min-w-0 text-[15px] after:absolute after:inset-x-0 after:top-1/2 after:h-[1.5px] after:rounded-full after:bg-current after:origin-left after:transition-transform after:duration-400 after:ease-stone motion-reduce:after:transition-none ${done ? 'after:scale-x-100' : 'after:scale-x-0'}`}>

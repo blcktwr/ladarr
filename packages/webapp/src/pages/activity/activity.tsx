@@ -1102,10 +1102,10 @@ function QueueView() {
   }
 
   return (
-    <div className={`${pageWidth} grid gap-6`}>
-      <div className="flex items-center gap-3 w-full">
+    <div className={`${pageWidth} grid grid-cols-[minmax(0,1fr)] gap-6`}>
+      <div className="flex flex-wrap items-center gap-3 w-full">
         <Text variant="title">{t('Queue')}</Text>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
           <FinishedPanel />
           <JobsPanel />
           <Button iconOnly disabled={blocked} aria-label={paused ? t('Resume the queue') : t('Pause the queue')} onClick={() => void setPaused(!paused)}>
