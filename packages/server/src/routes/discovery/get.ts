@@ -24,6 +24,11 @@ const sortOf = (value: unknown): DiscoverySort =>
 
 const dateOf = (value: unknown) => (typeof value === 'string' && DATE.test(value) ? value : undefined);
 
+const ratingOf = (value: unknown, fallback: number) => {
+  const rating = typeof value === 'string' && value.trim() ? Number(value) : fallback;
+  return rating >= 0 && rating <= 10 ? rating : fallback;
+};
+
 const regionOf = (value: unknown) => {
   const code = typeof value === 'string' ? value.toUpperCase() : '';
   return REGION.test(code) ? code : undefined;
@@ -48,6 +53,9 @@ export function discoveryGet(tmdb: Tmdb | undefined): RequestHandler {
     if (query.length > MAX_QUERY) return void res.status(400).json({ error: 'invalid_query' });
     const from = dateOf(req.query.from);
     const to = dateOf(req.query.to);
+    const ratingMin = ratingOf(req.query.ratingMin, 0);
+    const ratingMax = ratingOf(req.query.ratingMax, 10);
+    const hasRating = ratingMin <= ratingMax && (ratingMin > 0 || ratingMax < 10);
     const region = regionOf(req.query.region);
     // A watch provider needs the country of its list.
     const providers = region ? providersOf(req.query.providers) : [];
@@ -67,6 +75,7 @@ export function discoveryGet(tmdb: Tmdb | undefined): RequestHandler {
         const genreId = genre?.[item.mediaType];
         return (!type || item.mediaType === type) &&
           (!from || (item.date && item.date >= from)) && (!to || (item.date && item.date <= to)) &&
+          (!hasRating || (item.rating !== null && item.rating > 0 && item.rating >= ratingMin && item.rating <= ratingMax)) &&
           (!genre || (genreId != null && item.genreIds.includes(genreId)));
       });
       // TMDB gives the watch providers per title. Only the titles that pass the other filters need this request.
@@ -94,6 +103,9 @@ export function discoveryGet(tmdb: Tmdb | undefined): RequestHandler {
       page: String(page),
       ...(from ? { [mediaType === 'movie' ? 'primary_release_date.gte' : 'first_air_date.gte']: from } : {}),
       ...(to ? { [mediaType === 'movie' ? 'primary_release_date.lte' : 'first_air_date.lte']: to } : {}),
+      ...(hasRating ? { 'vote_count.gte': '1' } : {}),
+      ...(hasRating && ratingMin > 0 ? { 'vote_average.gte': String(ratingMin) } : {}),
+      ...(hasRating && ratingMax < 10 ? { 'vote_average.lte': String(ratingMax) } : {}),
       ...(genre?.[mediaType] ? { with_genres: String(genre[mediaType]) } : {}),
       ...(providers.length ? { with_watch_providers: providers.join('|'), watch_region: region } : {}),
     });

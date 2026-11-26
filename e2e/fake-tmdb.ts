@@ -31,8 +31,8 @@ export async function startFakeTmdb() {
       const query = (url.searchParams.get('query') ?? '').toLowerCase();
       return send({
         results: [
-          ...(MOVIE.title.toLowerCase().includes(query) ? [{ ...MOVIE, media_type: 'movie' }] : []),
-          ...(SERIES.name.toLowerCase().includes(query) ? [{ ...SERIES, media_type: 'tv' }] : []),
+          ...(MOVIE.title.toLowerCase().includes(query) ? [{ ...MOVIE, media_type: 'movie', vote_average: 7.5 }] : []),
+          ...(SERIES.name.toLowerCase().includes(query) ? [{ ...SERIES, media_type: 'tv', vote_average: 8.1 }] : []),
           ...(TWO_SEASONS.name.toLowerCase().includes(query) ? [{ ...TWO_SEASONS, media_type: 'tv' }] : []),
         ],
       });

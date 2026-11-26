@@ -1,7 +1,7 @@
 import type { DiscoveryFilters, DiscoveryPage, DiscoverySort, WatchProvider } from '@ladarr/shared/types';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { SlidersHorizontal } from 'lucide-react';
-import { Button, Dropdown, EmptyState, Field, Gallery, Panel, SearchField, Spinner, SubMenu, Text, Tile } from 'nebula';
+import { Button, Dropdown, EmptyState, Field, Gallery, Panel, SearchField, Slider, Spinner, SubMenu, Text, Tile } from 'nebula';
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { Alert } from '../../components/alert.tsx';
@@ -21,7 +21,13 @@ const column = 'mx-auto w-[min(1200px,calc(100%-40px))]';
 const tiles = 'mx-auto w-[calc(round(down,calc(100%+1.5rem),11.5rem)-1.5rem)]';
 
 // The filters of the panel. An empty value leaves its filter out. The streaming services start in the United States.
-type Filters = { from: string; to: string; genre: string; region: string; providers: number[] };
+type Rating = readonly [number, number];
+type Filters = { from: string; to: string; genre: string; rating: Rating; region: string; providers: number[] };
+
+const ratingOf = (value: string | null, fallback: number) => {
+  const rating = Number(value?.trim() || fallback);
+  return rating >= 0 && rating <= 10 ? rating : fallback;
+};
 
 // A country can have hundreds of services, so the panel shows a part of them at a time.
 const servicesShown = 40;
@@ -34,6 +40,9 @@ const listsTtl = 24 * 60 * 60_000;
 function FilterPanel({ filters, lists, providers, onChange }: { filters: Filters; lists?: DiscoveryFilters; providers?: WatchProvider[]; onChange: (filters: Filters) => void }) {
   const [search, setSearch] = useState('');
   const [shown, setShown] = useState(servicesShown);
+  const [rating, setRating] = useState<Rating>();
+  const [ratingMin, ratingMax] = filters.rating;
+  useEffect(() => setRating(undefined), [ratingMin, ratingMax]);
   const term = search.trim().toLowerCase();
   const matches = (providers ?? []).filter((provider) => provider.name.toLowerCase().includes(term));
   // A service that is on in the country turns on, and the others turn off. A new country starts with no service.
@@ -71,6 +80,23 @@ function FilterPanel({ filters, lists, providers, onChange }: { filters: Filters
         ]}
         onValueChange={(value) => onChange({ ...filters, genre: value ?? '' })}
       />
+      <div>
+        <Text variant="small">{t('TMDB rating')}</Text>
+        <Slider
+          label={[t('Minimum TMDB rating'), t('Maximum TMDB rating')]}
+          min={0}
+          max={10}
+          step={0.1}
+          stagger={20}
+          thumbCollisionBehavior="none"
+          value={rating ?? filters.rating}
+          formatValue={(value) => String(value)}
+          onValueChange={setRating}
+          onValueCommitted={(value) => {
+            if (value[0] !== ratingMin || value[1] !== ratingMax) onChange({ ...filters, rating: value });
+          }}
+        />
+      </div>
       <div className="grid gap-3">
         <Dropdown
           label={t('Country')}
@@ -120,10 +146,13 @@ export function Discovery() {
   const term = params.get('q')?.trim() ?? '';
   const selectedType = params.get('type');
   const type = selectedType === 'movie' || selectedType === 'tv' ? selectedType : 'all';
+  const ratingMin = ratingOf(params.get('ratingMin'), 0);
+  const ratingMax = ratingOf(params.get('ratingMax'), 10);
   const filters: Filters = {
     from: params.get('from') ?? '',
     to: params.get('to') ?? '',
     genre: params.get('genre') ?? '',
+    rating: ratingMin <= ratingMax ? [ratingMin, ratingMax] : [0, 10],
     region: params.get('region') || 'US',
     providers: (params.get('providers') ?? '').split(',').filter((id) => /^\d+$/.test(id)).map(Number),
   };
@@ -135,8 +164,14 @@ export function Discovery() {
     }
     setParams(next);
   }
-  function setFilters({ from, to, genre, region, providers }: Filters) {
-    update({ from, to, genre, region: region !== 'US' || providers.length ? region : '', providers: providers.join(',') });
+  function setFilters({ from, to, genre, rating: [min, max], region, providers }: Filters) {
+    update({
+      from, to, genre,
+      ratingMin: min > 0 ? String(min) : '',
+      ratingMax: max < 10 ? String(max) : '',
+      region: region !== 'US' || providers.length ? region : '',
+      providers: providers.join(','),
+    });
   }
   // The lists of the filter panel load with the page, so the panel opens with them ready. The server keeps them for a
   // day, so the page asks for them again only after that.

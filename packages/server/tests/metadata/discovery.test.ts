@@ -344,6 +344,27 @@ describe('discovery filter params', () => {
     });
   });
 
+  it.each([
+    ['ratingMin=6.2&ratingMax=8.4', '6.2', '8.4'],
+    ['ratingMin=10&ratingMax=10', '10', null],
+    ['ratingMin=0&ratingMax=0', null, '0'],
+    ['ratingMin=0&ratingMax=10', null, null],
+    ['ratingMin=6.2bad&ratingMax=8.4', null, '8.4'],
+    ['ratingMin=6.2&ratingMax=10.1', '6.2', null],
+    ['ratingMin=-0.1&ratingMax=no', null, null],
+    ['ratingMin=8.4&ratingMax=6.2', null, null],
+  ])('sends the active rating bounds to both lists for %s', async (query, min, max) => {
+    await withApp(async ({ base, cookie, calls }) => {
+      const res = await fetch(`${base}/discovery?${query}`, { headers: { cookie } });
+      expect(res.status).toBe(200);
+      for (const mediaType of ['movie', 'tv']) {
+        const params = calls.find((url) => url.pathname === `/3/discover/${mediaType}`)!.searchParams;
+        expect(params.get('vote_average.gte')).toBe(min);
+        expect(params.get('vote_average.lte')).toBe(max);
+      }
+    });
+  });
+
   it('sends the watch providers of the country', async () => {
     await withApp(async ({ base, cookie, calls }) => {
       await fetch(`${base}/discovery?providers=8,9&region=ES`, { headers: { cookie } });
@@ -368,6 +389,43 @@ describe('discovery filter params', () => {
       expect(calls.every((url) => url.searchParams.get('primary_release_date.gte') === null)).toBe(true);
       expect(calls.every((url) => url.searchParams.get('first_air_date.lte') === null)).toBe(true);
     });
+  });
+});
+
+describe('discovery search rating filter', () => {
+  it.each([
+    ['ratingMin=6.2&ratingMax=8.4', [2, 3, 4]],
+    ['ratingMin=8.4&ratingMax=8.4', [4]],
+    ['ratingMin=8.4', [4, 5, 9]],
+    ['ratingMax=8.4', [1, 2, 3, 4]],
+    ['ratingMax=0', []],
+    ['ratingMin=0&ratingMax=10', [1, 2, 3, 4, 5, 6, 7, 8, 9]],
+    ['ratingMin=8.4&ratingMax=6.2', [1, 2, 3, 4, 5, 6, 7, 8, 9]],
+  ] as const)('returns only the titles that match %s', async (query, expected) => {
+    const { send } = fakeTmdb({
+      '/search/multi': () => json({
+        results: [
+          { id: 1, media_type: 'movie', title: 'One', vote_average: 6.19 },
+          { id: 2, media_type: 'movie', title: 'Two', vote_average: 6.2 },
+          { id: 3, media_type: 'tv', name: 'Three', vote_average: 7.3 },
+          { id: 4, media_type: 'tv', name: 'Four', vote_average: 8.4 },
+          { id: 5, media_type: 'movie', title: 'Five', vote_average: 8.41 },
+          { id: 6, media_type: 'movie', title: 'Six', vote_average: null },
+          { id: 7, media_type: 'tv', name: 'Seven' },
+          { id: 8, media_type: 'tv', name: 'Eight', vote_average: 0 },
+          { id: 9, media_type: 'movie', title: 'Nine', vote_average: 10 },
+        ],
+      }),
+    });
+    const { base, cookie, close } = await start({ tmdb: client(send) });
+    try {
+      const res = await fetch(`${base}/discovery?q=title&${query}`, { headers: { cookie } });
+      expect(res.status).toBe(200);
+      const { rows } = (await res.json()) as DiscoveryBody;
+      expect(rows.flatMap((row) => row.results.map((result) => result.tmdbId)).sort((a, b) => a - b)).toEqual(expected);
+    } finally {
+      close();
+    }
   });
 });
 

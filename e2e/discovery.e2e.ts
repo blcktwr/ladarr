@@ -45,6 +45,86 @@ test('filters a global search in Discovery and keeps the filter when the query c
   await expect(show).toHaveCount(0);
 });
 
+test('filters search results by TMDB rating and keeps both bounds on reload', async ({ page, context }) => {
+  await context.addCookies([{ ...cookie, url: URL_BASE }]);
+  await page.goto(`${URL_BASE}/discovery?q=Name&ratingMin=7.5&ratingMax=8.1`);
+  const main = page.getByRole('main');
+  const movie = main.getByRole('link', { name: /Movie Name/ });
+  const show = main.getByRole('link', { name: /Show Name/ });
+  const empty = main.getByText('No titles match.', { exact: true });
+  const filters = page.getByRole('button', { name: 'Filters' });
+  const close = page.getByRole('button', { name: 'Close' });
+  const min = page.getByRole('slider', { name: 'Minimum TMDB rating', exact: true });
+  const max = page.getByRole('slider', { name: 'Maximum TMDB rating', exact: true });
+  await expect(movie).toBeVisible();
+  await expect(show).toBeVisible();
+
+  await filters.click();
+  await min.press('ArrowRight');
+  await expect(page).toHaveURL((url) => url.searchParams.get('ratingMin') === '7.6');
+  await close.click();
+  await expect(show).toBeVisible();
+  await expect(movie).toHaveCount(0);
+
+  await filters.click();
+  await max.press('ArrowLeft');
+  await expect(page).toHaveURL((url) => Number(url.searchParams.get('ratingMax')) === 8);
+  await close.click();
+  await expect(empty).toBeVisible();
+
+  await page.reload();
+  await expect(empty).toBeVisible();
+  await filters.click();
+  await expect(min).toHaveAttribute('aria-valuenow', '7.6');
+  await expect(max).toHaveAttribute('aria-valuenow', '8');
+  await min.press('Home');
+  await expect(page).toHaveURL((url) => !url.searchParams.has('ratingMin') && Number(url.searchParams.get('ratingMax')) === 8);
+  await max.press('End');
+  await expect(page).toHaveURL(/\/discovery\?q=Name$/);
+  await close.click();
+  await expect(movie).toBeVisible();
+  await expect(show).toBeVisible();
+});
+
+test('drags TMDB ratings to the track ends and shows values on opposite sides', async ({ page, context }) => {
+  await context.addCookies([{ ...cookie, url: URL_BASE }]);
+  await page.goto(`${URL_BASE}/discovery?q=Name&ratingMin=2.5&ratingMax=7.5`);
+  await page.getByRole('button', { name: 'Filters' }).click();
+
+  const min = page.getByRole('slider', { name: 'Minimum TMDB rating', exact: true });
+  const max = page.getByRole('slider', { name: 'Maximum TMDB rating', exact: true });
+  const minThumb = min.locator('..');
+  const maxThumb = max.locator('..');
+  const track = minThumb.locator('..');
+
+  const start = (await track.boundingBox())!;
+  const minLabel = (await minThumb.getByText('2.5', { exact: true }).boundingBox())!;
+  const maxLabel = (await maxThumb.getByText('7.5', { exact: true }).boundingBox())!;
+  expect.soft(minLabel.y + minLabel.height).toBeLessThan(start.y);
+  expect.soft(maxLabel.y).toBeGreaterThan(start.y + start.height);
+
+  const dragToEdge = async (thumb: typeof minThumb, edge: 'left' | 'right') => {
+    const handle = (await thumb.boundingBox())!;
+    const rail = (await track.boundingBox())!;
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(edge === 'left' ? rail.x : rail.x + rail.width, rail.y + rail.height / 2, { steps: 10 });
+    await page.mouse.up();
+  };
+
+  await dragToEdge(minThumb, 'left');
+  await expect(min).toHaveAttribute('aria-valuenow', '0');
+  await expect(page).toHaveURL((url) => !url.searchParams.has('ratingMin') && url.searchParams.get('ratingMax') === '7.5');
+
+  await dragToEdge(maxThumb, 'right');
+  await expect(max).toHaveAttribute('aria-valuenow', '10');
+  await expect(page).toHaveURL(/\/discovery\?q=Name$/);
+
+  const [rail, left, right] = await Promise.all([track.boundingBox(), minThumb.boundingBox(), maxThumb.boundingBox()]);
+  expect.soft(Math.abs(left!.x + left!.width / 2 - rail!.x), 'Minimum thumb center meets the left edge').toBeLessThanOrEqual(1);
+  expect.soft(Math.abs(right!.x + right!.width / 2 - (rail!.x + rail!.width)), 'Maximum thumb center meets the right edge').toBeLessThanOrEqual(1);
+});
+
 test('the Discovery item opens the page with a row for each list', async ({ page, context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
   await page.goto(`${URL_BASE}/catalog`);
