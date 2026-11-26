@@ -55,15 +55,29 @@ test('shows the part of a download that the client reports, without a reload', a
   await page.getByRole('button', { name: 'Show episodes of Season 1' }).click();
   const table = page.getByRole('table', { name: 'Episodes of season 1' });
   await expect(table).toBeVisible();
+  const reloads: string[] = [];
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) reloads.push(frame.url());
+  });
 
   // The client reports a part at its next poll. The page shows it with no reload.
   await expect.poll(() => [...stack.qbit.torrents.values()].some((torrent) => torrent.name === SERIES_PACK), { timeout: 60_000 }).toBe(true);
   const torrent = [...stack.qbit.torrents.values()].find((item) => item.name === SERIES_PACK)!;
-  stack.qbit.progress(torrent.hash, 0.5);
+  stack.qbit.setFiles(torrent.hash, [0.5, 0.25, 0].map((progress, index) => ({
+    name: `${SERIES_PACK}/Show.Name.S01E0${index + 1}.mkv`, size: 1000, progress,
+  })));
+  stack.qbit.progress(torrent.hash, 0.25);
   await expect
-    .poll(async () => (await stack.call('GET', '/queue/groups/tv:1')).body.items[0]?.transfer?.progress, { timeout: 90_000, intervals: [2_000] })
-    .toBe(0.5);
-  await expect(table).toContainText('(50%)', { timeout: 10_000 });
+    .poll(async () => {
+      const { group, items } = (await stack.call('GET', '/queue/groups/tv:1')).body;
+      return { download: group.download, progress: items.map((item: { transfer?: { progress?: number } }) => item.transfer?.progress) };
+    }, { timeout: 90_000, intervals: [2_000] })
+    .toEqual({ download: 0.25, progress: [0.5, 0.25, 0] });
+  await expect(page.getByRole('progressbar', { name: 'Show Name (2020) Season 1 Download' })).toHaveAttribute('aria-valuenow', '25');
+  await expect(table.locator('[data-row="entry:tv:1:1x1"]')).toContainText('(50%)');
+  await expect(table.locator('[data-row="entry:tv:1:1x2"]')).toContainText('(25%)');
+  await expect(table.locator('[data-row="entry:tv:1:1x3"]')).toContainText('(0%)');
+  expect(reloads).toEqual([]);
 });
 
 test('shows the selected title in the inspector', async ({ page }) => {
@@ -76,14 +90,22 @@ test('shows the selected title in the inspector', async ({ page }) => {
   // The first row is selected when the page opens, so the inspector shows the series and its seasons.
   await expect(seriesRow).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Show Name (2020) Season 1' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Seasons' })).toBeVisible();
+  const seasons = page.getByRole('table', { name: 'Seasons', exact: true });
+  const season = seasons.locator('[data-row="season:tv:1|1"]');
+  await expect(season.getByRole('heading', { name: 'Season 1' })).toBeVisible();
+  await season.getByRole('button', { name: 'Show episodes of Season 1' }).click();
+  const episodes = page.getByRole('table', { name: 'Episodes of season 1' });
+  await expect(episodes).toBeVisible();
+  await expect(episodes.locator('[data-row^="entry:tv:1:1x"]')).toHaveCount(3);
+  await season.getByRole('button', { name: 'Hide episodes of Season 1' }).click();
+  await expect(episodes).toBeHidden();
   await expect(inspectSeries).toHaveAttribute('aria-pressed', 'true');
   await expect(inspectMovie).toHaveAttribute('aria-pressed', 'false');
 
   // A click on the row of the movie selects it.
   await movieRow.click();
   await expect(page.getByRole('heading', { name: 'Movie Name (2019)' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Seasons' })).toHaveCount(0);
+  await expect(seasons).toHaveCount(0);
   await expect(inspectMovie).toHaveAttribute('aria-pressed', 'true');
   await expect(inspectSeries).toHaveAttribute('aria-pressed', 'false');
 

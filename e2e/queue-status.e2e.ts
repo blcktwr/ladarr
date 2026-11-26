@@ -1,83 +1,63 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { expect, test } from './fixtures.ts';
 import { hashOf } from '../packages/server/tests/helpers/test-pipeline.ts';
-import { configure, MIB, SERIES_PACK, startStack, URL_BASE, type Stack } from './stack.ts';
+import { expect, test } from './fixtures.ts';
+import { configure, MIB, startStack, URL_BASE } from './stack.ts';
 
-test.setTimeout(120_000);
+test('stops an ambiguous season for mapping while another season of the same series downloads', async ({ page, context }) => {
+  test.setTimeout(120_000);
+  const stack = await startStack();
+  try {
+    const cookie = await stack.createOwner();
+    await context.addCookies([{ ...cookie, url: URL_BASE }]);
+    await configure(stack);
+    const ambiguous = { title: 'Two.Seasons.S01.1080p.WEB-DL-GRP', size: 2 * 60 * 45 * MIB, files: ['First chapter.mkv', 'Second chapter.mkv'] };
+    const complete = { title: 'Two.Seasons.S02.1080p.WEB-DL-GRP', size: 2 * 60 * 45 * MIB, files: ['Two.Seasons.S02E03.mkv', 'Two.Seasons.S02E04.mkv'] };
+    stack.tracker.state.items = [ambiguous, complete];
+    stack.tracker.state.answer = (url) => {
+      if (url.searchParams.has('ep')) return [];
+      switch (url.searchParams.get('season')) {
+        case '1': return [ambiguous];
+        case '2': return [complete];
+        default: return [];
+      }
+    };
+    expect((await stack.call('POST', '/library', { mediaType: 'tv', tmdbId: 3, add: 'future' })).status).toBe(201);
+    const addSeason = async (number: number) => {
+      await page.goto(`${URL_BASE}/catalog/tv/3`);
+      const search = page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/queue/search');
+      await page.getByRole('button', { name: `Add Season ${number}`, exact: true }).click();
+      expect((await search).ok()).toBe(true);
+    };
+    await addSeason(1);
+    await expect.poll(() => stack.tracker.state.downloads, { timeout: 30_000 }).toContain(ambiguous.title);
 
-let stack: Stack;
-let cookie: Awaited<ReturnType<Stack['createOwner']>>;
-const DEST = 'Show Name (2020)/Season 01/Show Name - S01E01 - Episode 1.mkv';
-const SINGLE = 'Show.Name.S01E03.1080p.WEB-DL-GRP';
-const torrent = async (name: string) => [...stack.qbit.torrents.values()].find((item) => item.name === name);
+    await page.goto(`${URL_BASE}/activity`);
+    const first = page.locator('[data-row="group:tv:3:1"]');
+    const second = page.locator('[data-row="group:tv:3:2"]');
+    await expect(first).toContainText('Stuck', { timeout: 45_000 });
+    await expect(page.getByRole('button', { name: 'Map episodes', exact: true })).toBeVisible();
+    expect(stack.tracker.state.downloads).toEqual([ambiguous.title]);
+    expect(stack.addRequests()).toHaveLength(0);
 
-test.beforeAll(async () => {
-  stack = await startStack();
-  cookie = await stack.createOwner();
-  await configure(stack);
-  // The pack covers two episodes. The third episode needs its own download.
-  stack.tracker.state.items = [
-    { title: SERIES_PACK, size: 2 * 60 * 45 * MIB, files: ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'] },
-    { title: SINGLE, size: 60 * 45 * MIB },
-  ];
-  const added = await stack.call('POST', '/library', { mediaType: 'tv', tmdbId: 1, add: 'all' });
-  if (added.status >= 300) throw new Error(`POST /library answered ${added.status}: ${JSON.stringify(added.body)}`);
-});
-test.afterAll(() => stack.stop());
-test.beforeEach(async ({ context }) => {
-  await context.addCookies([{ ...cookie, url: URL_BASE }]);
-});
-
-test('shows the aggregate of the season in the row and in the inspector under every tab', async ({ page }) => {
-  await expect.poll(async () => (await stack.call('GET', '/queue/entries/tv:1:1x3')).body.entry?.reason?.code, { timeout: 60_000 }).toBe('pack_partial');
-  expect((await stack.call('GET', '/queue/entries/tv:1:1x3')).body.entry.status).toBe('stuck');
-  // The third episode is not in the pack, and the client has its own release. The download attaches to it.
-  const single = hashOf(SINGLE);
-  stack.qbit.torrents.set(single, {
-    hash: single, name: SINGLE, size: 60 * 45 * 1024 * 1024, progress: 0.2, state: 'downloading', category: '', tags: '',
-    save_path: stack.folders.downloads, content_path: `${stack.folders.downloads}/${SINGLE}`,
-    dlspeed: 1000, eta: 100, num_seeds: 1, num_leechs: 1, added_on: Math.floor(Date.now() / 1000),
-  });
-  stack.qbit.setFiles(single, [{ name: `${SINGLE}/Show.Name.S01E03.mkv`, size: 1000, progress: 0.2 }]);
-  const preview = await stack.call('POST', '/queue/entries/tv:1:1x3/attach', { hash: single, preview: true });
-  expect(preview.status).toBe(200);
-  const attached = await stack.call('POST', '/queue/entries/tv:1:1x3/attach', { hash: single, confirmOwner: true, confirmTitle: true, version: preview.body.version });
-  expect(attached.status).toBe(200);
-
-  // The attached episode and the identified episodes of the pack now download together.
-  await expect.poll(async () => Boolean(await torrent(SERIES_PACK)) && Boolean(await torrent(SINGLE)), { timeout: 60_000 }).toBe(true);
-
-  // The destination of the first episode holds a file that the library does not know, so that episode stops. The
-  // single episode keeps downloading.
-  const dest = join(stack.folders.tv, DEST);
-  mkdirSync(dirname(dest), { recursive: true });
-  writeFileSync(dest, 'someone else');
-  // The fake client knows the pack by the hash of its two files.
-  const packFiles = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'];
-  const packHash = hashOf(SERIES_PACK, packFiles);
-  const list = packFiles.map((rel, index) => {
-    const abs = join(stack.folders.downloads, SERIES_PACK, rel);
-    mkdirSync(dirname(abs), { recursive: true });
-    writeFileSync(abs, `episode-${index + 1}`);
-    return { name: `${SERIES_PACK}/${rel}`, size: 9, progress: 1 };
-  });
-  stack.qbit.setFiles(packHash, list);
-  stack.qbit.progress(packHash, 1);
-  await expect.poll(async () => (await stack.call('GET', '/queue/entries/tv:1:1x1')).body.entry?.reason?.code, { timeout: 60_000 }).toBe('destination_exists');
-  await expect.poll(async () => (await stack.call('GET', '/queue?stage=downloading')).body.total, { timeout: 60_000 }).toBe(1);
-
-  await page.goto(`${URL_BASE}/activity`);
-  const row = page.locator('[data-row="group:tv:1:1"]');
-  await expect(row).toContainText('Stuck');
-  // The row and the inspector show the same status. A hint with the status name is one reading of it.
-  await expect(page.getByLabel('About the status Stuck')).toHaveCount(2);
-
-  // The season appears in Downloading and in Stuck, and its status does not change with the tab.
-  for (const tab of ['Downloading', 'Stuck', 'All']) {
-    await page.getByRole('tab', { name: new RegExp(tab) }).click();
-    await expect(row).toBeVisible();
-    await expect(row).toContainText('Stuck');
-    await expect(page.getByLabel('About the status Stuck')).toHaveCount(2);
+    await addSeason(2);
+    await expect.poll(() => stack.qbit.torrents.has(hashOf(complete.title, complete.files)), { timeout: 45_000 }).toBe(true);
+    expect(stack.tracker.state.downloads).toEqual([ambiguous.title, complete.title]);
+    await page.goto(`${URL_BASE}/activity`);
+    await expect(first).toContainText('Stuck');
+    await expect(second).toContainText('Downloading');
+    await page.getByRole('tab', { name: /^Stuck\b/ }).click();
+    await expect(first).toBeVisible();
+    await expect(second).toHaveCount(0);
+    await page.getByRole('button', { name: 'Map episodes', exact: true }).click();
+    const mapping = page.getByRole('dialog', { name: 'Two Seasons (2021)' });
+    await expect(mapping.getByRole('table', { name: 'Map episodes' })).toBeVisible();
+    expect(stack.addRequests()).toHaveLength(1);
+    await page.keyboard.press('Escape');
+    await expect(mapping).toBeHidden();
+    await page.getByRole('tab', { name: /^Searching\b/ }).click();
+    await expect(page.getByText('No target fits these filters.', { exact: true })).toBeVisible();
+    await expect(first).toHaveCount(0);
+    expect(stack.addRequests()).toHaveLength(1);
+  } finally {
+    await stack.stop();
   }
 });

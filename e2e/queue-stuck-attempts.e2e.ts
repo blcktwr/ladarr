@@ -1,18 +1,22 @@
 import { expect, test } from './fixtures.ts';
-import { configure, SERIES_PACK, startStack, URL_BASE, type Stack } from './stack.ts';
+import { configure, MIB, SERIES_PACK, startStack, URL_BASE, type Stack } from './stack.ts';
 
 test.setTimeout(120_000);
 
 let stack: Stack;
 let cookie: Awaited<ReturnType<Stack['createOwner']>>;
-const reason = () => stack.call('GET', '/queue/entries/tv:1:1x1').then((res) => res.body.entry?.reason);
+const LOW = 'Show.Name.S01.720p.WEB-DL-LOW';
+const INVALID = 'The torrent is invalid.';
+const QUALITY = 'The quality of the release is not in the allowed qualities.';
 
 test.beforeAll(async () => {
   stack = await startStack();
   cookie = await stack.createOwner();
   await configure(stack);
-  // The release of the season is not a torrent, so each attempt fails and the season asks for the user.
-  stack.tracker.state.items = [{ title: SERIES_PACK, size: 3 * 60 * 45 * 1024 * 1024, bad: true }];
+  stack.tracker.state.items = [
+    { title: SERIES_PACK, size: 3 * 60 * 45 * MIB, bad: true },
+    { title: LOW, size: 3 * 60 * 45 * MIB },
+  ];
   const added = await stack.call('POST', '/library', { mediaType: 'tv', tmdbId: 1, add: 'all' });
   if (added.status >= 300) throw new Error(`POST /library answered ${added.status}: ${JSON.stringify(added.body)}`);
 });
@@ -21,16 +25,33 @@ test.beforeEach(async ({ context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
 });
 
-test('says why the last release failed on the card of the season', async ({ page }) => {
-  // The reason carries the failure of the last release, so the page says what went wrong.
-  await expect.poll(reason, { timeout: 60_000 }).toMatchObject({ code: 'too_many_attempts', detail: 'invalid_torrent' });
+test('shows why each candidate was rejected in the Stuck season', async ({ page }) => {
+  await expect.poll(async () => (await stack.call('GET', '/queue/groups/tv:1?season=1')).body.group, { timeout: 60_000 }).toMatchObject({
+    status: 'stuck',
+    tabs: ['stuck'],
+    problem: { code: 'all_rejected' },
+    rejected: [
+      { release: { title: LOW, reasons: [QUALITY], selectable: true } },
+      { release: { title: SERIES_PACK, reasons: [INVALID], selectable: false } },
+    ],
+  });
+  const { body } = await stack.call('GET', '/queue/entries/tv:1:1x1');
+  expect(body.entry).toMatchObject({
+    status: 'stuck',
+    reason: { code: 'all_rejected' },
+    search: { nextAt: null, topRejections: expect.arrayContaining(['invalid_torrent']) },
+  });
 
   await page.goto(`${URL_BASE}/activity`);
-  await page.locator('[data-row="group:tv:1:1"]').click();
-  const main = page.getByRole('main');
-  // The reason says why the last release failed, so the page gives the fact and no generic instruction.
-  await expect(main.getByText('The last release had a damaged .torrent file.')).toBeVisible();
-
-  await expect(main.getByRole('button', { name: 'Retry fetch', exact: true })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Try again', exact: true })).toBeHidden();
+  await page.getByRole('tab', { name: /^Stuck\b/ }).click();
+  const season = page.locator('[data-row="group:tv:1:1"]');
+  await expect(season).toContainText('Stuck');
+  await season.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
+  const rejected = page.getByRole('table', { name: 'Rejected releases' });
+  for (const [title, reason] of [[LOW, QUALITY], [SERIES_PACK, INVALID]] as const) {
+    const row = rejected.getByRole('row').filter({ hasText: title });
+    await expect(row.getByText(reason, { exact: true })).toBeVisible();
+  }
+  expect(stack.tracker.state.downloads).toEqual([SERIES_PACK]);
+  expect(stack.addRequests()).toHaveLength(0);
 });

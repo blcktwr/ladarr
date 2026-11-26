@@ -2,19 +2,14 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures.ts';
-import { MOVIE_RELEASE, OWNER, SERIES_PACK, startStack, URL_BASE, type Stack } from './stack.ts';
+import { addFromSearch, firstReport, openActivity, section, signIn } from './flow-helpers.ts';
+import { MOVIE_RELEASE, OWNER, startStack, URL_BASE, type Stack } from './stack.ts';
 import { hashOf } from '../packages/server/tests/helpers/test-pipeline.ts';
 
-// One server for the whole journey: setup first, then a movie, then a series. The tests depend on each other.
+// The movie journey uses the server configured by the setup test.
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(180_000);
-
-// The poller reads the client every 10 s, and a grab does not wake it. The first report of a new download can take that long.
-async function firstReport(page: Page, transfers: number) {
-  await expect.poll(async () => (await (await page.request.get(`${URL_BASE}/api/queue/summary`)).json()).activeTransfers, { timeout: 70_000, intervals: [500] }).toBe(transfers);
-}
 
 let stack: Stack;
 test.beforeAll(async () => {
@@ -26,29 +21,6 @@ test.afterEach(async ({}, info) => {
   writeFileSync(info.outputPath('server.log'), stack.logs());
   await info.attach('server-log', { path: info.outputPath('server.log') });
 });
-
-async function signIn(page: Page) {
-  await page.goto(URL_BASE);
-  await page.getByLabel('Password').fill(OWNER.password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('link', { name: 'Catalog', exact: true })).toBeVisible();
-}
-
-const section = (page: Page, name: string) => page.getByRole('link', { name, exact: true }).click();
-// The queue status at the end of the navbar is the link to Activity. Its text changes with the queue.
-const openActivity = (page: Page) => page.locator('a[href$="/activity"]').click();
-
-async function addFromSearch(page: Page, query: string, heading: string) {
-  const box = page.getByRole('searchbox', { name: 'Search', exact: true });
-  await box.fill(query);
-  await box.press('Enter');
-  await page.getByRole('main').getByRole('link', { name: query }).getByText(query, { exact: true }).click();
-  await page.getByRole('button', { name: 'Add', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Notifications' }).getByText('Added to the queue')).toBeVisible();
-  await expect(page.getByRole('heading', { name: heading })).toBeVisible();
-  // The page of the title has its action buttons when the title is in the catalog.
-  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
-}
 
 test('setup: owner, folders, download client, and indexer', async ({ page }) => {
   await page.goto(URL_BASE);
@@ -292,6 +264,9 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
 });
 
 test('movie: add, search, download, restart, import', async ({ page }) => {
+  const files = { [`${MOVIE_RELEASE}.mkv`]: 'video-data', 'Sample/sample.mkv': 'x', 'info.nfo': 'n' };
+  const paths = Object.keys(files);
+  stack.tracker.state.items.find(({ title }) => title === MOVIE_RELEASE)!.files = paths;
   await signIn(page);
   await addFromSearch(page, 'Movie Name', 'Movie Name (2019)');
 
@@ -302,13 +277,13 @@ test('movie: add, search, download, restart, import', async ({ page }) => {
   await expect(page.getByText(MOVIE_RELEASE, { exact: true })).toBeVisible();
   await expect(page.getByText('BluRay 1080p', { exact: true })).toBeVisible();
   await expect(page.getByText('11.7 GiB', { exact: true })).toBeVisible();
-  // The poster and the name open the page of the title.
-  await entry.getByRole('link', { name: 'Movie Name (2019)' }).click();
+  // The inspector title opens the page of the movie.
+  await page.getByRole('link', { name: 'Movie Name (2019)', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Movie Name (2019)' })).toBeVisible();
   await openActivity(page);
   await expect(page.getByRole('banner')).toContainText(/Downloading\s*Movie Name \(2019\)/);
-  const hash = hashOf(MOVIE_RELEASE);
-  expect(stack.qbit.torrents.get(hash)).toMatchObject({ tags: '', save_path: stack.folders.downloads });
+  const hash = hashOf(MOVIE_RELEASE, paths);
+  expect(stack.qbit.torrents.get(hash)).toMatchObject({ tags: expect.stringMatching(/^ladarr-/), save_path: stack.folders.downloads });
   expect(stack.tracker.state.downloads).toEqual([MOVIE_RELEASE]);
 
   // The client reports the download. The row keeps the stage until the transfer completes.
@@ -322,7 +297,7 @@ test('movie: add, search, download, restart, import', async ({ page }) => {
   expect(stack.tracker.state.downloads).toEqual([MOVIE_RELEASE]);
   expect(stack.qbit.torrents.size).toBe(1);
 
-  stack.complete(MOVIE_RELEASE, { [`${MOVIE_RELEASE}.mkv`]: 'video-data', 'Sample/sample.mkv': 'x', 'info.nfo': 'n' });
+  stack.complete(MOVIE_RELEASE, files, hash);
   // The poll reads the client every 10 seconds, so the import can wait that long to start. The row leaves the list when the
   // target is available, and the library file is the evidence that the import finished.
   const library = join(stack.folders.movies, 'Movie Name (2019)', 'Movie Name (2019).mkv');
@@ -335,11 +310,10 @@ test('movie: add, search, download, restart, import', async ({ page }) => {
   expect(stack.qbit.torrents.has(hash)).toBe(true);
 
   await section(page, 'Catalog');
-  const poster = page.getByRole('main').getByRole('link', { name: 'Movie Name Movies', exact: true });
+  const poster = page.getByRole('main').getByRole('link', { name: 'Movie Name Movies Available', exact: true });
   await expect(poster).toBeVisible();
-  // The poster shows the type and no availability badge.
   await expect(poster).toContainText('Movies');
-  await expect(poster).not.toContainText('Available');
+  await expect(poster).toContainText('Available');
 });
 
 test('the + of a season opens the add with that season', async ({ page }) => {
@@ -350,66 +324,4 @@ test('the + of a season opens the add with that season', async ({ page }) => {
   await expect(dialog.getByRole('checkbox', { name: 'Season 2' })).toBeChecked();
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toHaveCount(0);
-});
-
-test('series: add, season pack, crash, import', async ({ page }) => {
-  await signIn(page);
-  await addFromSearch(page, 'Show Name', 'Show Name (2020)');
-
-  await openActivity(page);
-  const groupRow = page.locator('[data-row="group:tv:1:1"]');
-  const groupMenu = page.getByRole('button', { name: 'Actions for Show Name (2020) Season 1' });
-  // The row of the season shows its status. The movie of the test before comes first, so the user selects the season.
-  await expect(groupRow).toContainText('Downloading');
-  await page.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
-  await expect(groupMenu).toBeVisible();
-  // The poster and the name of the master row open the page of the title.
-  await groupRow.getByRole('link', { name: 'Show Name (2020) Season 1' }).click();
-  await expect(page.getByRole('heading', { name: 'Show Name (2020)' })).toBeVisible();
-  await openActivity(page);
-  // One pack, one transfer, three targets.
-  expect(stack.tracker.state.downloads.filter((name) => name === SERIES_PACK)).toHaveLength(1);
-  const hash = hashOf(SERIES_PACK);
-  expect(stack.qbit.torrents.has(hash)).toBe(true);
-
-  stack.qbit.progress(hash, 0.4);
-  await firstReport(page, 1);
-  await page.reload();
-  // The page selects the first row, so the user selects the series. Its seasons are in the inspector, and the series
-  // shows the status of its episodes.
-  await page.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
-  await expect(page.locator('[data-row="season:tv:1|1"]')).toBeVisible();
-  await expect(groupRow).toContainText('Downloading');
-  // The bar and the status line show the same download percentage.
-  await expect(page.getByRole('progressbar', { name: 'Show Name (2020) Season 1 Download' })).toHaveAttribute('aria-valuenow', '40');
-  await expect(page.getByRole('main').getByText('40%', { exact: true })).toBeVisible();
-  await expect(page.getByRole('main').getByText('0 / 3 episodes')).toHaveCount(0);
-  // A click on the button of the season opens its episodes in the inspector.
-  await page.getByRole('button', { name: 'Show episodes of Season 1' }).click();
-  await expect(page.getByRole('table', { name: 'Episodes of season 1' })).toBeVisible();
-
-  // The process dies without a clean stop. The pack is not grabbed a second time.
-  await stack.restart('SIGKILL');
-  await expect(groupRow).toContainText('Downloading');
-  expect(stack.tracker.state.downloads.filter((name) => name === SERIES_PACK)).toHaveLength(1);
-  expect(stack.qbit.torrents.size).toBe(2);
-
-  stack.complete(SERIES_PACK, { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two', 'Show.Name.S01E03.mkv': 'three' });
-  // The row leaves the list when every episode is in the library. The library files are the evidence of the import.
-  const files = [1, 2, 3].map((number) => join(stack.folders.tv, 'Show Name (2020)', 'Season 01', `Show Name - S01E0${number} - Episode ${number}.mkv`));
-  await expect.poll(() => files.every((file) => existsSync(file)), { timeout: 75_000 }).toBe(true);
-  await expect(groupRow).toHaveCount(0, { timeout: 75_000 });
-  for (const file of files) expect(existsSync(file), file).toBe(true);
-
-  await section(page, 'Catalog');
-  await page.getByRole('link', { name: 'Show Name Series', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Show Name (2020)' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'TMDB 8.1' })).toHaveAttribute('href', 'https://www.themoviedb.org/tv/1');
-  await expect(page.getByRole('link', { name: 'IMDb' })).toHaveAttribute('href', 'https://www.imdb.com/title/tt0000001/');
-  await expect(page.getByText('3 of 3 episodes available')).toHaveCount(0);
-
-  // A click on the container of a season opens it, without the button at its right.
-  await page.getByRole('region', { name: 'Season 1' }).click();
-  await expect(page.getByRole('button', { name: 'Hide episodes of Season 1' })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Season 1' })).toContainText('Episode 1');
 });

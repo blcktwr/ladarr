@@ -125,6 +125,7 @@ export async function startStack() {
     tmdb,
     tracker,
     qbit,
+    addRequests: () => qbit.calls.filter(({ path }) => path === 'torrents/add'),
     // The output of the process and the log file of the server, to attach to a failed test.
     logs: () => `${output}\n${existsSync(join(folders.config, 'logs', 'ladarr.log')) ? readFileSync(join(folders.config, 'logs', 'ladarr.log'), 'utf8') : ''}`,
     call,
@@ -191,17 +192,22 @@ export async function startStack() {
 
 export type Stack = Awaited<ReturnType<typeof startStack>>;
 
-// Does the setup through the API, for the owner that createOwner made: folders, client, and indexer.
-export async function configure(stack: Stack) {
+export async function addClient(stack: Stack, maxDownloads = 0) {
+  const res = await stack.call('POST', '/clients', { name: 'qBittorrent', type: 'qbittorrent', host: '127.0.0.1', port: stack.qbit.port, maxDownloads, auth: { type: 'password', username: 'admin', password: 'secret' } });
+  if (res.status >= 300) throw new Error(`POST /clients answered ${res.status}: ${JSON.stringify(res.body)}`);
+}
+
+// Does the setup through the API, for the owner that createOwner made.
+export async function configure(stack: Stack, { client = true } = {}) {
   const steps: [string, string, unknown][] = [
     ['POST', '/roots', { path: stack.folders.movies, mediaType: 'movie' }],
     ['POST', '/roots', { path: stack.folders.tv, mediaType: 'tv' }],
     ['POST', '/settings/complete-setup', {}],
-    ['POST', '/clients', { name: 'qBittorrent', type: 'qbittorrent', host: '127.0.0.1', port: stack.qbit.port, auth: { type: 'password', username: 'admin', password: 'secret' } }],
   ];
   for (const [method, path, body] of steps) {
     const res = await stack.call(method, path, body);
     if (res.status >= 300) throw new Error(`${method} ${path} answered ${res.status}: ${JSON.stringify(res.body)}`);
   }
+  if (client) await addClient(stack);
   await stack.pushIndexer((await stack.call('GET', '/auth/api-key')).body.apiKey);
 }

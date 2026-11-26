@@ -39,15 +39,23 @@ test('does not map local files without a torrent', async ({ page }) => {
     await expect.poll(() => reason(id), { timeout: 60_000 }).toBe('file_unmapped');
   }
   const siblings = await Promise.all(['tv:1:1x2', 'tv:1:1x3'].map(async (id) => (await stack.call('GET', `/queue/entries/${id}`)).body.entry));
+  const { group } = (await stack.call('GET', '/queue/groups/tv:1?season=1')).body;
+  expect(group).toMatchObject({ status: 'stuck', problem: { code: 'file_unmapped' } });
+  expect(group.actions.filter((action: { action: string }) => action.action === 'match')).toMatchObject([
+    { fileSource: 'library', ids: ['tv:1:1x1', 'tv:1:1x2', 'tv:1:1x3'] },
+  ]);
   const writes: string[] = [];
+  const downloadFiles: string[] = [];
   page.on('request', (request) => {
-    if (request.method() !== 'GET' && new URL(request.url()).pathname.startsWith('/api/queue')) writes.push(request.url());
+    const url = new URL(request.url());
+    if (request.method() !== 'GET' && url.pathname.startsWith('/api/queue')) writes.push(request.url());
+    if (url.pathname.endsWith('/files') && url.searchParams.get('source') === 'download') downloadFiles.push(request.url());
   });
 
   await page.goto(`${URL_BASE}/activity`);
   await page.locator('[data-row="group:tv:1:1"]').click();
   const main = page.getByRole('main');
-  await expect(main.getByText('The title folder has a file that names no episode.')).toHaveCount(0);
+  await expect(main.getByText('The title folder has a file that names no episode.', { exact: true })).toBeVisible();
   await page.locator('[data-row="season:tv:1|1"]').click();
   const episodes = main.getByRole('table', { name: 'Episodes of season 1' });
   await expect(episodes).toContainText('Stuck');
@@ -78,6 +86,7 @@ test('does not map local files without a torrent', async ({ page }) => {
   await expect(question).toBeHidden();
   await expect(panel).toBeVisible();
   expect(writes).toEqual([]);
+  expect(downloadFiles).toEqual([]);
   expect(await reason('tv:1:1x1')).toBe('file_unmapped');
   await apply.click();
   await question.getByRole('button', { name: 'Yes', exact: true }).click();

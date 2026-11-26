@@ -2,7 +2,7 @@ import { linkSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } fr
 import { dirname, join } from 'node:path';
 import type { Locator, Page, Request } from '@playwright/test';
 import type { Data, QueueEntry } from '../packages/server/src/types.ts';
-import { hashOf } from '../packages/server/tests/helpers/test-pipeline.ts';
+import { hashOf, makeTorrent } from '../packages/server/tests/helpers/test-pipeline.ts';
 import { expect, test } from './fixtures.ts';
 import { configure, MOVIE_RELEASE, startStack, URL_BASE, type Stack } from './stack.ts';
 
@@ -89,8 +89,9 @@ function completeTorrent(name: string, files: Record<string, string>, category =
 async function start(entries: QueueEntry[]) {
   data.queue = Object.fromEntries(entries.map((entry) => [entry.id, entry]));
   for (const key of Object.keys(data.titles)) if (!entries.some((entry) => entry.titleKey === key)) delete data.titles[key];
-  // A full snapshot takes precedence over queue.json.
-  writeFileSync(join(stack.folders.config, 'db.json'), JSON.stringify(data));
+  // These fixtures describe legacy targets. Let the loader rebuild their turns.
+  const { queueItems, queueItemSeq, ...legacy } = data;
+  writeFileSync(join(stack.folders.config, 'db.json'), JSON.stringify({ ...legacy, schemaVersion: 9 }));
   await stack.server.start();
 }
 
@@ -206,7 +207,14 @@ for (const scenario of [
     download(stopped, MOVIE_RELEASE, { 'Movie.mkv': 'video' });
     if (scenario.at !== 'importing') stack.qbit.torrents.clear();
     if (scenario.at === 'fetching' || scenario.at === 'sending') stopped.transferHash = null;
-    if (scenario.at === 'sending') stopped.source = { torrent: true };
+    if (scenario.at === 'sending') {
+      const files = ['Movie.mkv'];
+      const hash = hashOf(MOVIE_RELEASE, files);
+      stopped.release!.infoHash = hash;
+      stopped.clientId = null;
+      stopped.source = { torrent: true };
+      data.torrents[hash] = makeTorrent(MOVIE_RELEASE, files).toString('base64');
+    }
     await start([stopped, unrelated]);
     const before = await entry(unrelated.id);
 
@@ -228,9 +236,10 @@ for (const scenario of [
     ]);
     expect(applied.status()).toBe(200);
     expect(applied.request().postDataJSON()).toMatchObject({ action: 'retry', ids: [stopped.id] });
+    const phase = scenario.at === 'sending' ? 'fetching' : scenario.at;
     expect(await entry(stopped.id)).toMatchObject({
-      status: scenario.at === 'downloading' ? 'stuck' : scenario.at,
-      phase: scenario.at,
+      status: scenario.at === 'downloading' ? 'stuck' : phase,
+      phase,
       release: { title: MOVIE_RELEASE },
     });
     const type = { importing: 'import.run', fetching: 'queue.grab', sending: 'queue.send', downloading: 'queue.retry' }[scenario.at];
@@ -467,13 +476,16 @@ test('maps selected episodes from a completed torrent with different season numb
     id: selected.map(({ id }) => id), source: 'download', hash, file: files[index]!,
     covers: [{ season: 1, number: target.number! }], ids: [target.id],
   })));
-  const secondSeason = page.locator(`[data-row="group:${title.key}:2"]`);
-  await expect(secondSeason).toContainText('Season 2');
-  await secondSeason.click();
-  await page.getByRole('button', { name: 'Show episodes of Season 2', exact: true }).click();
-  const releaseEpisodes = page.getByRole('table', { name: 'Episodes of season 2', exact: true });
-  await expect(releaseEpisodes.getByText('Show Name S02E01', { exact: true })).toBeVisible();
-  await expect(releaseEpisodes.getByRole('row')).toHaveCount(selected.length + 1);
+  const catalogSeason = page.locator(`[data-row="group:${title.key}:1"]`);
+  await expect(catalogSeason).toContainText('Season 1');
+  await expect(page.locator(`[data-row="group:${title.key}:2"]`)).toHaveCount(0);
+  await catalogSeason.click();
+  await page.getByRole('button', { name: 'Show episodes of Season 1', exact: true }).click();
+  const seasonEpisodes = page.getByRole('table', { name: 'Episodes of season 1', exact: true });
+  for (const [index, target] of selected.entries()) {
+    await expect(seasonEpisodes.locator(`[data-row="entry:${target.id}"]`)).toContainText(`Show Name S02E0${index + 1}`);
+  }
+  await expect(seasonEpisodes.getByRole('row')).toHaveCount(available.length + missing.length + 1);
   expect((await stack.call('POST', '/queue/pause', { paused: false })).status).toBe(200);
   for (const target of selected) {
     await expect.poll(async () => (await entry(target.id)).status, { timeout: 60_000 }).toBe('available');
@@ -581,7 +593,7 @@ test('applies one external file to two seasons and a separate file to one episod
   await applyMapping(page, panel);
   await expect.poll(async () => (await entry(first.id)).status).toBe('importing');
   expect((await entry(second.id)).status).toBe('importing');
-  expect((await stack.call('GET', '/queue/groups/tv:3?season=1')).body.group.status).toBe('stuck');
+  expect((await entry(blank.id)).status).toBe('stuck');
   await expect(panel).toBeHidden();
   const both = [{ season: 1, number: 1 }, { season: 2, number: 3 }];
   const last = [{ season: 2, number: 4 }];
@@ -591,12 +603,15 @@ test('applies one external file to two seasons and a separate file to one episod
   await expectMappings(sharedRequests, [
     { id: [first.id, second.id], source: 'download', hash, file: shared, covers: both, ids: [first.id, second.id] },
   ]);
-  expect((await stack.call('GET', '/queue/groups/tv:3?season=2')).body.group.status).not.toBe('stuck');
   await expectMappings(forFile(separate), [{ id: third.id, source: 'download', hash, file: separate, covers: last, ids: [third.id] }]);
+  expect((await entry(third.id)).status).toBe('importing');
+  const seasonStatuses = await Promise.all([1, 2].map(async (season) => (await stack.call('GET', `/queue/groups/tv:3?season=${season}`)).body.group.status));
+  expect.soft(seasonStatuses).toEqual(['importing', 'importing']);
   expect((await stack.call('POST', '/queue/pause', { paused: false })).status).toBe(200);
   for (const target of [first, second, third]) {
     await expect.poll(async () => (await entry(target.id)).status, { timeout: 60_000 }).toBe('available');
   }
+  expect((await stack.call('GET', '/queue/groups/tv:3?season=1')).body.group.status).toBe('stuck');
   const files = (await stack.call('GET', filesPath)).body.files as Data['files'][string][];
   expect(files).toHaveLength(2);
   for (const [contents, coverage] of [['combined-video', both], ['closing-video', last]] as const) {
@@ -657,8 +672,8 @@ test('reads the files of the torrent while the map dialog loads its mapping', as
 });
 
 test('shows the map dialog only after every torrent and its match load', async ({ page }) => {
-  const first = blocked('tv:3', 2, 3, 'fetching', 'pack_partial');
-  const second = blocked('tv:3', 2, 4, 'fetching', 'pack_partial');
+  const first = blocked('tv:3', 2, 3, 'importing', 'file_unmapped');
+  const second = blocked('tv:3', 2, 4, 'importing', 'file_unmapped');
   download(first, 'Two.Seasons.S02E03.1080p.WEB-DL-GRP', { 'Two.Seasons.S02E03.mkv': 'third' });
   download(second, 'Two.Seasons.S02E04.1080p.WEB-DL-GRP', { 'Two.Seasons.S02E04.mkv': 'fourth' });
   data.queuePaused = true;
@@ -833,8 +848,8 @@ test('opens the mapping with both source packs and keeps their file paths after 
 });
 
 test('applies the file that the matcher gives to each episode of a stopped season', async ({ page }) => {
-  const first = blocked('tv:3', 2, 3, 'fetching', 'pack_partial');
-  const second = blocked('tv:3', 2, 4, 'fetching', 'pack_partial');
+  const first = blocked('tv:3', 2, 3, 'importing', 'file_unmapped');
+  const second = blocked('tv:3', 2, 4, 'importing', 'file_unmapped');
   const name = 'Two.Seasons.S02.1080p.WEB-DL-GRP';
   download(first, name, { 'Two.Seasons.S02E03.mkv': 'third', 'Two.Seasons.S02E04.mkv': 'fourth', 'Alternate.mkv': 'alternate' });
   Object.assign(second, { transferHash: first.transferHash, clientId: first.clientId, release: structuredClone(first.release) });
