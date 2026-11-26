@@ -32,7 +32,7 @@ const items = [
   { title: SECOND, size: 100 * 120 * MIB },
 ];
 // A movie that came out already, so a search is possible.
-const film = () => movie({ rootId: 'movie', meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
+const film = () => movie({ rootId: 'movie', meta: { ...movie().meta, date: '2019-01-01', releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
 const other = () => movie({ key: 'movie:3', tmdbId: 3, rootId: 'movie', meta: { ...film().meta, tmdbId: 3, title: 'Other Movie', originalTitle: 'Other Movie' } });
 
 describe('a database with one client', () => {
@@ -70,6 +70,7 @@ describe('several clients', () => {
     pipe.tracker.state.items = items;
 
     const [entry] = pipe.finder.requestSearch(title.key);
+    expect(entry?.id).toBe(title.key);
     await until(() => stageOf(entry!) === 'downloading');
     expect(entry!.clientId).toBe(second.id);
     expect(extra!.torrents.has(hashOf(FIRST))).toBe(true);
@@ -79,6 +80,7 @@ describe('several clients', () => {
     pipe.db.data.downloadClients[0]!.enabled = true;
     mkdirSync(join(pipe.folders.downloads, FIRST), { recursive: true });
     writeFileSync(join(pipe.folders.downloads, FIRST, `${FIRST}.mkv`), 'video-data');
+    extra!.setFiles(hashOf(FIRST), [{ name: `${FIRST}/${FIRST}.mkv`, size: Buffer.byteLength('video-data'), progress: 1 }]);
     extra!.progress(hashOf(FIRST), 1);
     await until(() => stageOf(entry!) === 'available');
     expect(entry!.clientId).toBe(second.id);
@@ -96,9 +98,11 @@ describe('several clients', () => {
 
     // The first title goes to the first client, and the second title goes to the second one.
     const [one] = pipe.finder.requestSearch(first.key);
+    expect(one?.id).toBe(first.key);
     await until(() => stageOf(one!) === 'downloading');
     pipe.db.data.downloadClients[0]!.enabled = false;
     const [two] = pipe.finder.requestSearch(next.key);
+    expect(two?.id).toBe(next.key);
     await until(() => stageOf(two!) === 'downloading');
     expect([one!.clientId, two!.clientId]).toEqual(['client-1', second.id]);
     pipe.db.data.downloadClients[0]!.enabled = true;
@@ -114,7 +118,7 @@ describe('several clients', () => {
     expect(pipe.poller.status().state).toBe('unreachable');
 
     pipe.qbit.control.down = false;
-    await until(() => pipe!.poller.transfer(hashOf(FIRST))?.stale === false);
+    await until(() => pipe!.poller.transfer(hashOf(FIRST))?.stale === false && pipe!.poller.status().state === 'ok');
     expect(pipe.poller.status().state).toBe('ok');
   });
 
@@ -124,6 +128,7 @@ describe('several clients', () => {
     pipe.db.data.titles[title.key] = title;
     pipe.tracker.state.items = items;
     const [entry] = pipe.finder.requestSearch(title.key);
+    expect(entry?.id).toBe(title.key);
     await until(() => stageOf(entry!) === 'downloading');
     pipe.qbit.progress(hashOf(FIRST), 0.4);
     await until(() => pipe!.poller.transfer(hashOf(FIRST))?.progress === 0.4);

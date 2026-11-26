@@ -102,27 +102,35 @@ describe('series counts and availability', () => {
 });
 
 describe('movie availability', () => {
-  const movie = (releaseDates: Title['meta']['releaseDates'], extra: Partial<Title> = {}) =>
-    title({ key: 'movie:1', mediaType: 'movie', meta: { ...title().meta, mediaType: 'movie', releaseDates }, ...extra });
+  const movie = (date: string | null, releaseDates: Title['meta']['releaseDates'], extra: Partial<Title> = {}) =>
+    title({ key: 'movie:1', mediaType: 'movie', meta: { ...title().meta, mediaType: 'movie', date, releaseDates }, ...extra });
 
-  it('does not use a theatrical release as availability', () => {
-    expect(availability(movie([{ region: 'US', kind: 'theatrical', date: '2020-01-01T00:00:00.000Z' }]), clock)).toBe('waiting');
+  it('uses the primary date at midnight UTC when there is only a regional theatrical date', () => {
+    const theatrical: Title['meta']['releaseDates'] = [{ region: 'US', kind: 'theatrical', date: '2020-01-01T00:00:00.000Z' }];
+    expect(availability(movie(null, theatrical), clock)).toBe('waiting');
+    expect(availability(movie('2024-06-01', theatrical), { ...clock, now: NOW - 1 })).toBe('waiting');
+    expect(availability(movie('2024-06-01', theatrical), clock)).toBe('missing');
   });
 
-  it('uses a past digital or physical date in any region', () => {
-    expect(availability(movie([{ region: 'US', kind: 'digital', date: '2020-07-15T00:00:00.000Z' }]), clock)).toBe('missing');
-    expect(availability(movie([{ region: 'US', kind: 'physical', date: '2020-07-15T00:00:00.000Z' }]), clock)).toBe('missing');
+  it('uses a past primary date even before the regional digital or physical release', () => {
+    expect(availability(movie('2024-05-31', [{ region: 'US', kind: 'digital', date: '2999-01-01T00:00:00.000Z' }]), clock)).toBe('missing');
+    expect(availability(movie('2024-05-31', [{ region: 'GB', kind: 'physical', date: '2999-01-01T00:00:00.000Z' }]), clock)).toBe('missing');
   });
 
-  it('waits for a future date and no date', () => {
-    expect(availability(movie([{ region: 'US', kind: 'digital', date: '2999-01-01T00:00:00.000Z' }]), clock)).toBe('waiting');
-    expect(availability(movie([{ region: 'GB', kind: 'digital', date: '2020-01-01T00:00:00.000Z' }]), clock)).toBe('missing');
-    expect(availability(movie([]), clock)).toBe('waiting');
+  it('waits when the primary date is future or absent despite a past regional release', () => {
+    expect(availability(movie('2999-01-01', [{ region: 'US', kind: 'digital', date: '2020-01-01T00:00:00.000Z' }]), clock)).toBe('waiting');
+    expect(availability(movie(null, [{ region: 'GB', kind: 'digital', date: '2020-01-01T00:00:00.000Z' }]), clock)).toBe('waiting');
+    expect(availability(movie(null, []), clock)).toBe('waiting');
   });
 
-  it('lets a manual override allow a search, and a file make the movie available', () => {
-    expect(availability(movie([], { manualRelease: true }), clock)).toBe('missing');
-    expect(availability(movie([], { fileId: 'f' }), clock)).toBe('available');
+  it('uses the manual override only when the primary date is absent', () => {
+    expect(availability(movie(null, [], { manualRelease: true }), clock)).toBe('missing');
+    expect(availability(movie('2999-01-01', [], { manualRelease: true }), clock)).toBe('waiting');
+  });
+
+  it('shows a present file as available before the primary date', () => {
+    expect(availability(movie('2999-01-01', [], { fileId: 'f' }), clock)).toBe('available');
+    expect(availability(movie(null, [], { fileId: 'f' }), clock)).toBe('available');
   });
 });
 

@@ -13,10 +13,10 @@ import type { Db, ReleaseDate, Title } from '../../src/types.ts';
 const NOW = Date.UTC(2024, 5, 15, 12);
 const all = { from: '2024-01-01', to: '2024-12-31', monitored: true };
 
-const film = (key: string, releaseDates: ReleaseDate[], extra: Partial<Title> = {}) => {
+const film = (key: string, releaseDates: ReleaseDate[], extra: Partial<Title> = {}, date: string | null = null) => {
   const base = movie();
   const id = Number(key.split(':')[1]);
-  return movie({ key, tmdbId: id, meta: { ...base.meta, tmdbId: id, title: `Film ${id}`, releaseDates }, ...extra });
+  return movie({ key, tmdbId: id, meta: { ...base.meta, tmdbId: id, title: `Film ${id}`, date, releaseDates }, ...extra });
 };
 const digital = (date: string, region = 'US'): ReleaseDate => ({ region, kind: 'digital', date });
 const show = (key: string, extra: Partial<Title> = {}) => {
@@ -97,15 +97,15 @@ describe('calendar events', () => {
 
   it('uses the earliest digital or physical date in any region, and leaves other movies without a position', async () => {
     const db = await dbWith(
-      film('movie:1', [digital('2024-06-10T00:00:00.000Z'), { region: 'US', kind: 'physical', date: '2024-06-05T00:00:00.000Z' }, { region: 'US', kind: 'theatrical', date: '2024-01-01T00:00:00.000Z' }]),
-      film('movie:2', [{ region: 'US', kind: 'theatrical', date: '2024-06-10T00:00:00.000Z' }]),
-      film('movie:3', [digital('2024-06-10T00:00:00.000Z', 'FR')]),
+      film('movie:1', [digital('2024-06-10T00:00:00.000Z'), { region: 'US', kind: 'physical', date: '2024-06-05T00:00:00.000Z' }, { region: 'US', kind: 'theatrical', date: '2024-01-01T00:00:00.000Z' }], {}, '2024-06-20'),
+      film('movie:2', [{ region: 'US', kind: 'theatrical', date: '2024-06-10T00:00:00.000Z' }], {}, '2024-06-01'),
+      film('movie:3', [digital('2024-06-10T00:00:00.000Z', 'FR')], {}, '2024-06-01'),
       film('movie:4', []),
     );
     const { events, undated } = calendarEvents(all, NOW);
-    expect(events.map((e) => [e.id, e.day])).toEqual([
-      ['movie:1', '2024-06-05'],
-      ['movie:3', '2024-06-10'],
+    expect(events.map((e) => [e.id, e.day, e.availability])).toEqual([
+      ['movie:1', '2024-06-05', 'waiting'],
+      ['movie:3', '2024-06-10', 'missing'],
     ]);
     expect(undated.map((u) => u.titleKey)).toEqual(['movie:2', 'movie:4']);
   });
@@ -139,8 +139,8 @@ describe('calendar events', () => {
       show('tv:3', { episodes: [episode(1, 1, aired, { fileId: 'f' })] }),
       show('tv:4', { episodes: [episode(1, 1, aired, { override: 'unmonitored' })] }),
       show('tv:5', { episodes: [episode(1, 1, aired)], paused: true }),
-      film('movie:6', [digital('2024-01-10T00:00:00.000Z')]),
-      film('movie:7', [digital('2999-12-10T00:00:00.000Z')]),
+      film('movie:6', [digital('2024-01-10T00:00:00.000Z')], {}, '2024-01-05'),
+      film('movie:7', [digital('2999-12-10T00:00:00.000Z')], {}, '2999-12-01'),
       film('movie:8', [{ region: 'US', kind: 'theatrical', date: '2024-01-10T00:00:00.000Z' }]),
       film('movie:9', [digital('2999-12-10T00:00:00.000Z')], { manualRelease: true }),
       film('movie:10', [digital('2024-01-10T00:00:00.000Z')], { fileId: 'f' }),
@@ -213,7 +213,7 @@ describe('library filters', () => {
       show('tv:2', { episodes: [episode(1, 1, '2999-01-01')] }),
       film('movie:3', [{ region: 'US', kind: 'theatrical', date: '2020-01-01T00:00:00.000Z' }]),
       film('movie:4', [digital('2020-01-01T00:00:00.000Z')], { fileId: 'f' }),
-      film('movie:5', [digital('2020-01-01T00:00:00.000Z')]),
+      film('movie:5', [digital('2020-01-01T00:00:00.000Z')], {}, '2019-12-01'),
     ]) {
       app.db.data.titles[item.key] = item;
     }

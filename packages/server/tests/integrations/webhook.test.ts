@@ -312,11 +312,12 @@ describe('import with a receiver outage', () => {
     closers.push(() => pipe.stop());
     pipe.db.data.webhooks = [{ id: 'hook', type: 'available', url: receiver.url }];
 
-    const film = movie({ rootId: 'movie', meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
+    const film = movie({ rootId: 'movie', meta: { ...movie().meta, date: '2019-01-01', releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
     pipe.db.data.titles[film.key] = film;
     const name = 'Movie.Name.2019.1080p.BluRay.x264-GRP';
     pipe.tracker.state.items = [{ title: name, size: 100 * 120 * MIB }];
     const [entry] = pipe.finder.requestSearch(film.key);
+    expect(entry?.id).toBe(film.key);
     await until(() => stageOf(entry!) === 'downloading');
     pipe.complete(name, { [`${name}.mkv`]: 'video-data' });
 

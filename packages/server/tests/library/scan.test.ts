@@ -94,7 +94,9 @@ describe('movie scan', () => {
 
   it('marks a file that is gone as missing, keeps the record, and takes a new file after that', async () => {
     write(join(movies, 'Film', 'a.mkv'), 100);
-    db.data.titles['movie:1'] = title('movie:1', 'movie', 'Film');
+    const film = title('movie:1', 'movie', 'Film');
+    film.meta.date = '1999-12-31';
+    db.data.titles[film.key] = film;
     await scanTitle('movie:1');
     const id = db.data.titles['movie:1']!.fileId!;
     rmSync(join(movies, 'Film', 'a.mkv'));

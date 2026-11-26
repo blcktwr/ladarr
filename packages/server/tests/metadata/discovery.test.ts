@@ -225,18 +225,22 @@ describe('discovery route', () => {
 
   it('carries the availability of a title that is in the library and out of the queue', async () => {
     // The release date is in the past, so the movie is missing until it has a file.
-    db.data.titles['movie:603'] = movie({ key: 'movie:603', tmdbId: 603, meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
+    db.data.titles['movie:603'] = movie({ key: 'movie:603', tmdbId: 603, meta: { ...movie().meta, date: '1999-03-31', releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
 
     const { body } = await discovery();
-    expect(body.rows[0]!.results.find((result) => result.tmdbId === 603)).toMatchObject({ queueStatus: null, availability: 'missing' });
+    const result = body.rows[0]!.results.find((result) => result.tmdbId === 603);
+    expect(result?.availability).toBe('missing');
+    expect(result?.queueStatus).toBeNull();
   });
 
   it('carries the queue status of a title that is in the queue', async () => {
-    db.data.titles['movie:603'] = movie({ key: 'movie:603', tmdbId: 603, meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
+    db.data.titles['movie:603'] = movie({ key: 'movie:603', tmdbId: 603, meta: { ...movie().meta, date: '1999-03-31', releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
     db.data.queue['movie:603'] = entryOf({ id: 'movie:603', titleKey: 'movie:603', stage: 'downloading' }) as never;
     try {
       const { body } = await discovery();
-      expect(body.rows[0]!.results.find((result) => result.tmdbId === 603)).toMatchObject({ queueStatus: 'downloading', availability: 'missing' });
+      const result = body.rows[0]!.results.find((result) => result.tmdbId === 603);
+      expect(result?.availability).toBe('missing');
+      expect(result?.queueStatus).toBe('downloading');
     } finally {
       delete db.data.queue['movie:603'];
     }

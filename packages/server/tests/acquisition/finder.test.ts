@@ -58,15 +58,32 @@ describe('cache', () => {
 describe('release date', () => {
   it('waits for the release date before the next search', async () => {
     pipe = await startPipeline();
-    const date = '2999-01-01T00:00:00.000Z';
-    const m = movie({ rootId: 'movie', manualRelease: false, meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date }] } });
+    const date = '2999-01-01';
+    const m = movie({ rootId: 'movie', meta: { ...movie().meta, date, releaseDates: [{ region: 'US', kind: 'digital', date: '2019-06-01' }] } });
     pipe.db.data.titles[m.key] = m;
     pipe.tracker.state.items = [];
 
     const [entry] = pipe.finder.requestSearch(m.key, { manual: true, fresh: true });
     await until(() => branchOf(entry!) === 'waiting');
 
-    expect(entry!.search!.nextAt).toBe(Date.parse(date));
+    expect(entry!.search!.nextAt).toBe(Date.UTC(2999, 0, 1));
+  });
+
+  it('uses the regular search interval after a manual search when the primary date is absent', async () => {
+    const now = Date.UTC(2024, 5, 1);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+    try {
+      pipe = await startPipeline();
+      const m = movie({ rootId: 'movie', meta: { ...movie().meta, releaseDates: [{ region: 'US', kind: 'digital', date: '2999-01-01' }] } });
+      pipe.db.data.titles[m.key] = m;
+      pipe.tracker.state.items = [];
+      const [entry] = pipe.finder.requestSearch(m.key, { manual: true, fresh: true });
+      await until(() => branchOf(entry!) === 'waiting');
+      expect(entry!.search!.nextAt).toBe(now + 12 * 60 * 60 * 1000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
