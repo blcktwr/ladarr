@@ -1,4 +1,5 @@
 import type { TorrentStatus, TrackerStatus } from '@ladarr/shared/enums';
+import { setTimeout as delay } from 'node:timers/promises';
 import { outboundFetch } from '../../core/http.ts';
 import { JobError } from '../../core/jobs.ts';
 import type { ClientConfig, ClientSlots, QbittorrentErrorCode, QbittorrentOptions, Torrent, Tracker } from '../../types.ts';
@@ -256,6 +257,23 @@ export function createQbittorrent(config: ClientConfig, { fetch: fetchImpl = fet
       if (res.status === 404) return [];
       const raw = (await res.json()) as { name?: unknown; size?: unknown; progress?: unknown }[];
       return raw.map((file) => ({ name: str(file.name), sizeBytes: num(file.size), progress: num(file.progress) }));
+    },
+
+    async metadataFiles(magnet: string, hash: string, signal: AbortSignal): Promise<string[]> {
+      const end = Date.now() + 60_000;
+      do {
+        signal.throwIfAborted();
+        const res = await call('torrents/fetchMetadata', { method: 'POST', body: new URLSearchParams({ source: magnet }) }, true);
+        if (res.status === 404) return [];
+        if (res.status === 200) {
+          const data = await res.json().catch(() => null);
+          if (data?.infohash_v1 !== hash || !Array.isArray(data.info?.files)) return [];
+          return data.info.files.map((file: { path?: unknown }) => str(file?.path));
+        }
+        if (res.status !== 202) return [];
+        await delay(1_000, undefined, { signal });
+      } while (Date.now() < end);
+      return [];
     },
 
     // Removes one torrent. The data stays on the disk unless `deleteFiles` is true.

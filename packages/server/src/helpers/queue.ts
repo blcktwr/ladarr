@@ -378,7 +378,7 @@ export function view(poller: Poller, importStatus: ImportStatus | undefined, ent
     transfer: transfer
       ? {
           hash: transfer.hash,
-          progress: transfer.entryProgress?.[entry.id] ?? transfer.progress,
+          progress: transfer.entryProgress?.[entry.id] ?? (entry.number === null ? transfer.progress : null),
           sizeBytes: transfer.sizeBytes,
           downloadRate: transfer.downloadRate,
           etaSeconds: transfer.etaSeconds,
@@ -470,7 +470,7 @@ function groupsOf(f: Filters, poller?: Poller): RowGroup[] {
     if (entry.state.kind === 'downloading' && poller) {
       const transfer = entry.transferHash ? poller.transfer(entry.transferHash) : undefined;
       // The part of the least advanced file, for the order of the rows. A pack downloads its files one by one.
-      const part = transfer ? (transfer.entryProgress?.[entry.id] ?? transfer.progress) : null;
+      const part = transfer?.entryProgress?.[entry.id] ?? (entry.number === null ? transfer?.progress ?? null : null);
       if (part !== null) group.part = group.part < 0 ? part : Math.min(group.part, part);
       // The bar of the group shows the part of the torrent that the client reports, as the client shows it.
       if (transfer) group.download = group.download < 0 ? transfer.progress : Math.min(group.download, transfer.progress);

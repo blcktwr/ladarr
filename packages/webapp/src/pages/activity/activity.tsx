@@ -419,7 +419,7 @@ function GroupRejected({ group, filters, refresh }: { group: QueueGroupRow; filt
 
 // The progress of a download: the part that is done.
 function TransferProgress({ entry }: { entry: QueueEntryView }) {
-  if (entry.status !== 'downloading') return null;
+  if (entry.status !== 'downloading' || (entry.number !== null && entry.transfer?.progress == null)) return null;
   // The first poll can arrive after the target enters Downloading. The bar shows from 0% until then.
   const percent = downloadPercent(entry) ?? 0;
   return (
@@ -432,7 +432,7 @@ function TransferProgress({ entry }: { entry: QueueEntryView }) {
 
 // The percent of a download that runs. The list of the episodes of a series shows it in the name, with no bar and no rate.
 function downloadPercent(entry: QueueEntryView) {
-  if (!entry.transfer || entry.status !== 'downloading') return null;
+  if (entry.transfer?.progress == null || entry.status !== 'downloading') return null;
   return Math.round(entry.transfer.progress * 100);
 }
 

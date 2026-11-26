@@ -352,6 +352,14 @@ describe('requests and summary', () => {
     await until(() => pipe!.poller.transfer(hash)?.entryProgress?.['tv:1:1x1'] === 0.9 && pipe!.poller.transfer(hash)?.entryProgress?.['tv:1:1x2'] === 0.7);
 
     expect((await api.get('/queue')).body.items[0].download).toBe(0.5);
+    pipe.qbit.setFiles(hash, [
+      { name: `${pack}/Show.Name.S01E01.mkv`, size: 1000, progress: 0.2 },
+      { name: `${pack}/Sample/Show.Name.S01E02.mkv`, size: 50, progress: 1 },
+    ]);
+    await until(() => pipe!.poller.transfer(hash)?.entryProgress?.['tv:1:1x1'] === 0.2);
+    const episodes = (await api.get('/queue/groups/tv:1')).body.items;
+    expect(episodes.map((ep: { transfer: { progress: number | null } }) => ep.transfer.progress)).toEqual([0.2, null]);
+    expect(episodes[1].status).toBe('stuck');
   });
 
   it('gives a group no part of a download when none of its targets downloads', async () => {

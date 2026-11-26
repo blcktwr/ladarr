@@ -71,6 +71,14 @@ function lastNumber(name: string) {
 // when the string has none and the caller gives no hint. A name that gives no season and episode returns nothing, so the
 // file stays unmatched.
 export function parseEpisodes(name: string, seasonHint?: number | null): ParsedEpisodes | undefined {
+  const slash = name.lastIndexOf('/');
+  if (slash >= 0) {
+    const folder = name.slice(0, slash);
+    const marker = SXE.exec(folder) ?? NXN.exec(folder);
+    const season = seasonOf(folder) ?? (marker ? Number(marker[1]) : seasonHint);
+    const file = parseEpisodes(name.slice(slash + 1), season);
+    if (file) return file;
+  }
   const sxe = SXE.exec(name);
   if (sxe) return { season: Number(sxe[1]), numbers: numbersFrom(Number(sxe[2]), sxe[3]) };
   const nxn = NXN.exec(name);

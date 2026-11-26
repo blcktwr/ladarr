@@ -459,7 +459,7 @@ export type QueueReason = { code: string; message: string; action: 'retry' | 'ma
 
 export type QueueTransfer = {
   hash: string;
-  progress: number;
+  progress: number | null;
   sizeBytes: number;
   downloadRate: number;
   etaSeconds: number | null;

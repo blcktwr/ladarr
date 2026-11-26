@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { infoHashOf, magnetHash } from '../../src/library/grab/torrent.ts';
+import { infoHashOf, magnetHash, torrentFiles } from '../../src/library/grab/torrent.ts';
 
 export type FakeTorrent = {
   hash: string;
@@ -46,6 +46,7 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
   const trackers = new Map<string, FakeTracker[]>();
   // The files of a torrent, with the part of each one that the client reports. A torrent without an entry here has one file.
   const fileLists = new Map<string, { name: string; size: number; progress: number }[]>();
+  const metadata = new Map<string, string[] | null>();
   // The fields of /app/preferences that the tests use, and one that ladarr must never pass on.
   const preferences: Record<string, unknown> = { queueing_enabled: true, max_active_downloads: 3, max_active_torrents: 5, max_active_uploads: 3, web_ui_password: 'must-not-leave' };
   const calls: { path: string; body?: string }[] = [];
@@ -108,6 +109,12 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
     if (path === 'app/version') return send(200, flavor === '5' ? 'v5.0.4' : 'v4.6.7');
     if (path === 'app/webapiVersion') return send(200, flavor === '5' ? '2.11.3' : '2.9.3');
     if (path === 'app/preferences') return send(200, preferences);
+    if (path === 'torrents/fetchMetadata') {
+      const hash = magnetHash(form.source ?? '');
+      if (!hash || !metadata.has(hash)) return send(404);
+      const paths = metadata.get(hash);
+      return paths ? send(200, { infohash_v1: hash, info: { files: paths.map((path) => ({ path })) } }) : send(202, { infohash_v1: hash });
+    }
     if (path === 'torrents/trackers') {
       const hash = url.searchParams.get('hash') ?? '';
       return torrents.has(hash) ? send(200, trackers.get(hash) ?? []) : send(404);
@@ -132,6 +139,10 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
       if (!hash) return send(415);
       const existing = torrents.has(hash);
       if (!existing) {
+        if (files[0] && !fileLists.has(hash)) {
+          const manifest = torrentFiles(files[0]);
+          if (manifest.some((file) => file.path.includes('/'))) fileLists.set(hash, manifest.map((file) => ({ name: file.path, size: file.length, progress: 0 })));
+        }
         torrents.set(hash, { hash, name, size: 1_000_000, progress: 0, state: 'metaDL', category: form.category ?? '', tags: form.tags ?? '', save_path: form.savepath ?? savePath, content_path: `${form.savepath ?? savePath}/${name}`, dlspeed: 0, eta: 8640000, num_seeds: 0, num_leechs: 0, added_on: Math.floor(Date.now() / 1000) });
       }
       if (control.swallowAdds > 0) {
@@ -177,6 +188,7 @@ export async function startFakeQbit({ flavor = '5', username = 'admin', password
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     port: (server.address() as AddressInfo).port,
     torrents,
+    metadata,
     trackers,
     preferences,
     categories,

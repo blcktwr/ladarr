@@ -2,7 +2,7 @@ import { db } from '../../core/db.ts';
 import { catalog, itemFields, log } from '../../core/log.ts';
 import { withOutboundRequests } from '../../core/outbound.ts';
 import { MAX_IMPORT_ATTEMPTS } from '../imports/limits.ts';
-import { releaseEpisodes } from '../parse.ts';
+import { inspectCoverage } from '../coverage.ts';
 import { ClientError } from './qbittorrent.ts';
 import { addedByApp, isActive, phaseOfEntry } from './queue.ts';
 import type { ClientHandle, ClientStatus, PollerDeps, QueueEntry, Torrent, Transfer } from '../../types.ts';
@@ -78,44 +78,43 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
   }
 
   // The part of the torrent that each target has, and its file. The client reports the part of each file, and a pack
-  // has one file for each episode. A target whose file is not listed keeps the part of the whole torrent.
+  // has one file for each episode. An episode without a matching file has no progress.
   async function fileParts(handle: ClientHandle, hash: string, entries: QueueEntry[]) {
     let files: { name: string; sizeBytes: number; progress: number }[];
     try {
       files = await handle.api.files(hash);
     } catch {
-      // A failed read of the files does not stop the poll. The part of the torrent stays for every target.
+      // A failed read of the files does not stop the poll.
       return null;
     }
     const progress: Record<string, number> = {};
     const found: Record<string, { name: string; sizeBytes: number }> = {};
-    const title = db.data.titles[entries[0]!.titleKey];
-    // A file reads the same for every target with the same numbering, and a pack has one target for each file.
-    // The key is the content of the numbering, because each target has its own copy of it.
-    const readings = new Map<string, Map<string, ReturnType<typeof releaseEpisodes>>>();
+    const absent = new Set<string>();
+    const names = files.map((file) => file.name);
+    const manifests = new Map<string, ReturnType<typeof inspectCoverage>>();
     for (const entry of entries) {
       const upload = entry.release?.uploadPath;
       const manual = entry.manualMatch?.file;
-      const numbering = entry.numbering ?? title?.numbering ?? null;
-      const numberingKey = JSON.stringify(numbering);
-      const read = readings.get(numberingKey) ?? readings.set(numberingKey, new Map()).get(numberingKey)!;
+      const title = db.data.titles[entry.titleKey];
+      const numbering = entry.numbering === undefined ? title?.numbering : entry.numbering;
+      const key = JSON.stringify([entry.titleKey, numbering]);
+      if (title && entry.number !== null && !upload && !manual && !manifests.has(key)) manifests.set(key, inspectCoverage(names, title, numbering));
       const file =
         upload && !manual ? files.find((item) => item.name === upload) :
         entry.number === null && !manual
           ? [...files].sort((a, b) => b.sizeBytes - a.sizeBytes)[0]
           : files.find((item) => {
               if (manual) return item.name === manual || item.name.endsWith(`/${manual}`);
-              // The whole name of the file, so a folder that names the season is read.
-              if (!read.has(item.name)) read.set(item.name, releaseEpisodes(item.name, title?.episodes ?? [], numbering, null, title?.meta.title ?? null));
-              const parsed = read.get(item.name);
-              return entry.number !== null && parsed?.season === entry.season && parsed.numbers.includes(entry.number);
+              return manifests.get(key)?.byFile.get(item.name)?.some((ep) => ep.season === entry.season && ep.number === entry.number);
             });
       if (file) {
         progress[entry.id] = file.progress;
         found[entry.id] = { name: file.name.split('/').at(-1)!, sizeBytes: file.sizeBytes };
+      } else if (entry.season !== null && entry.number !== null && manifests.get(key)?.status({ season: entry.season, number: entry.number }) === 'absent') {
+        absent.add(entry.id);
       }
     }
-    return Object.keys(found).length ? { progress, files: found } : null;
+    return { progress, files: found, absent };
   }
 
   // Reads one client, and moves the entries that it has. Adds to `keep` the hashes that stay in `transfers`.
@@ -139,7 +138,7 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
     const groups = new Map<string, QueueEntry[]>();
     for (const entry of entries) {
       // A target in Sending next to an attached target keeps waiting. Only the grab decides about its torrent.
-      if (entry.state.kind === 'sending' && entry.transferHash && (entry.release?.uploadPath || !addedByApp(entry.transferHash))) continue;
+      if (entry.state.kind === 'sending' && entry.transferHash && (entry.number !== null || entry.release?.uploadPath || !addedByApp(entry.transferHash))) continue;
       groups.set(entry.transferHash!, [...(groups.get(entry.transferHash!) ?? []), entry]);
     }
 
@@ -159,10 +158,15 @@ export function createPoller({ queue, events, clients, enqueue, intervalMs = 10_
       // The files of a torrent give each target its own part, its name and its size. A complete torrent has every
       // file, but the names can be unknown after a restart, so they are read once.
       const knownFiles = transfers.get(hash)?.entryFiles;
-      const parts = !torrent.complete || !knownFiles ? await fileParts(handle, hash, group) : null;
+      const revisions = new Map(group.map((entry) => [entry, entry.revision]));
+      const parts = !torrent.complete || !knownFiles || !Object.keys(knownFiles).length ? await fileParts(handle, hash, group) : null;
       observe(group, hash, torrent, parts?.progress ?? null, parts?.files ?? null);
       for (const entry of group) {
-        if (entry.state.kind === 'blocked') continue;
+        if (entry.state.kind === 'blocked' || db.data.queue[entry.id] !== entry || entry.revision !== revisions.get(entry)) continue;
+        if (entry.state.kind === 'downloading' && !torrent.complete && torrent.status !== 'metadata' && parts?.absent.has(entry.id)) {
+          queue.block(entry, { code: 'pack_partial' }, 'the torrent has no file for this episode');
+          continue;
+        }
         if (entry.state.kind === 'sending') queue.enter(entry, 'downloading', 'client reported the torrent');
         if (torrent.status === 'error') {
           queue.block(entry, { code: 'client_error' }, 'client reported an error', torrent.state);

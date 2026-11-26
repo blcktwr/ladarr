@@ -28,8 +28,15 @@ import { createWorker } from '../../src/core/worker.ts';
 import { startTestApp } from './test-app.ts';
 import type { ClientConfig, Db, Handler, Indexer, ProbeResult, StateHook } from '../../src/types.ts';
 
-// A torrent with one file, or with the given files (paths inside the folder that has the name of the release).
+// Series fixtures have video files. The default season fixture contains three episodes.
+function seriesFiles(name: string) {
+  const season = /(?:^|\.)S(\d{2})(E\d+)?(?:\.|$)/i.exec(name);
+  if (!season) return undefined;
+  return season[2] ? [`${name}.mkv`] : [1, 2, 3].map((n) => `Show.Name.S${season[1]}E0${n}.mkv`);
+}
+
 export const makeTorrent = (name: string, files?: string[], comment?: string) => {
+  files ??= seriesFiles(name);
   const list = files ? `5:filesl${files.map((file) => `d6:lengthi1000e4:pathl${file.split('/').map((part) => `${part.length}:${part}`).join('')}ee`).join('')}e` : '6:lengthi1000e';
   // The comment is a top-level key, outside the info dictionary, so the info hash does not change.
   const commentPart = comment === undefined ? '' : `7:comment${Buffer.byteLength(comment, 'utf8')}:${comment}`;

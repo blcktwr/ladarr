@@ -34,7 +34,7 @@ async function lacking(total: number, held: number) {
   pipe.tracker.state.items = [{ title: PACK, size: held * MIB_PER_EPISODE, files }];
   const targets = pipe.finder.requestSearch(series.key);
   const missing = targets.slice(held);
-  await until(() => missing.every((entry) => reasonOfEntry(entry)?.code === 'pack_partial'));
+  await until(() => targets.every((entry) => reasonOfEntry(entry)?.code === 'all_rejected'));
   await closeLog();
   const lines = (await recentLogs(10_000, { itemType: 'tv' })).filter((line) => line.event === 'release_failed' && line.code === 'pack_partial');
   return { missing, lines, files };
@@ -45,26 +45,25 @@ describe('the log line of a partial pack', () => {
     const { missing, lines, files } = await lacking(50, 20);
 
     expect(missing).toHaveLength(30);
-    expect(lines.map((line) => line.itemId).sort()).toEqual(missing.map((entry) => entry.id).sort());
+    expect(lines).toHaveLength(50);
     for (const line of lines) {
       expect(line.files).toBe(files.length);
       expect(line.missingCount).toBe(30);
       expect(line.missing).toEqual(range(21, 40).map((number) => `1x${number}`));
     }
-    // The entries still stop with the pack as the reason.
-    for (const entry of missing) expect(entry.state).toMatchObject({ kind: 'blocked', at: 'fetching', problem: { code: 'pack_partial' } });
+    for (const entry of missing) expect(entry.search?.rejected[0]?.manifestProblem).toBe('pack_partial');
   });
 
   it('lists every missing episode for a pack that lacks 3 episodes', async () => {
     const { missing, lines, files } = await lacking(23, 20);
 
     expect(missing).toHaveLength(3);
-    expect(lines.map((line) => line.itemId).sort()).toEqual(missing.map((entry) => entry.id).sort());
+    expect(lines).toHaveLength(23);
     for (const line of lines) {
       expect(line.files).toBe(files.length);
       expect(line.missingCount).toBe(3);
       expect(line.missing).toEqual(['1x21', '1x22', '1x23']);
     }
-    for (const entry of missing) expect(entry.state).toMatchObject({ kind: 'blocked', at: 'fetching', problem: { code: 'pack_partial' } });
+    for (const entry of missing) expect(entry.search?.rejected[0]?.manifestProblem).toBe('pack_partial');
   });
 });

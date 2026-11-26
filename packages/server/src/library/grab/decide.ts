@@ -18,6 +18,8 @@ export const REJECTION_TEXT: Record<string, string> = {
   daily_ambiguous: 'The air date matches more than one episode, or none.',
   multi_season_pack: 'The release holds more than one season.',
   pack_covers_others: 'An earlier download of this pack held other episodes.',
+  pack_partial: 'The torrent does not contain all the requested episodes.',
+  file_unmapped: 'The torrent files do not identify all the requested episodes.',
   covers_available_episode: 'The release covers an episode that is available already.',
   already_available: 'A file is available for this target.',
   not_an_upgrade: 'The quality of the release is not better than the quality of the current file.',

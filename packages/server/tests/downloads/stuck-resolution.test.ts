@@ -65,6 +65,9 @@ function addDownload(entries: QueueEntry[], mediaType: 'movie' | 'tv', complete 
     entry.source = { magnet: `magnet:?xt=urn:btih:${hash}` };
     entry.importTries = 1;
   }
+  if (!complete && mediaType === 'tv') pipe!.qbit.setFiles(hash, entries.map((entry) => ({
+    name: `${name}/Show.Name.S01E${String(entry.number).padStart(2, '0')}.mkv`, size: 1000, progress: 0.5,
+  })));
   if (complete) {
     const files = mediaType === 'movie'
       ? { 'Movie.mkv': 'movie-data' }

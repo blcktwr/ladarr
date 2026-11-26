@@ -17,7 +17,7 @@ import { requestIdFor } from '../../core/outbound.ts';
 import type { OutsideTitleLock } from '../../core/title-lock.ts';
 import { catalogPoint, catalogSeasons, normalizeNumbering, releasePoint, releaseSeasons } from '../numbering.ts';
 import { needsOtherSeasons } from '@ladarr/shared/queue';
-import type { Db, DecideContext, Decision, Episode, FinderDeps, Indexer, Job, Numbering, QueueEntry, RawRelease, ReleaseRef, Scope, SearchPayload, SearchQuery, SearchResume, SearchState, Title, TitleName, Want } from '../../types.ts';
+import type { Db, DecideContext, Decision, Episode, FinderDeps, Indexer, Job, Numbering, QueueEntry, RawRelease, RejectedRelease, ReleaseRef, Scope, SearchPayload, SearchQuery, SearchResume, SearchState, Title, TitleName, Want } from '../../types.ts';
 import type { IndexerApp } from '@ladarr/shared/enums';
 
 // The reason of the attempt that the manual search of the other seasons of the releases starts. A target that a lost
@@ -444,7 +444,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
         if (!current || decision.rejections.length < current.rejections.length) closest.set(key, decision);
       }
       const decisions = [...closest.values()];
-      const code = asked === 0 ? 'no_indexers' : answered === 0 ? 'indexers_failed' : decisions.length ? 'all_rejected' : 'no_results';
+      const manifest = entry.search!.rejected.filter((r) => r.manifestProblem);
+      const code = asked === 0 ? 'no_indexers' : answered === 0 ? 'indexers_failed' : decisions.length || manifest.length ? 'all_rejected' : 'no_results';
       const rejections = topRejections(decisions);
       // An upgrade that finds nothing is not a missing title. The file stays, and the target is available.
       if (present(fileOf(title, entry))) {
@@ -455,8 +456,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       }
       // Every release that the search found and rejected. A person can take any of them by hand, so the list keeps the
       // reason that stopped each one and offers the button that grabs it.
-      const rejected = decisions
-        .filter((decision) => !decision.accepted)
+      const other = decisions
+        .filter((decision) => !decision.accepted && !manifest.some((r) => r.indexerId === decision.release.indexerId && r.guid === decision.release.guid))
         .sort((a, b) => a.rejections.length - b.rejections.length || (b.release.seeders ?? 0) - (a.release.seeders ?? 0))
         .slice(0, MAX_CANDIDATES)
         .map((decision) => {
@@ -478,7 +479,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
             sizeRejection: sizeCode && sizeLimit != null && decision.mibPerMinute !== null ? { code: sizeCode, value: decision.mibPerMinute, limit: sizeLimit } : null,
           };
         });
-      Object.assign(entry.search!, { result: code === 'no_indexers' ? 'no_results' : code, accepted: 0, candidates: decisions.length, topRejections: rejections, nextAt: nextSearchAt(title, entry, at), rejected });
+      const rejected = [...manifest, ...other].slice(0, MAX_CANDIDATES);
+      Object.assign(entry.search!, { result: code === 'no_indexers' ? 'no_results' : code, accepted: 0, candidates: Math.max(decisions.length, rejected.length), topRejections: rejections, nextAt: nextSearchAt(title, entry, at), rejected });
       // The releases that came closest to acceptance first: the fewest reasons, then the most seeders. A person sees
       // what the indexers offered and which rule stopped each one.
       const explained = decisions.map((decision) =>
@@ -600,7 +602,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     const numbering = numberingOf(title);
     const profiles = profilesFor(ctx.quality, title);
     for (const entry of entries) {
-      entry.search = { at: startedAt, indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null, rejected: [] };
+      const rejected = entry.search?.result === null || entry.search?.result === 'deferred' ? entry.search.rejected.filter((r) => r.manifestProblem) : [];
+      entry.search = { at: startedAt, indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null, rejected };
       queue.enter(entry, 'searching', 'search started');
     }
     let open = entries;
@@ -686,8 +689,19 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       answered += result.answered;
       for (const release of result.releases) foundReleases.add(`${release.indexerId}:${release.guid}`);
       const decisions = new Map<string, Decision[]>();
+      const rejected = new Map(group.flatMap((entry) => entry.search!.rejected.map((r) => [`${r.indexerId}:${r.guid}`, r.manifestProblem] as const)));
       for (const entry of group) {
-        const list = wantsOf(entry).flatMap((want) => result.releases.map((release) => decide(release, want, ctx)));
+        const list = wantsOf(entry).flatMap((want) => result.releases.map((release) => {
+          const decision = decide(release, want, ctx);
+          const reason = rejected.get(`${release.indexerId}:${release.guid}`);
+          if (reason) return { ...decision, accepted: false, rejections: [reason] };
+          if (decision.accepted && want.kind === 'season' && group.some((target) =>
+            releaseTarget(numbering, target)?.season === (want.releaseSeason ?? want.season) &&
+            !decision.covers.some((ep) => ep.season === target.season && ep.number === target.number))) {
+            return { ...decision, accepted: false, rejections: ['pack_partial'] };
+          }
+          return decision;
+        }));
         decisions.set(entry.id, list);
         all.set(entry.id, [...(all.get(entry.id) ?? []), ...list]);
         entry.search!.candidates = Math.max(entry.search!.candidates, result.releases.length);
@@ -1283,6 +1297,33 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
 
   // --- Failures ---------------------------------------------------------------------------
 
+  function rejectRelease(entries: QueueEntry[], reason: NonNullable<RejectedRelease['manifestProblem']>, missing: QueueEntry[], files: number) {
+    const ref = entries[0]!.release!;
+    const parsed = parseRelease(ref.title);
+    const rejected: RejectedRelease = { indexerId: ref.indexerId, guid: ref.guid, title: ref.title, link: ref.link, magnet: ref.magnet,
+      infoHash: ref.infoHash, sizeBytes: ref.sizeBytes, seeders: ref.seeders, kind: ref.kind, source: parsed.source, resolution: parsed.resolution,
+      manifestProblem: reason, reasons: [REJECTION_TEXT[reason]!], sizeRejection: null };
+    const again: string[] = [];
+    const detail = packDetail(missing, files);
+    for (const entry of entries) {
+      catalog.warn('release_failed', REJECTION_TEXT[reason]!, itemFields(entry), { code: reason, release: ref.title, ...detail });
+      const search = entry.search ??= { at: now(), indexers: [], candidates: 1, accepted: 0, result: null, topRejections: [], nextAt: null, rejected: [] };
+      search.rejected = [...search.rejected.filter((r) => r.indexerId !== ref.indexerId || r.guid !== ref.guid), rejected];
+      search.accepted = 0;
+      search.result = null;
+      forgetSource(entry);
+      Object.assign(entry, { release: null, transferHash: null, clientId: null });
+      if (ref.manual) {
+        Object.assign(search, { result: 'all_rejected', topRejections: [reason], nextAt: nextSearchAt(db.data.titles[entry.titleKey]!, entry, now()) });
+        queue.wait(entry, 'all_rejected', 'release rejected', reason);
+      } else {
+        queue.enter(entry, 'queued', 'release rejected', reason);
+        again.push(entry.id);
+      }
+    }
+    if (again.length) enqueueSearch({ titleKey: entries[0]!.titleKey, season: entries[0]!.season, entryIds: again }, { afterRun: true });
+  }
+
   const MAX_ATTEMPTS = 3;
 
   // The episodes that the pack lacks, in the log line that records it. The reason alone does not say which one was missing.
@@ -1377,5 +1418,5 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     for (const group of bySeason.values()) enqueueSearch({ titleKey: group[0]!.titleKey, season: group[0]!.season, entryIds: group.map((e) => e.id) }, { afterRun: true });
   }
 
-  return { requestSearch, reserve, fallback, partial, startOtherSeasons, enqueueSearch, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
+  return { requestSearch, reserve, fallback, partial, rejectRelease, startOtherSeasons, enqueueSearch, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
 }

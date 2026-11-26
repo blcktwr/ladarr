@@ -70,12 +70,13 @@ function stuck(item: Title, season: number, number: number, problem: { code: str
 
 // TMDB season 1 of 20 episodes. The tracker has one pack of that season, and the pack holds the ten episodes that the
 // library has already. The other ten targets find no file in it.
-async function partial(available = range(1, 10)) {
+async function partial(available = range(1, 10), legacy = false) {
   pipe = await startPipeline();
   const item = addTitle(range(1, 20).map((number) => ({ season: 1, number })));
   inLibrary(item, 1, available);
   const files = filesOf(1, 10);
   pipe.tracker.state.items = [{ title: FIRST, size: files.length * MIB_PER_EPISODE, files }];
+  if (legacy) return { item, targets: range(1, 20).filter((n) => !available.includes(n)).map((n) => stuck(item, 1, n, { code: 'pack_partial' }, 1)) };
   const targets = pipe.finder.requestSearch(item.key);
   await until(() => targets.every((entry) => entry.state.kind === 'blocked' || entry.state.kind === 'waiting'));
   return { item, targets };
@@ -98,20 +99,19 @@ const REST_OF_SEASON: NumberingRange = { season: 1, from: 11, to: 20, releaseSea
 // A query that does not name the season of the target. A search of other seasons names another season, or none.
 const otherSeasonQueries = () => pipe!.tracker.state.searches.filter((url) => url.searchParams.get('season') !== '1');
 
-describe('a partial pack waits for the user', () => {
-  it('leaves the episodes that the pack does not hold stuck, with the pack as the reason', async () => {
+const legacyPartial = (available = range(1, 10)) => partial(available, true);
+
+describe('a partial pack', () => {
+  it('lists the pack as rejected for every requested episode', async () => {
     const { targets } = await partial();
     expect(targets.map((entry) => entry.number)).toEqual(range(11, 20));
     // The search took the pack. The grab read its files, and they hold none of these targets.
     expect(pipe!.tracker.state.downloads).toContain(FIRST);
     expect(pipe!.qbit.torrents.size).toBe(0);
     for (const entry of targets) {
-      expect(reasonOfEntry(entry)).toMatchObject({ code: 'pack_partial' });
-      expect(stageOf(entry)).toBe('fetching');
-      // A difference of numbering is not a failed release: the target keeps its first attempt.
+      expect(reasonOfEntry(entry)).toMatchObject({ code: 'all_rejected' });
+      expect(entry.search?.rejected[0]).toMatchObject({ guid: FIRST, manifestProblem: 'pack_partial' });
       expect(entry.attempt).toBe(1);
-      expect(entry.search?.result).toBe('grabbed');
-      expect(needsOtherSeasons(entry.state)).toBe(true);
     }
     expect(targets.some((entry) => reasonOfEntry(entry)?.code === 'too_many_attempts')).toBe(false);
   });
@@ -124,7 +124,7 @@ describe('a partial pack waits for the user', () => {
   });
 
   it('starts no other-season search on a sweep or on a second search', async () => {
-    const { item, targets } = await partial();
+    const { item, targets } = await legacyPartial();
     const before = pipe!.tracker.state.searches.length;
     pipe!.finder.sweep();
     await pipe!.finder.search({ titleKey: item.key, season: 1, entryIds: targets.map((entry) => entry.id), fresh: true }, AbortSignal.timeout(5_000));
@@ -136,7 +136,7 @@ describe('a partial pack waits for the user', () => {
 
 describe('the action of the user', () => {
   it('previews the stuck targets of the season and starts nothing', async () => {
-    const { item, targets } = await partial();
+    const { item, targets } = await legacyPartial();
     mapReleases(item, [REST_OF_SEASON]);
     api = await pipe!.api();
     const before = pipe!.tracker.state.searches.length;
@@ -153,7 +153,7 @@ describe('the action of the user', () => {
   });
 
   it('starts the search for the targets of the action', async () => {
-    const { item, targets } = await partial();
+    const { item, targets } = await legacyPartial();
     mapReleases(item, [REST_OF_SEASON]);
     pipe!.tracker.state.items = [
       { title: FIRST, size: 10 * MIB_PER_EPISODE, files: filesOf(1, 10) },
@@ -173,7 +173,7 @@ describe('the action of the user', () => {
   }, 20_000);
 
   it('refuses a second request for the same targets', async () => {
-    const { item } = await partial();
+    const { item } = await legacyPartial();
     mapReleases(item, [REST_OF_SEASON]);
     pipe!.tracker.state.items = [
       { title: FIRST, size: 10 * MIB_PER_EPISODE, files: filesOf(1, 10) },
@@ -188,7 +188,7 @@ describe('the action of the user', () => {
   });
 
   it('refuses the action when the season has no saved range', async () => {
-    const { item, targets } = await partial();
+    const { item, targets } = await legacyPartial();
     api = await pipe!.api();
     const before = pipe!.tracker.state.searches.length;
 
@@ -231,7 +231,7 @@ describe('the action of the user', () => {
 
 describe('the mapping of the release numbering', () => {
   it('gives each release episode of another season to its own episode of TMDB', async () => {
-    const { item, targets } = await partial();
+    const { item, targets } = await legacyPartial();
     mapReleases(item, [REST_OF_SEASON]);
     const files = filesOf(2, 10);
     pipe!.tracker.state.items = [
@@ -258,7 +258,7 @@ describe('the mapping of the release numbering', () => {
 
   it('keeps the numbers of the block when some of its episodes are in the library already', async () => {
     // Episodes 12 to 15 have their files. The pack of the next release season holds 1 to 10 of its own numbering.
-    const { item, targets } = await partial([...range(1, 10), ...range(12, 15)]);
+    const { item, targets } = await legacyPartial([...range(1, 10), ...range(12, 15)]);
     expect(targets.map((entry) => entry.number)).toEqual([11, 16, 17, 18, 19, 20]);
     mapReleases(item, [REST_OF_SEASON]);
     const files = filesOf(2, 10);
@@ -402,7 +402,7 @@ describe('Jujutsu Kaisen', () => {
 
 describe('no solution', () => {
   it('keeps the targets stuck, records the search, and leaves no search in the queue', async () => {
-    const { item, targets } = await partial();
+    const { item, targets } = await legacyPartial();
     mapReleases(item, [REST_OF_SEASON]);
     api = await pipe!.api();
 

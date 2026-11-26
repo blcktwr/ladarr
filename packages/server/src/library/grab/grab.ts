@@ -6,11 +6,9 @@ import { ClientError } from '../downloads/qbittorrent.ts';
 import { addedByApp, forgetSource, isActive } from '../downloads/queue.ts';
 import { hasFreeSlot } from '../downloads/slots.ts';
 import { findUpload, uploadHash, uploadInUse, uploadOwner } from '../downloads/upload.ts';
-import { isSample, isVideoFile, parseEpisodes } from '../parse.ts';
-import { NO_NUMBERING } from '../numbering.ts';
 import { infoHashOf, magnetHash, torrentComment, torrentFiles } from './torrent.ts';
 import { IndexerError } from './torznab.ts';
-import type { ClientHandle, GrabberDeps, ParsedEpisodes, QueueEntry, Torrent } from '../../types.ts';
+import type { ClientHandle, GrabberDeps, QueueEntry, Torrent } from '../../types.ts';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -59,47 +57,31 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
       && saved.entry.state.kind !== 'blocked' && saved.entry.state.kind !== 'paused' && isActive(saved.entry) && input(saved.entry) === saved.input).map((saved) => saved.entry);
   }
 
-  // Unknown files are not evidence of absence. Each acquisition uses its saved map for the complete source.
-  function missingFrom(files: string[], entries: QueueEntry[]) {
+  function inspect(entries: QueueEntry[], files: string[]) {
     const title = db.data.titles[entries[0]!.titleKey];
-    const videos = files.filter((file) => isVideoFile(file) && !isSample(file));
-    // The numbers of the release, which the record of the pack keeps for the manual search of the other seasons.
-    const readings = videos.map((file) => parseEpisodes(file)).filter((item): item is ParsedEpisodes => Boolean(item));
-    const seasons = new Set(readings.map((item) => item.season));
     const manifests = new Map<string, ReturnType<typeof inspectCoverage>>();
     const status = (entry: QueueEntry) => {
       if (!title || entry.season === null || entry.number === null) return 'unknown';
-      const numbering = entry.numbering === undefined ? title.numbering ?? NO_NUMBERING : entry.numbering;
+      const numbering = entry.numbering === undefined ? title.numbering : entry.numbering;
       const key = JSON.stringify(numbering);
       if (!manifests.has(key)) manifests.set(key, inspectCoverage(files, title, numbering));
       return manifests.get(key)!.status({ season: entry.season, number: entry.number });
     };
     const missing = entries.filter((entry) => status(entry) === 'absent');
-    const unknown = entries.filter((entry) => status(entry) === 'unknown');
-    return {
-      missing,
-      unknown,
-      identified: [...manifests.values()].flatMap((manifest) => manifest.episodes),
-      releaseSeason: seasons.size === 1 ? [...seasons][0]! : null,
-      numbers: [...new Set(readings.flatMap((item) => item.numbers))].sort((a, b) => a - b),
-    };
-  }
-
-  function inspect(entries: QueueEntry[], files: string[], deferUnknown = false) {
-    const pack = missingFrom(files, entries);
-    // An opaque source can need downloaded metadata. It establishes neither episode coverage nor absence.
-    if (deferUnknown && !pack.identified.length && !pack.missing.length) return entries;
-    for (const entry of pack.unknown) {
-      queue.endAttempt(entry, 'failed', 'file_unmapped');
-      queue.block(entry, { code: 'file_unmapped' }, 'the source has an unassigned file');
+    if (!missing.length && entries.every((entry) => status(entry) === 'identified')) return true;
+    const leader = entries[0]!;
+    const ref = leader.release!;
+    const manifest = manifests.values().next().value;
+    if (ref.kind === 'pack' && missing.length && manifest && !manifest.unknown.length && manifests.size === 1 && leader.season !== null) {
+      const key = `${ref.indexerId}:${ref.guid}`;
+      const revision = (leader.numbering === undefined ? title?.numbering : leader.numbering)?.revision ?? 0;
+      if ((db.data.releaseCoverage[key]?.numberingRevision ?? 0) <= revision) db.data.releaseCoverage[key] = {
+        titleKey: leader.titleKey, season: leader.season, numberingRevision: revision,
+        numbers: manifest.episodes.filter((ep) => ep.season === leader.season).map((ep) => ep.number).sort((a, b) => a - b),
+      };
     }
-    const known = entries.filter((entry) => !pack.unknown.includes(entry));
-    if (!pack.missing.length) return known;
-    if (!pack.numbers.length) {
-      for (const entry of pack.missing) queue.block(entry, { code: 'pack_partial' }, 'the manifest has no video for the target');
-      return known.filter((entry) => !pack.missing.includes(entry));
-    }
-    return finder.partial(known, pack.missing, { files: files.length, releaseSeason: pack.releaseSeason, numbers: pack.numbers });
+    finder.rejectRelease(entries, missing.length ? 'pack_partial' : 'file_unmapped', missing, files.length);
+    return false;
   }
 
   // The files of the .torrent, or null when ladarr cannot read the list.
@@ -109,6 +91,15 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
     } catch {
       return null;
     }
+  }
+
+  async function verified(entries: QueueEntry[], source: Source, connection: ClientHandle, hash: string, signal: AbortSignal) {
+    if (!entries.length || entries[0]!.number === null || uploadHash(entries[0]!)) return entries;
+    const current = snapshot(entries);
+    const files = 'torrent' in source ? packFiles(source.torrent) : await connection.api.metadataFiles(source.magnet, hash, signal);
+    signal.throwIfAborted();
+    entries = current();
+    return entries.length && inspect(entries, files ?? []) ? entries : [];
   }
 
   function block(entries: QueueEntry[], code: string, cause: string) {
@@ -144,21 +135,21 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
   // A torrent in the client with the hash of the release is the release. A finished torrent is used as it is, also when
   // ladarr did not send it, because the user added it by hand or an older version did. A torrent that still downloads
   // is the user's, and ladarr does not take it over: the target stops with the reason that offers the attach.
-  async function take(entries: QueueEntry[], connection: ClientHandle, found: Torrent, sentUpload = false) {
+  async function take(entries: QueueEntry[], connection: ClientHandle, found: Torrent, justSent = false) {
     entries = entries.filter((entry) => isActive(entry) && entry.state.kind !== 'blocked' && entry.state.kind !== 'paused');
     if (!entries.length) return;
-    if (uploadHash(entries[0]!)) return adopt(entries, connection, found, !sentUpload && !uploadOwner(entries[0]!.titleKey, found.hash, connection.id));
+    if (uploadHash(entries[0]!)) return adopt(entries, connection, found, !justSent && !uploadOwner(entries[0]!.titleKey, found.hash, connection.id));
     if (claimedByUpload(entries[0]!.titleKey, found.hash)) {
       return block(entries, 'torrent_in_use', 'another title uses this torrent');
     }
-    if (entries[0]!.release?.kind === 'pack') {
+    if (!justSent && entries[0]!.number !== null) {
       const source = decode(entries[0]!);
       const saved = source && 'torrent' in source ? packFiles(source.torrent) : null;
       // The client can still lack metadata after an add. Its temporary names cannot replace the fetched manifest.
       const current = snapshot(entries);
       const files = saved ?? (await connection.api.files(found.hash)).map((file) => file.name);
       entries = current();
-      if (!entries.length) return;
+      if (!entries.length || !inspect(entries, files)) return;
       for (const entry of entries) {
         if (entry.state.kind === 'blocked' || !isActive(entry)) continue;
         entry.transferHash = found.hash;
@@ -168,8 +159,6 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
           if (!addedByApp(found.hash)) entry.release.external = true;
         }
       }
-      entries = inspect(entries.filter((entry) => entry.state.kind !== 'blocked' && isActive(entry)), files, addedByApp(found.hash));
-      if (!entries.length) return;
     }
     if (addedByApp(found.hash) || found.complete) return adopt(entries, connection, found, !addedByApp(found.hash));
     for (const entry of entries) {
@@ -274,10 +263,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
       if (entry.release) entry.release.infoHash = hash;
     }
     entries = entries.filter((entry) => entry.state.kind !== 'blocked' && isActive(entry));
-    if (ref.kind === 'pack' && 'torrent' in source) {
-      const files = packFiles(source.torrent);
-      if (files && entries.length) entries = inspect(entries, files, true);
-    }
+    entries = await verified(entries, source, connection, hash!, signal);
     const savedCurrent = snapshot(entries);
     await save();
     entries = savedCurrent();
@@ -355,6 +341,9 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
       return;
     }
 
+    // A retry or an older saved job can start here without a new fetch.
+    entries = await verified(entries, source, connection, hash, signal);
+    if (!entries.length) return;
     // The check and the change are one step: two sends cannot take the same free slot.
     const own = new Set(entries.map((entry) => entry.id));
     if (!hasFreeSlot(clients, connection.id, own)) {
@@ -399,7 +388,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
         const found = await clients.find(connection, hash).catch(() => null);
         entries = current();
         if (!entries.length) return;
-        if (found) return take(entries, connection, found);
+        if (found) return take(entries, connection, found, !upload);
       }
       throw new JobError(error.code === 'unreachable' ? 'uncertain' : 'outage', error.message);
     }
@@ -415,7 +404,7 @@ export function createGrabber({ queue, finder, indexers, clients, save, enqueue,
       const added = await clients.find(connection, hash);
       entries = current();
       if (!entries.length) return;
-      if (added) return take(entries, connection, added, Boolean(upload));
+      if (added) return take(entries, connection, added, true);
     }
     throw new JobError('uncertain', 'The client accepted the torrent but does not list it.');
   }

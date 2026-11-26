@@ -499,6 +499,7 @@ export type HistoryEvent = { at: number; state: QueueState; stage: Phase; attemp
 // A release of the last search that was rejected. A person can take it by hand. The link stays on the server: it
 // carries the API key.
 export type RejectedRelease = {
+  manifestProblem?: 'pack_partial' | 'file_unmapped';
   indexerId: number;
   guid: string;
   title: string;

@@ -226,7 +226,7 @@ describe('series journey', () => {
     expect(Object.values(pipe.db.data.jobs).some((job) => job.type === 'queue.search' && (job.payload as { entryIds: string[] }).entryIds.includes(entries[1]!.id))).toBe(false);
   });
 
-  it('takes a pack that holds a part of a season, and completes the season with the action of the user', async () => {
+  it('rejects a partial season and accepts both packs after the user corrects the numbering', async () => {
     pipe = await startPipeline();
     // TMDB counts 23 episodes in season 1, and no season 2. The releases count the first 13 in season 1.
     const series = title({ rootId: 'tv', episodes: Array.from({ length: 23 }, (_, index) => episode(1, index + 1, '2020-01-01')) });
@@ -240,10 +240,9 @@ describe('series journey', () => {
     pipe.tracker.state.items = [{ title: first, size: 13 * 600 * MIB, files: firstFiles }];
 
     const entries = pipe.finder.requestSearch(series.key);
-    // The pack holds 13 of the 23 episodes. The other ten stop with the pack as the reason, and no search follows.
-    await until(() => entries.slice(13).every((entry) => reasonOfEntry(entry)?.code === 'pack_partial'));
-    expect(entries.slice(0, 13).every((entry) => entry.transferHash === hashOf(first, firstFiles))).toBe(true);
-    expect(entries.slice(13).every((entry) => entry.attempt === 1 && entry.continuation == null)).toBe(true);
+    await until(() => entries.every((entry) => reasonOfEntry(entry)?.code === 'all_rejected'));
+    expect(pipe.qbit.torrents.size).toBe(0);
+    expect(entries.every((entry) => entry.search?.rejected[0]?.guid === first)).toBe(true);
     expect(pipe.tracker.state.downloads).toEqual([first]);
     // The record of the files of the pack keeps the episodes that it holds.
     expect(pipe.db.data.releaseCoverage[`1:${first}`]).toMatchObject({ titleKey: series.key, season: 1, numbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] });
@@ -254,9 +253,8 @@ describe('series journey', () => {
       { title: first, size: 13 * 600 * MIB, files: firstFiles },
       { title: second, size: 10 * 600 * MIB, files: secondFiles },
     ];
-    api = await pipe.api();
-    expect((await api.post('/queue/actions', { action: 'search_other_seasons', group: { titleKey: series.key, season: 1 } })).status).toBe(200);
-    await until(() => entries.slice(13).every((entry) => entry.release?.title === second && stageOf(entry) === 'downloading'), 20_000);
+    pipe.finder.requestSearch(series.key, { fresh: true });
+    await until(() => entries.every((entry) => entry.state.kind === 'downloading'), 20_000);
 
     pipe.complete(first, content(firstFiles), hashOf(first, firstFiles));
     pipe.complete(second, content(secondFiles), hashOf(second, secondFiles));
@@ -380,7 +378,7 @@ describe('series journey', () => {
     expect(Object.values(pipe.db.data.jobs).filter((job) => job.type === 'queue.search' && Boolean((job.payload as { otherSeasons?: boolean } | null)?.otherSeasons))).toEqual([]);
   }, 30_000);
 
-  it('takes the pack of 12 episodes, and the action gives the other 11 their files', async () => {
+  it('never sends the 12-episode torrent for a 23-episode request', async () => {
     pipe = await startPipeline();
     const series = title({ rootId: 'tv', episodes: Array.from({ length: 23 }, (_, index) => episode(1, index + 1, '2020-01-01')) });
     pipe.db.data.titles[series.key] = series;
@@ -393,8 +391,9 @@ describe('series journey', () => {
     pipe.tracker.state.items = [{ title: first, size: 12 * 600 * MIB, files: firstFiles }];
 
     const entries = pipe.finder.requestSearch(series.key);
-    // The pack holds 12 of the 23 episodes. The other 11 stop with the pack as the reason.
-    await until(() => entries.slice(12).every((entry) => reasonOfEntry(entry)?.code === 'pack_partial'));
+    await until(() => entries.every((entry) => reasonOfEntry(entry)?.code === 'all_rejected'));
+    expect(pipe.qbit.calls.filter((call) => call.path === 'torrents/add')).toHaveLength(0);
+    expect(entries.every((entry) => !entry.history.some((event) => event.stage === 'downloading'))).toBe(true);
     expect(pipe.db.data.releaseCoverage[`1:${first}`]).toMatchObject({ titleKey: series.key, season: 1, numbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] });
 
     // The releases number the rest of the season as their season 2. The user saves the map and starts the action.
@@ -403,9 +402,8 @@ describe('series journey', () => {
       { title: first, size: 12 * 600 * MIB, files: firstFiles },
       { title: second, size: 11 * 600 * MIB, files: secondFiles },
     ];
-    api = await pipe.api();
-    expect((await api.post('/queue/actions', { action: 'search_other_seasons', group: { titleKey: series.key, season: 1 } })).status).toBe(200);
-    await until(() => entries.slice(12).every((entry) => entry.release?.title === second && stageOf(entry) === 'downloading'), 20_000);
+    pipe.finder.requestSearch(series.key, { fresh: true });
+    await until(() => entries.every((entry) => entry.state.kind === 'downloading'), 20_000);
     expect(pipe.qbit.torrents.size).toBe(2);
 
     pipe.complete(first, content(firstFiles), hashOf(first, firstFiles));
