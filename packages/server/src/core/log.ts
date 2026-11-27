@@ -282,7 +282,11 @@ export function inbound(quiet: string[] = []): RequestHandler {
       for (const key of url.searchParams.keys()) {
         if (SECRET_KEY.test(key)) url.searchParams.set(key, '[redacted]');
       }
-      res.once('finish', () => traffic.info('request', { direction: 'inbound', request: { method: req.method, url: url.toString() }, response: { status: res.statusCode } }));
+      res.once('finish', () => traffic.info('request', {
+        direction: 'inbound',
+        request: { method: req.method, url: url.toString(), headers: req.headers },
+        response: { status: res.statusCode, headers: res.getHeaders() },
+      }));
     }
     next();
   };
