@@ -1,9 +1,10 @@
 import { db } from '../../../core/db.ts';
 import type { RequestHandler } from 'express';
 import { savePush, summarize } from '../../../library/grab/indexers.ts';
-import { exists, invalidSetting, parseManual, setDelay } from '../../../helpers/indexers.ts';
+import { exists, invalidSetting, parseManual, setDelay, setReleaseDayMinutes } from '../../../helpers/indexers.ts';
+import type { Finder } from '../../../types.ts';
 
-export function indexersUpdate({ onChange = () => {} }: { onChange?: () => void } = {}): RequestHandler<{ id: string }> {
+export function indexersUpdate({ onChange = () => {}, reschedule }: { onChange?: () => void; reschedule?: Finder['rescheduleReleaseDay'] } = {}): RequestHandler<{ id: string }> {
   return async (req, res) => {
     const indexer = db.data.indexers[Number(req.params.id)];
     if (!indexer?.manual) return void res.status(404).json({ error: 'not_found' });
@@ -13,6 +14,7 @@ export function indexersUpdate({ onChange = () => {} }: { onChange?: () => void 
     savePush('sonarr', result.parsed.sonarr, indexer.id);
     savePush('radarr', result.parsed.radarr, indexer.id);
     indexer.manual = true;
+    setReleaseDayMinutes(indexer, result.releaseDayMinutes, reschedule);
     indexer.preferredLanguages = result.preferredLanguages;
     indexer.rejectZeroSeeders = result.rejectZeroSeeders;
     setDelay(indexer, result.delaySeconds);

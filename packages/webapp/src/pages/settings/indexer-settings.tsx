@@ -1,7 +1,8 @@
 import type { IndexerRow, IndexerTestResult } from '@ladarr/shared/types';
+import { DEFAULT_RELEASE_DAY_MINUTES, validReleaseDayMinutes } from '@ladarr/shared/indexers';
 import { useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
-import { useEffect, useId, useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useId, useMemo, useState, type FormEvent, type ReactElement } from 'react';
 import { ActionMenu, Button, Checkbox, Confirm, Dropdown, EmptyState, Field, Form, Hint, Modal, MultiSelect, Section, Table, TagInput, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
@@ -48,20 +49,20 @@ const CATEGORY_OPTIONS = [
   { value: '5110', label: '5110 TV/x265' },
 ];
 
-type Draft = { name: string; type: 'torznab'; baseUrl: string; apiKey: string; delay: string; languages: string[]; categories: string[]; enableRss: boolean; enableAutomaticSearch: boolean; enableInteractiveSearch: boolean; rejectZeroSeeders: boolean };
+type Draft = { name: string; type: 'torznab'; baseUrl: string; apiKey: string; delay: string; releaseDayMinutes: string; languages: string[]; categories: string[]; enableRss: boolean; enableAutomaticSearch: boolean; enableInteractiveSearch: boolean; rejectZeroSeeders: boolean };
 
-const empty: Draft = { name: '', type: 'torznab', baseUrl: '', apiKey: '', delay: '6', languages: [], categories: [], enableRss: true, enableAutomaticSearch: true, enableInteractiveSearch: true, rejectZeroSeeders: false };
+const empty: Draft = { name: '', type: 'torznab', baseUrl: '', apiKey: '', delay: '6', releaseDayMinutes: String(DEFAULT_RELEASE_DAY_MINUTES), languages: [], categories: [], enableRss: true, enableAutomaticSearch: true, enableInteractiveSearch: true, rejectZeroSeeders: false };
 
 const draftOf = (indexer?: IndexerRow): Draft =>
   indexer
-    ? { ...empty, name: indexer.name, baseUrl: indexer.baseUrl, delay: String(indexer.delaySeconds), languages: indexer.preferredLanguages, categories: indexer.categories.map(String), enableRss: indexer.enableRss, enableAutomaticSearch: indexer.enableAutomaticSearch, enableInteractiveSearch: indexer.enableInteractiveSearch, rejectZeroSeeders: indexer.rejectZeroSeeders }
+    ? { ...empty, name: indexer.name, baseUrl: indexer.baseUrl, delay: String(indexer.delaySeconds), releaseDayMinutes: String(indexer.releaseDayMinutes), languages: indexer.preferredLanguages, categories: indexer.categories.map(String), enableRss: indexer.enableRss, enableAutomaticSearch: indexer.enableAutomaticSearch, enableInteractiveSearch: indexer.enableInteractiveSearch, rejectZeroSeeders: indexer.rejectZeroSeeders }
     : empty;
 
 const delayOf = (value: string) => (value.trim() === '' ? NaN : Number(value));
 const delayValid = (seconds: number) => Number.isFinite(seconds) && seconds >= 0 && seconds <= 3600;
 
 // The form of an indexer, in a modal. The indexer is saved only with Add or Save. Test connection saves nothing.
-// The indexer manager owns the fields of a pushed indexer, so its form has only the fields that ladarr owns.
+// The connection fields of a pushed indexer are read-only.
 // The buttons of the modal stay out of the content that scrolls, so they never cover a field.
 function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer?: IndexerRow; onDone: () => void; open?: boolean; onOpenChange?: (open: boolean) => void; trigger?: ReactElement }) {
   const editing = Boolean(indexer);
@@ -104,6 +105,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
     baseUrl: t('Enter the address of the indexer, with no user name or password in it.'),
     apiKey: t('Enter the API key.'),
     delaySeconds: t('Enter a number from 0 to 3600.'),
+    releaseDayMinutes: t('Enter a whole number from 1 to 1440.'),
     preferredLanguages: t('Enter lowercase language codes, such as en or ja.'),
     categories: t('Enter categories as numbers.'),
   };
@@ -112,15 +114,18 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
     // The indexer is saved only after a test that worked, when the address or the key changed.
     if (action === 'save' && needsTest && !result?.ok) return;
     const seconds = delayOf(draft.delay);
-    if (!delayValid(seconds)) return setErrors({ delaySeconds: messages.delaySeconds! });
+    const minutes = Number(draft.releaseDayMinutes);
+    if (action === 'save' && !delayValid(seconds)) return setErrors({ delaySeconds: messages.delaySeconds! });
+    if (action === 'save' && !validReleaseDayMinutes(minutes)) return setErrors({ releaseDayMinutes: messages.releaseDayMinutes! });
     setPending(action);
     setFailed(false);
     setResult(null);
     // The server keeps the key of an indexer that exists. A key that the person leaves empty is not in the body, so it stays as it is.
-    const body = { name: draft.name, type: draft.type, baseUrl: draft.baseUrl, ...(editing && !draft.apiKey ? {} : { apiKey: draft.apiKey }), delaySeconds: seconds, preferredLanguages: draft.languages, categories: draft.categories.map(Number), enableRss: draft.enableRss, enableAutomaticSearch: draft.enableAutomaticSearch, enableInteractiveSearch: draft.enableInteractiveSearch, rejectZeroSeeders: draft.rejectZeroSeeders };
+    const connection = { name: draft.name, type: draft.type, baseUrl: draft.baseUrl, ...(editing && !draft.apiKey ? {} : { apiKey: draft.apiKey }) };
+    const parameters = { delaySeconds: seconds, releaseDayMinutes: minutes, preferredLanguages: draft.languages, rejectZeroSeeders: draft.rejectZeroSeeders };
     try {
       if (action === 'test') {
-        const test = await api<IndexerTestResult>(indexer ? `/indexers/${indexer.id}/test` : '/indexers/test', { method: 'POST', body });
+        const test = await api<IndexerTestResult>(indexer ? `/indexers/${indexer.id}/test` : '/indexers/test', { method: 'POST', body: connection });
         // The indexer lists the categories that it has. A selected category that is not in the list goes, so a search does not ask for a category that does not exist.
         if (test.ok) {
           const listed = new Set(test.categories.map(String));
@@ -131,7 +136,8 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
         }
         setResult(test);
       } else {
-        await (managed ? api(`/indexers/${indexer!.id}`, { method: 'PATCH', body: { delaySeconds: seconds, preferredLanguages: draft.languages, rejectZeroSeeders: draft.rejectZeroSeeders } }) : api(indexer ? `/indexers/${indexer.id}` : '/indexers', { method: indexer ? 'PUT' : 'POST', body }));
+        const body = managed ? parameters : { ...connection, ...parameters, categories: draft.categories.map(Number), enableRss: draft.enableRss, enableAutomaticSearch: draft.enableAutomaticSearch, enableInteractiveSearch: draft.enableInteractiveSearch };
+        await api(indexer ? `/indexers/${indexer.id}` : '/indexers', { method: managed ? 'PATCH' : editing ? 'PUT' : 'POST', body });
         onDone();
       }
     } catch (err) {
@@ -144,15 +150,115 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
     }
   }
 
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    void run('save');
+  }
+
+  const categories = (
+    <MultiSelect
+      label={t('Categories')}
+      value={draft.categories}
+      onValueChange={(categories) => set({ categories })}
+      options={CATEGORY_OPTIONS}
+      valueText={(count) => t('{n} selected', { n: count })}
+      width="full"
+      error={errors.categories}
+    />
+  );
+  const delay = (
+    <div className="w-52 max-w-full">
+      <Field width="full" suffix={t('sec')} label={t('Delay between requests')} aria-required="true" inputMode="decimal" action={<Hint label={t('About the delay')}>{t('The least time, in seconds, between two requests to the indexer.')}</Hint>} error={errors.delaySeconds} value={!delayFocused && draft.delay.trim() === '0' ? '∞' : draft.delay} onFocus={() => setDelayFocused(true)} onBlur={() => setDelayFocused(false)} onValueChange={(delay) => set({ delay })} />
+    </div>
+  );
+  const connection = (
+    <>
+      <div className={editing ? 'grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_12rem] gap-x-4 w-full' : 'grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_12rem_minmax(0,1fr)] gap-x-4 w-full'}>
+        <Field width="full" label={t('Name')} readOnly={managed} aria-required={!managed} error={errors.name} value={draft.name} onValueChange={(name) => set({ name })} />
+        {managed
+          ? <Field width="full" label={t('Type')} readOnly value={indexer?.type === 'newznab' ? t('Newznab') : t('Torznab')} />
+          : <Dropdown label={t('Type')} value={draft.type} options={[{ value: 'torznab', label: t('Torznab') }]} onValueChange={(type) => set({ type: type as Draft['type'] })} />}
+        {!editing && categories}
+      </div>
+      <Field width="full" label={t('Address')} readOnly={managed} aria-required={!managed} error={errors.baseUrl} value={draft.baseUrl} onValueChange={(baseUrl) => set({ baseUrl })} />
+      {!managed && (
+        <div className={editing ? 'w-full' : 'grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_auto] gap-x-4 items-start w-full'}>
+          <Field width="full" label={t('API key')} aria-required={!editing} type="password" error={errors.apiKey} value={draft.apiKey} onValueChange={(apiKey) => set({ apiKey })} />
+          {!editing && delay}
+        </div>
+      )}
+    </>
+  );
+  const parameters = (
+    <>
+      <div className={`flex flex-wrap items-start gap-4 w-full${editing && !managed ? ' justify-between' : ''}`}>
+        {editing && !managed && <div className="w-52 max-w-full">{categories}</div>}
+        {editing && delay}
+        <div className="w-52 max-w-full">
+          <Field
+            width="full"
+            label={t('Release day, search interval')}
+            suffix="min"
+            aria-required="true"
+            inputMode="numeric"
+            action={<Hint label={t('About the release-day search interval')}>{t('Minutes between automatic searches on this indexer for the same movie or episode on its release day.')}</Hint>}
+            value={draft.releaseDayMinutes}
+            onValueChange={(releaseDayMinutes) => set({ releaseDayMinutes })}
+            error={errors.releaseDayMinutes}
+          />
+        </div>
+      </div>
+      <TagInput
+        label={t('Preferred languages')}
+        value={draft.languages}
+        onValueChange={(languages) => set({ languages })}
+        options={languageOptions}
+        allowCustom={false}
+        width="full"
+        description={t('A search sends an alias only to an indexer with one of these languages. No languages means every language.')}
+        emptyText={t('No options.')}
+        error={errors.preferredLanguages}
+      />
+      <div className="grid sm:grid-cols-2 items-start gap-4 w-full">
+        {([
+          ['enableRss', t('RSS'), t('Read the indexer feed for new releases.')],
+          ['enableAutomaticSearch', t('Automatic search'), t('Find wanted movies and episodes.')],
+          ['enableInteractiveSearch', t('Manual search'), t('Include this indexer in searches you start.')],
+          ['rejectZeroSeeders', t('Reject releases with no seeders'), t('Skip downloads with zero seeders.')],
+        ] as const).map(([field, label, description]) => {
+          if (managed && field !== 'rejectZeroSeeders') return null;
+          const descriptionId = `${formId}-${field}`;
+          return (
+            <div key={field} className="grid justify-items-start gap-1">
+              <Checkbox label={label} aria-describedby={descriptionId} checked={draft[field]} onCheckedChange={(checked) => set({ [field]: checked })} />
+              <div id={descriptionId} className="ml-11"><Text variant="small">{description}</Text></div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+  const failure = failed && <Alert tone="danger">{t('The request did not complete. Try again.')}</Alert>;
+  const connectionError = errors.name ?? errors.baseUrl ?? errors.apiKey;
+  const parameterError = errors.releaseDayMinutes ?? errors.delaySeconds ?? errors.categories ?? errors.preferredLanguages;
+
   return (
     <Modal
       trigger={trigger}
       open={open}
       onOpenChange={(next) => onOpenChange?.(next)}
       title={editing ? t('Edit an indexer') : t('Add an indexer')}
+      hideTitle={editing}
       width="lg"
+      tabs={editing ? [
+        { value: 'connection', label: t('Indexer'), content: <Form id={formId} onSubmit={submit}>{connection}</Form> },
+        { value: 'parameters', label: t('Parameters'), content: <Form onSubmit={submit}>{parameters}</Form> },
+      ] : undefined}
       actions={
         <>
+          {failure}
+          {editing && parameterError && <Alert tone="danger" title={t('Parameters')}>{parameterError}</Alert>}
+          {editing && connectionError && <Alert tone="danger" title={t('Connection')}>{connectionError}</Alert>}
           {!managed && (
             <>
               {result && (
@@ -172,58 +278,7 @@ function IndexerForm({ indexer, onDone, open, onOpenChange, trigger }: { indexer
         </>
       }
     >
-      <Form
-        id={formId}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void run('save');
-        }}
-      >
-        {failed && <Alert tone="danger">{t('The request did not complete. Try again.')}</Alert>}
-        {!managed && (
-          <>
-            <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_12rem_minmax(0,1fr)] gap-x-4 w-full">
-              <Field width="full" label={t('Name')} aria-required="true" error={errors.name} value={draft.name} onValueChange={(name) => set({ name })} />
-              <Dropdown label={t('Type')} value={draft.type} options={[{ value: 'torznab', label: t('Torznab') }]} onValueChange={(type) => set({ type: type as Draft['type'] })} />
-              <MultiSelect
-                label={t('Categories')}
-                value={draft.categories}
-                onValueChange={(categories) => set({ categories })}
-                options={CATEGORY_OPTIONS}
-                valueText={(count) => t('{n} selected', { n: count })}
-                width="full"
-                error={errors.categories}
-              />
-            </div>
-            <Field width="full" label={t('Address')} aria-required="true" error={errors.baseUrl} value={draft.baseUrl} onValueChange={(baseUrl) => set({ baseUrl })} />
-          </>
-        )}
-        <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_auto] gap-x-4 items-start w-full">
-          {!managed && <Field width="full" label={t('API key')} aria-required={!editing} type="password" error={errors.apiKey} value={draft.apiKey} onValueChange={(apiKey) => set({ apiKey })} />}
-          <Field width="sm" suffix={t('sec')} label={t('Delay requests')} aria-required="true" inputMode="decimal" action={<Hint label={t('About the delay')}>{t('The least time, in seconds, between two requests to the indexer.')}</Hint>} error={errors.delaySeconds} value={!delayFocused && draft.delay.trim() === '0' ? '∞' : draft.delay} onFocus={() => setDelayFocused(true)} onBlur={() => setDelayFocused(false)} onValueChange={(delay) => set({ delay })} />
-        </div>
-        <TagInput
-          label={t('Preferred languages')}
-          value={draft.languages}
-          onValueChange={(languages) => set({ languages })}
-          options={languageOptions}
-          allowCustom={false}
-          width="full"
-          description={t('A search sends an alias only to an indexer with one of these languages. No languages means every language.')}
-          emptyText={t('No options.')}
-          error={errors.preferredLanguages}
-        />
-        {!managed && (
-          <div className="grid grid-cols-[minmax(0,1fr)] sm:grid-cols-3 gap-3 justify-items-start w-full">
-            <Checkbox label={t('RSS')} checked={draft.enableRss} onCheckedChange={(enableRss) => set({ enableRss })} />
-            <Checkbox label={t('Automatic search')} checked={draft.enableAutomaticSearch} onCheckedChange={(enableAutomaticSearch) => set({ enableAutomaticSearch })} />
-            <Checkbox label={t('Manual search')} checked={draft.enableInteractiveSearch} onCheckedChange={(enableInteractiveSearch) => set({ enableInteractiveSearch })} />
-          </div>
-        )}
-        <div className="grid grid-cols-[minmax(0,1fr)] gap-3 justify-items-start w-full">
-          <Checkbox label={t('Reject releases with no seeders')} checked={draft.rejectZeroSeeders} onCheckedChange={(rejectZeroSeeders) => set({ rejectZeroSeeders })} />
-        </div>
-      </Form>
+      {!editing && <Form id={formId} onSubmit={submit}>{connection}{parameters}</Form>}
     </Modal>
   );
 }

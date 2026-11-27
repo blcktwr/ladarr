@@ -809,6 +809,7 @@ export type IndexerRow = {
   categories: number[];
   priority: number;
   delaySeconds: number;
+  releaseDayMinutes: number;
   nextRequestAt: number;
   // The languages of the names that the indexer should receive. No languages means every language.
   preferredLanguages: string[];

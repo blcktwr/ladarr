@@ -193,6 +193,7 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   // The form shows the saved key.
   await expect(editIndexer.getByLabel('API key')).toHaveValue('indexer-key');
   await editIndexer.getByLabel(/^Name/).fill('Renamed');
+  await editIndexer.getByRole('tab', { name: 'Parameters' }).click();
   await editIndexer.getByRole('checkbox', { name: 'Manual search' }).click();
   // An edit saves without a test while the address and the key stay as they are.
   await expect(editIndexer.getByRole('button', { name: 'Save' })).toBeEnabled();
@@ -223,9 +224,10 @@ test('setup: owner, folders, download client, and indexer', async ({ page }) => 
   await expect(page.getByRole('menuitem', { name: 'Delete' })).toHaveCount(0);
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const pushed = page.getByRole('dialog', { name: 'Edit an indexer' });
-  await expect(pushed.getByLabel('Delay requests')).toBeVisible();
+  await expect(pushed.getByLabel('Address')).not.toBeEditable();
+  await pushed.getByRole('tab', { name: 'Parameters' }).click();
+  await expect(pushed.getByLabel('Delay between requests')).toBeVisible();
   await expect(pushed.getByLabel('Preferred languages')).toBeVisible();
-  await expect(pushed.getByLabel('Address')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(pushed).toBeHidden();
 

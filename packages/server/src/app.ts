@@ -251,8 +251,8 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
     api.post('/indexers/test', indexersTest(indexers));
     api.post('/indexers/:id/test', indexerTestSaved(indexers));
   }
-  api.put('/indexers/:id', indexersUpdate({ onChange: () => setupChanged('indexers') }));
-  api.patch('/indexers/:id', indexersPatch());
+  api.put('/indexers/:id', indexersUpdate({ onChange: () => setupChanged('indexers'), reschedule: services?.finder.rescheduleReleaseDay }));
+  api.patch('/indexers/:id', indexersPatch(services?.finder.rescheduleReleaseDay));
   api.delete('/indexers/:id', indexersDelete({ onChange: () => setupChanged('indexers') }));
   api.get('/roots', rootsGet());
   api.get('/roots/browse', rootsBrowse());

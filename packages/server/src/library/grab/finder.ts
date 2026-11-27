@@ -20,6 +20,7 @@ import { requestIdFor } from '../../core/outbound.ts';
 import type { OutsideTitleLock } from '../../core/title-lock.ts';
 import { catalogPoint, catalogSeasons, normalizeNumbering, releasePoint, releaseSeasons } from '../numbering.ts';
 import { needsOtherSeasons } from '@ladarr/shared/queue';
+import { DEFAULT_RELEASE_DAY_MINUTES } from '@ladarr/shared/indexers';
 import type { DecideContext, Decision, Episode, FinderDeps, Indexer, Job, Numbering, QueueEntry, QueueTorrent, QueueTurn, RawRelease, RejectedRelease, ReleaseRef, Scope, SearchPayload, SearchQuery, SearchState, Title, TitleName, Want } from '../../types.ts';
 import type { IndexerApp } from '@ladarr/shared/enums';
 
@@ -34,15 +35,20 @@ const HOUR_MS = 60 * 60_000;
 const DAY_MS = 24 * HOUR_MS;
 export const RESEARCH_MS = 12 * HOUR_MS;
 const episodeOf = (title: Title, entry: QueueEntry) => title.episodes.find((episode) => episode.season === entry.season && episode.number === entry.number);
-// A title that waits for its release is searched again when that date comes, not after a few hours.
-const nextSearchAt = (title: Title, entry: QueueEntry, at: number) => {
-  if (title.mediaType !== 'movie') {
-    const start = episodeEligibleAt(episodeOf(title, entry)?.airDate ?? null);
-    return at + (start !== null && start <= at && at < start + DAY_MS ? HOUR_MS : RESEARCH_MS);
-  }
-  const release = movieEligibleAt(title);
-  return release !== null && release > at ? release : at + RESEARCH_MS;
+const releaseAt = (title: Title, entry: QueueEntry) =>
+  title.mediaType === 'movie' ? movieEligibleAt(title) : episodeEligibleAt(episodeOf(title, entry)?.airDate ?? null);
+const isReleaseDay = (release: number | null, at: number) => release !== null && release <= at && at < release + DAY_MS;
+const releaseDayInterval = (indexer: Indexer) => (indexer.releaseDayMinutes ?? DEFAULT_RELEASE_DAY_MINUTES) * 60_000;
+const nextSearchAt = (release: number | null, indexer: Indexer, last: number) => {
+  if (release !== null && release > last) return release;
+  return last + (isReleaseDay(release, last) ? releaseDayInterval(indexer) : RESEARCH_MS);
 };
+function nextRetryAt(title: Title, entries: QueueEntry[], indexers: Indexer[], last: number) {
+  return Math.min(...entries.map((entry) => {
+    const release = releaseAt(title, entry);
+    return Math.min(...indexers.map((indexer) => nextSearchAt(release, indexer, entry.lastIndexerSearch?.[indexer.id] ?? last)));
+  }));
+}
 const CACHE_MS = 5 * 60_000;
 const CACHE_MAX = 200;
 // The most search requests that one automatic search run sends for one title. A run that reaches the budget leaves
@@ -296,6 +302,30 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     });
   }
 
+  function rescheduleReleaseDay(changed: Indexer) {
+    const at = now();
+    for (const job of Object.values(db.data.jobs)) {
+      if (job.type !== 'queue.search' || job.state !== 'waiting') continue;
+      const payload = job.payload as Acquisition;
+      if (payload.fresh || payload.supplied || payload.work) continue;
+      const item = queue.findItem(payload.titleKey, payload.season);
+      const title = db.data.titles[payload.titleKey];
+      if (!title || item?.state.kind !== 'waiting' || !item.search) continue;
+      const entries = item.entryIds.map(queue.get).filter((entry): entry is QueueEntry =>
+        !!entry && entry.state.kind === 'waiting' && !prepared(item, entry.id));
+      if (!entries.some((entry) => isReleaseDay(releaseAt(title, entry), at))) continue;
+      const usable = usableIndexers(title);
+      if (!usable.includes(changed)) continue;
+      // Older queue records have only the time of the last round.
+      for (const entry of entries) entry.lastIndexerSearch ??= Object.fromEntries(usable.map(({ id }) => [id, item.search!.at]));
+      const nextAt = Math.max(at, nextRetryAt(title, entries, usable, item.search.at));
+      job.runAt = nextAt;
+      item.search.nextAt = nextAt;
+      for (const entry of entries) if (entry.search) entry.search.nextAt = nextAt;
+      queue.updateItem(item, { nextAt });
+    }
+  }
+
   // The title and the original title come first. They go to every indexer: only the aliases carry a language. The aliases
   // come after them, and a search uses them only when the names before gave no result.
   const titleNames = (title: Title): TitleName[] => {
@@ -359,10 +389,11 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   // Asks every usable indexer at the same time. Each one answers on its own: one failure does not stop the others.
   // `budget` counts the requests that go to an indexer, not the answers from the cache. A query that the budget stops
   // is incomplete, so the caller leaves its targets for the next run instead of ending them as an empty search.
-  async function queryAll(title: Title, scope: Scope, name: TitleName, entries: QueueEntry[], signal: AbortSignal, { fresh = false, quiet = false, budget }: { fresh?: boolean; quiet?: boolean; budget?: { left: number } } = {}) {
+  async function queryAll(title: Title, scope: Scope, name: TitleName, entries: QueueEntry[], signal: AbortSignal, { fresh = false, quiet = false, budget, due, releaseDay = false }: { fresh?: boolean; quiet?: boolean; budget?: { left: number }; due?: Indexer[]; releaseDay?: boolean } = {}) {
     const usable = usableIndexers(title);
     // An indexer with preferred languages receives only an alias in one of them. No languages means every name.
     const list = usable.filter((indexer) => {
+      if (due && !due.includes(indexer)) return false;
       const preferred = indexer.preferredLanguages ?? [];
       return name.languages.length === 0 || preferred.length === 0 || name.languages.some((language) => preferred.includes(language));
     });
@@ -424,7 +455,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           const key = JSON.stringify([indexer.id, query]);
           const hit = cache.get(key);
           let cached = false;
-          if (hit && !fresh && now() - hit.at < CACHE_MS) {
+          const cacheMs = releaseDay ? Math.min(CACHE_MS, releaseDayInterval(indexer)) : CACHE_MS;
+          if (hit && !fresh && now() - hit.at < cacheMs) {
             found = hit.releases;
             cached = true;
           } else {
@@ -575,13 +607,23 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     const budget = payload.manual || payload.forced || payload.otherSeasons || title.mediaType === 'movie' ? undefined : { left: SEARCH_BUDGET };
     let incomplete = false;
     let unavailable = false;
-    const noIndexers = usableIndexers(title).length === 0;
+    const usable = usableIndexers(title);
+    const noIndexers = usable.length === 0;
+    const releaseDates = new Map(members.map((entry) => [entry, releaseAt(title, entry)]));
+    const releaseToday = members.some((entry) => isReleaseDay(releaseDates.get(entry)!, searchState.at));
+    // Keep the due indexers fixed through the season, episode and alias queries of this round.
+    const dueFor = new Map(members.map((entry) => [entry, usable.filter((indexer) => {
+      const last = entry.lastIndexerSearch?.[indexer.id];
+      return !releaseToday || payload.fresh || last === undefined || nextSearchAt(releaseDates.get(entry)!, indexer, last) <= searchState.at;
+    })]));
     let holdingClient = false;
     const episodeRound = payload.episodeRound || (!resumed && !payload.supplied && targets().some((entry) => prepared(item, entry.id)));
     let episodeName = names[0];
 
     const ask = async (scope: Scope, group: QueueEntry[]) => {
       if (!group.length || !alive()) return [];
+      const due = usable.filter((indexer) => group.some((entry) => dueFor.get(entry)!.includes(indexer)));
+      if (!noIndexers && !due.length) return [];
       const namesToAsk = scope.kind === 'episode' && !payload.manual && !payload.otherSeasons ? (episodeName ? [episodeName] : [])
         : scope.kind === 'absolute' ? names.slice(0, 1) : names;
       const returned = (name: TitleName, releases: RawRelease[]) => {
@@ -600,7 +642,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           break;
         }
         phase('searching', group.filter((entry) => !prepared(item, entry.id)));
-        const answer = await outside(() => queryAll(title, scope, name, group, signal, { fresh: payload.fresh && !resumed, budget, quiet: scope.kind !== 'movie' }));
+        const answer = await outside(() => queryAll(title, scope, name, group, signal, { fresh: payload.fresh && !resumed, budget, quiet: scope.kind !== 'movie', due, releaseDay: releaseToday }));
         if (!alive()) return [];
         incomplete ||= answer.incomplete;
         if (!answer.incomplete && answer.asked > answer.answered) unavailable = true;
@@ -926,7 +968,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     const completed: string[] = [];
     if (alive() && !incomplete && !holdingClient && !manualIds && title.mediaType !== 'movie' && !mapping()) {
       for (const entry of missing()) {
-        if (!alive() || prepared(item, entry.id)) continue;
+        if (!alive() || prepared(item, entry.id) || (!noIndexers && !dueFor.get(entry)!.length)) continue;
         const at = releaseTarget(numbering, entry);
         if (!at) continue;
         const group = [entry];
@@ -977,7 +1019,16 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     const missingNumber = title.mediaType !== 'movie' && left.some((entry) => !releaseTarget(numbering, entry));
     const stop = mapping() ? 'file_unmapped' : missingNumber ? 'numbering_required' : rejected.length || (payload.forced && !completed.length) ? 'all_rejected'
       : noIndexers ? 'no_indexers' : payload.otherSeasons ? 'pack_partial' : null;
-    const nextAt = stop ? null : Math.min(...left.map((entry) => nextSearchAt(title, entry, now())));
+    const at = now();
+    if (!stop) {
+      for (const entry of left) {
+        if (releaseToday) {
+          entry.lastIndexerSearch ??= {};
+          for (const indexer of dueFor.get(entry)!) entry.lastIndexerSearch[indexer.id] = at;
+        } else delete entry.lastIndexerSearch;
+      }
+    }
+    const nextAt = stop ? null : nextRetryAt(title, left, usable, at);
     Object.assign(searchState, {
       result: stop && rejected.length ? 'all_rejected' : unavailable ? 'indexers_failed' : 'no_results',
       candidates: Object.keys(work.checked).length, accepted: Object.values(item.selected).filter(({ status }) => status === 'prepared').length,
@@ -996,7 +1047,19 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     }
     const outcome = unavailable ? 'indexers_failed' : 'no_results';
     phase('searching', left);
-    if (!unavailable && completed.length) queue.emptySearch(item, work.id, completed.filter((id) => left.some((entry) => entry.id === id)), nextAt);
+    const emptyRounds = unavailable ? [] : left.filter((entry) => {
+      if (!completed.includes(entry.id)) return false;
+      // A fast indexer cannot use up the episode's three rounds before a slower indexer answers.
+      const answered = new Set(entry.emptyRoundIndexers);
+      for (const indexer of dueFor.get(entry)!) answered.add(indexer.id);
+      if (usable.every((indexer) => answered.has(indexer.id))) {
+        delete entry.emptyRoundIndexers;
+        return true;
+      }
+      entry.emptyRoundIndexers = [...answered];
+      return false;
+    });
+    if (emptyRounds.length) queue.emptySearch(item, work.id, emptyRounds.map(({ id }) => id), nextAt);
     else queue.requeueItem(item, outcome, nextAt);
     if (item.state.kind === 'blocked') searchState.nextAt = null;
     for (const entry of left) {
@@ -1342,5 +1405,5 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     return [...bySeason.values()].flat();
   }
 
-  return { requestSearch, partial, startOtherSeasons, enqueueSearch, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, sweep, rss, search, canStartSearch, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
+  return { requestSearch, partial, startOtherSeasons, enqueueSearch, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, rescheduleReleaseDay, sweep, rss, search, canStartSearch, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
 }

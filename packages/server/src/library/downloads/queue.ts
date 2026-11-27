@@ -385,6 +385,8 @@ export function createQueue(events: Events, persist: () => void, onState?: State
   }
 
   function startAttempt(entry: QueueEntry, reason: string) {
+    delete entry.lastIndexerSearch;
+    delete entry.emptyRoundIndexers;
     entry.attempt++;
     entry.attempts.push({ n: entry.attempt, startedAt: Date.now(), endedAt: null, reason, release: null, outcome: 'running' });
     if (entry.attempts.length > MAX_ATTEMPTS_KEPT) entry.attempts.shift();

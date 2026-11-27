@@ -1,10 +1,11 @@
 import type { IndexerTestResult } from '@ladarr/shared/types';
+import { DEFAULT_RELEASE_DAY_MINUTES, validReleaseDayMinutes } from '@ladarr/shared/indexers';
 import type { Response } from 'express';
 import { DEFAULT_DELAY_SECONDS, MAX_DELAY_SECONDS, identity, isCategoryList, isLanguageList, isObject, newHealth, parsePush } from '../library/grab/indexers.ts';
 import { IndexerError } from '../library/grab/torznab.ts';
 import { db } from '../core/db.ts';
 import type { IndexerApp } from '@ladarr/shared/enums';
-import type { Db, Indexer, IndexerService, Parsed } from '../types.ts';
+import type { Db, Finder, Indexer, IndexerService, Parsed } from '../types.ts';
 
 export const invalidSetting = (res: Response, field: string) => void res.status(400).json({ error: 'invalid_setting', field });
 export const exists = (parsed: Parsed, id?: number) =>
@@ -12,12 +13,14 @@ export const exists = (parsed: Parsed, id?: number) =>
 
 // The form of Settings. An indexer that the user adds serves both apps. The categories are the ones that the user selects, and no categories means every category.
 // An indexer that exists keeps its key when the body leaves the key out, because the list does not hold the key.
-export function parseManual(body: unknown, existing?: Indexer): { parsed: Record<IndexerApp, Parsed>; delaySeconds: number; preferredLanguages: string[]; rejectZeroSeeders: boolean } | { invalid: string } {
+export function parseManual(body: unknown, existing?: Indexer): { parsed: Record<IndexerApp, Parsed>; delaySeconds: number; releaseDayMinutes: number; preferredLanguages: string[]; rejectZeroSeeders: boolean } | { invalid: string } {
   if (!isObject(body)) return { invalid: 'body' };
   // Torznab is the only type for now. Newznab is Usenet, and ladarr does not use Usenet.
   if (body.type !== 'torznab') return { invalid: 'type' };
   const delaySeconds = body.delaySeconds ?? existing?.delaySeconds ?? DEFAULT_DELAY_SECONDS;
   if (typeof delaySeconds !== 'number' || !Number.isFinite(delaySeconds) || delaySeconds < 0 || delaySeconds > MAX_DELAY_SECONDS) return { invalid: 'delaySeconds' };
+  const releaseDayMinutes = body.releaseDayMinutes === undefined ? existing?.releaseDayMinutes ?? DEFAULT_RELEASE_DAY_MINUTES : body.releaseDayMinutes;
+  if (!validReleaseDayMinutes(releaseDayMinutes)) return { invalid: 'releaseDayMinutes' };
   const rejectZeroSeeders = body.rejectZeroSeeders ?? existing?.rejectZeroSeeders ?? false;
   if (typeof rejectZeroSeeders !== 'boolean') return { invalid: 'rejectZeroSeeders' };
   const languages = body.preferredLanguages === undefined ? (existing?.preferredLanguages ?? []) : body.preferredLanguages;
@@ -45,13 +48,19 @@ export function parseManual(body: unknown, existing?: Indexer): { parsed: Record
     if ('errors' in result) return { invalid: result.errors[0]!.propertyName };
     parsed[app] = result;
   }
-  return { parsed, delaySeconds, preferredLanguages: [...new Set(languages)], rejectZeroSeeders };
+  return { parsed, delaySeconds, releaseDayMinutes, preferredLanguages: [...new Set(languages)], rejectZeroSeeders };
 }
 
 // A longer delay counts from the start of the last request, so the next request moves back.
 export function setDelay(indexer: Indexer, delaySeconds: number) {
   if (delaySeconds > indexer.delaySeconds && indexer.nextRequestAt > 0) indexer.nextRequestAt += (delaySeconds - indexer.delaySeconds) * 1000;
   indexer.delaySeconds = delaySeconds;
+}
+
+export function setReleaseDayMinutes(indexer: Indexer, minutes: number, reschedule?: Finder['rescheduleReleaseDay']) {
+  const previous = indexer.releaseDayMinutes ?? DEFAULT_RELEASE_DAY_MINUTES;
+  indexer.releaseDayMinutes = minutes;
+  if (previous !== minutes) reschedule?.(indexer);
 }
 
 // Asks the indexer for its capabilities. It saves nothing.

@@ -1,5 +1,6 @@
 import type { IndexerApp, MediaType, IndexerNotUsed as NotUsed } from '@ladarr/shared/enums';
 import type { IndexerHealth, IndexerRow } from '@ladarr/shared/types';
+import { DEFAULT_RELEASE_DAY_MINUTES } from '@ladarr/shared/indexers';
 import { db } from '../../core/db.ts';
 import type { Db, Field, Indexer, Parsed, Protocol, Rejected, SeedLimits } from '../../types.ts';
 
@@ -211,6 +212,7 @@ export function summarize(indexer: Indexer): IndexerRow {
     categories: [...new Set(pushes.flatMap((push) => push.categories))].sort((a, b) => a - b),
     priority: Math.min(...pushes.map((push) => push.priority)),
     delaySeconds: indexer.delaySeconds,
+    releaseDayMinutes: indexer.releaseDayMinutes ?? DEFAULT_RELEASE_DAY_MINUTES,
     preferredLanguages: indexer.preferredLanguages ?? [],
     rejectZeroSeeders: Boolean(indexer.rejectZeroSeeders),
     nextRequestAt: indexer.nextRequestAt,

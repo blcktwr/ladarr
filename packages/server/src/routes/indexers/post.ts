@@ -11,6 +11,7 @@ export function indexersCreate({ onChange = () => {} }: { onChange?: () => void 
     const indexer = savePush('sonarr', result.parsed.sonarr)!;
     savePush('radarr', result.parsed.radarr);
     indexer.manual = true;
+    indexer.releaseDayMinutes = result.releaseDayMinutes;
     indexer.preferredLanguages = result.preferredLanguages;
     indexer.rejectZeroSeeders = result.rejectZeroSeeders;
     setDelay(indexer, result.delaySeconds);

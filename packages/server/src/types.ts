@@ -585,6 +585,8 @@ export type QueueEntry = {
   attempts: Attempt[];
   history: HistoryEvent[];
   search: SearchState | null;
+  lastIndexerSearch?: Record<number, number>;
+  emptyRoundIndexers?: number[];
   release: ReleaseRef | null;
   transferHash: string | null;
   // The download client that has the torrent. Set with the hash.
@@ -726,9 +728,9 @@ export type Indexer = {
   baseUrl: string;
   apiPath: string;
   apiKey: string;
-  // The delay and the preferred languages are the fields that ladarr owns.
   // The least time, in seconds, between two requests that start.
   delaySeconds: number;
+  releaseDayMinutes?: number;
   // The languages of the names that the indexer should receive. No languages means every language.
   preferredLanguages?: string[];
   // Reject a release that the indexer reports with no seeders, so the target does not wait on a torrent that cannot download.
