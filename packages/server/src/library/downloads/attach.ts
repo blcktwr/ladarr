@@ -43,10 +43,17 @@ export async function attachTorrent(
   let attached = false;
   for (const target of targets) {
     // A cancelled or completed target stays as it is. A late attach must not revive it.
-    if (target.release?.uploadPath || !isActive(target) || target.state.kind === 'paused' || (target.state.kind === 'blocked' && !manual)) continue;
-    queue.endAttempt(target, 'cancelled', 'replaced by an attached download');
-    queue.startAttempt(target, 'attached download');
-    recordTorrent(target, { handle, torrent, kind: targets.length > 1 ? 'pack' : 'single', external });
+    const previous = target.retryDownload?.hash === hash ? target.retryDownload : null;
+    if ((target.release?.uploadPath && !previous) || !isActive(target) || target.state.kind === 'paused' || (target.state.kind === 'blocked' && !manual)) continue;
+    if (previous) delete target.retryDownload;
+    else {
+      queue.endAttempt(target, 'cancelled', 'replaced by an attached download');
+      queue.startAttempt(target, 'attached download');
+    }
+    if (target.release?.uploadPath) {
+      target.transferHash = hash;
+      target.clientId = handle.id;
+    } else recordTorrent(target, { handle, torrent, kind: targets.length > 1 ? 'pack' : 'single', external });
     // A torrent that the user attaches enters the acquisition with the numbering of the title now. A target that has a
     // snapshot already keeps it, so a restart does not reinterpret its download.
     if (target.numbering === undefined) target.numbering = structuredClone(normalizeNumbering(db.data.titles[target.titleKey]?.numbering));
@@ -54,7 +61,7 @@ export async function attachTorrent(
     // must not stay next to the attached torrent.
     target.search = null;
     target.importResult = null;
-    target.manualMatch = null;
+    target.manualMatch = previous?.match ?? null;
     if (manual) queue.resolve(target, torrent.complete ? 'importing' : 'downloading', cause, torrent.name);
     else queue.enter(target, torrent.complete ? 'importing' : 'downloading', cause, torrent.name);
     attached = true;

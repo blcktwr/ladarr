@@ -37,7 +37,6 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
       case 'resume':
         return entry.state.kind === 'paused' ? null : 'This target is not paused.';
       case 'retry':
-        if (entry.state.kind === 'blocked' && (entry.state.problem.code === 'file_invalid' || (entry.state.problem.code === 'too_many_attempts' && entry.state.problem.detail === 'file_invalid'))) return 'Select a file before continuation.';
         return canRetry(entry.state) ? null : 'This target does not need a retry.';
       case 'apply_numbering':
         return entry.state.kind === 'blocked' && entry.season !== null ? null : 'This target has no blocked acquisition.';
@@ -118,6 +117,9 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
           break;
         }
         case 'retry':
+          queue.restart(entry);
+          finder.enqueueSearch({ titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id], fresh: true, episodeRound: false, supplied: undefined }, { afterRun: true });
+          break;
         case 'retry_fetch':
         case 'retry_send':
         case 'check_download':

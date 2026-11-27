@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkPhase } from '@ladarr/shared/queue';
@@ -368,6 +368,69 @@ describe.each(['movie', 'tv'] as const)('automatic stuck recovery: %s', (mediaTy
 });
 
 describe('selected target authorization', () => {
+  it.each(['episode', 'season'])('downloads only the missing episode on a retry of the %s', async (scope) => {
+    const { item, entries } = await setup('tv', 'importing', 'file_not_found', 2);
+    const [first, missing] = entries as [QueueEntry, QueueEntry];
+    const { hash, name } = addDownload(entries, 'tv');
+    unlinkSync(join(pipe!.folders.downloads, name, 'Show.Name.S01E02.mkv'));
+    const release = { ...selectRelease(missing), title: name, infoHash: hash, kind: 'pack' as const };
+    missing.release = first.release = release;
+    turnOf(missing).selected = { [hash]: {
+      hash, release, status: 'accepted', source: null, clientId: missing.clientId, numberingRevision: 0,
+      matches: { [first.id]: `${name}/Show.Name.S01E01.mkv`, [missing.id]: null },
+    } };
+    const single = 'Show.Name.S01E02.1080p.WEB-DL-GRP';
+    pipe!.tracker.state.items = [{ title: name, size: 120 * 45 * MIB }, { title: single, size: 60 * 45 * MIB }];
+    api = await pipe!.api();
+
+    if (scope === 'episode') {
+      pipe!.queue.resolve(first, 'importing', 'download complete');
+      pipe!.queue.complete(first, 'imported');
+    }
+    const sibling = structuredClone(first);
+    const targets = scope === 'episode' ? { ids: [missing.id] } : { group: { titleKey: item.key, season: 1 } };
+    expect((await api.post('/queue/actions', { action: 'retry', ...targets })).status).toBe(200);
+    expect(missing).toMatchObject({ state: { kind: 'queued' }, transferHash: null, release: null });
+    expect(turnOf(missing).state.kind).toBe('queued');
+    expect(pipe!.tracker.state.searches).toEqual([]);
+    pipe!.db.data.queuePaused = false;
+    await expect.poll(() => missing.state).toMatchObject({ kind: 'downloading' });
+    expect(pipe!.tracker.state.searches.map((url) => [url.searchParams.get('season'), url.searchParams.get('ep')])).toEqual([['1', '2']]);
+    expect(pipe!.acquisition.filter(({ type }) => type === 'add')).toEqual([{ type: 'add', hash: hashOf(single) }]);
+    if (scope === 'episode') {
+      expect(first).toEqual(sibling);
+      expect(turnOf(missing).selected[hash]?.matches).toEqual({ [first.id]: `${name}/Show.Name.S01E01.mkv` });
+    }
+    expect(pipe!.qbit.torrents.has(hash)).toBe(true);
+
+    pipe!.complete(single, { [`${single}.mkv`]: 'second' });
+    await pipe!.poller.tick();
+    await until(() => missing.state.kind === 'available');
+    expect(item.episodes[1]!.fileId).not.toBeNull();
+    if (scope === 'season') {
+      await until(() => first.state.kind === 'available');
+      expect(item.episodes[0]!.fileId).not.toBeNull();
+    }
+  });
+
+  it('verifies the cached torrent on its turn before it asks an indexer', async () => {
+    const { entry } = await setup('tv', 'fetching', 'client_unreachable');
+    selectRelease(entry);
+    const source = prepared(entry);
+    entry.transferHash = source.hash;
+    api = await pipe!.api();
+
+    expect((await api.post('/queue/actions', { action: 'retry', ids: [entry.id] })).status).toBe(200);
+    expect(entry.state.kind).toBe('queued');
+    expect(pipe!.qbit.torrents.size).toBe(0);
+    pipe!.db.data.queuePaused = false;
+    await expect.poll(() => entry.state).toEqual({ kind: 'downloading' });
+    expect(entry.history.map(({ stage }) => stage)).toContain('searching');
+    expect(pipe!.tracker.state.searches).toEqual([]);
+    expect(pipe!.tracker.state.downloads).toEqual([]);
+    expect(entry.transferHash).toBe(source.hash);
+  });
+
   it('retries only the selected episode of a complete shared torrent', async () => {
     const { item, entries } = await setup('tv', 'importing', 'file_not_found', 2);
     const { hash } = addDownload(entries, 'tv');
@@ -376,12 +439,12 @@ describe('selected target authorization', () => {
     api = await pipe!.api();
 
     expect((await api.post('/queue/actions', { action: 'retry', ids: [selected.id] })).status).toBe(200);
-    expect(selected.state.kind).toBe('importing');
+    expect(selected.state.kind).toBe('queued');
     expect(sibling).toEqual(before);
 
     pipe!.db.data.queuePaused = false;
+    pipe!.poller.start();
     await until(() => stageOf(selected) === 'available');
-    await pipe!.poller.tick();
     await until(() => !Object.values(pipe!.db.data.jobs).some((job) => job.type === 'import.run'));
     pipe!.worker.enqueue({ type: 'import.run', payload: { hash }, dedupeKey: `import:${hash}` });
     await until(() => !Object.values(pipe!.db.data.jobs).some((job) => job.type === 'import.run'));
@@ -405,6 +468,7 @@ describe('selected target authorization', () => {
 
     expect((await api.post('/queue/actions', { action: 'retry', ids: [selected.id] })).status).toBe(200);
     pipe!.db.data.queuePaused = false;
+    pipe!.poller.start();
     await vi.waitFor(() => expect(selected.state).toEqual({ kind: 'available' }));
 
     expect(sibling).toEqual({ ...before, revision: sibling.revision });
@@ -426,11 +490,12 @@ describe('selected target authorization', () => {
     api = await pipe!.api();
 
     expect((await api.post('/queue/actions', { action: 'retry', ids: [entry.id] })).status).toBe(200);
-    expect(entry.state.kind).toBe('importing');
+    expect(entry.state.kind).toBe('queued');
     expect(item.fileId).toBeNull();
     expect(pipe!.db.data.files).toEqual({});
 
     pipe!.db.data.queuePaused = false;
+    pipe!.poller.start();
     await until(() => stageOf(entry) === 'available');
 
     expect(item.fileId).not.toBeNull();

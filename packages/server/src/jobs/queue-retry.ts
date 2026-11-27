@@ -194,7 +194,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
     },
     run: async (job, { signal }) => {
       const { entryIds, checkDownload: check, revisions, uploadHash: expectedHash, uploadAttempt } = job.payload as { entryIds: string[]; checkDownload?: boolean; revisions?: Record<string, number>; uploadHash?: string; uploadAttempt?: number };
-      const entries = entryIds.map((id) => queue.get(id)).filter((entry): entry is QueueEntry => Boolean(entry));
+      const entries = entryIds.map((id) => queue.get(id)).filter((entry): entry is QueueEntry => !!entry && (check || entry.retryDownload === undefined));
       if (check) {
         for (const entry of entries) {
           signal.throwIfAborted();
@@ -224,7 +224,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
           for (const entry of group) {
             signal.throwIfAborted();
             // The user can pause or cancel the target while the retry waits for its title.
-            if (!isActive(entry) || entry.state.kind === 'paused' || entry.state.kind === 'blocked') continue;
+            if (!isActive(entry) || entry.retryDownload !== undefined || entry.state.kind === 'paused' || entry.state.kind === 'blocked') continue;
             if (uploadHash(entry)) continue;
             // A target of an import runs its import checks. Its own job does that, with no limit.
             if (phaseOfEntry(entry) === 'importing') continue;

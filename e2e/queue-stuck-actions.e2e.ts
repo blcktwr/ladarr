@@ -238,25 +238,13 @@ for (const scenario of [
     ]);
     expect(applied.status()).toBe(200);
     expect(applied.request().postDataJSON()).toMatchObject({ action: 'retry', ids: [stopped.id] });
-    const phase = scenario.at === 'sending' ? 'fetching' : scenario.at;
     expect(await entry(stopped.id)).toMatchObject({
-      status: scenario.at === 'downloading' ? 'stuck' : phase,
-      phase,
-      release: { title: MOVIE_RELEASE },
+      status: 'queued',
+      phase: 'queued',
+      hasTorrent: false,
     });
-    const type = { importing: 'import.run', fetching: 'queue.grab', sending: 'queue.send', downloading: 'queue.retry' }[scenario.at];
-    if (scenario.at === 'downloading') {
-      await expect.poll(() => {
-        const saved = JSON.parse(readFileSync(join(stack.folders.config, 'queue.json'), 'utf8')) as Pick<Data, 'jobs'>;
-        return Object.values(saved.jobs).filter((job) => job.type === type);
-      }).toEqual([expect.objectContaining({
-        type, state: 'waiting',
-        payload: { entryIds: [stopped.id], checkDownload: true, revisions: { [stopped.id]: stopped.revision } },
-      })]);
-    } else {
-      const jobs = (await stack.call('GET', '/queue/jobs')).body.items;
-      expect(jobs).toEqual(expect.arrayContaining([expect.objectContaining({ type, state: 'waiting' })]));
-    }
+    const jobs = (await stack.call('GET', '/queue/jobs')).body.items;
+    expect(jobs).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'queue.search', state: 'waiting' })]));
     expect(await entry(unrelated.id)).toEqual(before);
     expect(stack.tracker.state.downloads).toEqual([]);
     expect(stack.qbit.calls.filter((call) => call.path === 'torrents/add')).toEqual([]);

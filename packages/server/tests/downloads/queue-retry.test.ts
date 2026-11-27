@@ -55,11 +55,10 @@ describe('retry at once', () => {
     expect(entry.state.kind).toBe('queued');
   });
 
-  it('does not wait behind the long work of another title', async () => {
+  it('checks the local file only when the retry gets its search turn', async () => {
     pipe = await startPipeline();
     api = await pipe.api();
-    // Two retries wait for the lock of their title, as a retry does while a long search of that title runs. They
-    // must not hold the retry of another title back.
+    // A search holds the first turn until its title lock is free.
     const release: (() => void)[] = [];
     try {
       for (const [index, key] of ['tv:2', 'tv:3'].entries()) {
@@ -71,7 +70,7 @@ describe('retry at once', () => {
         void withTitleLock(key, () => new Promise<void>((resolve) => release.push(resolve)));
         expect((await api.post('/queue/actions', { action: 'retry', ids: [entry.id] })).status).toBe(200);
       }
-      await until(() => Object.values(pipe!.db.data.jobs).filter((job) => job.type === 'queue.retry' && job.state === 'running').length === 2);
+      await until(() => Object.values(pipe!.db.data.jobs).some((job) => job.type === 'queue.search' && job.state === 'running'));
 
       const series = title({ rootId: 'tv', folder: 'Show Name (2020)', episodes: [episode(1, 1)] });
       pipe.db.data.titles[series.key] = series;
@@ -83,8 +82,11 @@ describe('retry at once', () => {
       move(pipe.queue, entry, { stage: 'searching', reason: { code: 'too_many_attempts' } }, 'test');
 
       expect((await api.post('/queue/actions', { action: 'retry', ids: ['tv:1:1x1'] })).status).toBe(200);
-      // The file is in its folder, so the retry ends there, beside the two that wait.
+      expect(entry.state.kind).toBe('queued');
+      expect(series.episodes[0]!.fileId).toBeNull();
+      release.forEach((resolve) => resolve());
       await until(() => stageOf(entry) === 'available', 5_000);
+      expect(entry.history.map((event) => event.stage)).toContain('searching');
     } finally {
       // The locks of the test must not outlive it, because the next one reads the same titles.
       for (const resolve of release) resolve();
@@ -151,7 +153,7 @@ describe('retry', () => {
     expect((await api.post('/queue/actions', { action: 'retry', ids: [entry.id] })).status).toBe(200);
     await until(() => entry.state.kind === 'blocked' && entry.state.at === 'importing');
 
-    expect(entry.state).toMatchObject({ kind: 'blocked', at: 'importing', problem: { code: 'file_unreadable' } });
+    expect(entry.state).toMatchObject({ kind: 'blocked', at: 'importing', problem: { code: 'file_invalid' } });
     expect(entry.history.slice(history).some((event) => event.stage === 'importing')).toBe(true);
     expect(entry.history.slice(history).some((event) => event.state.kind === 'available')).toBe(false);
     expect(entry.completedAt).toBeNull();
@@ -185,7 +187,7 @@ describe('retry', () => {
     const history = entry.history.length;
 
     expect((await api.post('/queue/actions', { action: 'retry', ids: [entry.id] })).status).toBe(200);
-    await until(() => !Object.values(pipe!.db.data.jobs).some((job) => job.type === 'queue.retry'));
+    await until(() => entry.state.kind === 'blocked');
 
     expect(entry.state.kind).not.toBe('available');
     expect(entry.history.slice(history).some((event) => event.state.kind === 'available')).toBe(false);

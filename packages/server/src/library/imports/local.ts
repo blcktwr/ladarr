@@ -6,13 +6,16 @@ import { db } from '../../core/db.ts';
 import { catalog, itemFields } from '../../core/log.ts';
 import { inspectCoverage } from '../coverage.ts';
 import { attachTorrent, recordTorrent } from '../downloads/attach.ts';
+import { matchPath } from '../downloads/file-evidence.ts';
 import { ClientError } from '../downloads/qbittorrent.ts';
 import { addedByApp, isActive, matchesSentTorrent, phaseOfEntry } from '../downloads/queue.ts';
 import { parseRelease, normalizeTitle } from '../grab/release.ts';
+import { matchMovie, readCoverage, validMatches } from '../grab/match.ts';
 import { normalizeNumbering, releasePoint } from '../numbering.ts';
 import { isSample, isVideoFile, releaseEpisodes } from '../parse.ts';
 import { inside } from '../roots.ts';
 import { linkedSources, readTitleFolder } from '../scan.ts';
+import { torrentVideos } from './importer.ts';
 import type { ClientHandle, Clients, InventoryFile, LocalResult, MediaFile, Queue, QueueEntry, Selection, Title, Torrent } from '../../types.ts';
 
 // A target that a local import can resolve: it is on its way to a file, and no download owns it.
@@ -38,11 +41,31 @@ function matches(title: Title, torrent: Torrent) {
   return title.mediaType !== 'movie' || parsed.year === null || title.meta.year === null || parsed.year === title.meta.year;
 }
 
+function downloadCoverage(files: string[], title: Title, entry: QueueEntry, torrent: Torrent, season: number | null) {
+  const match = entry.retryDownload?.match;
+  const selected = match && matchPath(files, (file) => file, torrent)(match.file);
+  if (match && !selected) {
+    if (entry.release?.uploadPath) return 'absent';
+    entry.retryDownload!.match = null;
+  }
+  if (title.mediaType === 'movie') {
+    const movie = matchMovie(files, selected);
+    if (movie.file) return 'identified';
+    return movie.problem === 'no_video' && entry.retryDownload && torrent.complete ? 'absent' : 'unknown';
+  }
+  const assignments = selected ? { [selected]: match.covers } : undefined;
+  if (assignments && !validMatches(files, title, assignments)) return 'unknown';
+  const manifest = readCoverage(files, title, numberingOf(title, entry), assignments, season);
+  if (entry.retryDownload && torrent.complete && !files.some((file) => isVideoFile(file) && !isSample(file))) return 'absent';
+  return manifest.status({ season: entry.season!, number: entry.number! });
+}
+
 // A torrent that the client has already and that no target owns. The download stays with the target, also when a
 // restart or a lost association left it alone. The client is read once for every target of the title.
 async function attachDownloads({ queue, clients }: { queue: Queue; clients: Clients }, title: Title, entries: QueueEntry[]): Promise<{ attached: string[]; blocked: string[] }> {
   const open = entries.filter(eligible);
   if (!open.length) return { attached: [], blocked: [] };
+  for (const entry of open) if (entry.retryDownload) delete entry.retryDownload.absent;
   const input = (entry: QueueEntry) => JSON.stringify({ state: entry.state, attempt: entry.attempt, release: entry.release, manualMatch: entry.manualMatch, numbering: numberingOf(title, entry) });
   const inputs = new Map(open.map((entry) => [entry.id, input(entry)]));
   const current = (entry: QueueEntry) => db.data.titles[title.key] === title && db.data.queue[entry.id] === entry && eligible(entry) && inputs.get(entry.id) === input(entry);
@@ -51,41 +74,56 @@ async function attachDownloads({ queue, clients }: { queue: Queue; clients: Clie
   const found = new Map<string, { handle: ClientHandle; torrent: Torrent; targets: QueueEntry[] }>();
   const unknown = new Map<string, { handle: ClientHandle; torrent: Torrent; target: QueueEntry }>();
   for (const handle of clients.all()) {
+    const candidates = open.filter((entry) => {
+      const prior = entry.retryDownload;
+      if (prior === undefined) return true;
+      return prior && (!prior.clientId || prior.clientId === handle.id);
+    });
+    if (!candidates.length) continue;
     let list: Torrent[];
     try {
       list = await clients.list(handle, { fresh: true });
     } catch (error) {
       if (!(error instanceof ClientError)) throw error;
       // A client that does not answer is not a client without the download. The search waits instead of a second copy.
-      const targets = open.filter(current);
+      const targets = candidates.filter(current);
       for (const entry of targets) queue.block(entry, { code: 'client_unreachable' }, 'the download client did not answer');
       return { attached: [], blocked: targets.map((entry) => entry.id) };
     }
     for (const torrent of list) {
-      if (claimed.has(torrent.hash)) continue;
-      if (!matches(title, torrent)) continue;
+      const targetsOfTorrent = candidates.filter((entry) => {
+        if (entry.retryDownload !== undefined) return entry.retryDownload?.hash === torrent.hash;
+        return !claimed.has(torrent.hash) && matches(title, torrent);
+      });
+      if (!targetsOfTorrent.length) continue;
       let files: string[];
+      let downloaded: string[] | undefined;
       try {
-        files = (await handle.api.files(torrent.hash)).map((file) => file.name);
+        if (torrent.complete && targetsOfTorrent.some((entry) => entry.retryDownload)) {
+          downloaded = (await torrentVideos(handle, torrent))?.map((file) => file.clientPath) ?? [];
+        }
+        files = downloaded && targetsOfTorrent.every((entry) => entry.retryDownload) ? downloaded
+          : (await handle.api.files(torrent.hash)).filter((file) => file.sizeBytes > 0).map((file) => file.name);
       } catch (error) {
         if (!(error instanceof ClientError)) throw error;
-        const targets = open.filter(current);
+        const targets = targetsOfTorrent.filter(current);
         for (const target of targets) queue.block(target, { code: 'client_unreachable' }, 'the download client did not answer');
         return { attached: [], blocked: targets.map((target) => target.id) };
       }
       const parsed = parseRelease(torrent.name);
       const targets: QueueEntry[] = [];
-      for (const target of open.filter(current)) {
+      for (const target of targetsOfTorrent.filter(current)) {
+        const prior = target.retryDownload;
+        const paths = prior && downloaded ? downloaded : files;
         const numbering = numberingOf(title, target);
         const point = target.season === null ? null : releasePoint(numbering, { season: target.season, number: target.number! });
-        const manifest = inspectCoverage(files, title, numbering, parsed.season);
-        const videos = files.filter((file) => isVideoFile(file) && !isSample(file));
         const named = releaseEpisodes(torrent.name, title.episodes, numbering, null, title.meta.title);
         const targeted = title.mediaType === 'movie' || parsed.multiSeason || parsed.season === point?.season
           || Boolean(named && named.season === target.season && named.numbers.includes(target.number!));
-        const status = title.mediaType === 'movie' ? videos.length === 1 ? 'identified' : 'unknown' : manifest.status({ season: target.season!, number: target.number! });
+        const status = downloadCoverage(paths, title, target, torrent, parsed.season);
         if (status === 'identified') targets.push(target);
-        else if (status === 'unknown' && targeted) {
+        else if (status === 'absent' && prior) prior.absent = true;
+        else if (status === 'unknown' && (prior || targeted)) {
           unknown.set(target.id, { handle, torrent, target });
         }
       }
@@ -130,7 +168,7 @@ export async function importLocal({ queue, clients }: { queue: Queue; clients: C
   const only = entryIds ? new Set(entryIds) : null;
   const entries = Object.values(db.data.queue).filter((entry) => entry.titleKey === titleKey && eligible(entry) && (!only || only.has(entry.id)));
   if (!entries.length) return { imported: [], blocked: [] };
-  const input = (entry: QueueEntry) => JSON.stringify({ numbering: numberingOf(title, entry), manualMatch: entry.manualMatch });
+  const input = (entry: QueueEntry) => JSON.stringify({ attempt: entry.attempt, numbering: numberingOf(title, entry), manualMatch: entry.manualMatch });
   const inputs = new Map(entries.map((entry) => [entry.id, input(entry)]));
   const current = (entry: QueueEntry) => db.data.titles[titleKey] === title && eligible(entry) && db.data.queue[entry.id] === entry && inputs.get(entry.id) === input(entry);
 
@@ -179,6 +217,8 @@ export async function importLocal({ queue, clients }: { queue: Queue; clients: C
     const fileId = fileOf(title, entry);
     if (!present(fileId)) continue;
     const file = db.data.files[fileId!]!;
+    if (entry.retryDownload !== undefined && file.titleKey === title.key && (folder.status === 'ok' || folder.status === 'folder_missing')
+      && !folder.files.some(({ path }) => path === file.path)) continue;
     if (file.titleKey !== title.key || !approved(file) || (title.mediaType === 'tv' && !covers(file.episodes, entry))) {
       stop(entry, identities.has(file.path) ? 'file_unmapped' : 'file_invalid');
       continue;
@@ -215,8 +255,9 @@ export async function importLocal({ queue, clients }: { queue: Queue; clients: C
     if (title.mediaType === 'movie') {
       // A manual choice identifies the movie. File size cannot select between several plausible videos.
       for (const entry of open) {
-        const manual = entry.manualMatch ? folder.files.find((item) => item.path === entry.manualMatch!.file) : undefined;
-        const file = manual ?? (folder.files.length === 1 ? folder.files[0] : undefined);
+        const manual = entry.manualMatch;
+        const match = matchMovie(folder.files.map((file) => file.path), manual?.file);
+        const file = folder.files.find(({ path }) => path === match.file);
         if (!file) {
           if (folder.files.length) stop(entry, 'file_unmapped');
           continue;
@@ -257,11 +298,11 @@ export async function importLocal({ queue, clients }: { queue: Queue; clients: C
         const existing = Object.values(db.data.files).find((item) => item.titleKey === title.key && item.path === file.path);
         const target = open.find((entry) => !done.has(entry.id) && (existing
           ? approved(existing) && covers(existing.episodes, entry)
-          : !coverageOf(numberingOf(title, entry)).ambiguous.includes(file.path) && inspectCoverage([file.path], title, numberingOf(title, entry)).status({ season: entry.season!, number: entry.number! }) === 'identified'));
+          : covers(coverageOf(numberingOf(title, entry)).byFile.get(file.path) ?? [], entry)));
         const numbering = numberingOf(title, target ?? open[0]!);
         const episodes = existing
           ? approved(existing) ? existing.episodes : []
-          : coverageOf(numbering).ambiguous.includes(file.path) ? [] : inspectCoverage([file.path], title, numbering).episodes;
+          : coverageOf(numbering).byFile.get(file.path) ?? [];
         // A file that names no episode of the title can not be given to a target. It stays for the choice of the user.
         if (!episodes.length) {
           loose.push(file);

@@ -200,11 +200,10 @@ describe('failed imports', () => {
 
     expect((await api!.post('/queue/actions', { action: 'retry', ids: [entry.id] })).status).toBe(200);
 
-    // The retry lifts the block at once, and the import checks run again.
-    expect(entry.history.some((event) => event.cause === 'retry: the import checks run again')).toBe(true);
+    expect(entry.history.some((event) => event.cause === 'retry' && event.state.kind === 'queued')).toBe(true);
     await until(() => entry.history.filter((event) => event.cause === 'import blocked').length > blocks);
 
-    // The manual run does not use the automatic budget, and it does not fetch the release again.
+    // The new attempt reuses the download and has its own import budget.
     expect(entry.importTries).toBe(tries);
     expect(entry.state).toMatchObject({ kind: 'blocked', at: 'importing', problem: { code: 'file_unreadable' } });
     expect(pipe!.tracker.state.downloads.length).toBe(downloads);

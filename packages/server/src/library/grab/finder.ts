@@ -10,12 +10,13 @@ import { isMonitored, movieEligibleAt } from '../library.ts';
 import { catalog, itemFields, titleFields } from '../../core/log.ts';
 import { entryId, forgetSource, forgetUnusedSource, isActive, phaseOfEntry } from '../downloads/queue.ts';
 import { createClients } from '../downloads/client-api.ts';
+import { enqueueUpload } from '../downloads/upload.ts';
 import { importLocal } from '../imports/local.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import { manualUpgradeTargets } from './upgrades.ts';
 import { fileOf as matchedFile, matchCompletePack, matchEpisode, matchMovie, matchPartialPack, needsManualMapping, readCoverage, validMatches } from './match.ts';
 import { readSource } from './source.ts';
-import { currentSelection, enqueueSelection, readySelection, reasonOf as grabReasonOf } from './grab.ts';
+import { currentSelection, enqueueSelection, readySelection, reasonOf as grabReasonOf, savedFiles } from './grab.ts';
 import { requestIdFor } from '../../core/outbound.ts';
 import type { OutsideTitleLock } from '../../core/title-lock.ts';
 import { catalogPoint, catalogSeasons, normalizeNumbering, releasePoint, releaseSeasons } from '../numbering.ts';
@@ -518,7 +519,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   const prepared = (item: QueueTurn, id: string) => Object.values(item.selected).some((source) =>
     (source.status === 'accepted' || currentSelection(item, source)) && Object.hasOwn(source.matches, id));
   const eligibleEntry = (entry: QueueEntry) => isActive(entry) && entry.state.kind !== 'paused' && entry.state.kind !== 'blocked' &&
-    !entry.release?.uploadPath && !released(entry);
+    (!entry.release?.uploadPath || Boolean(entry.retryDownload)) && !released(entry);
   const busyTransfer = (item: QueueTurn) => (item.state.kind === 'importing' || item.state.kind === 'downloading') && item.entryIds.some((id) => {
     const entry = queue.get(id);
     return entry && isActive(entry) && released(entry);
@@ -600,6 +601,22 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
         queue.transitionItem(item, localBlock.state);
         return;
       }
+      for (const entry of targets()) {
+        const previous = entry.retryDownload;
+        if (!previous || !entry.release?.uploadPath) continue;
+        const files = savedFiles({ hash: previous.hash, source: entry.source ?? null });
+        if (!previous.absent && files?.includes(entry.release.uploadPath)) {
+          entry.transferHash = previous.hash;
+          entry.clientId = previous.clientId;
+          delete entry.retryDownload;
+          queue.enter(entry, 'waiting_slot', 'the uploaded torrent contains the selected file');
+          enqueueUpload(enqueue, [entry], previous.hash);
+          continue;
+        }
+        forgetSource(entry);
+        entry.release = null;
+        queue.touch(entry);
+      }
     }
 
     const ctx = decideContext(payload.forced === true);
@@ -617,7 +634,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       return !releaseToday || payload.fresh || last === undefined || nextSearchAt(releaseDates.get(entry)!, indexer, last) <= searchState.at;
     })]));
     let holdingClient = false;
-    const episodeRound = payload.episodeRound || (!resumed && !payload.supplied && targets().some((entry) => prepared(item, entry.id)));
+    const episodeRound = payload.episodeRound || (!resumed && !payload.supplied && targets().some((entry) => prepared(item, entry.id)))
+      || missing().every((entry) => entry.retryDownload?.absent);
     let episodeName = names[0];
 
     const ask = async (scope: Scope, group: QueueEntry[]) => {
@@ -735,6 +753,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           forgetSource(entry);
         }
         Object.assign(entry, { release: source.release, source: source.source, transferHash: source.hash, numbering: title!.mediaType === 'movie' ? null : numbering });
+        delete entry.retryDownload;
         const attempt = entry.attempts.at(-1);
         if (attempt) attempt.release = source.release.title;
         catalog.info('release_chosen', `Chose "${release.title}" from ${release.indexerName}`, itemFields(entry), {
@@ -755,8 +774,10 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
         const applicable = () => group.filter((entry) => queue.get(entry.id) === entry && eligibleEntry(entry) && (packScope !== undefined || !prepared(item, entry.id)));
         const remaining = applicable();
         if (!remaining.length) return;
+        if (remaining.every((entry) => entry.retryDownload?.absent && entry.retryDownload.hash === decision.hash)) continue;
         const previous = Object.values(item.selected).find((source) => releaseKey(source.release) === key);
-        if (work.checked[key] || (previous?.status === 'prepared' && !manualIds)) continue;
+        const retrySource = previous && remaining.some((entry) => entry.retryDownload?.hash === previous.hash && !entry.retryDownload.absent);
+        if (work.checked[key] || (previous?.status === 'prepared' && !manualIds && !retrySource)) continue;
         const evidenceTargets = decision.kind === 'pack' ? remaining : remaining.filter((entry) => entry.number === null ||
           decision.covers.some((covered) => covered.season === entry.season && covered.number === entry.number));
         if (!evidenceTargets.length && !payload.forced) continue;
@@ -768,7 +789,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           record(decision);
           continue;
         }
-        const retained = previous && (previous.status === 'verify' || (manualIds && previous.status === 'prepared')) ? previous : undefined;
+        const retained = previous && (previous.status === 'verify' || ((manualIds || retrySource) && previous.status === 'prepared')) ? previous : undefined;
         const ref = retained?.release ?? refFor(title, decision, payload.forced === true);
         phase('fetching', evidenceTargets.filter((entry) => !prepared(item, entry.id)));
         for (const entry of evidenceTargets) if (!prepared(item, entry.id)) entry.release = ref;
@@ -824,7 +845,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           reject('already_downloading');
           continue;
         }
-        const candidates = applicable();
+        const candidates = applicable().filter((entry) => !(entry.retryDownload?.absent && entry.retryDownload.hash === evidence.hash));
+        if (!candidates.length) continue;
         const movieChoice = title.mediaType === 'movie' && retained ? retained.matches[candidates[0]?.id ?? ''] : null;
         const movie = title.mediaType === 'movie' ? matchMovie(evidence.files, movieChoice) : null;
         if (movie?.problem === 'no_video') {
@@ -906,14 +928,16 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       sendPrepared(item);
       return;
     }
-    if (payload.supplied) {
+    const cached = Object.values(item.selected).filter((source) => source.source && source.status !== 'accepted' &&
+      missing().some((entry) => entry.retryDownload?.hash === source.hash && !entry.retryDownload.absent));
+    if (cached.length || payload.supplied) {
       const group = targets();
-      const ranked = candidates(payload.supplied, group);
+      const ranked = candidates([...cached.map(({ release }) => rawOf(release)), ...(payload.supplied ?? [])], group);
       await inspect(ranked.filter(({ decision }) => decision.kind === 'pack'), group, 'supplied');
       if (!holdingClient) await inspect(ranked.filter(({ decision }) => decision.kind !== 'pack'), group);
     }
     if (!holdingClient && !payload.forced && (title.mediaType === 'movie' || (targets().length > 1 && !episodeRound) || payload.otherSeasons)) {
-      if (title.mediaType === 'movie' && !payload.supplied) {
+      if (title.mediaType === 'movie' && !payload.supplied && missing().length) {
         const group = targets();
         const result = await ask({ kind: 'movie' }, group);
         if (!incomplete) await inspect(candidates(result, group), group);

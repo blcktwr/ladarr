@@ -35,7 +35,7 @@ function legacyMovie(item: QueueTurn, torrent: QueueTorrent) {
   return item.season === null && id && Object.hasOwn(torrent.matches, id) && !torrent.matches[id] ? id : undefined;
 }
 
-function savedFiles(torrent: QueueTorrent) {
+export function savedFiles(torrent: Pick<QueueTorrent, 'hash' | 'manifest' | 'source'>) {
   if (torrent.source && 'magnet' in torrent.source) {
     return hashOfMagnet(torrent.source.magnet) === torrent.hash ? torrent.manifest : undefined;
   }

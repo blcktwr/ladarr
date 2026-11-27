@@ -25,8 +25,8 @@ export function validMatches(files: string[], title: Title, matches: Record<stri
   }));
 }
 
-export function readCoverage(files: string[], title: Title, numbering: Numbering, matches?: Record<string, EpisodeRef[]>): Manifest {
-  const manifest = inspectCoverage(matches ? files.filter((file) => !Object.hasOwn(matches, file)) : files, title, numbering);
+export function readCoverage(files: string[], title: Title, numbering: Numbering, matches?: Record<string, EpisodeRef[]>, seasonHint?: number | null): Manifest {
+  const manifest = inspectCoverage(matches ? files.filter((file) => !Object.hasOwn(matches, file)) : files, title, numbering, seasonHint);
   if (!matches) return manifest;
   const manual = Object.values(matches).flat();
   const assigned = new Set(manual.map(key));

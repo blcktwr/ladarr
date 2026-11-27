@@ -740,12 +740,12 @@ describe('actions', () => {
     await until(() => stageOf(entry) === 'downloading');
     move(pipe!.queue, entry, { stage: 'importing', reason: { code: 'file_not_found' } }, 'test');
 
-    // The reason offers a match, and the retry runs the import checks again, with no limit.
+    // The reason offers a match. Retry returns the target to the queue.
     expect((await api!.get('/queue/entries/movie:2')).body.entry.reason).toMatchObject({ action: 'match' });
     // The worker stays away, so the retry keeps the stage that it sets.
     await pipe!.worker.pause();
     expect((await api!.post('/queue/actions', { action: 'retry', ids: ['movie:2'] })).status).toBe(200);
-    expect(entry.state.kind).toBe('importing');
+    expect(entry.state.kind).toBe('queued');
   });
 
   it('refuses a retry of a target that does not wait', async () => {

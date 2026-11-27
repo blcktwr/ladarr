@@ -385,6 +385,7 @@ export function createQueue(events: Events, persist: () => void, onState?: State
   }
 
   function startAttempt(entry: QueueEntry, reason: string) {
+    delete entry.retryDownload;
     delete entry.lastIndexerSearch;
     delete entry.emptyRoundIndexers;
     entry.attempt++;
@@ -462,6 +463,42 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     startAttempt(entry, reason);
   }
 
+  function restart(entry: QueueEntry) {
+    const item = ensureItem(entry);
+    const selected = Object.values(item.selected).find((source) => Object.hasOwn(source.matches, entry.id));
+    const hash = entry.transferHash ?? entry.release?.infoHash ?? selected?.hash;
+    const upload = entry.release?.uploadPath ? entry.release : null;
+    const match = entry.manualMatch ?? (upload?.uploadPath ? {
+      file: upload.uploadPath, covers: entry.season === null ? [] : [{ season: entry.season, number: entry.number! }],
+    } : null);
+    const previous = hash ? { hash, clientId: entry.clientId ?? selected?.clientId ?? null, match } : entry.retryDownload;
+    rememberSent(entry);
+    retryAttempt(entry);
+    entry.retryDownload = previous ?? null;
+    for (const source of Object.values(item.selected)) {
+      if (!Object.hasOwn(source.matches, entry.id)) continue;
+      delete source.matches[entry.id];
+      if (!Object.keys(source.matches).length) {
+        if (source.hash === hash && source.source && source.status !== 'accepted') source.status = 'verify';
+        else {
+          delete item.selected[source.hash];
+          forgetUnusedSource(source.hash);
+        }
+      }
+    }
+    if (!upload) forgetSource(entry);
+    Object.assign(entry, {
+      search: null, release: upload, transferHash: null, clientId: null, importResult: null, importTries: 0,
+      manualMatch: previous ? null : entry.manualMatch, replaceDestination: undefined,
+      numbering: structuredClone(db.data.titles[entry.titleKey]?.numbering ?? null), partialPack: null, continuation: null,
+    });
+    delete item.emptySearches[entry.id];
+    if (item.state.kind !== 'queued') item.position = db.data.queueItemSeq++;
+    updateItem(item, { candidate: null, clientHold: false, search: null, nextAt: null });
+    transitionItem(item, { kind: 'queued' });
+    resolve(entry, 'queued', 'retry');
+  }
+
   // The jobs of the entry go to the priority lane with it. The caller does that, because jobs know the entry only by ID.
   function setPriority(entry: QueueEntry, on: boolean) {
     if (on === (entry.priority !== null)) return;
@@ -507,6 +544,7 @@ export function createQueue(events: Events, persist: () => void, onState?: State
     request,
     fallback,
     retryAttempt,
+    restart,
     startAttempt,
     endAttempt,
     setPriority,
