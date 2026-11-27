@@ -1,5 +1,5 @@
 import type { LibraryType } from '@ladarr/shared/enums';
-import type { CastMember, DownloadedQuality, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary, TorrentUploadPreview, UpgradeQuality } from '@ladarr/shared/types';
+import type { CastMember, DownloadedQuality, EpisodeRow, EpisodeSummary, PersonCredits, PlanRequest, SearchPlan, SearchResult, SeasonRow, SeasonSummary, SeriesEpisodes, TitleDetail, TitlePreview, TitleSummary, TorrentUploadPreview, UpgradeQuality } from '@ladarr/shared/types';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { ArrowLeft, ChevronDown, ChevronUp, Download, Plus, Trash2 } from 'lucide-react';
@@ -259,7 +259,7 @@ function EpisodeTable({ rows, loading = false, library = false }: { rows?: Episo
       aria-label={t('Episodes')}
       loading={loading}
       columns={[
-        { label: '#', width: '3.5rem' },
+        { label: '#', width: '5rem' },
         { label: t('Title'), width: '24rem' },
         { label: t('Air date'), width: '8rem' },
         ...(library ? [{ label: t('Status'), width: '9rem' }] : []),
@@ -267,7 +267,7 @@ function EpisodeTable({ rows, loading = false, library = false }: { rows?: Episo
       rows={rows?.map((row, index) => ({
         key: `${row.season}x${row.number}`,
         cells: [
-          `${index + 1}${index + 1 === row.number ? '' : ` (${row.number})`}`,
+          row.number === index + 1 ? row.number : `${row.number}\u00a0(${index + 1})`,
           row.name,
           row.airDate ? airDate(row.airDate) : t('Unknown'),
           ...(library ? [<EpisodeStatus key="status" episode={row} />] : []),
@@ -291,7 +291,9 @@ function LibrarySeason({ titleKey, season }: { titleKey: string; season: number 
 // A season of the series in its own container. A click on the container opens and closes the table of episodes. The
 // buttons at the right do the same for the keyboard, and the first one adds the season before the series is in the
 // library. A click inside the table does not close it.
-function SeasonPane({ name, expanded, onToggle, add, children }: { name: string; expanded: boolean; onToggle: () => void; add?: ReactNode; children?: ReactNode }) {
+function SeasonPane({ season, expanded, onToggle, add, children }: { season: SeasonSummary; expanded: boolean; onToggle: () => void; add?: ReactNode; children?: ReactNode }) {
+  const name = seasonName(season.seasonNumber);
+  const title = season.names?.[getLanguage()] ?? season.names?.en ?? name;
   const click = (event: MouseEvent<HTMLDivElement>) => {
     const target = event.target as Element;
     if (target.closest('table, button')) return;
@@ -299,20 +301,34 @@ function SeasonPane({ name, expanded, onToggle, add, children }: { name: string;
   };
   return (
     <div className="cursor-pointer" onClick={click}>
-      <Pane className="w-full">
-        <Section
-          title={name}
-          action={
-            <>
+      <Pane>
+        <section aria-label={name} className="grid w-full grid-cols-[minmax(0,1fr)] gap-5">
+          <div className="flex items-center gap-4">
+            {!expanded && (
+              <div className="shrink-0">
+                <Thumbnail size="xs" image={posterUrl(season.posterPath ?? null) ?? ''} title="" noCaption />
+              </div>
+            )}
+            <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
+              <div className="flex items-center gap-2">
+                <Text variant="heading">
+                  {expanded ? name : title}{!expanded && season.airDate && ` (${season.airDate.slice(0, 4)})`}
+                </Text>
+                {!expanded && season.rating != null && <Badge>{season.rating.toFixed(1)}</Badge>}
+              </div>
+              {!expanded && (
+                <Text variant="small">{season.episodeCount === 1 ? t('1 episode') : t('{count} episodes', { count: season.episodeCount })}</Text>
+              )}
+            </div>
+            <Actions>
               {add}
-              <Button iconOnly variant="ghost" aria-label={expanded ? t('Hide episodes of {name}', { name }) : t('Show episodes of {name}', { name })} onClick={onToggle}>
+              <Button iconOnly variant="ghost" aria-expanded={expanded} aria-label={expanded ? t('Hide episodes of {name}', { name }) : t('Show episodes of {name}', { name })} onClick={onToggle}>
                 {expanded ? <ChevronUp /> : <ChevronDown />}
               </Button>
-            </>
-          }
-        >
+            </Actions>
+          </div>
           {children && <div className="w-full cursor-default">{children}</div>}
-        </Section>
+        </section>
       </Pane>
     </div>
   );
@@ -354,7 +370,7 @@ function Seasons({ title, onAddSeason, onRemoveSeason }: { title: TitleDetail; o
     return (
       <SeasonPane
         key={season.seasonNumber}
-        name={seasonName(season.seasonNumber)}
+        season={season}
         expanded={expanded}
         onToggle={() => toggle(season.seasonNumber)}
         add={
@@ -414,7 +430,7 @@ function PreviewSeasons({ tmdbId, onAddSeason, pending }: { tmdbId: number; onAd
     return (
       <SeasonPane
         key={season.seasonNumber}
-        name={seasonName(season.seasonNumber)}
+        season={season}
         expanded={expanded}
         onToggle={() => toggle(season.seasonNumber)}
         add={

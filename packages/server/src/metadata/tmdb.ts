@@ -63,7 +63,7 @@ function certificationOf(raw: TmdbRaw, mediaType: MediaType): string | null {
   return entries.map((entry) => text(mediaType === 'movie' ? entry?.certification : entry?.rating)).find((value) => value) ?? null;
 }
 
-function titleMeta(raw: TmdbRaw, mediaType: MediaType): TitleMeta {
+function titleMeta(raw: TmdbRaw, mediaType: MediaType, spanishNames: Map<number, string | null>): TitleMeta {
   const base = searchResult(raw, mediaType);
   const date = textOrNull(mediaType === 'movie' ? raw.release_date : raw.first_air_date);
   const originalTitle = text(mediaType === 'movie' ? raw.original_title : raw.original_name);
@@ -110,6 +110,9 @@ function titleMeta(raw: TmdbRaw, mediaType: MediaType): TitleMeta {
       seasonNumber: numberOrNull(season?.season_number) ?? 0,
       episodeCount: numberOrNull(season?.episode_count) ?? 0,
       airDate: textOrNull(season?.air_date),
+      names: { en: textOrNull(season?.name), es: spanishNames.get(season?.season_number) ?? null },
+      posterPath: textOrNull(season?.poster_path),
+      rating: numberOrNull(season?.vote_average) || null,
     })),
   };
 }
@@ -193,7 +196,14 @@ export function createTmdb({
   // Pass ttl 0 to skip the cache.
   async function details(mediaType: MediaType, id: number, ttl = ttlMs): Promise<TitleMeta> {
     const append = mediaType === 'movie' ? 'release_dates,external_ids,alternative_titles' : 'external_ids,alternative_titles,content_ratings';
-    return titleMeta(await get(`/${mediaType}/${id}`, { append_to_response: append }, ttl), mediaType);
+    const path = `/${mediaType}/${id}`;
+    const raw = await get(path, { append_to_response: append }, ttl) as TmdbRaw;
+    const spanishNames = new Map<number, string | null>();
+    if (mediaType === 'tv' && list(raw?.seasons).length) {
+      const translated = await get(path, { language: 'es' }, ttl) as TmdbRaw;
+      for (const season of list(translated?.seasons)) spanishNames.set(season?.season_number, textOrNull(season?.name));
+    }
+    return titleMeta(raw, mediaType, spanishNames);
   }
 
   // ok is null before the first request.

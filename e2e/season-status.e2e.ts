@@ -15,6 +15,15 @@ test.afterAll(() => stack.stop());
 test('the page of a series marks only the seasons that the user selected', async ({ page, context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
   await page.goto(`${URL_BASE}/catalog/tv/3`);
+  const season = page.getByRole('region', { name: 'Season 2' });
+  const summary = async () => {
+    await expect(season).toContainText('The Return');
+    await expect(season).toContainText('2021');
+    await expect(season).toContainText('8.4');
+    await expect(season).toContainText('2 episodes');
+    await expect(season.getByRole('table')).toHaveCount(0);
+  };
+  await summary();
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Add new series' });
   // A click on the name of the season selects it, not only a click on its checkbox.
@@ -26,17 +35,17 @@ test('the page of a series marks only the seasons that the user selected', async
   // The selected season has no +, and the season that the user did not select keeps its +.
   await expect(page.getByRole('button', { name: 'Add Season 2' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add Season 1' })).toHaveCount(0);
+  await summary();
 
   // The episodes of the season that the user did not select have no status.
   await page.getByRole('button', { name: 'Show episodes of Season 2' }).click();
-  const season = page.getByRole('region', { name: 'Season 2' });
   await expect(season.getByRole('table', { name: 'Episodes' })).toContainText('Season two episode 1');
   await expect(season.getByRole('table', { name: 'Episodes' })).toContainText('N/A');
   await expect(season.getByRole('table', { name: 'Episodes' })).not.toContainText('Searching');
 
-  // The # column shows the position of the episode in the season, then the real number.
-  await expect(season.getByRole('table', { name: 'Episodes' }).getByRole('cell', { name: '1 (3)', exact: true })).toBeVisible();
-  await expect(season.getByRole('table', { name: 'Episodes' }).getByRole('cell', { name: '2 (4)', exact: true })).toBeVisible();
+  // The # column shows the TMDB episode number, then its position in the season.
+  await expect(season.getByRole('table', { name: 'Episodes' }).getByRole('cell', { name: '3 (1)', exact: true })).toBeVisible();
+  await expect(season.getByRole('table', { name: 'Episodes' }).getByRole('cell', { name: '4 (2)', exact: true })).toBeVisible();
 
   // The Air date column shows the date as dd/MM/YYYY.
   await expect(season.getByRole('table', { name: 'Episodes' }).getByRole('cell', { name: '01/02/2021', exact: true })).toBeVisible();

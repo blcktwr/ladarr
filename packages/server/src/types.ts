@@ -1,7 +1,7 @@
 import type { Language, MediaType, Override, WebhookEventType, ClientState, TorrentStatus, TrackerStatus, WANT_KIND, IndexerApp, Policy, RootProblem, AddMode, ImportNote, BackupKind } from '@ladarr/shared/enums';
 import type { Phase, QueueState } from '@ladarr/shared/queue';
-import type { SizeLimits, QueueClientDetail, IndexerHealth, QualityProfile, UpgradeQuality, ImportCheck, PlanPreview, SearchResult, MigrationRow, Numbering } from '@ladarr/shared/types';
-export type { Numbering } from '@ladarr/shared/types';
+import type { SizeLimits, QueueClientDetail, IndexerHealth, QualityProfile, UpgradeQuality, ImportCheck, PlanPreview, SearchResult, SeasonSummary, MigrationRow, Numbering } from '@ladarr/shared/types';
+export type { Numbering, SeasonSummary } from '@ladarr/shared/types';
 import type { Low } from 'lowdb';
 import type { copyFile as fsCopyFile, link as fsLink, rename as fsRename } from 'node:fs/promises';
 import type { QUEUE_KEYS } from './core/db.ts';
@@ -1064,7 +1064,6 @@ export type VerificationState = {
 };
 export type ReleaseKind = 'premiere' | 'theatrical_limited' | 'theatrical' | 'digital' | 'physical' | 'tv';
 export type ReleaseDate = { region: string; kind: ReleaseKind; date: string };
-export type SeasonSummary = { seasonNumber: number; episodeCount: number; airDate: string | null };
 // One page of a discover list, with the number of pages that TMDB has.
 export type DiscoverPage = { results: SearchResult[]; totalPages: number };
 // The TMDB facts about a title. A refresh replaces all of it, so it never holds a choice of the user.

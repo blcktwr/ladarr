@@ -78,7 +78,11 @@ export async function startFakeTmdb() {
     }
     if (path === '/tv/1/season/1') return send({ episodes: EPISODES });
     if (path === '/tv/3') {
-      return send({ ...TWO_SEASONS, status: 'Ended', episode_run_time: [45], vote_count: 0, vote_average: 0, external_ids: {}, seasons: [1, 2].map((season) => ({ season_number: season, episode_count: TWO_SEASONS_EPISODES[season as 1 | 2].length, air_date: '2021-01-01' })) });
+      const seasons = [
+        { season_number: 1, episode_count: TWO_SEASONS_EPISODES[1].length, air_date: '2021-01-01' },
+        { season_number: 2, episode_count: TWO_SEASONS_EPISODES[2].length, air_date: '2021-02-01', name: url.searchParams.get('language') === 'es' ? 'El regreso' : 'The Return', vote_average: 8.4 },
+      ];
+      return send({ ...TWO_SEASONS, status: 'Ended', episode_run_time: [45], vote_count: 0, vote_average: 0, external_ids: {}, seasons });
     }
     if (path === '/tv/3/season/1') return send({ episodes: TWO_SEASONS_EPISODES[1] });
     if (path === '/tv/3/season/2') return send({ episodes: TWO_SEASONS_EPISODES[2] });

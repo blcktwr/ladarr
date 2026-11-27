@@ -26,8 +26,8 @@ export function metadataSweepHandler(): Handler {
     run: async () => {
       const now = Date.now();
       for (const title of Object.values(db.data.titles)) {
-        // A title from an older version has no regions for its aliases. One refresh fills them.
-        if (title.meta.aliasRegions === undefined) {
+        // One refresh fills the metadata that older versions did not store.
+        if (title.meta.aliasRegions === undefined || title.meta.seasons.some((season) => season.names === undefined)) {
           enqueue(refreshJob(title.key));
           continue;
         }

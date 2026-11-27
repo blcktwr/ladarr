@@ -73,7 +73,7 @@ const series = {
   alternative_titles: { results: [{ title: 'Braking Bad' }] },
   seasons: [
     { season_number: 0, episode_count: 11, air_date: null },
-    { season_number: 1, episode_count: 7, air_date: '2008-01-20' },
+    { season_number: 1, episode_count: 7, air_date: '2008-01-20', name: 'Season 1', poster_path: '/s1.jpg', vote_average: 8.4 },
   ],
 };
 
@@ -190,12 +190,14 @@ describe('tmdb client', () => {
   });
 
   it('reads a series, keeps the TVDB ID apart, and treats a zero rating or runtime as unknown', async () => {
-    const { send } = fakeTmdb({ '/tv/1396': () => json(series) });
+    const { send } = fakeTmdb({ '/tv/1396': (url) => json(url.searchParams.get('language') === 'es'
+      ? { seasons: [{ season_number: 1, name: 'Temporada 1' }] }
+      : series) });
     const meta = await client(send).details('tv', 1396);
     expect(meta).toMatchObject({ mediaType: 'tv', tmdbId: 1396, tvdbId: 81189, rating: null, runtime: 59, aliases: ['Braking Bad'] });
     expect(meta.seasons).toEqual([
-      { seasonNumber: 0, episodeCount: 11, airDate: null },
-      { seasonNumber: 1, episodeCount: 7, airDate: '2008-01-20' },
+      { seasonNumber: 0, episodeCount: 11, airDate: null, names: { en: null, es: null }, posterPath: null, rating: null },
+      { seasonNumber: 1, episodeCount: 7, airDate: '2008-01-20', names: { en: 'Season 1', es: 'Temporada 1' }, posterPath: '/s1.jpg', rating: 8.4 },
     ]);
   });
 

@@ -352,7 +352,7 @@ describe('library API', () => {
     // The id finds every request of the refresh, so the log line opens all of them.
     const { requestId } = (line!.requests as { requestId: string; system: string }[])[0]!;
     const requests = await recentLogs(10, { kind: 'requests', requestId });
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(4);
     expect(requests.every((entry) => entry.system === 'TMDB' && entry.requestId === requestId)).toBe(true);
   });
 

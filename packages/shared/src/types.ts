@@ -121,7 +121,16 @@ export type TitleSummary = {
   eligibleAt: number | null;
 };
 
-export type SeasonRow = { seasonNumber: number; episodeCount: number; counts: EpisodeCounts; override: Override | null; numberingRevision?: number };
+export type SeasonSummary = {
+  seasonNumber: number;
+  episodeCount: number;
+  airDate: string | null;
+  names?: Record<Language, string | null>;
+  posterPath?: string | null;
+  rating?: number | null;
+};
+
+export type SeasonRow = SeasonSummary & { counts: EpisodeCounts; override: Override | null; numberingRevision?: number };
 
 export type DownloadedQuality = { resolution: number; label: string };
 
@@ -168,7 +177,7 @@ export type EpisodeRow = EpisodeSummary & {
 };
 
 // The seasons and the episodes of a series that is not in the library.
-export type SeasonEpisodes = { seasonNumber: number; episodes: EpisodeSummary[] };
+export type SeasonEpisodes = SeasonSummary & { episodes: EpisodeSummary[] };
 
 export type SeriesEpisodes = { seasons: SeasonEpisodes[] };
 

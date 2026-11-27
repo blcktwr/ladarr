@@ -77,13 +77,17 @@ export function detail(title: Title): TitleDetail {
   const at = clock();
   const { meta } = title;
   const groups = seasonGroups(title);
-  const catalog = new Map(meta.seasons.map((season) => [season.seasonNumber, season.episodeCount]));
+  const catalog = new Map(meta.seasons.map((season) => [season.seasonNumber, season]));
   const seasons: SeasonRow[] = [...new Set([...catalog.keys(), ...groups.keys()])].sort((a, b) => a - b).map((seasonNumber) => {
     const episodes = (groups.get(seasonNumber) ?? []).map((row) => row.episode);
     const numberingRevision = seasonRevision(title.numbering, seasonNumber);
+    const origin = episodes[0]?.season ?? seasonNumber;
+    const season = episodes.every((episode) => episode.season === origin) ? catalog.get(origin) : undefined;
     return {
+      ...season,
       seasonNumber, numberingRevision,
-      episodeCount: numberingRevision === undefined ? catalog.get(seasonNumber) ?? episodes.length : episodes.length,
+      airDate: season?.airDate ?? null,
+      episodeCount: numberingRevision === undefined ? season?.episodeCount ?? episodes.length : episodes.length,
       counts: seriesCounts({ ...title, episodes }, at),
       override: numberingRevision === undefined ? title.seasonOverrides[seasonNumber] ?? null : null,
     };

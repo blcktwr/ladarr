@@ -13,7 +13,7 @@ export function searchSeasons(tmdb: Tmdb | undefined): RequestHandler {
       seasons
         .filter((season) => season.episodeCount > 0)
         .map(async (season) => ({
-          seasonNumber: season.seasonNumber,
+          ...season,
           episodes: (await tmdb!.season(id, season.seasonNumber)).map(({ season: seasonNumber, number, name, airDate, runtime }) => ({ season: seasonNumber, number, name, airDate, runtime })),
         })),
     );
