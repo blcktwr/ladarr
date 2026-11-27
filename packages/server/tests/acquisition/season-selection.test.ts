@@ -17,7 +17,7 @@ const COMPLETE = 'Show.Name.S01.1080p.WEB-DL-FULL';
 const SINGLE = 'Show.Name.S01E03.1080p.WEB-DL-SINGLE';
 const WRONG = 'Show.Name.S01E03.1080p.WEB-DL-WRONG';
 const MOVIE = 'Movie.Name.2019.1080p.BluRay-MOVIE';
-const file = (n: number) => `Show.Name.S01E0${n}.mkv`;
+const file = (n: number) => `Show.Name.S01E${String(n).padStart(2, '0')}.mkv`;
 const seasonSearch = { type: 'search', season: '1', episode: null };
 const episodeSearch = (n: number) => ({ type: 'search', season: '1', episode: String(n) });
 const missingSearch = episodeSearch(3);
@@ -58,6 +58,45 @@ it('adds a complete pack once when one file identifies two episodes', async () =
 
   await expect.poll(async () => (await group(series.key)).status).toBe('downloading');
   expect(pipe.acquisition).toEqual([seasonSearch, read(complete), add(complete)]);
+});
+
+it.each([false, true])('accepts a quality-rejected season pack for all 31 episodes (E01 already prepared: %s)', async (prepared) => {
+  const numbers = Array.from({ length: 31 }, (_, i) => i + 1);
+  const series = await setup(numbers);
+  series.episodes.push(episode(2, 1));
+  const otherSeason = pipe.queue.ensure(series.key, 2, 1);
+  const low = pack('Show.Name.S01.720p.WEB-DL-PACK', numbers.map(file), numbers.length);
+  const hash = hashOf(low.title, low.files);
+  const matches = Object.fromEntries(numbers.map((n) => [`${series.key}:1x${n}`, `${low.title}/${file(n)}`]));
+  advertise([low]);
+  pipe.finder.requestSearch(series.key, { season: 1, manual: true, fresh: true });
+  await expect.poll(async () => (await group(series.key)).counts.stuck).toBe(31);
+  const first = pipe.queue.get(`${series.key}:1x1`)!;
+  const turn = pipe.queue.itemFor(first)!;
+
+  async function choose(scope: { ids: string[] } | { scope: 'season' }) {
+    const [{ entryId, release }] = (await group(series.key)).rejected;
+    expect(release).toMatchObject({ title: low.title, kind: 'pack', selectable: true,
+      reasons: expect.arrayContaining(['The quality of the release is not in the allowed qualities.']) });
+    return api!.post(`/queue/entries/${entryId}/releases/grab`, { indexerId: release.indexerId, guid: release.guid, ...scope });
+  }
+
+  if (prepared) {
+    expect(await choose({ ids: [first.id] })).toMatchObject({ status: 202, body: { started: [first.id] } });
+    await expect.poll(async () => (await group(series.key)).status).toBe('stuck');
+    expect(turn.selected[hash]?.matches).toEqual({ [first.id]: matches[first.id] });
+    expect((await group(series.key)).counts.stuck).toBe(30);
+    expect(pipe.acquisition.filter((event) => event.type === 'add')).toEqual([]);
+  }
+
+  const attempt = first.attempt;
+  expect((await choose({ scope: 'season' })).status).toBe(202);
+  await expect.poll(async () => (await group(series.key)).reached.matched).toBe(31);
+  await expect.poll(async () => (await group(series.key)).counts.downloading).toBe(31);
+  expect(turn.selected[hash]?.matches).toEqual(matches);
+  expect(pipe.acquisition.filter((event) => event.type === 'add')).toEqual([add(low)]);
+  if (prepared) expect(first.attempt).toBe(attempt);
+  expect(otherSeason).toMatchObject({ state: { kind: 'queued' }, release: null, transferHash: null });
 });
 
 it('inspects a higher-ranked partial but submits only the later complete pack', async () => {

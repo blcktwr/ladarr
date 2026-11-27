@@ -10,11 +10,15 @@ const WRONG = 'Other.Movie.2019.1080p.BluRay-WRONG';
 const CORRUPT = 'Movie.Name.2019.1080p.BluRay-CORRUPT';
 
 let stack: Stack;
-let cookie: Awaited<ReturnType<Stack['createOwner']>>;
-test.beforeAll(async () => {
+test.beforeEach(async ({ context }) => {
   stack = await startStack();
-  cookie = await stack.createOwner();
+  const cookie = await stack.createOwner();
+  await context.addCookies([{ ...cookie, url: URL_BASE }]);
   await configure(stack);
+});
+test.afterEach(() => stack.stop());
+
+test('keeps the ranked rejections in Stuck and verifies a manual choice beyond the first eight', async ({ page }) => {
   // A movie has no size limit by default. The TINY release must be rejected by its size again.
   const sizes = await stack.call('PUT', '/quality/sizes/movie/webdl-1080', { min: 12.5, preferred: null, max: null });
   if (sizes.status >= 300) throw new Error(`PUT /quality/sizes/movie/webdl-1080 answered ${sizes.status}: ${JSON.stringify(sizes.body)}`);
@@ -26,13 +30,7 @@ test.beforeAll(async () => {
   ].map((item) => ({ ...item, category: 2040 }));
   const movie = await stack.call('POST', '/library', { mediaType: 'movie', tmdbId: 2, add: 'all' });
   if (movie.status >= 300) throw new Error(`POST /library answered ${movie.status}: ${JSON.stringify(movie.body)}`);
-});
-test.afterAll(() => stack.stop());
-test.beforeEach(async ({ context }) => {
-  await context.addCookies([{ ...cookie, url: URL_BASE }]);
-});
 
-test('keeps the ranked rejections in Stuck and verifies a manual choice beyond the first eight', async ({ page }) => {
   await page.goto(`${URL_BASE}/activity`);
   const inspect = page.getByRole('button', { name: 'Inspect Movie Name (2019)' });
   const table = page.getByRole('table', { name: 'Rejected releases' });
@@ -86,5 +84,34 @@ test('keeps the ranked rejections in Stuck and verifies a manual choice beyond t
 
   await expect.poll(() => [...stack.qbit.torrents.values()].map(({ name }) => name), { timeout: 60_000 }).toEqual([RELEASE]);
   expect(stack.tracker.state.downloads.slice(reads)).toEqual([RELEASE]);
+  expect(stack.addRequests()).toHaveLength(1);
+});
+
+test('downloads every episode with one submission when a season pack rejected for quality is accepted', async ({ page }) => {
+  const title = 'Show.Name.S01.720p.WEB-DL-GRP';
+  const episodes = [1, 2, 3];
+  const files = episodes.map((n) => `Show.Name.S01E0${n}.mkv`);
+  const pack = { title, size: 3 * 60 * 45 * MIB, files };
+  stack.tracker.state.answer = (url) => url.searchParams.get('season') === '1' && !url.searchParams.has('ep') ? [pack] : [];
+  expect((await stack.call('POST', '/library', { mediaType: 'tv', tmdbId: 1, add: 'all' })).status).toBe(201);
+
+  await page.goto(`${URL_BASE}/activity`);
+  await page.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
+  const row = page.getByRole('table', { name: 'Rejected releases' }).getByRole('row').filter({ hasText: title });
+  await expect(row).toContainText('The quality of the release is not in the allowed qualities.', { timeout: 60_000 });
+  expect(stack.addRequests()).toHaveLength(0);
+  await row.getByRole('button', { name: /^Download 720p WEB-DL/ }).click();
+  const grab = page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/releases/grab'));
+  await page.getByRole('dialog', { name: 'Download this release?' }).getByRole('button', { name: 'Download', exact: true }).click();
+  const response = await grab;
+  expect(response.request().postDataJSON()).toMatchObject({ guid: title, scope: 'season' });
+  expect(response.ok()).toBe(true);
+
+  await page.getByRole('button', { name: 'Show episodes of Season 1' }).click();
+  const table = page.getByRole('table', { name: 'Episodes of season 1' });
+  for (const n of episodes) {
+    await expect(table.locator(`[data-row="entry:tv:1:1x${n}"]`)).toContainText('Downloading', { timeout: 45_000 });
+  }
+  expect([...stack.qbit.torrents.values()].map(({ name }) => name)).toEqual([title]);
   expect(stack.addRequests()).toHaveLength(1);
 });

@@ -301,7 +301,7 @@ const sourceLabel = (source: string) => sourceLabels[source] ?? (source === 'unk
 const releaseQuality = (release: QueueRejectedRelease) => [release.resolution ? `${release.resolution}p` : null, sourceLabel(release.source)].filter(Boolean).join(' ');
 
 // The releases that a search found and rejected, with the button that takes one by hand.
-type Rejected = QueueGroupRow['rejected'][number];
+type Rejected = QueueGroupRow['rejected'][number] & { scope?: 'season' };
 
 function NoMatchReleases({ items, onDone }: { items: Rejected[]; onDone: () => void }) {
   const [chosen, setChosen] = useState<Rejected | null>(null);
@@ -318,7 +318,7 @@ function NoMatchReleases({ items, onDone }: { items: Rejected[]; onDone: () => v
     setBusy(true);
     setError('');
     try {
-      await api(`/queue/entries/${chosen.entryId}/releases/grab`, { method: 'POST', body: { indexerId: chosen.release.indexerId, guid: chosen.release.guid } });
+      await api(`/queue/entries/${chosen.entryId}/releases/grab`, { method: 'POST', body: { indexerId: chosen.release.indexerId, guid: chosen.release.guid, scope: chosen.scope } });
       onDone();
       close();
     } catch (err) {
@@ -409,7 +409,8 @@ function MovieRejected({ entry, refresh }: { entry: QueueEntryView; refresh: () 
 // The server sends the rejected releases of the season in preference order.
 function GroupRejected({ group, filters, refresh }: { group: QueueGroupRow; filters: Filters; refresh: () => void }) {
   const { data } = useGroupEntries(group, filters);
-  return <RejectedPane items={data?.group.rejected ?? group.rejected} onDone={refresh} />;
+  const items = data?.group.rejected ?? group.rejected;
+  return <RejectedPane items={items.map((item) => item.release.kind === 'pack' ? { ...item, scope: 'season' } : item)} onDone={refresh} />;
 }
 
 // The progress of a download: the part that is done.

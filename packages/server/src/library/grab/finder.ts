@@ -1301,7 +1301,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
 
   // --- Interactive search -----------------------------------------------------------------
 
-  function itemForMapping(anchor: QueueEntry) {
+  function seasonItem(anchor: QueueEntry) {
     const current = queue.itemFor(anchor);
     if (current) return current;
     const entries = Object.values(db.data.queue).filter((entry) => entry.titleKey === anchor.titleKey &&
@@ -1329,7 +1329,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
 
   // The caller checks the whole batch under the title lock before it applies any assignment.
   function applyRejectedMapping(anchor: QueueEntry, batch: RejectedMapping[]): void {
-    const item = itemForMapping(anchor);
+    const item = seasonItem(anchor);
     const title = db.data.titles[anchor.titleKey]!;
     const numbering = numberingOf(title);
     const ids = new Set(batch.flatMap(({ files }) => files.flatMap(({ ids }) => ids)));
@@ -1419,6 +1419,24 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     return number !== undefined && season !== undefined ? { kind: 'episode', title, season, number, numbering } : undefined;
   }
 
+  function pendingPackEntries(want: Extract<Want, { kind: 'season' }>) {
+    const { title, season, releaseSeason } = want;
+    const item = queue.findItem(title.key, season);
+    if (item && item.state.kind !== 'blocked') return [];
+    const numbering = numberingOf(title);
+    return title.episodes.flatMap((episode) => {
+      if (episode.season !== season || episode.removedFromTmdb || !wantedEpisode(title, episode)) return [];
+      if (releaseSeason !== undefined && releasePoint(numbering, episode)?.season !== releaseSeason) return [];
+      const entry = queue.get(entryId(title.key, season, episode.number));
+      if (!entry || entry.clearedAt || entry.clientId || entry.transferHash || entry.release?.uploadPath) return [];
+      if (item ? !item.entryIds.includes(entry.id) || prepared(item, entry.id) : !entry.attempt) return [];
+      const { state } = entry;
+      const pending = state.kind === 'blocked' ? ['queued', 'searching', 'fetching'].includes(state.at)
+        : !entry.release && ['queued', 'waiting', 'searching'].includes(state.kind);
+      return pending ? [entry] : [];
+    });
+  }
+
   // Grabs a release that the user chose. A person can take any release by hand, also one that the automatic search
   // rejected.
   function grabManual(entries: QueueEntry[], release: RawRelease, want: Want) {
@@ -1435,6 +1453,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     if (entries.some((entry) => entry.season !== entries[0]!.season)) return { rejections: ['wrong_season'] };
     const title = db.data.titles[want.title.key];
     if (!title || (title.mediaType !== 'movie' && decision.numbering && numberingOf(title).revision !== decision.numbering.revision)) return { rejections: ['wrong_episode'] };
+    if (want.kind === 'season') seasonItem(entries[0]!);
     for (const entry of entries) {
       if (entry.state.kind === 'blocked') {
         queue.retryAttempt(entry, 'release chosen by the user');
@@ -1531,5 +1550,5 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     return [...bySeason.values()].flat();
   }
 
-  return { requestSearch, partial, startOtherSeasons, enqueueSearch, grabManual, applyRejectedMapping, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, rescheduleReleaseDay, sweep, rss, search, canStartSearch, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
+  return { requestSearch, partial, startOtherSeasons, enqueueSearch, grabManual, pendingPackEntries, applyRejectedMapping, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, rescheduleReleaseDay, sweep, rss, search, canStartSearch, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
 }
