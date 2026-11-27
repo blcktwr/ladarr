@@ -16,7 +16,7 @@ async function identity(path: string) {
   return info?.isFile() ? `${info.dev}:${info.ino}` : undefined;
 }
 
-async function mappingOf(title: Title, clients: Clients, fixedSeason: number | null, persist: () => void): Promise<QueueMappingEpisode[]> {
+async function mappingOf(title: Title, clients: Clients, fixedSeason: number | null, persist: () => void, rejected: boolean): Promise<QueueMappingEpisode[]> {
   const numbering = normalizeNumbering(title.numbering);
   const regularSeasons = new Set(title.meta.seasons.filter((season) => season.seasonNumber > 0 && season.episodeCount > 0).map((season) => season.seasonNumber));
   const episodes = fixedSeason === null
@@ -28,7 +28,11 @@ async function mappingOf(title: Title, clients: Clients, fixedSeason: number | n
     const record = fileId ? db.data.files[fileId] : undefined;
     const releaseSeason = releasePoint(numbering, { season, number })?.season ?? season;
     return { id, season, number, releaseSeason, entry, file: record?.titleKey === title.key && !record.missing ? record : undefined };
-  });
+  }).sort((a, b) => a.season - b.season || a.number - b.number);
+  if (rejected) return rows.map(({ id, season, number, releaseSeason, file }) => ({
+    id, season, number, releaseSeason, torrent: null,
+    match: file ? { file: file.download?.file ?? file.association?.originalName ?? file.path.split('/').at(-1)!, path: file.path } : null,
+  }));
   if (fixedSeason === null && await recoverMappingSources(title, rows.flatMap(({ file }) => file ?? []), clients)) await persist();
   const hashes = new Map<string, Set<string>>();
   const add = (id: string | null | undefined, hash: string | null | undefined) => {
@@ -60,7 +64,7 @@ async function mappingOf(title: Title, clients: Clients, fixedSeason: number | n
     }
     return (await found).has(inode);
   }
-  const mapping = await Promise.all(rows.map(async ({ id, season, number, releaseSeason, entry, file }) => {
+  return Promise.all(rows.map(async ({ id, season, number, releaseSeason, entry, file }) => {
     const prepared = entry && preparedMapping(entry)?.candidate;
     if (prepared && Object.hasOwn(prepared.matches, id)) {
       const manual = Object.entries(prepared.manualMatches ?? {}).find(([, points]) => points.some((point) => point.season === season && point.number === number));
@@ -77,7 +81,6 @@ async function mappingOf(title: Title, clients: Clients, fixedSeason: number | n
     const name = saved?.download?.file ?? saved?.association?.originalName ?? (saved ? saved.path.split('/').pop() : (torrent || fixedSeason !== null ? manual : undefined));
     return { id, season, number, releaseSeason, torrent: torrent ? { hash: torrent.hash, name: torrent.name ?? torrent.hash } : null, match: name ? { file: name, path: saved?.path ?? null } : null };
   }));
-  return mapping.sort((a, b) => a.season - b.season || a.number - b.number);
 }
 
 // The episodes of one season of a series, in the order of the season and the number. Without a season, it shows every
@@ -89,7 +92,8 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
     const f = filtersOf(req.query);
     const lane = lanePositions();
     const season = req.query.season === undefined ? null : Number(req.query.season);
-    const mappingRequested = req.query.mapping === 'true';
+    const rejected = req.query.mapping === 'rejected';
+    const mappingRequested = rejected || req.query.mapping === 'true';
     const all = Object.values(db.data.queue).filter(
       (entry) => entry.titleKey === req.params.titleKey && entry.season !== null && (season === null || entry.season === season) && shown(entry) && (f.cleared || !entry.clearedAt),
     );
@@ -105,7 +109,7 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
     const summary = groupAggregate(items, season !== null ? findItem(req.params.titleKey, season) : undefined);
     const title = db.data.titles[req.params.titleKey];
     const numberingRevision = title?.numbering?.revision ?? 0;
-    const mapping = mappingRequested && title ? await mappingOf(title, clients, season, persist) : undefined;
+    const mapping = mappingRequested && title ? await mappingOf(title, clients, season, persist, rejected) : undefined;
     res.json({
       cursor: db.data.queueRev,
       group: {

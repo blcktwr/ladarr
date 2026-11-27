@@ -13,9 +13,12 @@ export function runningDownloads(clients: Clients, clientId: string, own: Readon
     if (busy(entry) && entry.transferHash) hashes.add(entry.transferHash);
   }
   for (const item of Object.values(db.data.queueItems)) {
-    if (!['fetching', 'downloading', 'importing'].includes(item.state.kind)) continue;
+    const active = ['fetching', 'downloading', 'importing'].includes(item.state.kind);
     for (const torrent of Object.values(item.selected)) {
-      if (torrent.status === 'uncertain' && torrent.clientId === clientId && !Object.keys(torrent.matches).some((id) => own.has(id))) hashes.add(torrent.hash);
+      if (torrent.status !== 'uncertain' || torrent.clientId !== clientId) continue;
+      const ids = Object.keys(torrent.matches);
+      if (!active && !(item.state.kind === 'blocked' && torrent.sendMapped && ids.some((id) => db.data.queue[id]?.state.kind === 'fetching'))) continue;
+      if (!ids.some((id) => own.has(id))) hashes.add(torrent.hash);
     }
   }
   for (const job of Object.values(db.data.jobs)) {

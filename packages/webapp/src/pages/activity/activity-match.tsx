@@ -1,7 +1,7 @@
-import type { AttachCandidates, EpisodeRef, FileRow, QueueEntryView, QueueGroupPage, QueueMappingEpisode, QueueMatchPreview, QueuePackFiles } from '@ladarr/shared/types';
+import type { AttachCandidates, EpisodeRef, FileRow, QueueEntryView, QueueGroupPage, QueueMappingEpisode, QueueMatchPreview, QueuePackFiles, QueueTorrentDetail } from '@ladarr/shared/types';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { Button, Checkbox, Dropdown, EmptyState, Modal, SearchableDropdown, Spinner, Table, Text } from 'nebula';
 import { Confirm } from '../../components/confirm.tsx';
 import { api, ApiError } from '../../lib/api.ts';
@@ -28,7 +28,33 @@ type FileSource = QueuePackFiles['source'];
 type PackFile = QueuePackFiles['files'][number];
 type Draft = { hash?: string; file?: PackFile | null; path?: string };
 type Change = { id: string; source: FileSource; hash?: string; file: string; ids: string[]; covers?: EpisodeRef[] };
-export type MatchRequest = { entry: QueueEntryView; ids: string[]; entries: QueueEntryView[]; fileSource?: FileSource; fixedSource: boolean };
+type Rejected = QueueGroupPage['group']['rejected'][number];
+type ReleaseDraft = { season: number; candidate: Rejected; file: string };
+type ReleaseSelection = { indexerId: number; guid: string; files: { file: string; ids: string[] }[] };
+export type MatchRequest = { entry: QueueEntryView; ids: string[]; entries: QueueEntryView[]; fileSource?: FileSource; fixedSource: boolean; rejected?: Rejected[] };
+
+const manifestPath = ({ entryId, release }: Rejected) =>
+  `/queue/entries/${entryId}/releases/torrent?indexerId=${release.indexerId}&guid=${encodeURIComponent(release.guid)}&mapping=true`;
+
+function releaseBatches(assignments: (ReleaseDraft & { id: string })[]) {
+  const batches = new Map<number, { id: string; torrents: ReleaseSelection[] }>();
+  for (const { id, season, candidate: { entryId, release }, file } of assignments) {
+    let batch = batches.get(season);
+    if (!batch) {
+      batch = { id: entryId, torrents: [] };
+      batches.set(season, batch);
+    }
+    let torrent = batch.torrents.find(({ indexerId, guid }) => indexerId === release.indexerId && guid === release.guid);
+    if (!torrent) {
+      torrent = { indexerId: release.indexerId, guid: release.guid, files: [] };
+      batch.torrents.push(torrent);
+    }
+    const selected = torrent.files.find((row) => row.file === file);
+    if (selected) selected.ids.push(id);
+    else torrent.files.push({ file, ids: [id] });
+  }
+  return batches;
+}
 
 const fileOptions = (files: PackFile[]) => [
   { value: '', label: t('Unassigned') },
@@ -56,36 +82,61 @@ async function apply({ id, ...body }: Change) {
 
 const readout = (text: string) => <div className="truncate" title={text}>{text}</div>;
 
-export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onClose, onDone }: MatchRequest & { onClose: () => void; onDone: () => void }) {
+export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, rejected, onClose, onDone }: MatchRequest & { onClose: () => void; onDone: () => void }) {
   const series = entry.mediaType === 'tv';
   const mapSeries = series && !fixedSource;
+  const existing = mapSeries && !rejected;
   const fixed = fixedSource ? fileSource ?? 'library' : undefined;
   const detailId = useId();
-  const [expanded, setExpanded] = useState<number[]>();
+  const [expanded, setExpanded] = useState<number[]>(() => entry.season === null ? [] : [entry.season]);
   const [seasons, setSeasons] = useState<Record<string, string>>({});
   const [searchSeasons, setSearchSeasons] = useState<number[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [releases, setReleases] = useState<Record<string, ReleaseDraft | undefined>>({});
   const [movie, setMovie] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
   const client = useQueryClient();
   const group = useQuery<QueueGroupPage>({
-    queryKey: [`/queue/groups/${entry.titleKey}?mapping=true${mapSeries ? '' : `&season=${entry.season}`}`],
+    queryKey: [`/queue/groups/${entry.titleKey}?mapping=${rejected ? 'rejected' : 'true'}${mapSeries ? '' : `&season=${entry.season}`}`],
     enabled: series,
     gcTime: 0,
   });
   const candidates = useQuery<AttachCandidates>({
     queryKey: [`/queue/entries/${entry.id}/external?mapping=true`],
-    enabled: mapSeries,
+    enabled: existing,
     gcTime: 0,
   });
   const options = (candidates.data?.torrents ?? []).map(({ hash, name }) => ({ value: hash, label: name }));
   const items = new Map(group.data?.items.map((item) => [item.id, item]));
   const editable = new Set(mapSeries ? group.data?.group.actions.filter((action) => action.action === 'match').flatMap((action) => action.ids) : ids);
   const episodes = group.data?.mapping ?? [];
+  const rows = mapSeries ? episodes : episodes.filter((point) => point.season === entry.season);
+  const pendingRows = rejected ? rows.filter((point) => {
+    const item = items.get(point.id);
+    if (!item || item.hasTorrent || point.match?.path) return false;
+    const waiting = item.phase === 'queued' && ['not_found', 'no_match', 'searching'].includes(item.status);
+    return waiting || (item.status === 'stuck' && ['queued', 'searching', 'fetching'].includes(item.phase));
+  }) : [];
+  const eligible = new Set(pendingRows.map((row) => row.id));
+  const otherSeasons = expanded.filter((season) => season !== entry.season && pendingRows.some((row) => row.season === season));
+  const seasonGroups = useQueries({
+    queries: otherSeasons.map((season) => ({
+      queryKey: [`/queue/groups/${entry.titleKey}?season=${season}`],
+      queryFn: () => api<QueueGroupPage>(`/queue/groups/${entry.titleKey}?season=${season}`),
+    })),
+  });
+  const rejectedBySeason = new Map(otherSeasons.map((season, index) => [season, seasonGroups[index]!.data?.group.rejected ?? []]));
+  if (rejected && entry.season !== null) rejectedBySeason.set(entry.season, rejected);
+  const paths = [...new Set(Object.values(releases).flatMap((draft) => draft ? [manifestPath(draft.candidate)] : []))];
+  const manifests = useQueries({
+    queries: paths.map((path) => ({ queryKey: [path], queryFn: () => api<QueueTorrentDetail>(path), staleTime: Infinity, gcTime: 0 })),
+  });
+  const releaseFiles = new Map(paths.map((path, i) => [path, manifests[i]!.data?.files]));
   const library = useQuery<{ files: FileRow[] }>({
     queryKey: [`/library/${entry.titleKey}/files`],
-    enabled: mapSeries,
+    enabled: existing,
     gcTime: 0,
   });
   const matchesByPath = new Map(episodes.flatMap(({ match, torrent }) => match?.path && torrent ? [[match.path, { label: match.file, hash: torrent.hash }] as const] : []));
@@ -93,7 +144,6 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     const match = matchesByPath.get(file.path);
     return !file.missing && match ? [{ value: file.path, ...match }] : [];
   });
-  const rows = mapSeries ? episodes : episodes.filter((point) => point.season === entry.season);
   const seasonChanged = (point: QueueMappingEpisode) => seasons[point.id] !== undefined && Number(seasons[point.id]) !== point.releaseSeason;
   const invalidSeason = Object.values(seasons).some((value) => !validSeason(value));
   const initialSeasons = new Set(rows.flatMap((point) => [point.season, point.releaseSeason]));
@@ -125,12 +175,12 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     initial.add(key);
     essential.add(key);
   }
-  else if (group.isPending) for (const item of entries) {
+  else if (existing && group.isPending) for (const item of entries) {
     const own = sourceOf(item).own;
     const known = options.find((option) => option.value === own);
     if (known) initial.add(addSource(torrentSource(item.id, own)));
   }
-  else for (const point of rows) {
+  else if (existing) for (const point of rows) {
     const { draft, path, hash, source } = rowSource(point);
     if (!path && hash) {
       const key = addSource(source);
@@ -145,7 +195,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   });
   const keys = [...sources.keys()];
   // A row shows its matches at once, so the table waits for each torrent of the dialog and for the library.
-  const loading = group.isPending || (mapSeries && (candidates.isPending || library.isPending))
+  const loading = group.isPending || (existing && (candidates.isPending || library.isPending))
     || packs.some((pack, index) => initial.has(keys[index]!) && pack.isPending);
   const lists = new Map(keys.map((key, i) => {
     const files = packs[i]!.data?.files;
@@ -158,7 +208,8 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
       ?? (seasonChanged(point) ? undefined : files?.find((file) => file.proposal?.episodes.some((cover) => sameEpisode(cover, point))));
   };
   const movieList = lists.get(sourceOf(entry, fixed).key);
-  const failed = group.error ?? library.error ?? packs.find((pack, i) => essential.has(keys[i]!) && pack.error)?.error;
+  const failed = group.error ?? library.error ?? seasonGroups.find((query) => query.error)?.error ?? manifests.find((query) => query.error)?.error
+    ?? packs.find((pack, i) => essential.has(keys[i]!) && pack.error)?.error;
   const shown = error || (failed ? errorText(failed) : '');
 
   const change = (id: string, draft: Draft) => {
@@ -195,14 +246,14 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   }
 
   async function save() {
-    if (busy || invalidSeason) return;
+    if (submitting.current || invalidSeason) return;
     const corrected = new Map<string, EpisodeRef[]>();
     const confirmedIds: string[] = [];
     const coverage = (path: string) => corrected.get(path) ?? library.data?.files.find((file) => file.path === path)?.episodes ?? [];
     for (const row of rows) {
       const { id, season, number } = row;
       const { path: saved, draft } = rowSource(row);
-      if (!mapSeries || !saved || !row.torrent) continue;
+      if (!existing || !saved || !row.torrent) continue;
       const path = draft?.path ?? saved;
       if (editable.has(id)) confirmedIds.push(id);
       else if (path === saved) continue;
@@ -210,13 +261,15 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
       if (path !== saved) corrected.set(saved, coverage(saved).filter((ep) => !sameEpisode(ep, point)));
       corrected.set(path, [...coverage(path).filter((ep) => !sameEpisode(ep, point)), point]);
     }
-    const posts = changes(corrected);
+    const posts = rejected ? [] : changes(corrected);
+    const assignments = Object.entries(releases).flatMap(([id, draft]) => eligible.has(id) && draft?.file ? [{ id, ...draft }] : []);
     if (!mapSeries && !posts.length && !corrected.size) return;
+    submitting.current = true;
     setBusy(true);
     setError('');
     try {
-      const assigned = new Set([...confirmedIds, ...posts.flatMap((post) => post.ids)]);
-      const edits = rows.filter(seasonChanged).map((point) => ({
+      const assigned = new Set([...confirmedIds, ...posts.flatMap((post) => post.ids), ...assignments.map(({ id }) => id)]);
+      const edits = rows.filter((point) => seasonChanged(point) && (!rejected || eligible.has(point.id))).map((point) => ({
         season: point.season, number: point.number, releaseSeason: Number(seasons[point.id]),
         search: searchSeasons.includes(Number(seasons[point.id])) && !assigned.has(point.id) && !rowSource(point).match,
       }));
@@ -231,11 +284,16 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
         await api('/mapping/apply', { method: 'POST', body: { ...body, version: preview.version } });
       }
       for (const post of posts) await apply(post);
+      for (const [season, { id, torrents }] of releaseBatches(assignments)) {
+        await api(`/queue/entries/${id}/releases/map`, { method: 'POST', body: { torrents } });
+        setReleases((current) => Object.fromEntries(Object.entries(current).filter(([, draft]) => draft?.season !== season)));
+      }
       onDone();
     } catch (err) {
       setError(errorText(err));
       if (series) void group.refetch();
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -247,11 +305,53 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
   ];
 
   const episodeRow = (point: QueueMappingEpisode) => {
+    const pending = eligible.has(point.id);
+    const season = (
+      <SearchableDropdown key="season" label={t('Season')} hideLabel width="full" surface="table" allowCustom options={seasonOptions} emptyText={t('No options.')}
+        disabled={busy || (Boolean(rejected) && !pending)} value={seasons[point.id] ?? String(point.releaseSeason)}
+        onValueChange={(value) => setSeasons((state) => ({ ...state, [point.id]: value }))} />
+    );
+    if (rejected) {
+      const draft = pending ? releases[point.id] : undefined;
+      const manifest = draft ? manifestPath(draft.candidate) : '';
+      const choices = rejectedBySeason.get(point.season) ?? [];
+      const saved = point.match?.file ?? '';
+      return {
+        key: point.id,
+        cells: [
+          pointText(point), season,
+          <SearchableDropdown
+            key="torrent" label={t('Torrent')} hideLabel width="full" surface="table" value={manifest}
+            placeholder={t('No torrent selected')} emptyText={t('No options.')} disabled={busy || !pending}
+            options={choices.map((candidate) => ({ value: manifestPath(candidate), label: candidate.release.title }))}
+            onValueChange={(value) => {
+              if (manifest === value) return;
+              const candidate = choices.find((candidate) => manifestPath(candidate) === value);
+              setReleases((current) => ({ ...current, [point.id]: candidate ? { season: point.season, candidate, file: '' } : undefined }));
+              setError('');
+            }}
+          />,
+          <SearchableDropdown
+            key={`release-file:${manifest}`} label={t('Matches')} hideLabel width="full" surface="table"
+            placeholder={t('Unassigned')} emptyText={t('No options.')} disabled={busy || !draft}
+            value={draft?.file ?? saved}
+            options={draft ? [
+              { value: '', label: t('Unassigned') },
+              ...(releaseFiles.get(manifest) ?? []).map(({ path, sizeBytes }) => ({ value: path, label: sizeBytes === null ? path : `${path} (${formatBytes(sizeBytes)})` })),
+            ] : saved ? [{ value: saved }] : []}
+            onValueChange={(file) => {
+              if (draft) setReleases((current) => ({ ...current, [point.id]: { ...draft, file } }));
+              setError('');
+            }}
+          />,
+        ],
+      };
+    }
     const { item, draft, torrent: verified, source, hash, match, path } = rowSource(point);
     const list = source.path ? lists.get(source.key) : undefined;
     const own = verified?.hash ?? '';
     const name = source.hash ? undefined : match?.file;
-    const suggested = mapSeries && !path && source.path ? proposed(point, source.key, name) : undefined;
+    const suggested = existing && !path && source.path ? proposed(point, source.key, name) : undefined;
     const canEdit = !match && !suggested && (editable.has(point.id) || fixedSource) && item?.status !== 'available';
     const shown = match?.file ?? item?.file?.name ?? (suggested ? suggested.originalName || suggested.rel : undefined) ?? '—';
     const fileValue = draft?.file !== undefined ? draft.file?.rel ?? '' : suggested?.rel ?? '';
@@ -262,7 +362,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     const matches = mapSeries ? (
       <SearchableDropdown
         key={`file:${source.key}`} label={t('Matches')} hideLabel width="full" surface="table"
-        placeholder={t('Unassigned')} emptyText={t('No options.')}
+        placeholder={t('Unassigned')} emptyText={t('No options.')} disabled={busy}
         value={path ? draft?.path ?? path : fileValue}
         options={path ? alternatives ?? [{ value: path, label: match!.file }] : list?.options ?? []}
         onValueChange={path ? (next) => { if (next) change(point.id, { path: next }); } : selectFile}
@@ -275,11 +375,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
       key: point.id,
       cells: [
         pointText(point),
-        ...(mapSeries ? [(
-          <SearchableDropdown key="season" label={t('Season')} hideLabel width="full" surface="table" allowCustom options={seasonOptions} emptyText={t('No options.')}
-            disabled={busy} value={seasons[point.id] ?? String(point.releaseSeason)}
-            onValueChange={(value) => setSeasons((state) => ({ ...state, [point.id]: value }))} />
-        ), (
+        ...(mapSeries ? [season, (
           <SearchableDropdown
             key="torrent" label={t('Torrent')} hideLabel width="full" surface="table" value={hash}
             placeholder={t('No torrent selected')} emptyText={t('No options.')}
@@ -299,8 +395,6 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
     else bySeason.set(point.season, [point]);
   }
   const catalogSeasons = [...bySeason].sort(([a], [b]) => a - b);
-  const firstSeason = catalogSeasons[0]?.[0];
-  if (expanded === undefined && firstSeason !== undefined) setExpanded([firstSeason]);
 
   const title = groupName({ ...entry, season: null });
   const confirmTitle = addedSeasons.length ? t('Do you want to search for these new seasons?') : t('Apply this episode mapping?');
@@ -313,7 +407,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
       actions={mapSeries ? (
         <Confirm label={t('Apply mapping')} title={confirmTitle}
           confirm={t('Yes')} onOpen={() => setSearchSeasons([])} onConfirm={() => void save()}
-          disabled={busy || invalidSeason || !group.data || (rows.some((point) => point.match?.path) && !library.data) || packs.some((pack, i) => essential.has(keys[i]!) && pack.isPending)}>
+          disabled={busy || invalidSeason || !group.data || (existing && rows.some((point) => point.match?.path) && !library.data) || packs.some((pack, i) => essential.has(keys[i]!) && pack.isPending)}>
           {addedSeasons.length > 0 && (
             <div className="grid gap-2">
               {addedSeasons.map((season) => (
@@ -332,9 +426,9 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, onCl
           columns={[{ label: t('Seasons'), hideLabel: true, width: '100%' }]}
           detailTone="open"
           rows={catalogSeasons.map(([season, points]) => {
-            const open = expanded?.includes(season) ?? false;
+            const open = expanded.includes(season);
             const id = `${detailId}-${season}`;
-            const toggle = () => setExpanded((current = []) => current.includes(season)
+            const toggle = () => setExpanded((current) => current.includes(season)
               ? current.filter((number) => number !== season)
               : [...current, season]);
             return {

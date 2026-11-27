@@ -1,9 +1,22 @@
-import type { QueueTorrent } from '@ladarr/shared/types';
+import type { QueueTorrent, QueueTorrentDetail } from '@ladarr/shared/types';
 import type { Response } from 'express';
 import { downloaderOf } from '../library/grab/grab.ts';
+import { sourceLabel } from '../library/grab/quality.ts';
+import { parseRelease } from '../library/grab/release.ts';
 import { torrentInfo } from '../library/grab/torrent.ts';
 import { IndexerError } from '../library/grab/torznab.ts';
-import type { IndexerService } from '../types.ts';
+import type { IndexerService, ReleaseRef } from '../types.ts';
+import { publicText } from './queue.ts';
+
+export function detailOf(hash: string, release: Pick<ReleaseRef, 'title' | 'link' | 'comment'>, files: QueueTorrentDetail['files'], totalBytes: number, name = release.title): QueueTorrentDetail {
+  const parsed = parseRelease(release.title);
+  return {
+    name, hash, files, totalBytes, resolution: parsed.resolution,
+    quality: parsed.source === 'unknown' ? null : sourceLabel(parsed.source),
+    comment: release.comment ? publicText(release.comment, release.link) : null,
+    source: null, createdBy: null, createdAt: null, pieceLength: null, pieceCount: null, private: null,
+  };
+}
 
 type TorrentSource = { torrent: QueueTorrent } | { magnet: string } | { error: 'torrent_unavailable' | 'no_indexers' | 'indexer_unreachable' };
 

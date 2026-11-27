@@ -231,10 +231,20 @@ it('stops for manual mapping when the pack contains conflicting episode numberin
 
   await expect.poll(() => pipe.acquisition).toEqual([seasonSearch, read(conflicting)]);
   await expect.poll(async () => (await group(series.key)).status).toBe('stuck');
+  const message = 'The releases available do not contain all the episodes.';
   expect(await group(series.key)).toMatchObject({
-    tabs: ['stuck'], problem: { code: 'file_unmapped' }, reached: { matched: 0 },
+    tabs: ['stuck'], reached: { matched: 0 },
+    problem: { code: 'file_unmapped', message },
+    actions: expect.arrayContaining([expect.objectContaining({ action: 'match', label: 'Map episodes manually' })]),
     torrents: [],
-    rejected: [{ release: { title: conflicting.title } }],
+    rejected: [{ release: { title: conflicting.title, reasons: [message] } }],
+  });
+  const saved = pipe.queue.findItem(series.key, 1)!.search!.rejected[0]!;
+  saved.reasons = ['The torrent files do not contain all the requested episodes.'];
+  const [{ entryId, release }] = (await group(series.key)).rejected;
+  expect(release).toMatchObject({ reasons: [message], selectable: false });
+  expect(await api!.post(`/queue/entries/${entryId}/releases/grab`, { indexerId: release.indexerId, guid: release.guid })).toMatchObject({
+    status: 409, body: { error: 'release_rejected', rejections: [{ code: 'file_unmapped', message }] },
   });
   expect(pipe.acquisition).toEqual([seasonSearch, read(conflicting)]);
 });

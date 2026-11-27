@@ -58,6 +58,15 @@ export function currentSelection(item: QueueTurn, torrent: QueueTorrent) {
 export const canReconcileMovie = (item: QueueTurn, torrent: QueueTorrent) =>
   ['fetching', 'downloading', 'importing'].includes(item.state.kind) && Boolean(legacyMovie(item, torrent));
 
+export function sendTargets(item: QueueTurn, torrent: QueueTorrent) {
+  return Object.entries(torrent.matches).flatMap(([id, file]) => {
+    const entry = db.data.queue[id];
+    if (!entry || !item.entryIds.includes(id) || !sendPhase(entry) || uploadHash(entry)) return [];
+    if (torrent.sendMapped && (!file || entry.manualMatch?.file !== file || entry.transferHash !== torrent.hash)) return [];
+    return !entry.transferHash || entry.transferHash === torrent.hash ? [entry] : [];
+  });
+}
+
 export function readySelection(item: QueueTurn) {
   if (!['fetching', 'downloading', 'importing'].includes(item.state.kind)) return false;
   const title = db.data.titles[item.titleKey];
@@ -84,10 +93,18 @@ export function readySelection(item: QueueTurn) {
   });
 }
 
-export function enqueueSelection(item: QueueTurn, enqueue: (input: EnqueueInput) => Job) {
+export function canSubmit(item: QueueTurn, torrent: QueueTorrent, ready?: boolean) {
+  if (!currentSelection(item, torrent)) return false;
+  if (torrent.sendMapped) return ['blocked', 'fetching', 'downloading', 'importing'].includes(item.state.kind);
+  return (ready ?? readySelection(item)) || canReconcileMovie(item, torrent);
+}
+
+export function enqueueSelection(item: QueueTurn, enqueue: (input: EnqueueInput) => Job, torrents = Object.values(item.selected)) {
   const ready = readySelection(item);
-  for (const torrent of Object.values(item.selected)) {
-    if (!currentSelection(item, torrent) || (!ready && !canReconcileMovie(item, torrent))) continue;
+  for (const torrent of torrents) {
+    if (!canSubmit(item, torrent, ready)) continue;
+    const targets = sendTargets(item, torrent);
+    if (!targets.length) continue;
     if (Object.values(db.data.jobs).some((job) => {
       if (job.type !== 'queue.send' || job.state === 'failed') return false;
       const payload = job.payload as { itemId?: string; hash?: string };
@@ -95,7 +112,7 @@ export function enqueueSelection(item: QueueTurn, enqueue: (input: EnqueueInput)
     })) continue;
     enqueue({
       type: 'queue.send',
-      payload: { itemId: item.id, hash: torrent.hash, entryIds: Object.keys(torrent.matches) },
+      payload: { itemId: item.id, hash: torrent.hash, entryIds: targets.map(({ id }) => id) },
       dedupeKey: `send:${item.id}:${torrent.hash}`,
       runAt: item.createdAt,
       priority: item.priority !== null,
@@ -149,17 +166,13 @@ export function createGrabber({ queue, clients, save, enqueue, reconcileMs = 1_0
 
   async function submit(item: QueueTurn, torrent: QueueTorrent, signal: AbortSignal) {
     const { hash } = torrent;
-    const current = () => getItem(item.id) === item && item.selected[hash] === torrent &&
-      (readySelection(item) || canReconcileMovie(item, torrent));
-    const targets = () => Object.keys(torrent.matches).flatMap((id) => {
-      const entry = queue.get(id);
-      return entry && item.entryIds.includes(id) && (!entry.transferHash || entry.transferHash === hash) && !uploadHash(entry) && sendPhase(entry) ? [entry] : [];
-    });
+    const current = () => getItem(item.id) === item && item.selected[hash] === torrent && canSubmit(item, torrent);
+    const targets = () => sendTargets(item, torrent);
     const wait = () => enqueue({
       type: 'queue.send', payload: { itemId: item.id, hash, entryIds: targets().map(({ id }) => id) },
       dedupeKey: `send-wait:${item.id}:${hash}`, runAt: Date.now() + 2_000, priority: item.priority !== null,
     });
-    if (!current() || !targets().length || !currentSelection(item, torrent)) return;
+    if (!current() || !targets().length) return;
     const connection = torrent.status === 'uncertain' && torrent.clientId ? clients.get(torrent.clientId) : clients.next();
     if (!connection) {
       queue.holdClient(item, true);
@@ -168,7 +181,7 @@ export function createGrabber({ queue, clients, save, enqueue, reconcileMs = 1_0
     }
     queue.holdClient(item, false);
     const stopped = () => {
-      if (signal.aborted || db.data.queuePaused || !current() || !currentSelection(item, torrent) || !targets().length) return true;
+      if (signal.aborted || db.data.queuePaused || !current() || !targets().length) return true;
       if (clients.get(connection.id) === connection) return false;
       queue.holdClient(item, !clients.next());
       wait();
@@ -259,7 +272,7 @@ export function createGrabber({ queue, clients, save, enqueue, reconcileMs = 1_0
       if (!path) return stop('file_unmapped', 'the torrent does not contain one movie file');
       torrent.matches = { ...torrent.matches, [movie]: path };
     }
-    if (!readySelection(item)) return;
+    if (!canSubmit(item, torrent)) return;
 
     if (!hasFreeSlot(clients, connection.id, new Set(entries.map(({ id }) => id)))) {
       wait();

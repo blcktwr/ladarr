@@ -536,6 +536,8 @@ export type QueueTorrent = {
   matches: Record<string, string | null>;
   manifest?: string[];
   manualMatches?: Record<string, EpisodeRef[]>;
+  // The user selected these files for download even if other episodes still need a source.
+  sendMapped?: true;
   clientId: string | null;
   status: 'verify' | 'prepared' | 'uncertain' | 'accepted';
   addTag?: string;
@@ -859,7 +861,7 @@ export type JournalStep = {
 // a manual import reads a folder that the user named, and a rename reads the root of the title (`kind: 'rename'`).
 // An import from a download folder is link only: it never copies. It asks for a search when its files are in, so the
 // episodes that it did not bring still get a release.
-export type ImportJournal = { id: string; hash: string; torrentName?: string; titleKey: string; steps: JournalStep[]; createdAt: number; kind?: 'rename'; sourceBase?: string; clientId?: string; downloadBase?: string; linkOnly?: true; searchOnFinish?: true; upload?: true; correction?: CorrectionCommit };
+export type ImportJournal = { id: string; hash: string; torrentName?: string; titleKey: string; steps: JournalStep[]; createdAt: number; kind?: 'rename'; sourceBase?: string; clientId?: string; downloadBase?: string; linkOnly?: true; searchOnFinish?: boolean; upload?: true; correction?: CorrectionCommit };
 export type Fs = { link: typeof fsLink; copyFile: typeof fsCopyFile; rename: typeof fsRename };
 export type ImporterDeps = {
   queue: Queue;

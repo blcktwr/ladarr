@@ -144,7 +144,7 @@ export function actionsOf(entries: QueueEntry[]): QueueResolution[] {
     };
     const title = titleOf(entry);
     if (['file_not_found', 'file_unmapped', 'coverage_unknown', 'file_unreadable', 'file_invalid', 'destination_exists'].includes(cause) || (title?.mediaType === 'tv' && ['pack_partial', 'numbering_required'].includes(cause))) {
-      add('match', title?.mediaType === 'movie' ? 'Select file' : 'Map episodes', undefined, entry.transferHash ? 'download' : 'library');
+      add('match', title?.mediaType === 'movie' ? 'Select file' : 'Map episodes manually', undefined, entry.transferHash ? 'download' : 'library');
     }
     if (cause === 'destination_exists') {
       add('use_existing', 'Use existing file', undefined, 'library');
@@ -335,6 +335,7 @@ export function fileOf(entry: QueueEntry, title: Title, transfer?: Transfer) {
 // The text of a reason that a search of an older version kept, when the text changed since then.
 const RENAMED_REASONS: Record<string, string> = {
   'The quality of the release is not in any quality profile of the title.': REJECTION_TEXT.quality_not_in_profile!,
+  'The torrent files do not contain all the requested episodes.': REJECTION_TEXT.file_unmapped!,
 };
 const currentText = (text: string) => RENAMED_REASONS[text] ?? text;
 const manualStops = Object.entries(REJECTION_TEXT).filter(([code]) => manualRejection(code));
@@ -692,7 +693,7 @@ export function groupAggregate(entries: QueueEntry[], item?: QueueTurn) {
     entry.state.kind === 'blocked' && entry.state.problem.code === 'pack_partial' && problemOf(entry)?.code === 'file_not_found');
   const problem = missingFile ? { ...itemProblem!, code: 'file_not_found' } : itemProblem;
   if (description?.status === 'stuck' && description.phase === 'fetching' && problem && ['file_unmapped', 'numbering_required'].includes(problem.code) && !actions.some((action) => action.action === 'match')) {
-    actions.push({ action: 'match', label: 'Map episodes', ids: entries.map(({ id }) => id), phase: 'fetching', cause: problem.code, source: item?.candidate?.title ?? null });
+    actions.push({ action: 'match', label: 'Map episodes manually', ids: entries.map(({ id }) => id), phase: 'fetching', cause: problem.code, source: item?.candidate?.title ?? null });
   }
   return {
     status,

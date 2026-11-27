@@ -3,7 +3,7 @@ import { JobError } from '../core/jobs.ts';
 import { catalog, itemFields } from '../core/log.ts';
 import { withTitleLock } from '../core/title-lock.ts';
 import { getItem, itemFor } from '../library/downloads/queue.ts';
-import { canReconcileMovie, createGrabber, currentSelection, readySelection, reasonOf, sendPhase } from '../library/grab/grab.ts';
+import { canSubmit, createGrabber, reasonOf, sendPhase, sendTargets } from '../library/grab/grab.ts';
 import { hasFreeSlot } from '../library/downloads/slots.ts';
 import { uploadHash } from '../library/downloads/upload.ts';
 import type { GrabberDeps, Handler, QueueEntry } from '../types.ts';
@@ -23,12 +23,8 @@ export function queueSendHandler(deps: GrabberDeps): Handler {
     const item = itemId ? getItem(itemId) : leader && itemFor(leader);
     const key = hash ?? leader?.transferHash;
     const torrent = key && item?.selected[key];
-    if (!item || !torrent || !currentSelection(item, torrent) || (!readySelection(item) && !canReconcileMovie(item, torrent))) return;
-    const entries = Object.keys(torrent.matches).flatMap((id) => {
-      const entry = queue.get(id);
-      return entry && item.entryIds.includes(id) && (!entry.transferHash || entry.transferHash === torrent.hash) &&
-        sendPhase(entry) && !uploadHash(entry) ? [entry] : [];
-    });
+    if (!item || !torrent || !canSubmit(item, torrent)) return;
+    const entries = sendTargets(item, torrent);
     if (entries.length) return { item, torrent, entries };
   };
   const entriesOf = (job: { payload: unknown }) => {
@@ -60,16 +56,18 @@ export function queueSendHandler(deps: GrabberDeps): Handler {
           signal.throwIfAborted();
           const selected = selectedOf(job);
           if (!selected || selected.torrent.hash !== prepared.torrent.hash) return;
-          const { item, torrent, entries } = selected;
+          const { item, torrent } = selected;
           try {
             await submit(item, torrent, signal);
           } catch (error) {
             if (signal.aborted) throw error;
-            if (getItem(item.id) !== item || item.selected[torrent.hash] !== torrent || (!readySelection(item) && !canReconcileMovie(item, torrent))) return;
+            if (getItem(item.id) !== item || item.selected[torrent.hash] !== torrent || !canSubmit(item, torrent)) return;
+            const entries = sendTargets(item, torrent);
+            if (!entries.length) return;
             const reason = reasonOf(error);
             const kind = error instanceof JobError ? error.kind : 'outage';
             const final = kind === 'invalid_input' || job.attempts >= MAX_ATTEMPTS;
-            for (const entry of entries.filter(sendPhase)) {
+            for (const entry of entries) {
               catalog.warn('download_failed', `Send failed: ${reason.code} (try ${job.attempts} of ${MAX_ATTEMPTS})`, itemFields(entry), { code: reason.code, try: job.attempts, maxTries: MAX_ATTEMPTS, kind });
               if (final) queue.block(entry, reason, 'send failed');
               else queue.observe(entry, 'send will be tried again', reason.code);

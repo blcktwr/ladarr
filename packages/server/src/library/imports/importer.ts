@@ -487,8 +487,13 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
         return !entry || entry.state.kind !== 'importing' || inputOf(entry) !== input;
       })) throw new StaleImport();
     };
-    type Candidate = Pick & { dest: string | null; replaces: string | null; validation: 'ffprobe' | 'basic'; failed: boolean; identity?: JournalStep['sourceIdentity'] };
-    const candidates: Candidate[] = picked.picks.map((item) => ({ ...item, dest: null, replaces: null, validation: 'basic', failed: false }));
+    type Candidate = Pick & { originalName: string; dest: string | null; replaces: string | null; validation: 'ffprobe' | 'basic'; failed: boolean; identity?: JournalStep['sourceIdentity'] };
+    const mapped = (entry: QueueEntry) => queue.itemFor(entry)?.selected[hash]?.sendMapped === true;
+    const candidates: Candidate[] = picked.picks.map((item) => {
+      const entry = item.entries[0]!;
+      const originalName = mapped(entry) && item.source === 'manual' ? entry.manualMatch?.file ?? item.file.rel : item.file.rel;
+      return { ...item, originalName, dest: null, replaces: null, validation: 'basic', failed: false };
+    });
     const alive = () => candidates.filter((candidate) => !candidate.failed);
 
     // Runs a check for each file. A file that fails is blocked here, and the other files go on.
@@ -569,7 +574,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       const correction = candidate.entries.some((entry) => entry.manualMatch);
       const fromSameTorrent = (file: MediaFile | undefined) => Boolean(file?.download && (!upload || correction || file.missing) && entry && file.download.clientId === entry.clientId && file.download.hash === entry.transferHash);
       const currentIds = title.mediaType === 'movie' ? [title.fileId] : candidate.episodes.map((episode) => episode.fileId);
-      const sameSource = Object.values(db.data.files).find((file) => file.titleKey === title.key && fromSameTorrent(file) && file.association?.originalName === candidate.file.rel);
+      const sameSource = Object.values(db.data.files).find((file) => file.titleKey === title.key && fromSameTorrent(file) && file.association?.originalName === candidate.originalName);
       if (sameSource && candidate.source !== 'manual' && (sameSource.episodes.length !== candidate.episodes.length || sameSource.episodes.some((ref) => !candidate.episodes.some((episode) => ref.season === episode.season && ref.number === episode.number)))) throw new ImportProblem('file_unmapped');
       const same = sameSource ?? currentIds.map((id) => (id ? db.data.files[id] : undefined)).find((file) => fromSameTorrent(file));
       const replace = candidate.entries.some((item) => item.replaceDestination);
@@ -641,12 +646,12 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       sizeBytes: candidate.identity?.sizeBytes ?? candidate.file.sizeBytes,
       episodes: candidate.episodes.map((e) => ({ season: e.season, number: e.number })),
       validation: candidate.validation,
-      association: { source: candidate.source, originalName: candidate.file.rel, numberingRevision: numberingOf(candidate.entries[0]!)?.revision ?? 0 },
+      association: { source: candidate.source, originalName: candidate.originalName, numberingRevision: numberingOf(candidate.entries[0]!)?.revision ?? 0 },
       sourceIdentity: candidate.identity,
     }));
     if (!steps.length) return;
 
-    const journal: ImportJournal = { id: randomUUID(), hash, torrentName: clientTorrent.name, titleKey: title.key, steps, createdAt: now(), clientId: handle.id, downloadBase: base, ...(upload ? { upload: true } : {}) };
+    const journal: ImportJournal = { id: randomUUID(), hash, torrentName: clientTorrent.name, titleKey: title.key, steps, createdAt: now(), clientId: handle.id, downloadBase: base, ...(upload ? { upload: true } : {}), ...(group.every(mapped) ? { searchOnFinish: false } : {}) };
     for (const step of steps) step.expected = { entries: Object.fromEntries(step.entryIds.map((id) => [id, inputs.get(id)!])), library: libraryOf(title, step) };
     db.data.imports[journal.id] = journal;
     for (const step of steps) {
@@ -1117,7 +1122,7 @@ export function createImporter({ queue, events, clients, save, probe = probeFile
       delete db.data.imports[journal.id];
       // The files are in, so a search only targets the episodes that have no file. A download import runs it too:
       // a pack can leave episodes without a file, and they must not wait for another action.
-      if (journal.searchOnFinish || (!journal.sourceBase && !journal.upload)) enqueueJob({ type: 'queue.initial', payload: { key: journal.titleKey }, dedupeKey: `initial:${journal.titleKey}` });
+      if (journal.searchOnFinish ?? (!journal.sourceBase && !journal.upload)) enqueueJob({ type: 'queue.initial', payload: { key: journal.titleKey }, dedupeKey: `initial:${journal.titleKey}` });
       await save();
       status?.finish(journal.id);
     }

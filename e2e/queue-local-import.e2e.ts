@@ -62,7 +62,7 @@ test('does not map local files without a torrent', async ({ page }) => {
   await expect(episodes.getByText('The title folder has a file that names no episode.')).toHaveCount(0);
 
   await expect(episodes.getByRole('button', { name: /^(?!About the status )/ })).toHaveCount(0);
-  const map = main.getByRole('button', { name: 'Map episodes', exact: true });
+  const map = main.getByRole('button', { name: 'Map episodes manually', exact: true });
   await expect(map).toHaveCount(1);
   await map.click();
   const panel = page.getByRole('dialog');

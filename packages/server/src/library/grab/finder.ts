@@ -8,15 +8,15 @@ import { explainProfile } from './quality.ts';
 import { enqueue as enqueueJob, JobError, prioritize } from '../../core/jobs.ts';
 import { isMonitored, movieEligibleAt } from '../library.ts';
 import { catalog, itemFields, titleFields } from '../../core/log.ts';
-import { entryId, forgetSource, forgetUnusedSource, isActive, phaseOfEntry } from '../downloads/queue.ts';
+import { entryId, forgetSource, forgetUnusedSource, isActive, newTurn, phaseOfEntry } from '../downloads/queue.ts';
 import { createClients } from '../downloads/client-api.ts';
 import { enqueueUpload } from '../downloads/upload.ts';
 import { importLocal } from '../imports/local.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import { manualUpgradeTargets } from './upgrades.ts';
 import { fileOf as matchedFile, matchCompletePack, matchEpisode, matchMovie, matchPartialPack, needsManualMapping, readCoverage, validMatches } from './match.ts';
-import { readSource } from './source.ts';
-import { currentSelection, enqueueSelection, readySelection, reasonOf as grabReasonOf, savedFiles } from './grab.ts';
+import { readSource, type Evidence } from './source.ts';
+import { currentSelection, enqueueSelection, readySelection, reasonOf as grabReasonOf, savedFiles, sendPhase } from './grab.ts';
 import { requestIdFor } from '../../core/outbound.ts';
 import type { OutsideTitleLock } from '../../core/title-lock.ts';
 import { catalogPoint, catalogSeasons, normalizeNumbering, releasePoint, releaseSeasons } from '../numbering.ts';
@@ -26,6 +26,12 @@ import type { DecideContext, Decision, Episode, FinderDeps, Indexer, Job, Number
 import type { IndexerApp } from '@ladarr/shared/enums';
 
 class StaleAcquisition extends Error {}
+
+export type RejectedMapping = {
+  candidate: RejectedRelease;
+  evidence: Evidence;
+  files: { file: string; ids: string[] }[];
+};
 
 // The reason of the attempt that the manual search of the other seasons of the releases starts. A target that a lost
 // job leaves behind continues in that mode, not in a normal search.
@@ -505,7 +511,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   // to another episode, so the target needs an explicit range before it can search.
   const releaseTarget = (numbering: Numbering, entry: QueueEntry) => (entry.season === null || entry.number === null ? null : releasePoint(numbering, { season: entry.season, number: entry.number }));
 
-  function refFor(title: Title, decision: Decision, manual: boolean): ReleaseRef {
+  function refFor(title: Title, decision: Pick<Decision, 'kind' | 'hash'> & { release: RawRelease | RejectedRelease }, manual: boolean): ReleaseRef {
     const { release } = decision;
     const indexer = db.data.indexers[release.indexerId];
     return {
@@ -519,7 +525,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   const prepared = (item: QueueTurn, id: string) => Object.values(item.selected).some((source) =>
     (source.status === 'accepted' || currentSelection(item, source)) && Object.hasOwn(source.matches, id));
   const eligibleEntry = (entry: QueueEntry) => isActive(entry) && entry.state.kind !== 'paused' && entry.state.kind !== 'blocked' &&
-    (!entry.release?.uploadPath || Boolean(entry.retryDownload)) && !released(entry);
+    (!entry.release?.uploadPath || Boolean(entry.retryDownload)) && !released(entry) &&
+    !(entry.transferHash && queue.itemFor(entry)?.selected[entry.transferHash]?.sendMapped && sendPhase(entry));
   const busyTransfer = (item: QueueTurn) => (item.state.kind === 'importing' || item.state.kind === 'downloading') && item.entryIds.some((id) => {
     const entry = queue.get(id);
     return entry && isActive(entry) && released(entry);
@@ -1255,7 +1262,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     for (const item of Object.values(db.data.queueItems)) {
       const title = db.data.titles[item.titleKey];
       if (!title || title.paused || (item.clientHold && !clients.next())) continue;
-      if (item.state.kind === 'fetching' || item.state.kind === 'downloading') sendPrepared(item);
+      if (item.state.kind === 'fetching' || item.state.kind === 'downloading' ||
+        (item.state.kind === 'blocked' && Object.values(item.selected).some((source) => source.sendMapped))) sendPrepared(item);
       if (!['queued', 'waiting', 'searching', 'fetching'].includes(item.state.kind)) continue;
       const entryIds = item.entryIds.filter((id) => {
         const entry = queue.get(id);
@@ -1292,6 +1300,100 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   }
 
   // --- Interactive search -----------------------------------------------------------------
+
+  function itemForMapping(anchor: QueueEntry) {
+    const current = queue.itemFor(anchor);
+    if (current) return current;
+    const entries = Object.values(db.data.queue).filter((entry) => entry.titleKey === anchor.titleKey &&
+      entry.season === anchor.season && entry.attempt > 0 && !entry.clearedAt);
+    const searches = entries.flatMap(({ search }) => search ?? []).sort((a, b) => b.at - a.at);
+    const item = newTurn(anchor.titleKey, anchor.season, db.data.queueItemSeq++, Math.min(...entries.map(({ createdAt }) => createdAt)));
+    item.entryIds = entries.map(({ id }) => id);
+    const priorities = entries.flatMap(({ priority }) => priority ?? []);
+    if (priorities.length) item.priority = Math.min(...priorities);
+    const blocked = entries.find(({ state }) => state.kind === 'blocked');
+    if (blocked) {
+      item.state = structuredClone(blocked.state);
+      item.stateSince = blocked.stateSince;
+    }
+    if (searches[0]) {
+      const rejected = new Map<string, RejectedRelease>();
+      for (const search of searches) for (const release of search.rejected) {
+        if (!rejected.has(releaseKey(release))) rejected.set(releaseKey(release), release);
+      }
+      item.search = { ...searches[0], rejected: [...rejected.values()] };
+    }
+    db.data.queueItems[item.id] = item;
+    return item;
+  }
+
+  // The caller checks the whole batch under the title lock before it applies any assignment.
+  function applyRejectedMapping(anchor: QueueEntry, batch: RejectedMapping[]): void {
+    const item = itemForMapping(anchor);
+    const title = db.data.titles[anchor.titleKey]!;
+    const numbering = numberingOf(title);
+    const ids = new Set(batch.flatMap(({ files }) => files.flatMap(({ ids }) => ids)));
+    const selected = { ...item.selected };
+    const removed: string[] = [];
+    for (const source of Object.values(selected)) {
+      if (!['verify', 'prepared'].includes(source.status) || source.sendMapped) continue;
+      if (!Object.keys(source.matches).some((id) => ids.has(id))) continue;
+      const matches = Object.fromEntries(Object.entries(source.matches).filter(([id]) => !ids.has(id)));
+      if (Object.keys(matches).length) selected[source.hash] = { ...source, matches };
+      else {
+        delete selected[source.hash];
+        removed.push(source.hash);
+      }
+    }
+
+    const mapped: QueueTorrent[] = [];
+    const cause = 'file selected by the user';
+    for (const { candidate, evidence, files } of batch) {
+      const { hash } = evidence;
+      const source = 'torrent' in evidence.source ? { torrent: true as const } : evidence.source;
+      const torrent: QueueTorrent = {
+        hash, release: refFor(title, { release: candidate, kind: candidate.kind, hash }, true),
+        source, numberingRevision: numbering.revision, status: 'prepared', clientId: null, matches: {}, sendMapped: true,
+        ...('magnet' in source ? { manifest: evidence.files } : {}),
+      };
+      if (evidence.comment) torrent.release.comment = evidence.comment;
+      if ('torrent' in evidence.source) db.data.torrents[hash] = evidence.source.torrent.toString('base64');
+      selected[hash] = torrent;
+      mapped.push(torrent);
+      for (const { file, ids } of files) {
+        const targets = ids.map((id) => queue.get(id)!);
+        const covers = targets.map(({ season, number }) => ({ season: season!, number: number! }));
+        (torrent.manualMatches ??= {})[file] = covers;
+        for (const entry of targets) {
+          queue.retryAttempt(entry, cause);
+          torrent.matches[entry.id] = file;
+          Object.assign(entry, {
+            release: torrent.release, transferHash: hash, clientId: null,
+            source: torrent.source, numbering, manualMatch: { file, covers }, manualMatchRevision: db.data.queueRev + 1,
+            importTries: 0, importResult: null, partialPack: null, replaceDestination: undefined,
+          });
+          entry.attempts.at(-1)!.release = torrent.release.title;
+          queue.resolve(entry, 'fetching', cause, file);
+        }
+      }
+    }
+    const candidate = Object.values(selected).find((source) => source.status === 'verify')?.release ?? null;
+    queue.updateItem(item, { selected, candidate });
+    for (const hash of removed) forgetUnusedSource(hash);
+
+    const pending = item.entryIds.some((id) => {
+      const entry = queue.get(id);
+      if (!entry || !isActive(entry) || ['downloading', 'importing'].includes(entry.state.kind)) return false;
+      return !entry.transferHash || !selected[entry.transferHash]?.sendMapped || !sendPhase(entry);
+    });
+    if (pending) {
+      if (item.state.kind !== 'blocked') queue.transitionItem(item, { kind: 'blocked', at: 'fetching', problem: { code: 'file_unmapped' } });
+    } else if (!['downloading', 'importing'].includes(item.state.kind)) {
+      if (['queued', 'waiting'].includes(item.state.kind)) queue.transitionItem(item, { kind: 'searching' });
+      queue.transitionItem(item, { kind: 'fetching' });
+    }
+    enqueueSelection(item, enqueue, mapped);
+  }
 
   // The target that a release names. A pack covers its release season, an episode covers itself, and a release that
   // does not say which episode it has falls back to the target that the user opened. The numbers of the release go to
@@ -1429,5 +1531,5 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     return [...bySeason.values()].flat();
   }
 
-  return { requestSearch, partial, startOtherSeasons, enqueueSearch, grabManual, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, rescheduleReleaseDay, sweep, rss, search, canStartSearch, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
+  return { requestSearch, partial, startOtherSeasons, enqueueSearch, grabManual, applyRejectedMapping, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, rescheduleReleaseDay, sweep, rss, search, canStartSearch, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
 }

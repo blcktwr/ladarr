@@ -2,7 +2,7 @@ import type { Clients, Indexer, IndexerService, ReleaseRef } from '../../types.t
 import { magnetHash, torrentInfo } from './torrent.ts';
 import { IndexerError } from './torznab.ts';
 
-type Evidence =
+export type Evidence =
   | { hash: string; files: string[]; source: { torrent: Buffer }; comment?: string }
   | { hash: string; files: string[]; source: { magnet: string }; comment?: undefined };
 

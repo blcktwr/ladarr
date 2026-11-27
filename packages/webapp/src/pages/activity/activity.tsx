@@ -89,7 +89,7 @@ const retryActions = new Set<QueueResolution['action']>(['retry', 'retry_fetch',
 const OpenMatch = createContext<(request: MatchRequest) => void>(() => {});
 
 // The server supplies each action and its explicit target scope.
-function EntryFix({ entry, entries = [entry], actions = entry.actions, run }: { entry: QueueEntryView; entries?: QueueEntryView[]; actions?: QueueResolution[]; run: Run }) {
+function EntryFix({ entry, entries = [entry], actions = entry.actions, rejected, run }: { entry: QueueEntryView; entries?: QueueEntryView[]; actions?: QueueResolution[]; rejected?: MatchRequest['rejected']; run: Run }) {
   const openMatch = useContext(OpenMatch);
   return (
     <>
@@ -101,7 +101,7 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run }: { 
         switch (action) {
           case 'match':
           case 'use_existing':
-            return <Button key={action} aria-haspopup="dialog" onClick={() => openMatch({ entry: target, ids: item.ids, entries, fileSource: item.fileSource, fixedSource: action === 'use_existing' })}>{t(item.label)}</Button>;
+            return <Button key={action} aria-haspopup="dialog" onClick={() => openMatch({ entry: target, ids: item.ids, entries, fileSource: item.fileSource, fixedSource: action === 'use_existing', rejected: action === 'match' ? rejected : undefined })}>{t(item.label)}</Button>;
           case 'replace':
             return <ReplaceAllFix key={item.action} ids={item.ids} run={run} />;
           case 'settings':
@@ -119,7 +119,11 @@ function EntryFix({ entry, entries = [entry], actions = entry.actions, run }: { 
 // that it opens.
 const fixKey = (item: QueueResolution) => (item.action === 'settings' ? `settings:${item.settings === 'library' ? 'media' : 'connections'}` : item.action);
 
-function GroupFix({ actions, stopped, run }: { actions: QueueResolution[]; stopped: QueueEntryView[]; run: Run }) {
+function GroupFix({ group, stopped, run }: { group: QueueGroupPage['group']; stopped: QueueEntryView[]; run: Run }) {
+  const { actions } = group;
+  const rejected = actions.some(({ action, phase, cause }) =>
+    action === 'match' && ['queued', 'searching', 'fetching'].includes(phase) && (cause === 'file_unmapped' || group.rejected.length > 0))
+    ? group.rejected : undefined;
   const fixes = new Map<string, QueueResolution>();
   for (const item of actions) {
     if (retryActions.has(item.action)) continue;
@@ -132,7 +136,7 @@ function GroupFix({ actions, stopped, run }: { actions: QueueResolution[]; stopp
   return (
     <div className="flex flex-wrap justify-start gap-2 mt-2 w-full">
       {[...fixes].map(([key, item]) => (
-        <EntryFix key={key} entry={entry} entries={stopped} actions={[item]} run={run} />
+        <EntryFix key={key} entry={entry} entries={stopped} actions={[item]} rejected={rejected} run={run} />
       ))}
     </div>
   );
@@ -709,7 +713,7 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
             {missing.map(({ season, number, rounds }) => (
               <Text key={`${season}:${number}`} variant="small">{t('Episode {number}: No release in {rounds} searches.', { number, rounds })}</Text>
             ))}
-            {stopped.length > 0 && <GroupFix actions={actions} stopped={stopped} run={run} />}
+            {stopped.length > 0 && <GroupFix group={summary} stopped={stopped} run={run} />}
           </DetailStatus>
         ) : (
           <Text>—</Text>
