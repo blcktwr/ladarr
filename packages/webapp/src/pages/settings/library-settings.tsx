@@ -130,9 +130,7 @@ function FoldersForm({ roots, settings, reloadRoots, reloadSettings }: {
           />
         ))}
       </Section>
-      <div className="-mx-6 justify-self-stretch">
-        <Divider />
-      </div>
+      <Divider />
       <Section title={t('File names')}>
         {(['movie', 'episode'] as const).map((kind) => (
           <Field

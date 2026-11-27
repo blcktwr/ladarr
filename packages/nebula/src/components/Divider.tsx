@@ -5,5 +5,5 @@ import { divider } from '../theme/stone.ts';
 // Table, so that the two parts read apart at a glance. It fills its container.
 // className is for layout only, such as a margin.
 export function Divider({ className = '' }: { className?: string }) {
-  return <Separator className={`${divider} ${className}`} />;
+  return <Separator className={`${divider} -mx-[var(--surface-padding,0px)] w-[calc(100%+2*var(--surface-padding,0px))] ${className}`} />;
 }

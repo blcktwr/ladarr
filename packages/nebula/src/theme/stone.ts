@@ -33,7 +33,7 @@ export const linkInherit = 'bg-transparent text-current underline-offset-4 point
 
 // The stone under the content of a page, with its grain and its shadow. The layout of its content comes from the component.
 export const paneFace = 'bg-(image:--grain) bg-pane';
-const surface = `min-w-0 p-6 rounded-lg ${paneFace} shadow-(--slab-shadow) text-ink`;
+const surface = `min-w-0 [--surface-padding:--spacing(6)] p-(--surface-padding) rounded-lg ${paneFace} shadow-(--slab-shadow) text-ink`;
 
 // The stone under the content of a page. It is a grid with space between its children, and they keep their own width.
 export const pane = `grid grid-cols-[minmax(0,1fr)] justify-items-start gap-10 ${surface}`;
@@ -72,7 +72,7 @@ export const off = 'bg-(--recess-sunk) shadow-(--recess-edge-sunk) pointed:bg-(-
 export const on = 'bg-(image:--key) shadow-(--key-edge) text-ink pressed:bg-none pressed:bg-(--key-sunk) pressed:shadow-(--edge-sunk) pressed:text-ink-strong';
 
 // A line between two parts of a pane: a groove carved in the stone, deeper than the groove between the rows of a table.
-export const divider = 'box-border w-full h-0.5 shrink-0 bg-(image:--divider) bg-[length:100%_1px,100%_1px] bg-[position:0_0,0_100%] bg-no-repeat';
+export const divider = 'box-border h-0.5 shrink-0 bg-(image:--divider) bg-[length:100%_1px,100%_1px] bg-[position:0_0,0_100%] bg-no-repeat';
 
 export const tabRail = 'bg-(image:--grain) bg-field';
 export const tabEdge = 'before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] before:border-x before:border-t before:border-(--divider-dark) after:pointer-events-none after:absolute after:inset-x-px after:top-px after:bottom-0 after:rounded-t-[calc(var(--radius-md)-1px)] after:border-x after:border-t after:border-(--divider-light)';

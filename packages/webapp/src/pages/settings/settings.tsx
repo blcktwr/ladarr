@@ -4,7 +4,7 @@ import { Copy, RotateCw } from 'lucide-react';
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { api } from '../../lib/api.ts';
-import { alert, Button, Confirm, Dropdown, EmptyState, Field, List, Pagination, Pane, SideMenu, Spinner, Switch, Tabs, Text } from 'nebula';
+import { alert, Button, Confirm, Divider, Dropdown, EmptyState, Field, List, Pagination, Pane, SideMenu, Spinner, Switch, Tabs, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { t } from '../../i18n/index.ts';
@@ -205,12 +205,11 @@ const categories = [
       <>
         <Pane>
           <div className="grid grid-cols-[minmax(0,1fr)] justify-items-start gap-4 w-full">
+            <SystemVersion />
+            <Divider />
             <GeneralSettings />
             <ApiKey />
           </div>
-        </Pane>
-        <Pane>
-          <SystemVersion />
         </Pane>
         <Pane>
           <Bridges />
