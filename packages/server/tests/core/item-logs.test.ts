@@ -5,7 +5,7 @@ import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmS
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { open } from '../../src/core/db.ts';
+import { open, withDefaults } from '../../src/core/db.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { catalog, closeLog, configureItemLogs, deleteItemLog, log, logToFile, recentLogs } from '../../src/core/log.ts';
 import { createQueue } from '../../src/library/downloads/queue.ts';
@@ -158,28 +158,23 @@ describe('item logs', () => {
     expect(() => deleteItemLog('movie:99')).not.toThrow();
   });
 
-  it('writes no item file when keepQueueLogs is off, and removes the folder of a previous run', async () => {
+  it('keeps the item file across a restart when an older setting disabled queue logs', async () => {
     const file = join(folder(), 'ladarr.log');
     const db = await dbWith('movie:1');
     const movie = fields('movie:1', 'movie', 'movie:1', 'Movie', 'Movie');
 
-    // A run with the setting on leaves a folder that holds a file.
     logToFile(file);
     configureItemLogs();
     catalog.info('search.started', 'First', movie);
     await closeLog();
-    expect(existsSync(join(dirname(file), 'items'))).toBe(true);
-
-    db.data.settings.keepQueueLogs = false;
+    const settings = { ...db.data.settings, keepQueueLogs: false };
+    db.data = withDefaults({ ...db.data, settings });
+    expect(db.data.settings).not.toHaveProperty('keepQueueLogs');
     logToFile(file);
     configureItemLogs();
-    expect(existsSync(join(dirname(file), 'items'))).toBe(false);
-
     catalog.info('search.finished', 'Second', movie);
     await closeLog();
-    expect(existsSync(join(dirname(file), 'items'))).toBe(false);
-    // The app log still gets the entries.
-    expect((await recentLogs(10)).map((line) => line.message)).toEqual(['First', 'Second']);
+    expect(itemEntries(file, 'movie:1').map((line) => line.message)).toEqual(['First', 'Second']);
   });
 
   it('joins the lines of the targets of a title in the log of the title', async () => {

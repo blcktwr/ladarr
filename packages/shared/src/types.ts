@@ -310,7 +310,6 @@ export type SettingsData = {
   theme: 'dark' | 'light';
   defaultRoots: { movie: string | null; tv: string | null };
   audio: { language: string; strict: boolean } | null;
-  keepQueueLogs: boolean;
   naming: { movie: string; episode: string };
 };
 

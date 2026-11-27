@@ -1,10 +1,10 @@
-import type { LogEntry, LogsResponse, SettingsResponse } from '@ladarr/shared/types';
+import type { LogEntry, LogsResponse } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
 import { Copy, RotateCw } from 'lucide-react';
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { api } from '../../lib/api.ts';
-import { Button, Confirm, Dropdown, EmptyState, Field, List, Pagination, Pane, Section, SideMenu, Spinner, Switch, Text } from 'nebula';
+import { Button, Confirm, Dropdown, EmptyState, Field, List, Pagination, Pane, SideMenu, Spinner, Switch, Tabs, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { t } from '../../i18n/index.ts';
@@ -101,34 +101,6 @@ const directionOf = (entry: LogEntry): Traffic => (entry.direction === 'inbound'
 // shows 100.
 const PAGE = 100;
 
-// The setting of the log of a target in the queue. The change is saved at once.
-function QueueLogs() {
-  const { data, refetch } = useQuery<SettingsResponse>({ queryKey: ['/settings'] });
-  const [failed, setFailed] = useState(false);
-  const [pending, setPending] = useState(false);
-
-  async function save(keep: boolean) {
-    setFailed(false);
-    setPending(true);
-    try {
-      await api('/settings', { method: 'PATCH', body: { keepQueueLogs: keep } });
-      await refetch();
-    } catch {
-      setFailed(true);
-    } finally {
-      setPending(false);
-    }
-  }
-
-  if (!data) return null;
-  return (
-    <>
-      <Switch label={t('Keep the full log of every target in the queue')} checked={data.settings.keepQueueLogs} disabled={pending} onCheckedChange={(keep) => void save(keep)} />
-      {failed && <Alert tone="danger">{t('The request did not complete.')}</Alert>}
-    </>
-  );
-}
-
 function LogEntries({ kind }: { kind: 'logs' | 'requests' }) {
   const [live, setLive] = useState(false);
   const { data, error, isFetching: loading, refetch: reload } = useQuery<LogsResponse>({ queryKey: [`/system/logs?limit=1000&kind=${kind}`], refetchInterval: live ? 2_000 : false });
@@ -157,7 +129,6 @@ function LogEntries({ kind }: { kind: 'logs' | 'requests' }) {
     <LoadFailed onRetry={reload} />
   ) : (
     <>
-      {kind === 'logs' && <QueueLogs />}
       <div className="flex flex-wrap items-center gap-4 w-full">
         {kind === 'logs' && (
           <>
@@ -198,10 +169,26 @@ function LogEntries({ kind }: { kind: 'logs' | 'requests' }) {
     </>
   );
 
-  return kind === 'logs' ? (
-    <Section title={t('Logs')}>{content}</Section>
-  ) : (
-    <div className="grid grid-cols-[minmax(0,1fr)] justify-items-start gap-5 w-full">{content}</div>
+  return <div className="grid grid-cols-[minmax(0,1fr)] justify-items-start gap-5 w-full">{content}</div>;
+}
+
+function Telemetry() {
+  const { hash } = useLocation();
+  const navigate = useNavigate();
+  const kind = hash === '#requests' ? 'requests' : 'logs';
+  return (
+    <Pane>
+      <Tabs
+        aria-label={t('Telemetry')}
+        flush
+        value={kind}
+        onValueChange={(value) => void navigate(value === 'requests' ? '#requests' : '#telemetry', { replace: true })}
+        items={[
+          { value: 'logs', label: t('Logs'), content: kind === 'logs' && <LogEntries kind="logs" /> },
+          { value: 'requests', label: t('Requests'), content: kind === 'requests' && <LogEntries kind="requests" /> },
+        ]}
+      />
+    </Pane>
   );
 }
 
@@ -269,22 +256,9 @@ const categories = [
     ),
   },
   {
-    value: 'logs',
-    label: 'Logs',
-    content: (
-      <Pane>
-        <LogEntries kind="logs" />
-      </Pane>
-    ),
-  },
-  {
-    value: 'requests',
-    label: 'Requests',
-    content: (
-      <Pane>
-        <LogEntries kind="requests" />
-      </Pane>
-    ),
+    value: 'telemetry',
+    label: 'Telemetry',
+    content: <Telemetry />,
   },
   {
     value: 'backups',
@@ -311,7 +285,8 @@ export function Settings() {
   const { hash } = useLocation();
   const navigate = useNavigate();
   // The hash names the section, so a link can open a section of the settings.
-  const category = categories.find((item) => `#${item.value}` === hash)?.value ?? 'general';
+  const section = { '#logs': '#telemetry', '#requests': '#telemetry' }[hash] ?? hash;
+  const category = categories.find((item) => `#${item.value}` === section)?.value ?? 'general';
   const active = categories.find((item) => item.value === category)!;
   const setCategory = (value: string) => void navigate(`/settings#${value}`, { replace: true });
   // The side space is the one of the Navbar: its content column is 1200px wide and centred.

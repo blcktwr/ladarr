@@ -34,7 +34,6 @@ export const emptyData = (): Data => ({
     theme: 'dark',
     defaultRoots: { movie: null, tv: null },
     audio: null,
-    keepQueueLogs: true,
     naming: { ...DEFAULT_NAMING },
   },
   profiles: defaultProfiles(),
@@ -91,7 +90,8 @@ export const profilesFor = (data: Pick<Data, 'profiles' | 'profileOrder'>, title
 // A file from an older version can lack a collection that a newer version added.
 export function withDefaults(data: Data): Data {
   const empty = emptyData();
-  const loaded = { ...empty.settings, ...data.settings } as Settings & { maxAliases?: number; aliasLanguages?: string[] | null; upgrades?: { enabled: boolean; stopAt: string }; defaultPreset?: string; recentDays?: number; recoveryDays?: number; region?: string; timeZone?: string };
+  const loaded = { ...empty.settings, ...data.settings } as Settings & { maxAliases?: number; aliasLanguages?: string[] | null; upgrades?: { enabled: boolean; stopAt: string }; defaultPreset?: string; recentDays?: number; recoveryDays?: number; region?: string; timeZone?: string; keepQueueLogs?: boolean };
+  delete loaded.keepQueueLogs;
   // The movie release region and the time zone are gone from the settings.
   delete loaded.region;
   delete loaded.timeZone;

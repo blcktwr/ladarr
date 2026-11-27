@@ -1,7 +1,6 @@
 import { db } from '../../core/db.ts';
 import type { SettingsSaved } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
-import { configureItemLogs } from '../../core/log.ts';
 import { templateProblem } from '../../library/naming.ts';
 import type { Db, Settings } from '../../types.ts';
 
@@ -14,7 +13,6 @@ function parseChanges(body: unknown): Partial<Settings> | { invalid: string } {
   for (const [key, value] of Object.entries(body)) {
     if (key === 'language' && (value === 'en' || value === 'es')) changes.language = value;
     else if (key === 'theme' && (value === 'dark' || value === 'light')) changes.theme = value;
-    else if (key === 'keepQueueLogs' && typeof value === 'boolean') changes.keepQueueLogs = value;
     else if (key === 'naming' && isObject(value) && !templateProblem('movie', value.movie) && !templateProblem('episode', value.episode)) {
       changes.naming = { movie: (value.movie as string).trim(), episode: (value.episode as string).trim() };
     } else if (key === 'audio' && value === null) changes.audio = null;
@@ -46,7 +44,6 @@ export function settingsPatch(): RequestHandler {
     const changes = parseChanges(req.body);
     if ('invalid' in changes) return void res.status(400).json({ error: 'invalid_setting', field: changes.invalid });
     Object.assign(db.data.settings, changes);
-    if ('keepQueueLogs' in changes) configureItemLogs();
     await db.write();
     res.json({ settings: db.data.settings } satisfies SettingsSaved);
   };

@@ -48,12 +48,12 @@ export function TabPanels({ items, stack = false, className = '' }: { items: Tab
   ));
 }
 
-type TabsProps = { 'aria-label': string; items: TabItem[]; className?: string };
+type TabsProps = Pick<BaseTabs.Root.Props, 'value' | 'onValueChange'> & { 'aria-label': string; items: TabItem[]; flush?: boolean; className?: string };
 
-export function Tabs({ 'aria-label': label, items, className = '' }: TabsProps) {
+export function Tabs({ 'aria-label': label, items, flush, className = '', ...props }: TabsProps) {
   return (
-    <BaseTabs.Root defaultValue={items[0]?.value} className={`flex w-full min-w-0 flex-col gap-5 ${className}`}>
-      <TabHeader label={label} items={items} className="px-2" />
+    <BaseTabs.Root {...props} defaultValue={items[0]?.value} className={`flex w-full min-w-0 flex-col gap-5 ${className}`}>
+      <TabHeader label={label} items={items} className={flush ? '-mx-6 -mt-6 overflow-clip rounded-t-lg px-6' : 'px-2'} />
       <TabPanels items={items} />
     </BaseTabs.Root>
   );

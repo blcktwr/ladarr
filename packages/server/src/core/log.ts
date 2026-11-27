@@ -80,9 +80,7 @@ let trafficLogger = silent();
 let streams: RotatingFileStream[] = [];
 let files = { logs: '', requests: '' };
 
-// The folder of the files of the targets, the setting that turns them on, and the queue that says which targets are in it.
 let itemsDir = '';
-let itemsOn = false;
 let inQueue: (itemId: string) => boolean = () => false;
 // The moment when the current record of an item began. A line before it belongs to an older record of the same ID.
 let startedAt: (itemId: string) => number = () => 0;
@@ -96,7 +94,7 @@ const itemFile = (itemId: string) => join(itemsDir, `${itemId.replace(/[^A-Za-z0
 // Takes the line from the app log and writes it to the file of its target when the target is in the queue. A line of a
 // target also goes to the file of its title, so the page reads the whole log of a series in one place.
 const keepItemLine = (line: string) => {
-  if (!itemsOn || !itemsDir || !line.includes('"type":"catalog"')) return;
+  if (!itemsDir || !line.includes('"type":"catalog"')) return;
   let entry: { type?: unknown; itemId?: unknown; titleKey?: unknown };
   try {
     entry = JSON.parse(line) as { type?: unknown; itemId?: unknown; titleKey?: unknown };
@@ -149,8 +147,6 @@ export function logToFile(file: string, maxBytes = 1_000_000) {
   mkdirSync(dirname(file), { recursive: true });
   files = { logs: file, requests: join(dirname(file), 'requests.log') };
   itemsDir = join(dirname(file), 'items');
-  // The caller turns the files of the targets on with configureItemLogs().
-  itemsOn = false;
   inQueue = () => false;
   startedAt = () => 0;
   isTitleKey = () => false;
@@ -166,10 +162,7 @@ export function logToFile(file: string, maxBytes = 1_000_000) {
   trafficLogger = makeLogger(dropLevel(streams[1]!));
 }
 
-// The setting says whether a target in the queue keeps its whole log in a file of its own. The queue says which targets
-// are in it: a target that is available left the queue, so its file goes.
 export function configureItemLogs() {
-  itemsOn = db.data.settings.keepQueueLogs !== false;
   inQueue = (itemId) => {
     const entry = db.data.queue[itemId];
     if (entry) return entry.state.kind !== 'available';
@@ -179,8 +172,7 @@ export function configureItemLogs() {
   // A target begins when its entry enters the queue. A title begins when the person adds it.
   startedAt = (itemId) => db.data.queue[itemId]?.createdAt ?? db.data.titles[itemId]?.addedAt ?? 0;
   isTitleKey = (itemId) => Object.hasOwn(db.data.titles, itemId);
-  if (!itemsOn) forgetItemLogs();
-  else forgetItemLogsOutsideQueue();
+  forgetItemLogsOutsideQueue();
 }
 
 // Removes the file of one target. A target that left the queue has no log any more.
@@ -190,15 +182,6 @@ export function deleteItemLog(itemId: string) {
     rmSync(itemFile(itemId), { force: true });
   } catch {
     /* A file that cannot be removed stays for the next try. */
-  }
-}
-
-function forgetItemLogs() {
-  if (!itemsDir) return;
-  try {
-    rmSync(itemsDir, { recursive: true, force: true });
-  } catch {
-    /* A folder that cannot be removed stays for the next try. */
   }
 }
 

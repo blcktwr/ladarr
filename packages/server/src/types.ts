@@ -30,8 +30,6 @@ export type Settings = {
   // Root IDs.
   defaultRoots: { movie: string | null; tv: string | null };
   audio: { language: string; strict: boolean } | null;
-  // Keep the whole log of a target while it is in the queue. The log goes when the target is available.
-  keepQueueLogs: boolean;
   // The name of a file in the library. See naming.ts.
   naming: NamingTemplates;
 };

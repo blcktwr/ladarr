@@ -29,6 +29,7 @@ test('keeps the open log entry when new logs arrive', async ({ page }) => {
   await page.goto(`${URL_BASE}/settings#logs`);
   const main = page.getByRole('main');
   await main.getByRole('switch', { name: 'Live' }).click();
+  await expect(main.getByRole('switch', { name: 'Keep the full log of every target in the queue' })).toHaveCount(0);
   const details = `Details of ${entry.message}`;
   const opened = main.getByRole('button', { name: details, exact: true });
   await expect(opened).toBeVisible();
@@ -52,24 +53,4 @@ test('keeps the open log entry when new logs arrive', async ({ page }) => {
   await expect(panel).toBeVisible();
   await expect(panel).toContainText(firstKey);
   await expect(panel).not.toContainText(secondKey);
-});
-
-test('keeps the full log of the queue as a setting that a reload keeps', async ({ page }) => {
-  await page.goto(`${URL_BASE}/settings#logs`);
-  const name = 'Keep the full log of every target in the queue';
-  const keep = page.getByRole('main').getByRole('switch', { name });
-  try {
-    await expect(keep).toBeChecked();
-
-    await keep.click();
-    await expect(keep).not.toBeChecked();
-
-    // The setting is saved on the server, so a reload shows it still off.
-    await page.reload();
-    await expect(page.getByRole('main').getByRole('switch', { name })).not.toBeChecked();
-    expect((await stack.call('GET', '/settings')).body.settings.keepQueueLogs).toBe(false);
-  } finally {
-    // The tests that follow start from the default again.
-    await stack.call('PATCH', '/settings', { keepQueueLogs: true });
-  }
 });

@@ -28,7 +28,8 @@ afterAll(() => {
 describe('settings', () => {
   it('starts with defaults and offers the two profiles of version 1', async () => {
     const { body } = await app.get('/settings');
-    expect(body.settings).toMatchObject({ setupCompleted: false, audio: null, keepQueueLogs: true });
+    expect(body.settings).toMatchObject({ setupCompleted: false, audio: null });
+    expect(body.settings).not.toHaveProperty('keepQueueLogs');
     expect(body.settings).not.toHaveProperty('upgrades');
     expect(body.settings).not.toHaveProperty('defaultPreset');
     expect(body.settings).not.toHaveProperty('region');
@@ -54,11 +55,10 @@ describe('settings', () => {
   });
 
   it('saves valid changes', async () => {
-    const changes = { language: 'es', theme: 'light', audio: { language: 'es', strict: true }, keepQueueLogs: false };
+    const changes = { language: 'es', theme: 'light', audio: { language: 'es', strict: true } };
     expect((await app.patch('/settings', changes)).status).toBe(200);
     expect((await app.get('/settings')).body.settings).toMatchObject(changes);
     expect((await app.patch('/settings', { audio: null })).body.settings.audio).toBeNull();
-    expect((await app.patch('/settings', { keepQueueLogs: true })).body.settings.keepQueueLogs).toBe(true);
   });
 
   it.each([
@@ -70,8 +70,7 @@ describe('settings', () => {
     [{ audio: { language: 'Spanish', strict: true } }, 'audio'],
     [{ setupCompleted: true }, 'setupCompleted'],
     [{ defaultRoots: { movie: 'missing' } }, 'defaultRoots.movie'],
-    [{ keepQueueLogs: 'true' }, 'keepQueueLogs'],
-    [{ keepQueueLogs: 1 }, 'keepQueueLogs'],
+    [{ keepQueueLogs: false }, 'keepQueueLogs'],
     [{ maxAliases: 5 }, 'maxAliases'],
     [{ maxAliases: -1 }, 'maxAliases'],
     [{ maxAliases: 21 }, 'maxAliases'],
