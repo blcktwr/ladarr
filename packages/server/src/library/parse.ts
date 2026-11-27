@@ -61,7 +61,7 @@ function lastNumber(name: string) {
   const found = /(?:^|[ ._-])(\d{1,3})$/.exec(stem);
   if (!found) return undefined;
   const before = stem.slice(0, found.index);
-  if (/[0-9.]$/.test(before)) return undefined;
+  if (/[0-9.]$/.test(before) || /(?:^|[ ._-])(?:disc|disk|disco|cd|dvd|bd)[ ._-]*$/i.test(before)) return undefined;
   return Number(found[1]);
 }
 

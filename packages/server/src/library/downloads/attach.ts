@@ -45,7 +45,10 @@ export async function attachTorrent(
     // A cancelled or completed target stays as it is. A late attach must not revive it.
     const previous = target.retryDownload?.hash === hash ? target.retryDownload : null;
     if ((target.release?.uploadPath && !previous) || !isActive(target) || target.state.kind === 'paused' || (target.state.kind === 'blocked' && !manual)) continue;
-    if (previous) delete target.retryDownload;
+    if (previous) {
+      if (previous.upload) target.release = previous.upload;
+      delete target.retryDownload;
+    }
     else {
       queue.endAttempt(target, 'cancelled', 'replaced by an attached download');
       queue.startAttempt(target, 'attached download');

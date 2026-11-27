@@ -359,7 +359,7 @@ function NoMatchReleases({ items, onDone }: { items: Rejected[]; onDone: () => v
                   >
                     <TorrentInfo path={`/queue/entries/${item.entryId}/releases/torrent?indexerId=${item.release.indexerId}&guid=${encodeURIComponent(item.release.guid)}`} />
                   </Modal>
-                  <Button iconOnly disabled={item.release.selectable === false} aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
+                  <Button iconOnly aria-label={t('Download {quality} {size}', { quality, size })} onClick={() => setChosen(item)}>
                     <Check />
                   </Button>
                 </div>,
@@ -588,7 +588,10 @@ function MasterRow({ row }: { row: QueueRow }) {
       <div className="grid gap-2 min-w-0">
         {/* The name of the row is not a heading: the heading of the page says the section, and the inspector says the title. */}
         <Text variant="body" className="min-w-0">
-          <strong>{nameOf(row)}</strong>
+          <strong>
+            {row.kind === 'entry' ? row.label : groupName({ ...row, season: null })}
+            {row.kind === 'group' && row.season !== null && <><br />{seasonName(row.season)}</>}
+          </strong>
         </Text>
         {row.kind === 'group' ? <GroupLine group={row} /> : row.kind === 'pending' ? <StatusText small status={statusLabel('searching')} icon="searching" /> : <EntryStatus entry={row} />}
       </div>

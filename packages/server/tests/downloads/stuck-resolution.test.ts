@@ -413,22 +413,30 @@ describe('selected target authorization', () => {
     }
   });
 
-  it('verifies the cached torrent on its turn before it asks an indexer', async () => {
+  it.each(['waiting', 'running'] as const)('discards the cached torrent and its %s search when the target retries', async (state) => {
     const { entry } = await setup('tv', 'fetching', 'client_unreachable');
     selectRelease(entry);
     const source = prepared(entry);
     entry.transferHash = source.hash;
+    const stale = fetchJob(entry);
+    stale.state = state;
+    const next = 'Show.Name.S01E01.1080p.WEB-DL-NEW';
+    pipe!.tracker.state.items = [{ title: next, size: 60 * 45 * MIB }];
     api = await pipe!.api();
 
     expect((await api.post('/queue/actions', { action: 'retry', ids: [entry.id] })).status).toBe(200);
+    expect(pipe!.db.data.jobs[stale.id]).toBeUndefined();
+    if (state === 'running') await queueSearchHandler(pipe!.finder).run(stale, signal());
     expect(entry.state.kind).toBe('queued');
+    expect(turnOf(entry).selected).toEqual({});
+    expect(pipe!.db.data.torrents[source.hash]).toBeUndefined();
     expect(pipe!.qbit.torrents.size).toBe(0);
     pipe!.db.data.queuePaused = false;
     await expect.poll(() => entry.state).toEqual({ kind: 'downloading' });
     expect(entry.history.map(({ stage }) => stage)).toContain('searching');
-    expect(pipe!.tracker.state.searches).toEqual([]);
-    expect(pipe!.tracker.state.downloads).toEqual([]);
-    expect(entry.transferHash).toBe(source.hash);
+    expect(pipe!.tracker.state.searches).toHaveLength(1);
+    expect(pipe!.tracker.state.downloads).toEqual([next]);
+    expect(entry.transferHash).toBe(hashOf(next));
   });
 
   it('retries only the selected episode of a complete shared torrent', async () => {

@@ -45,7 +45,7 @@ function downloadCoverage(files: string[], title: Title, entry: QueueEntry, torr
   const match = entry.retryDownload?.match;
   const selected = match && matchPath(files, (file) => file, torrent)(match.file);
   if (match && !selected) {
-    if (entry.release?.uploadPath) return 'absent';
+    if (entry.retryDownload?.upload || entry.release?.uploadPath) return 'absent';
     entry.retryDownload!.match = null;
   }
   if (title.mediaType === 'movie') {

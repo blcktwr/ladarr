@@ -351,7 +351,8 @@ function publicRejectionId(entry: QueueEntry, release: RejectedRelease) {
 
 export function manualStopsOf(release: RejectedRelease) {
   const reasons = (release.reasons ?? []).map(currentText);
-  return manualStops.flatMap(([code, message]) => reasons.includes(code) || reasons.includes(message) ? [{ code, message }] : []);
+  return manualStops.filter(([code]) => code !== 'file_unmapped' || release.kind !== 'pack')
+    .flatMap(([code, message]) => reasons.includes(code) || reasons.includes(message) ? [{ code, message }] : []);
 }
 
 function rejectedView(entry: QueueEntry, release: RejectedRelease): QueueRejectedRelease {

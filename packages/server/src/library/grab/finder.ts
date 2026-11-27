@@ -10,13 +10,12 @@ import { isMonitored, movieEligibleAt } from '../library.ts';
 import { catalog, itemFields, titleFields } from '../../core/log.ts';
 import { entryId, forgetSource, forgetUnusedSource, isActive, newTurn, phaseOfEntry } from '../downloads/queue.ts';
 import { createClients } from '../downloads/client-api.ts';
-import { enqueueUpload } from '../downloads/upload.ts';
 import { importLocal } from '../imports/local.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import { manualUpgradeTargets } from './upgrades.ts';
-import { fileOf as matchedFile, matchCompletePack, matchEpisode, matchMovie, matchPartialPack, needsManualMapping, readCoverage, validMatches } from './match.ts';
+import { fileOf as matchedFile, matchCompletePack, matchEpisode, matchMovie, matchPartialPack, needsManualMapping, readCoverage, readPackCoverage, validMatches } from './match.ts';
 import { readSource, type Evidence } from './source.ts';
-import { currentSelection, enqueueSelection, readySelection, reasonOf as grabReasonOf, savedFiles, sendPhase } from './grab.ts';
+import { currentSelection, enqueueSelection, readySelection, reasonOf as grabReasonOf, sendPhase } from './grab.ts';
 import { requestIdFor } from '../../core/outbound.ts';
 import type { OutsideTitleLock } from '../../core/title-lock.ts';
 import { catalogPoint, catalogSeasons, normalizeNumbering, releasePoint, releaseSeasons } from '../numbering.ts';
@@ -89,7 +88,7 @@ const rawOf = (release: ReleaseRef): RawRelease => ({
 });
 
 export function createFinder({ queue, indexers, enqueue, clients = createClients(), now = Date.now }: FinderDeps) {
-  const cache = new Map<string, { at: number; releases: RawRelease[] }>();
+  const cache = new Map<string, { at: number; releases: RawRelease[]; round?: string }>();
   // Equal queries that run at the same time share one request.
   const inflight = new Map<string, { requestId: string; releases: Promise<RawRelease[]> }>();
 
@@ -214,6 +213,28 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       }
     }
     return enqueue({ type: 'queue.search', payload, runAt, priority: payload.entryIds.some((id) => db.data.queue[id]?.priority != null) });
+  }
+
+  function restartSearch(entries: QueueEntry[]) {
+    const turns = new Map<QueueTurn, string[]>();
+    for (const entry of entries) {
+      const item = queue.restart(entry);
+      const ids = turns.get(item) ?? [];
+      ids.push(entry.id);
+      turns.set(item, ids);
+    }
+    for (const [item, entryIds] of turns) {
+      for (const job of Object.values(db.data.jobs)) {
+        if (job.type !== 'queue.search' || job.state === 'failed') continue;
+        const prior = job.payload as Acquisition;
+        if (prior.titleKey !== item.titleKey || prior.season !== item.season) continue;
+        const rest = prior.forced ? prior.entryIds.filter((id) => !entryIds.includes(id)) : [];
+        if (prior.forced && rest.length === prior.entryIds.length) continue;
+        delete db.data.jobs[job.id];
+        if (rest.length) enqueueSearch({ ...prior, entryIds: rest, work: undefined, resume: undefined }, { runAt: job.runAt, afterRun: true });
+      }
+      enqueueSearch({ titleKey: item.titleKey, season: item.season, entryIds, fresh: true }, { afterRun: true });
+    }
   }
 
   // Puts the targets in the queue and starts their search. A target that is in the journey already is left as it is.
@@ -396,7 +417,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
   // Asks every usable indexer at the same time. Each one answers on its own: one failure does not stop the others.
   // `budget` counts the requests that go to an indexer, not the answers from the cache. A query that the budget stops
   // is incomplete, so the caller leaves its targets for the next run instead of ending them as an empty search.
-  async function queryAll(title: Title, scope: Scope, name: TitleName, entries: QueueEntry[], signal: AbortSignal, { fresh = false, quiet = false, budget, due, releaseDay = false }: { fresh?: boolean; quiet?: boolean; budget?: { left: number }; due?: Indexer[]; releaseDay?: boolean } = {}) {
+  async function queryAll(title: Title, scope: Scope, name: TitleName, entries: QueueEntry[], signal: AbortSignal, { fresh = false, round, quiet = false, budget, due, releaseDay = false }: { fresh?: boolean; round?: string; quiet?: boolean; budget?: { left: number }; due?: Indexer[]; releaseDay?: boolean } = {}) {
     const usable = usableIndexers(title);
     // An indexer with preferred languages receives only an alias in one of them. No languages means every name.
     const list = usable.filter((indexer) => {
@@ -463,7 +484,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           const hit = cache.get(key);
           let cached = false;
           const cacheMs = releaseDay ? Math.min(CACHE_MS, releaseDayInterval(indexer)) : CACHE_MS;
-          if (hit && !fresh && now() - hit.at < cacheMs) {
+          if (hit && (!fresh || (round !== undefined && hit.round === round)) && now() - hit.at < cacheMs) {
             found = hit.releases;
             cached = true;
           } else {
@@ -482,7 +503,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
             }
             requestId = shared.requestId;
             found = await shared.releases;
-            cache.set(key, { at: now(), releases: found });
+            cache.set(key, { at: now(), releases: found, round });
             if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
           }
           answered++;
@@ -609,17 +630,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
         return;
       }
       for (const entry of targets()) {
-        const previous = entry.retryDownload;
-        if (!previous || !entry.release?.uploadPath) continue;
-        const files = savedFiles({ hash: previous.hash, source: entry.source ?? null });
-        if (!previous.absent && files?.includes(entry.release.uploadPath)) {
-          entry.transferHash = previous.hash;
-          entry.clientId = previous.clientId;
-          delete entry.retryDownload;
-          queue.enter(entry, 'waiting_slot', 'the uploaded torrent contains the selected file');
-          enqueueUpload(enqueue, [entry], previous.hash);
-          continue;
-        }
+        if (!entry.retryDownload || !entry.release?.uploadPath) continue;
         forgetSource(entry);
         entry.release = null;
         queue.touch(entry);
@@ -667,7 +678,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           break;
         }
         phase('searching', group.filter((entry) => !prepared(item, entry.id)));
-        const answer = await outside(() => queryAll(title, scope, name, group, signal, { fresh: payload.fresh && !resumed, budget, quiet: scope.kind !== 'movie', due, releaseDay: releaseToday }));
+        const answer = await outside(() => queryAll(title, scope, name, group, signal, { fresh: payload.fresh, round: work.id, budget, quiet: scope.kind !== 'movie', due, releaseDay: releaseToday }));
         if (!alive()) return [];
         incomplete ||= answer.incomplete;
         if (!answer.incomplete && answer.asked > answer.answered) unavailable = true;
@@ -783,8 +794,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
         if (!remaining.length) return;
         if (remaining.every((entry) => entry.retryDownload?.absent && entry.retryDownload.hash === decision.hash)) continue;
         const previous = Object.values(item.selected).find((source) => releaseKey(source.release) === key);
-        const retrySource = previous && remaining.some((entry) => entry.retryDownload?.hash === previous.hash && !entry.retryDownload.absent);
-        if (work.checked[key] || (previous?.status === 'prepared' && !manualIds && !retrySource)) continue;
+        const retrying = payload.fresh && remaining.some((entry) => entry.retryDownload !== undefined);
+        if (work.checked[key] || (previous?.status === 'prepared' && !manualIds && !retrying)) continue;
         const evidenceTargets = decision.kind === 'pack' ? remaining : remaining.filter((entry) => entry.number === null ||
           decision.covers.some((covered) => covered.season === entry.season && covered.number === entry.number));
         if (!evidenceTargets.length && !payload.forced) continue;
@@ -796,7 +807,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           record(decision);
           continue;
         }
-        const retained = previous && (previous.status === 'verify' || ((manualIds || retrySource) && previous.status === 'prepared')) ? previous : undefined;
+        const retained = previous && ((previous.status === 'verify' && (!retrying || manualIds)) || (manualIds && previous.status === 'prepared')) ? previous : undefined;
         const ref = retained?.release ?? refFor(title, decision, payload.forced === true);
         phase('fetching', evidenceTargets.filter((entry) => !prepared(item, entry.id)));
         for (const entry of evidenceTargets) if (!prepared(item, entry.id)) entry.release = ref;
@@ -866,6 +877,10 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           continue;
         }
         const manifest = title.mediaType === 'movie' ? null : readCoverage(evidence.files, title, numbering, manualMatches);
+        const manifest = title.mediaType === 'movie' ? null
+          : pack && decision.parsed.pack && decision.parsed.season !== null
+            ? readPackCoverage(evidence.files, title, numbering, decision.parsed.season, manualMatches)
+            : readCoverage(evidence.files, title, numbering, manualMatches);
         const pack = decision.kind === 'pack';
         const requested = candidates.map(point);
         const complete = manifest && pack && matchCompletePack(manifest, requested);
@@ -935,11 +950,9 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       sendPrepared(item);
       return;
     }
-    const cached = Object.values(item.selected).filter((source) => source.source && source.status !== 'accepted' &&
-      missing().some((entry) => entry.retryDownload?.hash === source.hash && !entry.retryDownload.absent));
-    if (cached.length || payload.supplied) {
+    if (payload.supplied) {
       const group = targets();
-      const ranked = candidates([...cached.map(({ release }) => rawOf(release)), ...(payload.supplied ?? [])], group);
+      const ranked = candidates(payload.supplied, group);
       await inspect(ranked.filter(({ decision }) => decision.kind === 'pack'), group, 'supplied');
       if (!holdingClient) await inspect(ranked.filter(({ decision }) => decision.kind !== 'pack'), group);
     }
@@ -1550,5 +1563,5 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     return [...bySeason.values()].flat();
   }
 
-  return { requestSearch, partial, startOtherSeasons, enqueueSearch, grabManual, pendingPackEntries, applyRejectedMapping, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, rescheduleReleaseDay, sweep, rss, search, canStartSearch, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
+  return { requestSearch, restartSearch, partial, startOtherSeasons, enqueueSearch, grabManual, pendingPackEntries, applyRejectedMapping, wantForRelease, decideContext, usableIndexers, queryAll, wantedEpisode, wantedMovie, repairBlocked, rescheduleReleaseDay, sweep, rss, search, canStartSearch, upgradeTitle, upgradeCount: (title: Title, quality: string) => upgradeFiles(title, quality).length, clearCache: () => cache.clear() };
 }

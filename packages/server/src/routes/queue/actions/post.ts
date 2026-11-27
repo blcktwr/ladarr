@@ -25,9 +25,16 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
 
   const sharing = (entry: QueueEntry) => sharingOf(entry);
 
+  function canRestart(entry: QueueEntry, group: boolean) {
+    if (canRetry(entry.state)) return true;
+    if ((!group && entry.season !== null) || !['queued', 'searching', 'waiting', 'fetching', 'waiting_slot'].includes(entry.state.kind)) return false;
+    const item = queue.itemFor(entry);
+    return Boolean(item && item.entryIds.includes(entry.id) && canRetry(item.state));
+  }
+
   // The torrent is one that a target of ladarr sent to the client.
   // Says if the action fits the state of the entry. A refusal is clear and changes nothing.
-  function supports(action: Action, entry: QueueEntry, removal?: { torrents: Map<string, Torrent>; attached: Set<string> }): string | null {
+  function supports(action: Action, entry: QueueEntry, removal?: { torrents: Map<string, Torrent>; attached: Set<string> }, group = false): string | null {
     const phase = phaseOfEntry(entry);
     const early = ['queued', 'searching', 'fetching', 'waiting_slot', 'sending'].includes(phase);
     const work = ['queued', 'searching', 'fetching', 'waiting_slot', 'sending', 'downloading'].includes(entry.state.kind);
@@ -37,7 +44,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
       case 'resume':
         return entry.state.kind === 'paused' ? null : 'This target is not paused.';
       case 'retry':
-        return canRetry(entry.state) ? null : 'This target does not need a retry.';
+        return canRestart(entry, group) ? null : 'This target does not need a retry.';
       case 'apply_numbering':
         return entry.state.kind === 'blocked' && entry.season !== null ? null : 'This target has no blocked acquisition.';
       case 'retry_fetch':
@@ -83,6 +90,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
   const { retry } = createRetry({ queue, enqueue });
 
   async function apply(action: Action, entries: QueueEntry[]) {
+    if (action === 'retry') return finder.restartSearch(entries);
     const removed = new Set<string>();
     for (const entry of entries) {
       // Each target acts on the client that has its torrent.
@@ -116,10 +124,6 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
           }
           break;
         }
-        case 'retry':
-          queue.restart(entry);
-          finder.enqueueSearch({ titleKey: entry.titleKey, season: entry.season, entryIds: [entry.id], fresh: true, episodeRound: false, supplied: undefined }, { afterRun: true });
-          break;
         case 'retry_fetch':
         case 'retry_send':
         case 'check_download':
@@ -178,7 +182,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
       picked =
         action === 'search_other_seasons'
           ? otherSeasonsTargets(group.titleKey, group.season ?? null)
-          : groupEntries(group.titleKey, group.season ?? null).filter((entry) => action !== 'retry' || canRetry(entry.state));
+          : groupEntries(group.titleKey, group.season ?? null).filter((entry) => action !== 'retry' || canRestart(entry, true));
     } else if (action === 'search_other_seasons') return void res.status(400).json({ error: 'invalid_request' });
     else if (Array.isArray(ids) && ids.length <= 1000 && ids.every((id) => typeof id === 'string')) picked = ids.flatMap((id) => (db.data.queue[id] && shown(db.data.queue[id]!) ? [db.data.queue[id]!] : []));
     else return void res.status(400).json({ error: 'invalid_request' });
@@ -326,7 +330,7 @@ export function queueActionsPost(queue: Queue, finder: Finder, poller: Poller, c
     const unsupported: { id: string; reason: string }[] = [];
     const affected = new Map<string, QueueEntry>();
     for (const entry of picked) {
-      const refusal = supports(action, entry, removal);
+      const refusal = supports(action, entry, removal, Boolean(group));
       if (refusal) unsupported.push({ id: entry.id, reason: refusal });
       else for (const other of scope(action, entry)) affected.set(other.id, other);
     }

@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { emptyData, withDefaults } from '../../src/core/db.ts';
 import { decide } from '../../src/library/grab/decide.ts';
+import { readPackCoverage } from '../../src/library/grab/match.ts';
 import { stageOf } from '../../src/library/downloads/queue.ts';
 import { entryOf } from '../helpers/test-queue.ts';
 import { releaseEpisodes } from '../../src/library/parse.ts';
@@ -38,6 +39,48 @@ const ctx = (extra: Partial<DecideContext> = {}): DecideContext => ({
 });
 
 const show = title({ episodes: range(1, 23).map((number) => episode(1, number)) });
+
+describe('season pack file matching', () => {
+  it.each(['Show.S01/Bonus/E03.mkv', 'Bonus/E03.mkv', 'Show.S01/Bonus.E03.mkv'])('does not fill a missing episode with %s', (bonus) => {
+    const files = ['Show.S01/E01.mkv', 'Show.S01/E02.mkv', bonus];
+    const series = title({ episodes: range(1, 3).map((n) => episode(1, n)) });
+    const manifest = readPackCoverage(files, series, numbering([]), 1);
+    expect([...manifest.byFile.keys()]).toEqual(files.slice(0, 2));
+    expect(manifest.status({ season: 1, number: 3 })).toBe('absent');
+  });
+
+  it('keeps episodes in the Specials folder for season zero', () => {
+    const series = title({ episodes: [episode(0, 1), episode(0, 2)] });
+    const files = ['Show/Specials/E01.mkv', 'Show/Specials/Bonus/E02.mkv'];
+    const manifest = readPackCoverage(files, series, numbering([]), 0);
+    expect(manifest.episodes).toEqual([{ season: 0, number: 1 }]);
+  });
+
+  it.each([1, 63])('does not use disc numbers for a season starting at episode %i', (first) => {
+    const series = title({ episodes: [episode(1, first), episode(1, first + 1)] });
+    const files = ['Show.S01/Disc 1.mkv', 'Show.S01/Disc 2.mkv'];
+    const manifest = readPackCoverage(files, series, numbering([]), 1);
+    expect(manifest.byFile.size).toBe(0);
+    expect(manifest.unknown).toEqual(files);
+  });
+
+  it('uses the advertised season for unqualified files and respects explicit season numbers', () => {
+    const series = title({ episodes: [episode(1, 1), episode(1, 2), episode(2, 1), episode(2, 2)] });
+    const files = ['Show/E01.mkv', 'Show/S01E02.mkv'];
+    const manifest = readPackCoverage(files, series, numbering([]), 2);
+    expect([...manifest.byFile.values()]).toEqual([[{ season: 2, number: 1 }], [{ season: 1, number: 2 }]]);
+    expect(manifest.status({ season: 2, number: 2 })).toBe('absent');
+  });
+
+  it('keeps manual file assignments and uses the release season for saved numbering', () => {
+    const series = title({ episodes: [episode(1, 13), episode(1, 14)] });
+    const files = ['Show/E01.mkv', 'Show/Bonus/E02.mkv'];
+    const matches = { [files[1]!]: [{ season: 1, number: 14 }] };
+    const manifest = readPackCoverage(files, series, numbering(), 2, matches);
+    expect(manifest.byFile.get(files[0]!)).toEqual([{ season: 1, number: 13 }]);
+    expect(manifest.byFile.get(files[1]!)).toEqual(matches[files[1]!]);
+  });
+});
 
 describe('the decision of a release', () => {
   it('accepts the release episode that the range maps to the catalog target', () => {

@@ -267,7 +267,7 @@ describe('title torrent upload', () => {
     expect(pipe.tracker.state.searches).toEqual([]);
   });
 
-  it.each([true, false])('checks a manual source before searching, cached bytes: %s', async (cached) => {
+  it.each([true, false])('starts a fresh search after an unsent upload, cached bytes: %s', async (cached) => {
     const item = pipe.db.data.titles['movie:2'] = film();
     pipe.db.data.queuePaused = true;
     const bytes = makeTorrent('For retry', ['Movie.mkv'], 'Retain this metadata.');
@@ -278,17 +278,13 @@ describe('title torrent upload', () => {
     if (!cached) delete pipe.db.data.torrents[hash];
     pipe.queue.block(entry, { code: 'client_unreachable' }, 'client unavailable before send');
     accepted(await api.post('/queue/actions', { action: 'retry', ids: [entry.id] }));
+    expect(entry.release).toBeNull();
+    expect(pipe.db.data.torrents[hash]).toBeUndefined();
     accepted(await api.post('/queue/actions', { action: 'priority', ids: [entry.id] }));
     pipe.queue.setPaused(false);
-    if (cached) {
-      await until(() => entry.state.kind === 'downloading');
-      expect(pipe.qbit.receivedTorrents).toEqual([bytes]);
-      expect(pipe.tracker.state.searches).toEqual([]);
-    } else {
-      await until(() => entry.state.kind === 'waiting');
-      expect(pipe.tracker.state.searches.length).toBeGreaterThan(0);
-      expect(adds()).toEqual([]);
-    }
+    await until(() => entry.state.kind === 'waiting');
+    expect(pipe.tracker.state.searches.length).toBeGreaterThan(0);
+    expect(adds()).toEqual([]);
     expect(pipe.tracker.state.downloads).toEqual([]);
   });
 

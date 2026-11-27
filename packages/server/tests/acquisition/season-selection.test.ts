@@ -60,6 +60,62 @@ it('adds a complete pack once when one file identifies two episodes', async () =
   expect(pipe.acquisition).toEqual([seasonSearch, read(complete), add(complete)]);
 });
 
+it.each([
+  { catalog: [63, 64, 65], source: [1, 2, 3] },
+  { catalog: [1, 2, 3], source: [63, 64, 65] },
+  { catalog: [2, 3, 4], source: [1, 2, 3] },
+])('matches a complete season with catalog numbers $catalog and torrent numbers $source', async ({ catalog, source }) => {
+  const series = await setup(catalog);
+  const complete = pack(PACK, [...source].reverse().map(file), catalog.length);
+  advertise([complete]);
+  pipe.finder.requestSearch(series.key, { season: 1, fresh: true });
+
+  await expect.poll(async () => (await group(series.key)).counts.downloading).toBe(catalog.length);
+  expect(pipe.acquisition).toEqual([seasonSearch, read(complete), add(complete)]);
+  const hash = hashOf(PACK, complete.files);
+  expect(pipe.queue.findItem(series.key, 1)!.selected[hash]?.matches).toEqual(Object.fromEntries(
+    catalog.map((n, i) => [`${series.key}:1x${n}`, `${PACK}/${file(source[i]!)}`]),
+  ));
+  pipe.complete(PACK, Object.fromEntries(source.map((n) => [file(n), `episode-${n}`])), hash);
+  await expect.poll(async () => (await group(series.key)).counts.available).toBe(catalog.length);
+  for (const [i, episode] of series.episodes.entries()) {
+    expect(pipe.db.data.files[episode.fileId!]).toMatchObject({
+      episodes: [{ season: 1, number: episode.number }], download: { file: file(source[i]!), hash },
+    });
+  }
+});
+
+it.each([true, false])('checks the accepted file of a renumbered download on retry (file present: %s)', async (present) => {
+  const series = await setup([63, 64]);
+  const complete = pack(PACK, [file(1), file(2)], 2);
+  advertise([complete]);
+  pipe.finder.requestSearch(series.key, { season: 1, fresh: true });
+  await expect.poll(async () => (await group(series.key)).counts.downloading).toBe(2);
+  pipe.poller.stop();
+  const target = pipe.queue.get(`${series.key}:1x63`)!;
+  const hash = hashOf(PACK, complete.files);
+  pipe.qbit.setFiles(hash, [{ name: file(present ? 1 : 63), size: 1000, progress: 0.5 }]);
+  pipe.queue.block(target, { code: 'client_error' }, 'download interrupted');
+  expect((await api!.post('/queue/actions', { action: 'check_download', ids: [target.id] })).status).toBe(200);
+  await expect.poll(() => target.state).toMatchObject(present
+    ? { kind: 'downloading' }
+    : { kind: 'blocked', problem: { code: 'pack_partial' } });
+  expect(pipe.acquisition).toEqual([seasonSearch, read(complete), add(complete)]);
+});
+
+it('rechecks a rejected pack when the full catalog season now matches its numbering', async () => {
+  const series = await setup([3, 4, 5]);
+  const complete = pack(PACK, [file(1), file(2), file(3), file(4)], 4);
+  advertise([complete]);
+  pipe.finder.requestSearch(series.key, { season: 1, fresh: true });
+  await expect.poll(async () => (await group(series.key)).problem?.code).toBe('file_unmapped');
+  const [{ entryId, release }] = (await group(series.key)).rejected;
+  series.episodes.push(episode(1, 6));
+  expect(await api!.post(`/queue/entries/${entryId}/releases/grab`, { indexerId: release.indexerId, guid: release.guid, scope: 'season' })).toMatchObject({ status: 202 });
+  await expect.poll(async () => (await group(series.key)).counts.downloading).toBe(3);
+  expect(pipe.acquisition).toEqual([seasonSearch, read(complete), add(complete)]);
+});
+
 it.each([false, true])('accepts a quality-rejected season pack for all 31 episodes (E01 already prepared: %s)', async (prepared) => {
   const numbers = Array.from({ length: 31 }, (_, i) => i + 1);
   const series = await setup(numbers);
@@ -108,6 +164,35 @@ it('inspects a higher-ranked partial but submits only the later complete pack', 
 
   await expect.poll(() => pipe.acquisition).toEqual([seasonSearch, read(first), read(complete), add(complete)]);
   await expect.poll(async () => (await group(series.key)).status).toBe('downloading');
+});
+
+it('discards an unsent partial pack when a stuck season retries its search', async () => {
+  const series = await setup();
+  const old = partial();
+  advertise([old], [pack(WRONG, [file(2)], 1)]);
+  pipe.finder.requestSearch(series.key, { season: 1, fresh: true });
+  await expect.poll(() => group(series.key)).toMatchObject({
+    status: 'stuck', torrents: [{ status: 'prepared', release: { title: old.title } }],
+  });
+  expect(pipe.qbit.torrents.size).toBe(0);
+
+  pipe.queue.setPaused(true);
+  const action = { action: 'retry', group: { titleKey: series.key, season: 1 } };
+  const preview = await api!.post('/queue/actions', { ...action, preview: true });
+  expect(preview.body.affected).toHaveLength(3);
+  expect((await api!.post('/queue/actions', { ...action, version: preview.body.version })).status).toBe(200);
+  expect(await group(series.key)).toMatchObject({ status: 'queued', torrents: [], rejected: [] });
+  for (const n of [1, 2, 3]) {
+    expect(await entry(`${series.key}:1x${n}`)).toMatchObject({ status: 'queued', release: null, search: null });
+  }
+  expect(pipe.db.data.torrents[hashOf(old.title, old.files)]).toBeUndefined();
+
+  const complete = full();
+  advertise([complete]);
+  const before = pipe.acquisition.length;
+  pipe.queue.setPaused(false);
+  await expect.poll(() => group(series.key)).toMatchObject({ counts: { downloading: 3 } });
+  expect(pipe.acquisition.slice(before)).toEqual([seasonSearch, read(complete), add(complete)]);
 });
 
 it('uses a single already returned with the partial pack instead of asking again', async () => {
@@ -281,10 +366,9 @@ it('stops for manual mapping when the pack contains conflicting episode numberin
   const saved = pipe.queue.findItem(series.key, 1)!.search!.rejected[0]!;
   saved.reasons = ['The torrent files do not contain all the requested episodes.'];
   const [{ entryId, release }] = (await group(series.key)).rejected;
-  expect(release).toMatchObject({ reasons: [message], selectable: false });
-  expect(await api!.post(`/queue/entries/${entryId}/releases/grab`, { indexerId: release.indexerId, guid: release.guid })).toMatchObject({
-    status: 409, body: { error: 'release_rejected', rejections: [{ code: 'file_unmapped', message }] },
-  });
+  expect(release).toMatchObject({ reasons: [message], selectable: true });
+  expect(await api!.post(`/queue/entries/${entryId}/releases/grab`, { indexerId: release.indexerId, guid: release.guid, scope: 'season' })).toMatchObject({ status: 202 });
+  await expect.poll(async () => (await group(series.key)).status).toBe('stuck');
   expect(pipe.acquisition).toEqual([seasonSearch, read(conflicting)]);
 });
 

@@ -118,7 +118,10 @@ describe('series journey', () => {
     const series = show();
     pipe.db.data.titles[series.key] = series;
     const pack = 'Show.Name.S01.1080p.WEB-DL.DDP5.1-GRP';
-    const files = { 'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two', 'extras/Show.Name.S01E03.mkv': 'three-data' };
+    const files = {
+      'Show.Name.S01E01.mkv': 'one', 'Show.Name.S01E02.mkv': 'two',
+      'extras/Show.Name.S01E03.mkv': 'bonus', 'episodes/Show.Name.S01E03.mkv': 'three-data',
+    };
     const hash = hashOf(pack, Object.keys(files));
     pipe.tracker.state.items = [
       { title: pack, size: 3 * 60 * 45 * MIB, files: Object.keys(files) },
@@ -137,6 +140,7 @@ describe('series journey', () => {
     await until(() => entries.every((e) => stageOf(e) === 'available'));
     const paths = Object.values(pipe.db.data.files).map((f) => f.path).sort();
     expect(paths).toEqual(['Show Name (2020)/Season 01/Show Name - S01E01 - Episode 1.mkv', 'Show Name (2020)/Season 01/Show Name - S01E02 - Episode 2.mkv', 'Show Name (2020)/Season 01/Show Name - S01E03 - Episode 3.mkv']);
+    expect(readFileSync(join(pipe.folders.tv, paths[2]!), 'utf8')).toBe('three-data');
     expect(series.episodes.every((e) => e.fileId)).toBe(true);
   });
 

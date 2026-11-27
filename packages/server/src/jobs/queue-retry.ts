@@ -2,11 +2,12 @@ import { db } from '../core/db.ts';
 import { catalog, itemFields } from '../core/log.ts';
 import { withTitleLock } from '../core/title-lock.ts';
 import { inspectCoverage } from '../library/coverage.ts';
+import { acceptedPath, matchPath } from '../library/downloads/file-evidence.ts';
 import { ClientError } from '../library/downloads/qbittorrent.ts';
 import { forgetSource, isActive, phaseOfEntry } from '../library/downloads/queue.ts';
 import { enqueueUpload, findUpload, uploadHash, uploadOwner } from '../library/downloads/upload.ts';
 import { readTitleFolder, scanTitle } from '../library/scan.ts';
-import type { ClientHandle, Handler, QueueEntry, QueueRetryDeps, Title } from '../types.ts';
+import type { ClientHandle, Handler, QueueEntry, QueueRetryDeps, Title, Torrent } from '../types.ts';
 
 const present = (fileId: string | null) => Boolean(fileId && db.data.files[fileId] && !db.data.files[fileId]!.missing);
 
@@ -19,16 +20,16 @@ const fileOf = (title: Title, entry: QueueEntry) =>
 // the search. The target stops at the first phase that resolves it, so a file that is on the disk, or a torrent that
 // the client has, is never downloaded again.
 export function queueRetryHandler({ queue, finder, clients, enqueue, events }: QueueRetryDeps): Handler {
-  async function canResume(entry: QueueEntry, handle: ClientHandle, hash: string) {
+  async function canResume(entry: QueueEntry, handle: ClientHandle, torrent: Torrent) {
     if (entry.number === null || entry.season === null) return true;
     const revision = entry.revision;
     const title = db.data.titles[entry.titleKey];
     if (!title) return false;
-    const files = (await handle.api.files(hash)).map((file) => file.name);
+    const files = (await handle.api.files(torrent.hash)).map((file) => file.name);
     if (queue.get(entry.id) !== entry || entry.revision !== revision || title !== db.data.titles[entry.titleKey]) return false;
-    const selected = entry.manualMatch?.file ?? entry.release?.uploadPath;
+    const selected = entry.manualMatch?.file ?? entry.release?.uploadPath ?? acceptedPath(entry);
     const status = selected
-      ? files.some((file) => file === selected || file.endsWith(`/${selected}`)) ? 'identified' : 'absent'
+      ? matchPath(files, (file) => file, torrent)(selected) ? 'identified' : 'absent'
       : inspectCoverage(files, title, entry.numbering).status({ season: entry.season, number: entry.number });
     if (status === 'identified') return true;
     queue.block(entry, { code: status === 'absent' ? 'pack_partial' : 'file_unmapped' }, 'the torrent has no matching episode file');
@@ -98,7 +99,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
       queue.block(entry, { code: torrent ? 'client_error' : 'torrent_missing' }, 'download check');
       return;
     }
-    if (!torrent.complete && !(await canResume(entry, handle, hash))) return;
+    if (!torrent.complete && !(await canResume(entry, handle, torrent))) return;
     queue.retryAttempt(entry, 'retry');
     entry.transferHash = hash;
     entry.clientId = handle.id;
@@ -142,7 +143,7 @@ export function queueRetryHandler({ queue, finder, clients, enqueue, events }: Q
     if (download) {
       const { torrent } = download;
       if (torrent.status === 'error') return queue.block(entry, { code: 'client_error' }, 'download check');
-      if (!torrent.complete && !(await canResume(entry, handle, hash))) return;
+      if (!torrent.complete && !(await canResume(entry, handle, torrent))) return;
       release.uploadOwner = uploadOwner(entry.titleKey, hash, handle.id);
       release.external = !release.uploadOwner;
       queue.enter(entry, torrent.complete ? 'importing' : 'downloading', 'retry: the client has the torrent', torrent.name);

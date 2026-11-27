@@ -1,6 +1,6 @@
 import type { EpisodeRef, Numbering, Title } from '../../types.ts';
 import { inspectCoverage } from '../coverage.ts';
-import { isSample, isVideoFile } from '../parse.ts';
+import { isSample, isVideoFile, parseEpisodes } from '../parse.ts';
 
 type Manifest = ReturnType<typeof inspectCoverage>;
 
@@ -37,6 +37,35 @@ export function readCoverage(files: string[], title: Title, numbering: Numbering
     status: (point) => assigned.has(key(point)) ? 'identified'
       : !manifest.unknown.length && !manifest.episodes.length && manual.length ? 'absent' : manifest.status(point),
   };
+}
+
+const extraFolder = /^(?:extras?|bonus(?:[ ._-]+features?)?|featurettes?|trailers?|ncop\d*|nced\d*)$/i;
+const extraFile = /(?:^|[ ._-])(?:extras?|bonus|featurettes?|trailers?)(?=$|[ ._-]+(?:s\d|e\d|\d))|(?:^|[ ._-])(?:ncop\d*|nced\d*)(?:$|[ ._-])/i;
+function isExtra(path: string, season: number) {
+  const folders = path.split('/');
+  const name = folders.pop()!.replace(/\.[^.]+$/, '');
+  return extraFile.test(name) || folders.some((folder) => extraFolder.test(folder) || (season !== 0 && /^specials?$/i.test(folder)));
+}
+
+export function readPackCoverage(files: string[], title: Title, numbering: Numbering, season: number, matches?: Record<string, EpisodeRef[]>) {
+  const videos = files.filter((file) => isVideoFile(file) && !isSample(file) && !isExtra(file, season));
+  if (matches || season === 0 || numbering.ranges.some((range) => range.season === season || range.releaseSeason === season)) {
+    return readCoverage(videos, title, numbering, matches, season);
+  }
+  const catalog = title.episodes.filter((episode) => episode.season === season && !episode.removedFromTmdb).map(({ number }) => number).sort((a, b) => a - b);
+  const readings = videos.map((file) => parseEpisodes(file, season));
+  const source = readings.flatMap((reading) => reading?.numbers ?? []).sort((a, b) => a - b);
+  const from = catalog[0];
+  const releaseFrom = source[0];
+  const expected = title.meta.seasons.find((item) => item.seasonNumber === season)?.episodeCount ?? catalog.length;
+  if (from !== undefined && releaseFrom !== undefined && releaseFrom > 0 && from !== releaseFrom &&
+    catalog.length >= 2 && catalog.length === expected && source.length === catalog.length &&
+    readings.every((reading) => reading?.season === season) &&
+    catalog.every((number, i) => number === from + i && source[i] === releaseFrom + i)) {
+    const range = { season, from, to: catalog.at(-1)!, releaseSeason: season, releaseFrom };
+    return inspectCoverage(videos, title, { ...numbering, ranges: [...numbering.ranges, range] }, season);
+  }
+  return inspectCoverage(videos, title, numbering, season);
 }
 
 export function matchCompletePack(manifest: Manifest, requested: EpisodeRef[]) {

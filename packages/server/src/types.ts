@@ -589,7 +589,7 @@ export type QueueEntry = {
   emptyRoundIndexers?: number[];
   release: ReleaseRef | null;
   transferHash: string | null;
-  retryDownload?: { hash: string; clientId: string | null; match: QueueEntry['manualMatch']; absent?: boolean } | null;
+  retryDownload?: { hash: string; clientId: string | null; match: QueueEntry['manualMatch']; upload?: ReleaseRef; absent?: boolean } | null;
   // The download client that has the torrent. Set with the hash.
   clientId: string | null;
   // The torrent source that the fetch got. The target keeps it while it waits for a slot of the client, so a wait,
