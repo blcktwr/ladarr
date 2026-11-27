@@ -570,13 +570,19 @@ function requestedSeasons(title: Title, list: number[]) {
   return list.length ? list : known.filter((season) => season !== 0);
 }
 
+function uncachedJson(body: Record<string, unknown>): RequestHandler {
+  const json = JSON.stringify(body);
+  return (_req, res) => {
+    // res.json() can send a 304 even with no-store if the client sends an old ETag.
+    res.set('Cache-Control', 'no-store').type('json').end(json);
+  };
+}
+
 export function seerrRouter(deps: CompatDeps) {
   const router = Router();
 
-  router.get('/status', (_req, res) => void res.json({ version: '3.5.1', commitTag: 'ladarr' }));
-  router.get('/settings/public', (_req, res) =>
-    void res.json({ initialized: true, movie4kEnabled: false, series4kEnabled: false, cacheImages: false }),
-  );
+  router.get('/status', uncachedJson({ version: '3.5.1', commitTag: 'ladarr' }));
+  router.get('/settings/public', uncachedJson({ initialized: true, movie4kEnabled: false, series4kEnabled: false, cacheImages: false }));
   router.post('/auth/local', unsupported('Use the API key.'));
   router.post('/auth/jellyfin', unsupported('Use the API key.'));
   router.post('/auth/logout', (_req, res) => void res.json({}));
@@ -805,7 +811,7 @@ export function seerr(options: SeerrOptions) {
   const { restorer, ...deps } = options;
   const app = express();
   app.disable('x-powered-by');
-  app.use(inbound());
+  app.use(inbound({ seerrPaths: ['/'] }));
   app.use(express.json({ limit: '100kb' }));
   if (restorer) app.use(restoreGate(restorer));
   app.use('/api/v1', seerrRouter(deps), onError);

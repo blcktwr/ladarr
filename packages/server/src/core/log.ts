@@ -2,7 +2,7 @@ import type { LogEntry } from '@ladarr/shared/types';
 import { appendFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type { RequestHandler } from 'express';
+import type { Request, RequestHandler, Response } from 'express';
 import pino from 'pino';
 import { createStream, type RotatingFileStream } from 'rotating-file-stream';
 import { db } from './db.ts';
@@ -272,7 +272,38 @@ export const traffic = {
   warn: (message: string, fields?: Record<string, unknown>) => write('warn', message, fields, 'requests'),
 };
 
-export function inbound(quiet: string[] = []): RequestHandler {
+function seerrDetails(req: Request, res: Response) {
+  const started = performance.now();
+  const remoteAddress = req.socket.remoteAddress;
+  let body: unknown = null;
+  let bodyBytes = 0;
+  const end = res.end;
+  res.end = function (...args: unknown[]) {
+    const [chunk] = args;
+    if (!res.headersSent && req.method !== 'HEAD' && (typeof chunk === 'string' || Buffer.isBuffer(chunk))) {
+      bodyBytes = Buffer.byteLength(chunk);
+      if (bodyBytes) {
+        // Keep complete JSON so the logger can redact its fields before it writes them.
+        body = bodyBytes <= 8192 && res.get('content-type')?.startsWith('application/json') ? chunk.toString() : `[${bodyBytes} bytes]`;
+      }
+    }
+    return Reflect.apply(end, this, args);
+  };
+  return () => ({
+    request: {
+      remoteAddress,
+      bodyFields: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 32) : undefined,
+    },
+    response: {
+      completed: res.writableFinished,
+      durationMs: Math.round(performance.now() - started),
+      ...(res.writableFinished ? { body, bodyBytes } : {}),
+    },
+  });
+}
+
+export function inbound({ quiet = [], seerrPaths = [] }: { quiet?: string[]; seerrPaths?: string[] } = {}): RequestHandler {
+  const prefixes = seerrPaths.map((base) => base.toLowerCase());
   return (req, res, next) => {
     if (quiet.includes(req.originalUrl.split('?')[0]!)) return next();
     const url = URL.parse(req.originalUrl, `${req.protocol}://${req.get('host') ?? 'localhost'}`);
@@ -282,11 +313,18 @@ export function inbound(quiet: string[] = []): RequestHandler {
       for (const key of url.searchParams.keys()) {
         if (SECRET_KEY.test(key)) url.searchParams.set(key, '[redacted]');
       }
-      res.once('finish', () => traffic.info('request', {
-        direction: 'inbound',
-        request: { method: req.method, url: url.toString(), headers: req.headers },
-        response: { status: res.statusCode, headers: res.getHeaders() },
-      }));
+      const path = req.path.toLowerCase();
+      const trace = prefixes.some((base) => base === '/' || path === base || path.startsWith(`${base}/`)) ? seerrDetails(req, res) : undefined;
+      res.once(trace ? 'close' : 'finish', () => {
+        const details = trace?.();
+        traffic.info('request', {
+          direction: 'inbound',
+          ...(details ? { system: 'Seerr' } : {}),
+          ...(details && !res.writableFinished ? { code: 'connection_closed' } : {}),
+          request: { method: req.method, url: url.toString(), headers: req.headers, ...details?.request },
+          response: { status: res.writableFinished ? res.statusCode : undefined, headers: res.getHeaders(), ...details?.response },
+        });
+      });
     }
     next();
   };

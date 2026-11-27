@@ -1,10 +1,16 @@
 import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { request } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { closeLog, catalog, log, logToFile, recentLogs, redact, traffic } from '../../src/core/log.ts';
 import { outboundFetch } from '../../src/core/http.ts';
 import { withOutboundRequests } from '../../src/core/outbound.ts';
+import { createApp } from '../../src/app.ts';
+import { open } from '../../src/core/db.ts';
+import { createEvents } from '../../src/core/events.ts';
+import { seerr } from '../../src/proxy/seerr.ts';
 import { startTestApp } from '../helpers/test-app.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'ladarr-log-'));
@@ -135,6 +141,70 @@ describe('log file', () => {
   it('writes nothing before a file is set, and nothing after the close', async () => {
     await closeLog();
     expect(() => log.info('ignored')).not.toThrow();
+  });
+});
+
+describe('inbound Seerr requests', () => {
+  it.each(['port', 'prefix'])('records what the client received on the %s', async (mount) => {
+    const db = await open('unused.json');
+    db.data.apiKey = 'SECRET-KEY';
+    const app = mount === 'port' ? seerr({ events: createEvents(), enqueue: vi.fn() }) : createApp({ urlBase: '/ladarr' });
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise((resolve) => server.once('listening', resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}${mount === 'port' ? '' : '/ladarr/seerr'}/api/v1`;
+    logToFile(join(dir, `seerr-${mount}`, 'app.log'));
+    try {
+      const headers = { 'user-agent': 'Pocket (iOS)', 'if-none-match': '"old"', 'x-api-key': 'SECRET-KEY', cookie: 'connect.sid=SECRET-COOKIE' };
+      const settings = await (await fetch(`${base}/settings/public`, { headers })).json();
+      const login = await fetch(`${base}/auth/local?apikey=SECRET-QUERY`, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'SECRET-EMAIL', password: 'SECRET-PASSWORD' }),
+      });
+      const error = await login.json();
+      await fetch(`${base}/status`, { method: 'HEAD' });
+      const cached = await fetch(`${base}/request`, { headers: { ...headers, 'if-none-match': '*', 'cache-control': 'max-age=0' } });
+      expect(cached.status).toBe(304);
+      await closeLog();
+      const entries = await recentLogs(10, { kind: 'requests' });
+      expect(entries).toHaveLength(4);
+      expect(entries[0]).toMatchObject({
+        request: { remoteAddress: '127.0.0.1', headers: { 'user-agent': 'Pocket (iOS)', 'if-none-match': '"old"' } },
+        response: { status: 200, completed: true, durationMs: expect.any(Number), body: settings, bodyBytes: Buffer.byteLength(JSON.stringify(settings)) },
+      });
+      expect(entries[1]).toMatchObject({ request: { bodyFields: ['email', 'password'] }, response: { status: 501, body: error } });
+      expect(JSON.stringify(entries)).not.toContain('SECRET-');
+      expect(entries[2]).toMatchObject({ response: { status: 200, body: null } });
+      expect(entries[3]).toMatchObject({ response: { status: 304, completed: true, body: null, bodyBytes: 0 } });
+    } finally {
+      server.closeAllConnections();
+      server.close();
+      await closeLog();
+    }
+  });
+
+  it('records a disconnect before the server sends headers', async () => {
+    const server = seerr({ events: createEvents(), enqueue: vi.fn() }).listen(0, '127.0.0.1');
+    await new Promise((resolve) => server.once('listening', resolve));
+    logToFile(join(dir, 'seerr-disconnect', 'app.log'));
+    try {
+      const closed = new Promise<void>((resolve) => server.once('request', (_req, res) => res.once('close', resolve)));
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v1/auth/local`;
+      const client = request(url, { method: 'POST', headers: { 'content-type': 'application/json', 'content-length': 50 } });
+      client.on('error', () => {});
+      server.once('request', () => client.destroy());
+      client.write('{');
+      await closed;
+      await closeLog();
+      const entries = await recentLogs(10, { kind: 'requests' });
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ code: 'connection_closed', response: { completed: false } });
+      expect(entries[0]!.response).not.toHaveProperty('status');
+    } finally {
+      server.closeAllConnections();
+      server.close();
+      await closeLog();
+    }
   });
 });
 

@@ -62,10 +62,22 @@ describe('proxy ports', () => {
     expect(await radarr.getSystemStatus()).toMatchObject({ appName: 'Radarr', version: '5.0.0.0', urlBase: '' });
   });
 
-  it('serves the Seerr API at /api/v1 of its port', async () => {
+  it.each([
+    ['/status', { version: '3.5.1', commitTag: 'ladarr' }],
+    ['/settings/public', { initialized: true, movie4kEnabled: false, series4kEnabled: false, cacheImages: false }],
+  ] as const)('returns JSON on repeat requests to the public Seerr route %s', async (path, body) => {
     const { seerrUrl } = await start();
-    const status = await fetch(`${seerrUrl}/api/v1/status`);
-    expect(await status.json()).toEqual({ version: '3.5.1', commitTag: 'ladarr' });
+    const url = `${seerrUrl}/api/v1${path}`;
+    const first = await fetch(url);
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual(body);
+
+    const repeat = await fetch(url, {
+      headers: { 'If-None-Match': first.headers.get('etag') ?? '*', 'Cache-Control': 'max-age=0' },
+    });
+    expect(repeat.status).toBe(200);
+    expect(await repeat.json()).toEqual(body);
+    expect(repeat.headers.get('cache-control')).toBe('no-store');
   });
 
   it('needs the API key on each port and hides the native API', async () => {

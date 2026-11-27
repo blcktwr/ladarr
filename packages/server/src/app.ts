@@ -356,7 +356,10 @@ export function createApp({ services, urlBase = '', events = createEvents(), web
   // The requests that one call of the API sends belong to it, so its lines of the log link to them.
   app.use((_req, _res, next) => withOutboundRequests(next));
   // A read of the log would log itself, and the tail of the log page would fill the file.
-  app.use(inbound([`${urlBase}/api/health`, `${urlBase}/api/system/logs`]));
+  app.use(inbound({
+    quiet: [`${urlBase}/api/health`, `${urlBase}/api/system/logs`],
+    seerrPaths: [`${urlBase}/seerr`, `${urlBase}/api/v1`],
+  }));
   // Seerr and other callers use /api/v3 on their own. The answer names the right paths, because the native API would answer 401.
   app.use(`${urlBase}/api/v3`, wrongPath(urlBase));
   // A Seerr client adds /api/v1 to the address. The adapter lives under /seerr.
