@@ -1,15 +1,14 @@
 import type { BackupsResponse, UpdateCheck, VersionInfo } from '@ladarr/shared/types';
 import { useQuery } from '@tanstack/react-query';
+import { Download } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, apiUrl } from '../../lib/api.ts';
-import { Badge, Button, Confirm, Details, Divider, EmptyState, List, Row, Section, Spinner, Text } from 'nebula';
+import { Actions, Badge, Button, Confirm, Details, Divider, EmptyState, List, Row, Section, Spinner, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { formatBytes, describeError } from '../../lib/format.ts';
 import { getLanguage, t } from '../../i18n/index.ts';
-import { RestoreBackup, RestoreFile } from './restore.tsx';
-
-const kindLabel = { auto: 'Automatic', manual: 'Manual', safety: 'Safety' };
+import { RestoreFile } from './restore.tsx';
 
 export function SystemVersion() {
   const { data, error, isFetching: loading, refetch: reload } = useQuery<VersionInfo>({ queryKey: ['/system/version'] });
@@ -150,9 +149,9 @@ export function Backups() {
   }
 
   return (
-    <Section title={t('Backups')}
-      action={
-        <>
+    <div className="grid w-full justify-items-start gap-5">
+      <div className="justify-self-end">
+        <Actions>
           <RestoreFile />
           <Button
             pending={pending}
@@ -164,9 +163,8 @@ export function Backups() {
           >
             {t('Back up now')}
           </Button>
-        </>
-      }
-    >
+        </Actions>
+      </div>
       {error && !data ? <LoadFailed onRetry={reload} /> : loading && !data ? <Spinner label={t('Loading')} /> : null}
       {message && <Alert tone="danger">{message}</Alert>}
       {data?.backups.length === 0 && <EmptyState>{t('No backups.')}</EmptyState>}
@@ -176,22 +174,20 @@ export function Backups() {
             key={backup.name}
             actions={
               <>
-                <RestoreBackup name={backup.name} createdAt={backup.createdAt} />
-                <Button variant="ghost" onClick={() => location.assign(new URL(apiUrl(`/backups/${backup.name}/download`), document.baseURI))}>
-                  {t('Download')}
+                <Button variant="ghost" iconOnly aria-label={t('Download')} onClick={() => location.assign(new URL(apiUrl(`/backups/${backup.name}/download`), document.baseURI))}>
+                  <Download aria-hidden="true" />
                 </Button>
-                <Button variant="ghost" onClick={() => void run(() => api(`/backups/${backup.name}`, { method: 'DELETE' }))}>
+                <Button variant="ghost-danger" onClick={() => void run(() => api(`/backups/${backup.name}`, { method: 'DELETE' }))}>
                   {t('Delete')}
                 </Button>
               </>
             }
           >
             <span>{new Date(backup.createdAt).toLocaleString(getLanguage())}</span>
-            <Badge>{t(kindLabel[backup.kind])}</Badge>
-            <span>{formatBytes(backup.bytes)}</span>
+            <Badge>{formatBytes(backup.bytes)}</Badge>
           </Row>
         ))}
       </List>
-    </Section>
+    </div>
   );
 }

@@ -367,7 +367,7 @@ test('the background reaches the end of a page that is taller than the window', 
 
 test('a profile that the user makes ranks the qualities in the order of the clicks', async ({ page }) => {
   await page.goto(`${URL_BASE}/settings`);
-  await page.getByRole('tab', { name: 'Quality' }).click();
+  await page.getByRole('tab', { name: 'Media' }).click();
   await page.getByRole('button', { name: 'Add profile' }).click();
   const dialog = page.getByRole('dialog', { name: 'Add a profile' });
   await dialog.getByLabel('Name').fill('Ordered');
@@ -389,7 +389,7 @@ test('the quality profiles are an ordered priority chain', async ({ page }) => {
   await stack.call('PUT', '/quality/order', { ids: ['p1080', 'p2160'] });
 
   await page.goto(`${URL_BASE}/settings`);
-  await page.getByRole('tab', { name: 'Quality' }).click();
+  await page.getByRole('tab', { name: 'Media' }).click();
   const qualities = page.getByRole('region', { name: 'Qualities' });
   // A profile is no longer the default one: the first row of the chain is the one that the search uses first.
   await expect(qualities.getByText('Default', { exact: true })).toHaveCount(0);
@@ -411,7 +411,7 @@ test('the quality profiles are an ordered priority chain', async ({ page }) => {
 
 test('the file size limits are in the dialog of the profile', async ({ page }) => {
   await page.goto(`${URL_BASE}/settings`);
-  await page.getByRole('tab', { name: 'Quality' }).click();
+  await page.getByRole('tab', { name: 'Media' }).click();
   // The sizes are no longer a section of their own.
   await expect(page.getByRole('region', { name: 'File size' })).toHaveCount(0);
 
@@ -443,7 +443,7 @@ test('the file size limits are in the dialog of the profile', async ({ page }) =
 
 test('an empty size limit shows infinity and saves as no limit', async ({ page }) => {
   await page.goto(`${URL_BASE}/settings`);
-  await page.getByRole('tab', { name: 'Quality' }).click();
+  await page.getByRole('tab', { name: 'Media' }).click();
   await page.getByRole('button', { name: 'Actions for 1080p' }).click();
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   const dialog = page.getByRole('dialog', { name: 'Edit quality' });
@@ -478,7 +478,7 @@ test('the table of the profile scrolls sideways under its first column', async (
   // A narrow window makes the table wider than the page, so it scrolls sideways.
   await page.setViewportSize({ width: 800, height: 900 });
   await page.goto(`${URL_BASE}/settings`);
-  await page.getByRole('tab', { name: 'Quality' }).click();
+  await page.getByRole('tab', { name: 'Media' }).click();
   await page.getByRole('button', { name: 'Actions for 1080p' }).click();
   await page.getByRole('menuitem', { name: 'Edit' }).click();
 

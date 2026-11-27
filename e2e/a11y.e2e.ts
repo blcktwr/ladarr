@@ -88,12 +88,12 @@ const PAGES: [string, Opener][] = [
       await expect(page.getByRole('region', { name: 'Folders' })).toBeVisible();
       await expect(page.getByLabel('Movies folder')).toBeVisible();
       await expect(page.getByLabel('Series folder')).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Qualities' })).toBeVisible();
     }),
   ],
-  ['settings quality', settingsTab('Quality', (page) => expect(page.getByRole('region', { name: 'Qualities' })).toBeVisible())],
   [
     'settings quality profile editor',
-    settingsTab('Quality', async (page) => {
+    settingsTab('Media', async (page) => {
       await page.getByRole('button', { name: 'Add profile' }).click();
       await expect(page.getByRole('dialog', { name: 'Add a profile' })).toBeVisible();
     }),

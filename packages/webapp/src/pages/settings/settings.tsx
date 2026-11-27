@@ -12,7 +12,6 @@ import { LogRow } from '../../lib/log-row.tsx';
 import { useAuth } from '../auth/auth.tsx';
 import { DownloadClients } from './connections-settings.tsx';
 import { Indexers } from './indexer-settings.tsx';
-import { NamingSettings } from './import-settings.tsx';
 import { FolderSettings, GeneralSettings } from './library-settings.tsx';
 import { Qualities } from './quality-settings.tsx';
 import { Backups, SystemVersion } from './system-settings.tsx';
@@ -219,21 +218,10 @@ const categories = [
     content: (
       <>
         <Pane>
-          <FolderSettings />
-        </Pane>
-        <Pane>
-          <NamingSettings />
-        </Pane>
-      </>
-    ),
-  },
-  {
-    value: 'quality',
-    label: 'Quality',
-    content: (
-      <>
-        <Pane>
           <Qualities />
+        </Pane>
+        <Pane>
+          <FolderSettings />
         </Pane>
       </>
     ),
@@ -285,7 +273,7 @@ export function Settings() {
   const { hash } = useLocation();
   const navigate = useNavigate();
   // The hash names the section, so a link can open a section of the settings.
-  const section = { '#logs': '#telemetry', '#requests': '#telemetry' }[hash] ?? hash;
+  const section = { '#quality': '#media', '#logs': '#telemetry', '#requests': '#telemetry' }[hash] ?? hash;
   const category = categories.find((item) => `#${item.value}` === section)?.value ?? 'general';
   const active = categories.find((item) => item.value === category)!;
   const setCategory = (value: string) => void navigate(`/settings#${value}`, { replace: true });

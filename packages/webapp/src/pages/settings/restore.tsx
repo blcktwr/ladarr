@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
-import { api, upload } from '../../lib/api.ts';
+import { upload } from '../../lib/api.ts';
 import { Button, Modal, Text } from 'nebula';
 import { describeError } from '../../lib/format.ts';
-import { getLanguage, t } from '../../i18n/index.ts';
+import { t } from '../../i18n/index.ts';
 
 const restoreErrors: Record<string, string> = {
   invalid_archive: 'The file is not a backup of this app.',
@@ -61,18 +61,6 @@ function RestoreAlert({ intro, send, onCancel }: { intro: string; send: () => Pr
       <div role="alert">{error && <Text>{error}</Text>}</div>
     </Modal>
   );
-}
-
-export function RestoreBackup({ name, createdAt }: { name: string; createdAt: number }) {
-  const [asking, setAsking] = useState(false);
-  if (!asking) {
-    return (
-      <Button variant="ghost" onClick={() => setAsking(true)}>
-        {t('Restore')}
-      </Button>
-    );
-  }
-  return <RestoreAlert intro={t('This replaces the app data with the data of the backup from {date}.', { date: new Date(createdAt).toLocaleString(getLanguage()) })} send={() => api<{ safetyBackup: string }>(`/backups/${name}/restore`, { method: 'POST', body: {} })} onCancel={() => setAsking(false)} />;
 }
 
 // A Ladarr backup file from outside the backup folder, for example from another machine. The setup screen has no
