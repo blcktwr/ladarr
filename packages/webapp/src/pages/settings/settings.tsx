@@ -4,7 +4,7 @@ import { Copy, RotateCw } from 'lucide-react';
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { api } from '../../lib/api.ts';
-import { Button, Confirm, Dropdown, EmptyState, Field, List, Pagination, Pane, SideMenu, Spinner, Switch, Tabs, Text } from 'nebula';
+import { alert, Button, Confirm, Dropdown, EmptyState, Field, List, Pagination, Pane, SideMenu, Spinner, Switch, Tabs, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { t } from '../../i18n/index.ts';
@@ -53,7 +53,13 @@ function ApiKey() {
           action={
             <>
               {typeof navigator.clipboard !== 'undefined' && (
-                <Button variant="ghost" iconOnly aria-label={t('Copy')} disabled={!data} onClick={() => void navigator.clipboard.writeText(data!.apiKey)}>
+                <Button
+                  variant="ghost"
+                  iconOnly
+                  aria-label={t('Copy')}
+                  disabled={!data}
+                  onClick={() => void navigator.clipboard.writeText(data!.apiKey).then(() => alert.success(t('API key copied')), () => undefined)}
+                >
                   <Copy />
                 </Button>
               )}

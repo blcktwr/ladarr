@@ -340,6 +340,7 @@ export const es: Record<string, string> = {
   'Restore this backup?': '¿Restaurar este respaldo?',
   'Rotate key': 'Rotar clave',
   'Rotate the API key?': '¿Rotar la clave de API?',
+  'API key copied': 'Se copió la clave de API',
   'Safety': 'De seguridad',
   'Save': 'Guardar',
   'Show more': 'Mostrar más',
