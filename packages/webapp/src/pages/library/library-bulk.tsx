@@ -123,19 +123,18 @@ const doneText = (request: PlanRequest, result: PlanResult, subject?: string | n
         : '';
 
 // The plan starts when the user confirms. `subject` names the title or season.
-export function PlanDialog({ request, subject, onClose, onDone, deleteFilesDefault = false }: { request: PlanRequest | null; subject?: string | null; onClose: () => void; onDone: (result: PlanResult) => void; deleteFilesDefault?: boolean }) {
+export function PlanDialog({ request, subject, onClose, onDone }: { request: PlanRequest | null; subject?: string | null; onClose: () => void; onDone: (result: PlanResult) => void }) {
   const [deleteFiles, setDeleteFiles] = useState(false);
   const [result, setResult] = useState<PlanResult | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const queryClient = useQueryClient();
 
-  // A new request starts with no result, no error, and the files kept unless the caller asks otherwise.
   useEffect(() => {
     setResult(null);
     setError('');
-    setDeleteFiles(deleteFilesDefault);
-  }, [request, deleteFilesDefault]);
+    setDeleteFiles(false);
+  }, [request]);
 
   async function confirm() {
     if (!request) return;
@@ -166,7 +165,7 @@ export function PlanDialog({ request, subject, onClose, onDone, deleteFilesDefau
 
   if (!request || !action) return null;
   const title = action === 'remove' && request.season === undefined ? subject : null;
-  const FileOption = title ? Checkbox : Switch;
+  const FileOption = subject ? Checkbox : Switch;
   return (
     <Confirm
       open

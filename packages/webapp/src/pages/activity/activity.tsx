@@ -763,7 +763,7 @@ function PendingDetail() {
 // whole series goes only from the page of the series.
 function Inspector({ row, filters, run, openLogs, openGroupLogs, onDelete, onBack, backRef }: { row: QueueRow; filters: Filters; run: Run; openLogs: (entry: QueueEntryView) => void; openGroupLogs: (group: QueueGroupRow) => void; onDelete: (request: PlanRequest, subject: string) => void; onBack: () => void; backRef: Ref<HTMLButtonElement> }) {
   const deletion: { request: PlanRequest; subject: string } | null =
-    row.kind === 'entry'
+    row.kind === 'entry' && row.mediaType === 'movie'
       ? { request: { action: 'remove', keys: [row.titleKey] }, subject: row.title }
       : row.kind === 'group' && row.season !== null
         ? { request: { action: 'remove', keys: [row.titleKey], season: row.season }, subject: seasonName(row.season) }
@@ -1228,7 +1228,7 @@ function QueueView() {
           }}
         />
       )}
-      {deletion && <PlanDialog request={deletion.request} subject={deletion.subject} deleteFilesDefault onClose={() => setDeletion(null)} onDone={() => refresh()} />}
+      {deletion && <PlanDialog request={deletion.request} subject={deletion.subject} onClose={() => setDeletion(null)} onDone={() => refresh()} />}
     </div>
   );
 }

@@ -58,7 +58,7 @@ test('the page of a series marks only the seasons that the user selected', async
   await expect(page.getByRole('button', { name: 'Delete Season 1' })).toBeVisible();
   await page.getByRole('button', { name: 'Delete Season 1' }).click();
   const remove = page.getByRole('alertdialog', { name: 'Delete Season 1?' });
-  await expect(remove.getByRole('switch', { name: 'Delete the files too' })).toBeVisible();
+  await expect(remove.getByRole('checkbox', { name: 'Delete the files too' })).not.toBeChecked();
   await remove.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Add Season 1' })).toBeVisible();
 });

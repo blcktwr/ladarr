@@ -40,8 +40,9 @@ test('deletes a season of a series and a movie from the queue with the modal of 
   await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
   const seasonAlert = page.getByRole('alertdialog', { name: 'Delete Season 1?' });
   await expect(seasonAlert).toBeVisible();
-  // The deletion from the queue deletes the files unless the user turns the switch off.
-  await expect(seasonAlert.getByRole('switch', { name: 'Delete the files too' })).toBeChecked();
+  const seasonFiles = seasonAlert.getByRole('checkbox', { name: 'Delete the files too' });
+  await expect(seasonFiles).not.toBeChecked();
+  await seasonFiles.check();
   await seasonAlert.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.locator('[data-row="group:tv:1:1"]')).toHaveCount(0);
   await expect.poll(async () => (await stack.call('GET', '/library/tv:1')).status, { timeout: 30_000 }).toBe(200);
@@ -54,8 +55,7 @@ test('deletes a season of a series and a movie from the queue with the modal of 
   await expect(page.getByText('Movie Name', { exact: true })).toBeVisible();
   await page.locator('a[href$="/activity"]').click();
 
-  // The movie has the same menu and the same modal. The user clears the checkbox, so the catalog loses the title and
-  // the torrent and its files stay.
+  // The movie leaves the catalog. Its torrent and files stay on disk.
   await page.locator('[data-row="entry:movie:2"]').click();
   await expect(page.getByRole('heading', { name: 'Movie Name (2019)' })).toBeVisible();
   await page.getByRole('button', { name: 'Actions for Movie Name (2019)' }).click();
@@ -63,8 +63,6 @@ test('deletes a season of a series and a movie from the queue with the modal of 
   const movieAlert = page.getByRole('alertdialog', { name: 'Delete Movie Name?' });
   await expect(movieAlert).toBeVisible();
   const deleteFiles = movieAlert.getByRole('checkbox', { name: 'Delete the files too' });
-  await expect(deleteFiles).toBeChecked();
-  await deleteFiles.click();
   await expect(deleteFiles).not.toBeChecked();
   await movieAlert.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect.poll(async () => (await stack.call('GET', '/library/movie:2')).status, { timeout: 30_000 }).toBe(404);
