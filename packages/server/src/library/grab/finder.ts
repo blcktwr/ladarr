@@ -876,12 +876,11 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           reject('file_unmapped', candidates);
           continue;
         }
-        const manifest = title.mediaType === 'movie' ? null : readCoverage(evidence.files, title, numbering, manualMatches);
+        const pack = decision.kind === 'pack';
         const manifest = title.mediaType === 'movie' ? null
           : pack && decision.parsed.pack && decision.parsed.season !== null
             ? readPackCoverage(evidence.files, title, numbering, decision.parsed.season, manualMatches)
             : readCoverage(evidence.files, title, numbering, manualMatches);
-        const pack = decision.kind === 'pack';
         const requested = candidates.map(point);
         const complete = manifest && pack && matchCompletePack(manifest, requested);
         const partial = manifest && pack ? matchPartialPack(manifest, requested) : null;
