@@ -60,7 +60,7 @@ export function SearchableDropdown({ label, hideLabel, disabled, placeholder, va
         />
         <Combobox.Portal>
           <Combobox.Positioner anchor={anchorRef} align="start" sideOffset={8}>
-            <Combobox.Popup className="box-border w-(--anchor-width) max-h-[min(15rem,var(--available-height))] overflow-y-auto overscroll-contain p-1 rounded-lg outline-none bg-(image:--grain) bg-slab shadow-(--slab-shadow) text-ink">
+            <Combobox.Popup className="box-border w-max min-w-[min(var(--anchor-width),var(--available-width))] max-w-(--available-width) max-h-[min(15rem,var(--available-height))] overflow-y-auto overscroll-contain p-1 rounded-lg outline-none bg-(image:--grain) bg-slab shadow-(--slab-shadow) text-ink">
               <Combobox.List>
                 {(item: string) => {
                   const option = options.find((candidate) => candidate.value === item);
