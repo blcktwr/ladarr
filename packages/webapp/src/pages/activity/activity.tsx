@@ -589,10 +589,8 @@ function MasterRow({ row }: { row: QueueRow }) {
       <div className="grid gap-2 min-w-0">
         {/* The name of the row is not a heading: the heading of the page says the section, and the inspector says the title. */}
         <Text variant="body" className="min-w-0">
-          <strong>
-            {row.kind === 'entry' ? row.label : groupName({ ...row, season: null })}
-            {row.kind === 'group' && row.season !== null && <><br />{seasonName(row.season)}</>}
-          </strong>
+          <strong>{row.kind === 'entry' ? row.label : groupName({ ...row, season: null })}</strong>
+          {row.kind === 'group' && row.season !== null && <><br />{seasonName(row.season)}</>}
         </Text>
         {row.kind === 'group' ? <GroupLine group={row} /> : row.kind === 'pending' ? <StatusText small status={statusLabel('searching')} icon="searching" /> : <EntryStatus entry={row} />}
       </div>
