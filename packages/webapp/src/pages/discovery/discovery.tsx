@@ -1,9 +1,9 @@
 import type { DiscoveryFilters, DiscoveryPage, DiscoverySort, WatchProvider } from '@ladarr/shared/types';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { SlidersHorizontal } from 'lucide-react';
-import { Button, Dropdown, EmptyState, Field, Gallery, Panel, SearchField, Slider, Spinner, SubMenu, Text, Tile } from 'nebula';
+import { Button, Dropdown, EmptyState, Field, Gallery, Panel, SearchField, Slider, Spinner, SubMenu, Text, Thumbnail, Tile } from 'nebula';
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link as RouterLink, useSearchParams } from 'react-router';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/index.ts';
 import { api } from '../../lib/api.ts';
@@ -214,6 +214,13 @@ export function Discovery() {
     return true;
   });
   if (term) shown.sort((a, b) => (a.sortKey ?? Infinity) - (b.sortKey ?? Infinity));
+  const seenPeople = new Set<number>();
+  const people = pages.flatMap((page) => page.people ?? []).filter((person) => {
+    if (seenPeople.has(person.id)) return false;
+    seenPeople.add(person.id);
+    return true;
+  });
+  const hasResults = shown.length > 0 || people.length > 0;
   // The end of the page takes the next page before it reaches the screen.
   const more = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -256,17 +263,22 @@ export function Discovery() {
         </div>
       </div>
       {pages[0]?.needsMatch && <Alert tone="warning">{t('This ID does not match exactly one series. Select the right one.')}</Alert>}
-      {error && !shown.length ? (
+      {error && !hasResults ? (
         <LoadFailed onRetry={() => void refetch()} />
-      ) : !data || (!shown.length && hasNextPage) ? (
+      ) : !data || (!hasResults && hasNextPage) ? (
         <div className="grid min-h-96 place-items-center">
           <Spinner size="lg" label={t('Loading')} />
         </div>
-      ) : shown.length === 0 ? (
+      ) : !hasResults ? (
         <EmptyState>{t(term ? 'No titles match.' : 'No titles.')}</EmptyState>
       ) : (
         <div className={tiles}>
           <Gallery>
+            {people.map((person) => (
+              <RouterLink key={`person:${person.id}`} to={`/catalog/person/${person.id}`}>
+                <Thumbnail image={posterUrl(person.profilePath) ?? ''} title={person.name} />
+              </RouterLink>
+            ))}
             {shown.map((result) => {
               const key = `${result.mediaType}:${result.tmdbId}`;
               return <ResultItem key={key} result={result} selected={term ? selection.has(key) : undefined} onSelectedChange={term ? () => selection.toggle(key) : undefined} />;

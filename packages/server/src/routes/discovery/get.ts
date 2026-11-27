@@ -70,7 +70,9 @@ export function discoveryGet(tmdb: Tmdb | undefined): RequestHandler {
     if (query) {
       const source = tmdb.discoverySearch;
       const match = await searchById(query, type, source);
-      const { results, totalPages } = match ? { results: page === 1 ? match.results : [], totalPages: 1 } : await source.page(query, page);
+      const { results, people, totalPages } = match
+        ? { results: page === 1 ? match.results : [], people: [], totalPages: 1 }
+        : await source.page(query, page);
       const candidates = results.filter((item) => {
         const genreId = genre?.[item.mediaType];
         return (!type || item.mediaType === type) &&
@@ -96,7 +98,8 @@ export function discoveryGet(tmdb: Tmdb | undefined): RequestHandler {
           results: results.sort((a, b) => (a.sortKey ?? Infinity) - (b.sortKey ?? Infinity)),
         };
       });
-      return void res.json({ page, totalPages, rows, needsMatch: match?.needsMatch } satisfies DiscoveryPage);
+      const showPeople = people.length > 0 && !type && !from && !to && !hasRating && !genre && providers.length === 0;
+      return void res.json({ page, totalPages, rows, ...(showPeople ? { people } : {}), needsMatch: match?.needsMatch } satisfies DiscoveryPage);
     }
     const params = (mediaType: MediaType): Record<string, string> => ({
       sort_by: sort[mediaType],

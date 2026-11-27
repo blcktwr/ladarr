@@ -392,6 +392,41 @@ describe('discovery filter params', () => {
   });
 });
 
+describe('discovery actor search', () => {
+  it('returns the actors and titles of the requested page, even if their TMDB IDs match', async () => {
+    const { send } = fakeTmdb({
+      '/search/multi': (url) => json({
+        total_pages: 2,
+        results: url.searchParams.get('page') === '2' ? [
+          { id: 11, media_type: 'person', known_for_department: 'Acting', name: 'Actor One', profile_path: null },
+          { id: 12, media_type: 'person', known_for_department: 'Camera', name: 'Actor One Camera Operator' },
+          { id: 11, media_type: 'movie', title: 'Actor One: A Life' },
+        ] : [],
+      }),
+    });
+    const { base, cookie, close } = await start({ tmdb: client(send) });
+    try {
+      const url = `${base}/discovery?q=Actor+One&page=2`;
+      const search = await fetch(url, { headers: { cookie } });
+      expect(search.status).toBe(200);
+      expect(await search.json()).toMatchObject({
+        page: 2,
+        totalPages: 2,
+        people: [{ id: 11, name: 'Actor One', profilePath: null }],
+        rows: [{ id: 'movies', results: [{ tmdbId: 11 }] }, { id: 'series', results: [] }],
+      });
+
+      const movies = await fetch(`${url}&type=movie`, { headers: { cookie } });
+      expect(movies.status).toBe(200);
+      const filtered = await movies.json();
+      expect(filtered.people ?? []).toHaveLength(0);
+      expect(filtered.rows).toMatchObject([{ id: 'movies', results: [{ tmdbId: 11 }] }]);
+    } finally {
+      close();
+    }
+  });
+});
+
 describe('discovery search rating filter', () => {
   it.each([
     ['ratingMin=6.2&ratingMax=8.4', [2, 3, 4]],

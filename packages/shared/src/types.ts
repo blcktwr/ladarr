@@ -71,8 +71,10 @@ export type SearchResult = {
 // A list of the discovery page. The page names the row and keeps its order.
 export type DiscoveryRow = { id: 'movies' | 'series'; results: (SearchResult & { sortKey?: number | null })[] };
 
+export type DiscoveryPerson = { id: number; name: string; profilePath: string | null };
+
 // A page of the discovery lists. The page reads the next one while page < totalPages.
-export type DiscoveryPage = { page: number; totalPages: number; rows: DiscoveryRow[]; needsMatch?: boolean };
+export type DiscoveryPage = { page: number; totalPages: number; rows: DiscoveryRow[]; people?: DiscoveryPerson[]; needsMatch?: boolean };
 
 // The order of the discovery lists. The server names the field of TMDB that each media type uses.
 export type DiscoverySort = 'popularity.asc' | 'popularity.desc' | 'release.asc' | 'release.desc' | 'rating.asc' | 'rating.desc';

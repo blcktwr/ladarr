@@ -1,5 +1,5 @@
 import type { MediaType } from '@ladarr/shared/enums';
-import type { CastMember, PersonCredits, SearchResult, WatchProvider, WatchRegion } from '@ladarr/shared/types';
+import type { CastMember, DiscoveryPerson, PersonCredits, SearchResult, WatchProvider, WatchRegion } from '@ladarr/shared/types';
 import { outboundFetch } from '../core/http.ts';
 import { JobError } from '../core/jobs.ts';
 import type { DiscoverPage, EpisodeMeta, ReleaseKind, TitleMeta, TmdbErrorCode, TmdbOptions, TmdbRaw } from '../types.ts';
@@ -238,9 +238,18 @@ export function createTmdb({
     discoverySearch: {
       async page(query: string, page: number) {
         const raw = await searchPage(query, page) as TmdbRaw;
-        const results = list(raw?.results).flatMap((item) =>
+        const items = list(raw?.results);
+        const results = items.flatMap((item) =>
           item?.media_type === 'movie' || item?.media_type === 'tv' ? [discoveryResult(item, item.media_type)] : []);
-        return { results, totalPages: Math.min(500, numberOrNull(raw?.total_pages) ?? 1) };
+        const people = items.flatMap<DiscoveryPerson>((item) => {
+          if (item?.media_type !== 'person') return [];
+          const department = text(item.known_for_department).trim();
+          if (department && department !== 'Acting') return [];
+          const id = numberOrNull(item.id);
+          const name = text(item.name);
+          return id === null || !name ? [] : [{ id, name, profilePath: textOrNull(item.profile_path) }];
+        });
+        return { results, people, totalPages: Math.min(500, numberOrNull(raw?.total_pages) ?? 1) };
       },
       async details(mediaType: MediaType, id: number) {
         return discoveryResult(await get(`/${mediaType}/${id}`), mediaType);

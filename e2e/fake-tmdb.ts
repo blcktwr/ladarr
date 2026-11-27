@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 const MOVIE = { id: 2, title: 'Movie Name', original_title: 'Movie Name', release_date: '2019-06-01', overview: 'A movie for the end-to-end tests.', original_language: 'en', poster_path: null, genre_ids: [28] };
 const SERIES = { id: 1, name: 'Show Name', original_name: 'Show Name', first_air_date: '2020-01-01', overview: 'A series for the end-to-end tests.', original_language: 'en', poster_path: null, genre_ids: [35] };
 const TWO_SEASONS = { id: 3, name: 'Two Seasons', original_name: 'Two Seasons', first_air_date: '2021-01-01', overview: 'A series with two seasons for the end-to-end tests.', original_language: 'en', poster_path: null };
+const ACTOR = { id: 11, media_type: 'person', known_for_department: 'Acting', name: 'Actor One', profile_path: '/actor-one.jpg' };
 export const BENCH_MOVIE_ID = 900_000;
 export const BENCH_NAMES = 'Alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliet Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey Xray Yankee Zulu'.split(' ');
 const benchMovie = (id: number) => {
@@ -34,6 +35,7 @@ export async function startFakeTmdb() {
           ...(MOVIE.title.toLowerCase().includes(query) ? [{ ...MOVIE, media_type: 'movie', vote_average: 7.5 }] : []),
           ...(SERIES.name.toLowerCase().includes(query) ? [{ ...SERIES, media_type: 'tv', vote_average: 8.1 }] : []),
           ...(TWO_SEASONS.name.toLowerCase().includes(query) ? [{ ...TWO_SEASONS, media_type: 'tv' }] : []),
+          ...(ACTOR.name.toLowerCase().includes(query) ? [ACTOR] : []),
         ],
       });
     }

@@ -19,6 +19,25 @@ test.beforeAll(async () => {
 });
 test.afterAll(() => stack.stop());
 
+test('opens the actor profile from the photo in global search results', async ({ page, context }) => {
+  await context.addCookies([{ ...cookie, url: URL_BASE }]);
+  await page.route('**/actor-one.jpg', (route) =>
+    route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="3"/>' }));
+  await page.goto(`${URL_BASE}/catalog`);
+  await page.getByRole('searchbox', { name: 'Search', exact: true }).fill('Actor One');
+
+  const main = page.getByRole('main');
+  const actor = main.getByRole('link', { name: 'Actor One', exact: true });
+  await expect(actor.getByText('Actor One', { exact: true })).toBeVisible();
+  const photo = actor.locator('img[src$="/actor-one.jpg"]');
+  await expect(photo).toBeVisible();
+  await expect(actor.getByRole('checkbox')).toHaveCount(0);
+  await expect(actor.getByRole('button')).toHaveCount(0);
+  await photo.click();
+  await expect(page).toHaveURL(/\/catalog\/person\/11$/);
+  await expect(main.getByRole('heading', { name: 'Actor One', exact: true })).toBeVisible();
+});
+
 test('filters a global search in Discovery and keeps the filter when the query changes', async ({ page, context }) => {
   await context.addCookies([{ ...cookie, url: URL_BASE }]);
   await page.goto(`${URL_BASE}/catalog`);
