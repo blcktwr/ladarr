@@ -7,7 +7,7 @@ import type { QueueGroupRow, QueuePage, QueueRejectedRelease, QueueResolution, Q
 import { normalizeNumbering, releasePoint, seasonRevision } from '../library/numbering.ts';
 import { db } from '../core/db.ts';
 import { redact } from '../core/log.ts';
-import { reasonInfo } from '../core/reasons.ts';
+import { reasonInfo, type ReasonScope } from '../core/reasons.ts';
 import { availability } from '../library/library.ts';
 import { acceptedPath } from '../library/downloads/file-evidence.ts';
 import { findItem, getItem, isActive, itemFor, phaseOfEntry, reasonOfEntry } from '../library/downloads/queue.ts';
@@ -75,18 +75,18 @@ export function problemOf(entry: QueueEntry): StateProblem | null {
 export function reasonOf(entry: QueueEntry): (ReasonInfo & { code: string; detail: string | null }) | null {
   const problem = problemOf(entry);
   if (!problem) return null;
-  const specific = infoOfProblem(problem, entry.state.kind === 'blocked');
+  const specific = infoOfProblem(problem, entry.state.kind === 'blocked', entry.season === null ? 'movie' : 'episode');
   return { code: problem.code, ...specific, detail: problem.detail ?? null };
 }
 
-function infoOfProblem(problem: StateProblem, stopped: boolean): ReasonInfo {
+function infoOfProblem(problem: StateProblem, stopped: boolean, scope: ReasonScope): ReasonInfo {
   if (stopped && problem.code === 'no_results') return { message: 'The searches found no release.', action: 'retry' };
-  return reasonInfo(problem.code === 'too_many_attempts' && problem.detail ? problem.detail : problem.code);
+  return reasonInfo(problem.code === 'too_many_attempts' && problem.detail ? problem.detail : problem.code, scope);
 }
 
 export const reasonOfProblem = (problem: StateProblem | null, stopped = true, phase?: string) => {
   if (!problem) return null;
-  const info = infoOfProblem(problem, stopped);
+  const info = infoOfProblem(problem, stopped, 'group');
   const message = stopped && phase === 'fetching' && problem.code === 'file_unmapped' ? REJECTION_TEXT.file_unmapped! : info.message;
   return { code: problem.code, message, action: info.action, settings: info.settings ?? null, detail: problem.detail ?? null };
 };

@@ -81,7 +81,7 @@ export function createWebhooks({ enqueue, now = Date.now }: WebhookDeps) {
       if (imported) emit('available', fields);
       else {
         const code = (entry.state as Extract<QueueState, { kind: 'blocked' }>).problem.code;
-        emit('stuck', { ...fields, reason: { code, message: reasonInfo(code).message } });
+        emit('stuck', { ...fields, reason: { code, message: reasonInfo(code, fields.episode ? 'episode' : 'movie').message } });
       }
     } catch (error) {
       log.error('could not make a webhook event', { error });

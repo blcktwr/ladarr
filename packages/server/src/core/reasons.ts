@@ -1,4 +1,7 @@
 import type { ReasonInfo } from '../types.ts';
+
+export type ReasonScope = 'movie' | 'episode' | 'group';
+
 export const REASONS: Record<string, ReasonInfo> = {
   // The search found nothing to take.
   no_results: { message: 'Not found in any indexers, we will search again.', action: 'retry' },
@@ -30,7 +33,7 @@ export const REASONS: Record<string, ReasonInfo> = {
   job_removed: { message: 'The job was removed from the queue. Start it again.', action: 'retry' },
 
   // The import.
-  file_not_found: { message: 'The download has no file for this target.', action: 'match' },
+  file_not_found: { message: 'No video file matches this movie.', action: 'match' },
   file_unmapped: { message: 'The title folder has a file that names no episode.', action: 'match' },
   coverage_unknown: { message: 'The files do not identify this episode. Map the files before continuation.', action: 'match' },
   file_unreadable: { message: 'The file is damaged or not a video.', action: 'none' },
@@ -47,4 +50,9 @@ export const REASONS: Record<string, ReasonInfo> = {
   title_unavailable: { message: 'The title is not in the library now.', action: 'none' },
 };
 
-export const reasonInfo = (code: string): ReasonInfo => REASONS[code] ?? { message: 'Something stopped this target.', action: 'retry' };
+export function reasonInfo(code: string, scope: ReasonScope = 'movie'): ReasonInfo {
+  const info = REASONS[code] ?? { message: 'Something stopped this target.', action: 'retry' };
+  if (code === 'file_not_found' && scope === 'episode') return { ...info, message: 'No video file matches this episode.' };
+  if (code === 'file_not_found' && scope === 'group') return { ...info, message: 'One or more episodes have no matching video file.' };
+  return info;
+}

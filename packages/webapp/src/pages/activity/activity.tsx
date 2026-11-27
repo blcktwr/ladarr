@@ -673,10 +673,23 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
   // importing episode shows it.
   const importing = status === 'importing' ? entries.find(showsChecks) : undefined;
   const stopped = entries.filter((entry) => actions.some((action) => action.ids.includes(entry.id)));
+  let stuckMessage = status === 'stuck' && !missing.length && problem ? reasonText(problem) : null;
+  if (stuckMessage && problem?.code === 'file_not_found') {
+    const matches = actions.filter(({ action, cause }) => action === 'match' && cause === 'file_not_found');
+    const count = matches.reduce((total, { ids }) => total + ids.length, 0);
+    const source = matches[0]?.source;
+    if (source && matches.every((match) => match.fileSource === 'download' && match.source === source)) {
+      stuckMessage = count === 1
+        ? t('The downloaded torrent does not contain a file for 1 episode.')
+        : t('The downloaded torrent does not contain files for {count} episodes.', { count });
+    } else if (count) {
+      stuckMessage = t('Episodes without a matching video file: {count}.', { count });
+    }
+  }
   const message =
     status === 'fetching' ? null
       : status === 'downloading' ? `${percent}%`
-        : status === 'stuck' ? missing.length || !problem ? null : reasonText(problem)
+        : status === 'stuck' ? stuckMessage
           : status === 'no_match' ? t('None of the releases passed the checks.')
         : t('{count} / {total} episodes', { count: matched, total });
   const bar = status === 'downloading' ? (

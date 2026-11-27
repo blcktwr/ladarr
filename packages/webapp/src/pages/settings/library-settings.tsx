@@ -34,7 +34,7 @@ function GeneralCard({ data, reload }: { data: SettingsResponse; reload: () => v
   return (
     <>
       {message && <Failure message={message} />}
-      <div className="flex flex-wrap items-start gap-4 w-full">
+      <div className="flex flex-col items-start gap-4 w-full">
         <Dropdown label={t('Language')} value={settings.language} options={Object.entries(languages).map(([value, label]) => ({ value, label }))} onValueChange={(value) => void saveSetting({ language: value as string })} />
         <Dropdown label={t('Theme')} value={settings.theme} options={[{ value: 'dark', label: t('Dark') }, { value: 'light', label: t('Light') }]} onValueChange={(value) => void saveSetting({ theme: value as string })} />
       </div>

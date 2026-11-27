@@ -367,7 +367,14 @@ describe('requests and summary', () => {
     await expect.poll(() => missing.state.kind).toBe('blocked');
     expect(series.episodes[1]!.fileId).toBeNull();
     const path = `/queue/entries/${missing.id}`;
-    expect.soft((await api.get(path)).body.entry).toMatchObject({ status: 'stuck', reason: { code: 'file_not_found', action: 'match' } });
+    expect.soft((await api.get(path)).body.entry).toMatchObject({
+      status: 'stuck',
+      reason: { code: 'file_not_found', message: 'No video file matches this episode.', action: 'match' },
+    });
+    await expect.poll(async () => (await api!.get('/queue/groups/tv:1?season=1')).body.group.problem).toMatchObject({
+      code: 'file_not_found',
+      message: 'One or more episodes have no matching video file.',
+    });
     const body = { file: replacement, covers: [{ season: 1, number: 2 }], ids: [missing.id] };
     const preview = await api.post(`${path}/match`, { ...body, preview: true });
     expect(preview.status).toBe(200);

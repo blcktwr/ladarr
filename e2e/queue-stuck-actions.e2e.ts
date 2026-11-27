@@ -837,6 +837,19 @@ test('changes the torrent of a mapped episode without a queue entry', async ({ p
     .find((point: { id: string }) => point.id === 'tv:3:2x3')).toMatchObject({ torrent: { hash: alternate }, match: { file: 'Replacement.mkv' } });
 });
 
+test('counts only episodes with missing files in the season message', async ({ page }) => {
+  const first = blocked('tv:1', 1, 1, 'importing', 'file_not_found');
+  const second = blocked('tv:1', 1, 2, 'importing', 'file_not_found');
+  const third = blocked('tv:1', 1, 3, 'importing', 'file_unmapped');
+  download(first, 'Show.Name.S01.1080p.WEB-DL-GRP', { 'Show.Name.S01E03.mkv': 'third' });
+  Object.assign(second, { transferHash: first.transferHash, clientId: first.clientId, release: first.release });
+  data.queuePaused = true;
+  await start([first, second, third]);
+
+  await open(page, 'group:tv:1:1');
+  await expect(page.getByRole('main').getByText('The downloaded torrent does not contain files for 2 episodes.', { exact: true })).toBeVisible();
+});
+
 test('opens the mapping with both source packs and keeps their file paths after a restart without the torrents', async ({ page }) => {
   const title = data.titles['tv:3']!;
   title.folder = 'Two Seasons (2021)';
@@ -863,6 +876,7 @@ test('opens the mapping with both source packs and keeps their file paths after 
   missing.clientId = data.downloadClients[0]!.id;
   await start([missing]);
   await open(page, `group:${title.key}:1`);
+  await expect(page.getByRole('main').getByText('The downloaded torrent does not contain a file for 1 episode.', { exact: true })).toBeVisible();
   const show = async () => {
     await page.getByRole('button', { name: 'Map episodes', exact: true }).click();
     await seasonButton(page.getByRole('dialog'), 2).click();

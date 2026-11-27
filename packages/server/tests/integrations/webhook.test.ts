@@ -95,7 +95,7 @@ describe('events', () => {
     move(queue, entry, { reason: { code: 'file_not_found' } }, 'import blocked');
     move(queue, entry, { reason: { code: 'file_unreadable' } }, 'import blocked');
     expect(eventsOf(db)).toHaveLength(1);
-    expect(eventsOf(db)[0]).toMatchObject({ type: 'stuck', title: { key: 'movie:2' }, reason: { code: 'file_not_found', message: 'The download has no file for this target.' } });
+    expect(eventsOf(db)[0]).toMatchObject({ type: 'stuck', title: { key: 'movie:2' }, reason: { code: 'file_not_found', message: 'No video file matches this movie.' } });
     expect(deliveriesOf(db)[0]!.webhookId).toBe('stuck-webhook');
 
     move(queue, entry, { branch: null, reason: null }, 'retry');
