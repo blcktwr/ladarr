@@ -553,12 +553,14 @@ describe('removal of one season', () => {
     expect(kept.entryIds).toEqual([second.id]);
     const own = enqueue({ type: 'queue.search', payload: { titleKey: 'tv:1', season: 1, entryIds: [first.id] } });
     const other = enqueue({ type: 'queue.search', payload: { titleKey: 'tv:1', season: 2, entryIds: [second.id] } });
+    const shared = enqueue({ type: 'import.local', payload: { titleKey: 'tv:1', entryIds: [first.id, second.id] } });
 
     await apply((await preview({ action: 'remove', keys: ['tv:1'], season: 1 })).planId);
     expect(app.db.data.queue[first.id]).toBeUndefined();
     expect(app.db.data.queue[second.id]).toBeDefined();
     expect(app.db.data.jobs[own.id]).toBeUndefined();
     expect(app.db.data.jobs[other.id]).toBeDefined();
+    expect(app.db.data.jobs[shared.id]?.payload).toMatchObject({ entryIds: [second.id] });
     const afterRemoval = app.db.data.queueItems[removed.id];
     expect((await app.patch('/library/tv:1/seasons/1', { override: 'monitored' })).status).toBe(200);
     expect(app.db.data.queueItems[removed.id]).toBeUndefined();

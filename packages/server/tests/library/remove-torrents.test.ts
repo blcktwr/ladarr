@@ -42,6 +42,13 @@ describe('torrentsForRemoval', () => {
     expect(torrentsForRemoval([entry('tv:1:1x1')], [entry('tv:1:2x1')])).toEqual([]);
   });
 
+  it.each(['client', null])('keeps a shared torrent while another season waits to retry with client %s', (clientId) => {
+    const other = entry('tv:1:2x1', {
+      state: { kind: 'queued' }, clientId: null, transferHash: null, retryDownload: { hash: 'hash', clientId, match: null },
+    });
+    expect(torrentsForRemoval([entry('tv:1:1x1')], [other])).toEqual([]);
+  });
+
   it('takes a torrent that the user attached', () => {
     expect(torrentsForRemoval([entry('movie:2', { release: { ...release, external: true } })], [])).toEqual([{ clientId: 'client', hash: 'hash' }]);
   });

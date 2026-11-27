@@ -7,14 +7,18 @@ import { forgetUnusedSource, isActive, itemFor, itemId, ownsUpload, phaseOfEntry
 import type { Data, Job, MediaFile, Queue, QueueEntry, Retired, Seen, Title } from '../../types.ts';
 
 // Keep a torrent if an entry or a file outside the removal still uses it.
-export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[], files: MediaFile[] = [], keptFiles: MediaFile[] = [], items: Data['queueItems'] = {}) {
+export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[], files: MediaFile[] = [], keptFiles: MediaFile[] = [], items: Data['queueItems'] = {}, past: { clientId: string; hash: string }[] = []) {
   const used = new Set(remaining.map((entry) => `${entry.clientId}\n${entry.transferHash}`));
+  for (const entry of remaining) {
+    const retry = entry.retryDownload;
+    if (retry && !retry.absent && isActive(entry)) used.add(retry.clientId ? `${retry.clientId}\n${retry.hash}` : retry.hash);
+  }
   for (const file of keptFiles) if (file.download) used.add(`${file.download.clientId}\n${file.download.hash}`);
   const refs: { clientId: string; hash: string }[] = [];
   const add = (clientId: string | null, hash: string | null) => {
     if (!clientId || !hash) return;
     const id = `${clientId}\n${hash}`;
-    if (used.has(id)) return;
+    if (used.has(id) || used.has(hash)) return;
     used.add(id);
     refs.push({ clientId, hash });
   };
@@ -26,6 +30,7 @@ export function torrentsForRemoval(removed: QueueEntry[], remaining: QueueEntry[
     add(entry.clientId, entry.transferHash);
   }
   for (const file of files) if (file.download) add(file.download.clientId, file.download.hash);
+  for (const torrent of past) add(torrent.clientId, torrent.hash);
   return refs;
 }
 
@@ -78,6 +83,8 @@ export function dropTitle(key: string, queue?: Queue, cancelJob?: (id: string) =
     else delete db.data.jobs[job.id];
   }
   delete db.data.titles[key];
+  delete db.data.verifications[key];
+  for (const request of Object.values(db.data.seerr.requests)) if (`${request.mediaType}:${request.tmdbId}` === key) delete db.data.seerr.requests[request.id];
   for (const [id, file] of Object.entries(db.data.files)) if (file.titleKey === key) delete db.data.files[id];
   if (queue) {
     for (const entry of entries) {
@@ -105,10 +112,9 @@ export function dropSeason(key: string, season: number, queue?: Queue, cancelJob
   const ids = new Set(entries.map((entry) => entry.id));
   // A search of a season holds the title key and the season. The jobs of one target hold its ID.
   const own = (job: Job) => {
-    const payload = job.payload as { titleKey?: unknown; season?: unknown; entryIds?: unknown; uploadHash?: unknown } | null;
+    const payload = job.payload as { titleKey?: unknown; season?: unknown; entryIds?: unknown } | null;
     if (!points && job.type === 'queue.search' && payload?.titleKey === key && payload.season === season) return true;
     if (Array.isArray(payload?.entryIds) && payload.entryIds.some((id) => ids.has(id))) {
-      if (!points && !(job.type === 'queue.send' && payload.uploadHash)) return true;
       const remaining = payload.entryIds.filter((id) => !ids.has(id));
       if (!remaining.length) return true;
       payload.entryIds = remaining;

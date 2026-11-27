@@ -1,5 +1,5 @@
 import { describe, isActiveState, itemId, phaseOf, type Phase, type Problem, type QueueState, type SearchOutcome, type WorkPhase } from '@ladarr/shared/queue';
-import { db } from '../../core/db.ts';
+import { db, rememberTorrent } from '../../core/db.ts';
 import { catalog, deleteItemLog, itemFields } from '../../core/log.ts';
 import type { Attempt, Data, Events, QueueEntry, QueueTurn, SearchState, StateHook } from '../../types.ts';
 
@@ -289,6 +289,8 @@ export function createQueue(events: Events, persist: () => void, onState?: State
 
   // The only place that writes the state. Every operation below goes through it.
   function change(entry: QueueEntry, next: QueueState, cause: string, detail?: string, invalidation = false) {
+    // Before the checks, because a new torrent can arrive with no change of the state.
+    rememberTorrent(db.data, entry, next);
     const before = entry.state;
     if (sameState(before, next)) return;
     if (!invalidation && !canEnter(entry, before, next)) return;

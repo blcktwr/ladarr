@@ -5,6 +5,7 @@ import type { PlanAction, PlanSkip } from '@ladarr/shared/enums';
 import type { PlanFile, PlanPreview, PlanRequest, PlanResult, PlanTitle } from '@ladarr/shared/types';
 import { Router } from 'express';
 import { db } from '../../core/db.ts';
+import { inspectCoverage } from '../coverage.ts';
 import { inside, listFiles } from '../imports/folder-files.ts';
 import { filesByTitle } from './files.ts';
 import { dropSeason, dropTitle, forgetFile, inSeason, retireFile, sameSeen, seeFile, pruneEmpty, torrentsForRemoval } from './remove.ts';
@@ -13,7 +14,7 @@ import { refreshJob } from '../metadata.ts';
 import { log } from '../../core/log.ts';
 import { isActive } from '../downloads/queue.ts';
 import { checkRoot } from '../roots.ts';
-import type { Db, Failure, PlansDeps, Stored } from '../../types.ts';
+import type { Db, Failure, PlansDeps, Stored, Title } from '../../types.ts';
 
 const KEY = /^(movie|tv):[1-9]\d*$/;
 const ACTIONS: PlanAction[] = ['pause', 'resume', 'refresh', 'preset', 'remove', 'delete_files'];
@@ -70,14 +71,21 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
   const destructive = (request: PlanRequest) => request.action === 'delete_files' || (request.action === 'remove' && request.deleteFiles === true);
   const journalOf = (key: string) => Object.values(db.data.imports).some((journal) => journal.titleKey === key);
 
-  async function removeTorrents(refs: { clientId: string; hash: string }[]) {
+  async function removeTorrents(refs: { clientId: string; hash: string }[], title: Title, season?: number, points?: Set<string>) {
     for (const ref of refs) {
       const client = clients?.get(ref.clientId);
       if (!client) return false;
       try {
+        if (season !== undefined) {
+          const files = await client.api.files(ref.hash);
+          const { episodes } = inspectCoverage(files.map((file) => file.name), title);
+          // A pack with another season stays. The record of the title keeps it.
+          if (episodes.some((episode) => !inSeason(episode, season, points))) continue;
+        }
         await client.api.remove(ref.hash, true);
         // The torrent is gone, so the record of the torrents that ladarr sent no longer covers it.
         delete db.data.sentTorrents[ref.hash];
+        title.torrents = title.torrents?.filter((torrent) => torrent.clientId !== ref.clientId || torrent.hash !== ref.hash);
       } catch (error) {
         log.warn('could not remove torrent', { clientId: ref.clientId, hash: ref.hash, error: String(error) });
         return false;
@@ -276,8 +284,10 @@ export function libraryPlansRouter({ tmdb, events, enqueue, queue, cancelJob, cl
             const removed = new Set(entries.filter((entry) => entry.titleKey === row.key && (season === undefined || inSeason(entry, season, stored.points))));
             const files = Object.values(db.data.files);
             const ids = new Set(stored.ids.get(row.key));
-            const refs = torrentsForRemoval([...removed], entries.filter((entry) => !removed.has(entry)), files.filter((file) => ids.has(file.id)), files.filter((file) => !ids.has(file.id)), db.data.queueItems);
-            if (!(await removeTorrents(refs))) {
+            // A torrent of a client that is gone cannot be deleted, so it does not stop the removal.
+            const past = (title.torrents ?? []).filter((torrent) => (season === undefined || inSeason(torrent, season, stored.points)) && db.data.downloadClients.some(({ id }) => id === torrent.clientId));
+            const refs = torrentsForRemoval([...removed], entries.filter((entry) => !removed.has(entry)), files.filter((file) => ids.has(file.id)), files.filter((file) => !ids.has(file.id)), db.data.queueItems, past);
+            if (!(await removeTorrents(refs, title, season, stored.points))) {
               skip(row.key, 'torrent_not_deleted');
               await db.write();
               continue;

@@ -932,6 +932,8 @@ export type Title = {
   episodes: Episode[];
   // The managed file of a movie.
   fileId: string | null;
+  // Every torrent that a client had for a target, also after the target moved on. A removal with the files deletes them.
+  torrents?: { clientId: string; hash: string; season: number | null; number: number | null }[];
 };
 // A file that is gone from the disk does not make an episode or a movie available.
 export type Clock = { now: number; files: Record<string, { missing: boolean }> };

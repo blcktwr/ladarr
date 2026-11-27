@@ -3,6 +3,7 @@ import { Low, Memory, type Adapter } from 'lowdb';
 import { TextFile } from 'lowdb/node';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { phaseOf, type QueueState } from '@ladarr/shared/queue';
 import { migrateEmptySeason, migrateQueue, migrateTurns } from '../library/downloads/queue-migrate.ts';
 import { DEFAULT_NAMING } from '../library/naming.ts';
 import { defaultProfiles, defaultSizes, QUALITY_TABLE_VERSION, unlimitedSizes } from '../library/grab/quality.ts';
@@ -86,6 +87,15 @@ export const profilesFor = (data: Pick<Data, 'profiles' | 'profileOrder'>, title
   const index = list.findIndex((profile) => profile.id === title.preset);
   return index > 0 ? list.slice(index) : list;
 };
+
+// Keeps the torrent of a target on its title. The client has that torrent in these phases only.
+export function rememberTorrent(data: Data, entry: QueueEntry, state: QueueState = entry.state) {
+  const { clientId, transferHash: hash, season, number } = entry;
+  const title = data.titles[entry.titleKey];
+  if (!title || !clientId || !hash || !['downloading', 'importing', 'available'].includes(phaseOf(state))) return;
+  if (title.torrents?.some((torrent) => torrent.clientId === clientId && torrent.hash === hash && torrent.season === season && torrent.number === number)) return;
+  (title.torrents ??= []).push({ clientId, hash, season, number });
+}
 
 // A file from an older version can lack a collection that a newer version added.
 export function withDefaults(data: Data): Data {
@@ -207,6 +217,8 @@ export function withDefaults(data: Data): Data {
     for (const torrent of Object.values(item.selected)) if (torrent.source) waiting.add(torrent.hash);
   }
   for (const hash of Object.keys(next.torrents)) if (!waiting.has(hash)) delete next.torrents[hash];
+  // An older file has no record of the torrents of a title. The record starts with the ones that the targets have now.
+  for (const entry of Object.values(next.queue)) rememberTorrent(next, entry);
   // The history is not in the file. The run starts with none, and the log of each target keeps the events.
   for (const entry of Object.values(next.queue)) entry.history = [];
   return next;
