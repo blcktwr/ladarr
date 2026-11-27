@@ -1,6 +1,6 @@
 import { isActiveState, itemId, phaseOf, type Phase, type QueueState, type SearchOutcome, type WorkPhase } from '@ladarr/shared/queue';
-import type { Data, ImportJournal, Job, LegacyEntry, QueueEntry, QueueTorrent, SearchPayload, StoredEvent } from '../../types.ts';
-import { newTurn } from './queue.ts';
+import type { Data, ImportJournal, Job, LegacyEntry, QueueEntry, QueueTorrent, QueueTurn, SearchPayload, StoredEvent } from '../../types.ts';
+import { newTurn, seasonHasCoverage } from './queue.ts';
 
 const WORK: readonly Phase[] = ['queued', 'searching', 'fetching', 'waiting_slot', 'sending', 'downloading', 'importing'];
 
@@ -91,6 +91,36 @@ function migrateEntry(entry: LegacyEntry) {
 // A pure migration of the queue data. It is idempotent, and it calls no hook, client, or webhook.
 export function migrateQueue(queue: Record<string, QueueEntry>) {
   for (const entry of Object.values(queue)) migrateEntry(entry as LegacyEntry);
+}
+
+function withoutEmptySearchBlock(state: QueueState): QueueState {
+  if (state.kind === 'blocked' && state.at === 'searching' && state.problem.code === 'no_results') return { kind: 'waiting', outcome: 'no_results' };
+  if (state.kind === 'paused' && state.resume === 'searching' && state.problem?.code === 'no_results') return { kind: 'paused', resume: 'queued', problem: null };
+  return state;
+}
+
+export function migrateEmptySeason(data: Data, item: QueueTurn) {
+  if (item.season === null || !Object.keys(item.emptySearches).length || seasonHasCoverage(data, item)) return;
+  item.emptySearches = {};
+  item.lastEmptyRound = null;
+  const now = Date.now();
+  const state = withoutEmptySearchBlock(item.state);
+  if (state !== item.state) {
+    item.state = state;
+    item.stateSince = item.nextAt = now;
+    if (item.search) item.search.nextAt = now;
+    item.revision = ++data.queueRev;
+  }
+  for (const id of item.entryIds) {
+    const entry = data.queue[id]!;
+    delete entry.emptyRoundIndexers;
+    const state = withoutEmptySearchBlock(entry.state);
+    if (state === entry.state) continue;
+    entry.state = state;
+    entry.stateSince = entry.phaseSince = now;
+    if (entry.search) entry.search.nextAt = now;
+    entry.revision = ++data.queueRev;
+  }
 }
 
 function cachedSource(data: Data, entry: QueueEntry, hash: string | null) {

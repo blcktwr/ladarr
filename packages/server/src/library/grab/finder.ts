@@ -8,7 +8,7 @@ import { explainProfile } from './quality.ts';
 import { enqueue as enqueueJob, JobError, prioritize } from '../../core/jobs.ts';
 import { isMonitored, movieEligibleAt } from '../library.ts';
 import { catalog, itemFields, titleFields } from '../../core/log.ts';
-import { entryId, forgetSource, forgetUnusedSource, isActive, newTurn, phaseOfEntry } from '../downloads/queue.ts';
+import { entryId, forgetSource, forgetUnusedSource, isActive, newTurn, phaseOfEntry, seasonHasCoverage } from '../downloads/queue.ts';
 import { createClients } from '../downloads/client-api.ts';
 import { importLocal } from '../imports/local.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
@@ -1090,7 +1090,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     }
     const outcome = unavailable ? 'indexers_failed' : 'no_results';
     phase('searching', left);
-    const emptyRounds = unavailable ? [] : left.filter((entry) => {
+    const emptyRounds = unavailable || !completed.length || !seasonHasCoverage(db.data, item) ? [] : left.filter((entry) => {
       if (!completed.includes(entry.id)) return false;
       // A fast indexer cannot use up the episode's three rounds before a slower indexer answers.
       const answered = new Set(entry.emptyRoundIndexers);

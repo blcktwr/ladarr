@@ -250,6 +250,33 @@ it.each([
   expect(pipe.acquisition.slice(split)).toEqual(expect.arrayContaining(selected.map(add)));
 });
 
+it('keeps searching an absent season and starts counting missing episodes only after a release appears', async () => {
+  let now = Date.UTC(2026, 10, 26);
+  using clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const series = await setup();
+  advertise([]);
+  pipe.finder.requestSearch(series.key, { season: 1 });
+
+  const turn = pipe.queue.findItem(series.key, 1)!;
+  const round = [seasonSearch, ...[1, 2, 3].map(episodeSearch)];
+  for (let i = 1; i <= 4; i++) {
+    await expect.poll(() => turn.nextAt ?? 0).toBeGreaterThan(now);
+    expect(await group(series.key)).toMatchObject({ status: 'not_found', counts: { not_found: 3 }, tabs: ['queued'] });
+    expect(pipe.acquisition).toEqual(Array.from({ length: i }, () => round).flat());
+    now = turn.nextAt!;
+  }
+
+  const first = partial();
+  advertise([first]);
+  await expect.poll(() => turn.nextAt ?? 0).toBeGreaterThan(now);
+  expect(turn.emptySearches).toEqual({ [`${series.key}:1x3`]: 1 });
+  const last = single();
+  advertise([first], [last]);
+  now = turn.nextAt!;
+  await expect.poll(async () => (await group(series.key)).status).toBe('downloading');
+  expect(pipe.acquisition.filter(({ type }) => type === 'add')).toEqual(expect.arrayContaining([add(first), add(last)]));
+});
+
 it('counts empty E03 rounds, not indexer responses, and stops after three rounds', async () => {
   let now = Date.UTC(2026, 10, 26);
   using clock = vi.spyOn(Date, 'now').mockImplementation(() => now);

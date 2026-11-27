@@ -73,6 +73,16 @@ const ref = (pipeline: Pipeline, name: string, files: string[], kind: ReleaseRef
 });
 const adds = (pipeline: Pipeline) => pipeline.qbit.calls.filter(({ path }) => path === 'torrents/add');
 
+function partiallyAvailableSeason(pipeline: Pipeline) {
+  const series = title({ rootId: 'tv', episodes: [episode(1, 1, undefined, { fileId: 'first' }), episode(1, 2)] });
+  pipeline.db.data.files.first = {
+    id: 'first', titleKey: series.key, path: 'Show Name/S01E01.mkv', sizeBytes: 1000, mtimeMs: NOW, addedAt: NOW,
+    missing: false, episodes: [{ season: 1, number: 1 }],
+  };
+  pipeline.db.data.titles[series.key] = series;
+  return series;
+}
+
 describe('persisted queue recovery', () => {
   it('coalesces matching legacy search jobs without merging an explicit search of other release seasons', async () => {
     const { pipeline } = await start();
@@ -97,10 +107,9 @@ describe('persisted queue recovery', () => {
 
   it('does not charge a completed empty round again if the worker replays it after reload', async () => {
     const { pipeline } = await start();
-    const series = title({ rootId: 'tv', episodes: [episode(1, 1)] });
-    pipeline.db.data.titles[series.key] = series;
+    const series = partiallyAvailableSeason(pipeline);
     pipeline.finder.requestSearch(series.key, { season: 1 });
-    const id = 'tv:1:1x1';
+    const id = 'tv:1:1x2';
     const item = () => itemFor(pipeline.queue.get(id)!)!;
     const due = NOW + 60 * 60_000;
     expect(pipeline.queue.transitionItem(item(), { kind: 'searching' })).toBe(true);
@@ -201,8 +210,7 @@ describe('persisted queue recovery', () => {
 
   it('keeps the missing episode delay across reload and stops after the third completed empty round', async () => {
     const { pipeline, app } = await start();
-    const series = title({ rootId: 'tv', episodes: [episode(1, 2)] });
-    pipeline.db.data.titles[series.key] = series;
+    const series = partiallyAvailableSeason(pipeline);
     pipeline.finder.requestSearch(series.key, { season: 1, number: 2 });
     pipeline.db.data.queuePaused = false;
     const detail = async () => (await app.get(`/queue/groups/${series.key}?season=1`)).body;
@@ -253,6 +261,34 @@ describe('persisted queue recovery', () => {
     await pipeline.worker.drain();
     expect.soft(episodeQueries()).toHaveLength(3);
     expect(adds(pipeline)).toEqual([]);
+  });
+
+  it('recovers an absent season blocked by empty searches and retries without a manual action', async () => {
+    const { pipeline, app } = await start();
+    const series = title({ rootId: 'tv', episodes: [episode(2, 1), episode(2, 2)] });
+    pipeline.db.data.titles[series.key] = series;
+    const entries = pipeline.finder.requestSearch(series.key, { season: 2 });
+    const turn = pipeline.queue.findItem(series.key, 2)!;
+    const problem = { code: 'no_results', detail: entries[0]!.id };
+    turn.state = { kind: 'blocked', at: 'searching', problem };
+    for (const entry of entries) {
+      turn.emptySearches[entry.id] = 3;
+      entry.state = turn.state;
+    }
+    pipeline.db.data.jobs = {};
+    await reload(pipeline);
+
+    const detail = async () => (await app.get(`/queue/groups/${series.key}?season=2`)).body.group;
+    expect(await detail()).toMatchObject({ status: 'not_found', counts: { not_found: 2 } });
+    pipeline.db.data.queuePaused = false;
+    pipeline.finder.sweep();
+    pipeline.worker.resume();
+    await vi.waitFor(() => expect(pipeline.tracker.state.searches).toHaveLength(3));
+    await pipeline.worker.drain();
+    const waiting = await detail();
+    expect(waiting.status).toBe('not_found');
+    expect(waiting.nextAt).toBeGreaterThan(NOW);
+    expect(adds(pipeline)).toHaveLength(0);
   });
 
   it('migrates a missing-client block to a configuration wait and resumes the saved source once', async () => {

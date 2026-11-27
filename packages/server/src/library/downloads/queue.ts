@@ -1,7 +1,7 @@
 import { describe, isActiveState, itemId, phaseOf, type Phase, type Problem, type QueueState, type SearchOutcome, type WorkPhase } from '@ladarr/shared/queue';
 import { db } from '../../core/db.ts';
 import { catalog, deleteItemLog, itemFields } from '../../core/log.ts';
-import type { Attempt, Events, QueueEntry, QueueTurn, SearchState, StateHook } from '../../types.ts';
+import type { Attempt, Data, Events, QueueEntry, QueueTurn, SearchState, StateHook } from '../../types.ts';
 
 export { itemId };
 
@@ -32,6 +32,12 @@ export function newTurn(titleKey: string, season: number | null, position: numbe
 export const getItem = (id: string) => db.data.queueItems[id];
 export const findItem = (titleKey: string, season: number | null) => getItem(itemId(titleKey, season));
 export const itemFor = (entry: Pick<QueueEntry, 'titleKey' | 'season'>) => findItem(entry.titleKey, entry.season);
+
+export function seasonHasCoverage(data: Data, item: QueueTurn) {
+  return Object.values(item.selected).some((torrent) => torrent.status !== 'verify' && Object.keys(torrent.matches).length > 0)
+    || (data.titles[item.titleKey]?.episodes ?? []).some((episode) =>
+      episode.season === item.season && episode.fileId && data.files[episode.fileId]?.missing === false);
+}
 
 // An entry is active until it is available, or cancelled by the user.
 export const isActive = (entry: QueueEntry) => isActiveState(entry.state);
