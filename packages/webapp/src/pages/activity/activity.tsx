@@ -436,7 +436,7 @@ function downloadPercent(entry: QueueEntryView) {
 // shows the indicator of its status and the reason that stops it above the progress of the work, under the name, then
 // the checks of the import while it imports, then the fields of its release. The label is off in the inspector of a
 // movie, where the heading of the panel says the name. An episode of a series shows the percent of its download in its name.
-function EntryDetails({ entry, label = true, inline = false, actions, fix }: { entry: QueueEntryView; label?: boolean; inline?: boolean; actions?: ReactNode; fix?: ReactNode }) {
+function EntryDetails({ entry, label = true, inline = false, missing, actions, fix }: { entry: QueueEntryView; label?: boolean; inline?: boolean; missing?: QueueGroupRow['missing'][number]; actions?: ReactNode; fix?: ReactNode }) {
   const percent = inline ? downloadPercent(entry) : null;
   const data = inline
     ? entry.file ? <FileDetails file={entry.file} /> : null
@@ -461,6 +461,7 @@ function EntryDetails({ entry, label = true, inline = false, actions, fix }: { e
             {actions}
           </div>
         </div>
+        {missing && <Text variant="small">{t('Episode {number}: No release in {rounds} searches.', { number: missing.number, rounds: missing.rounds })}</Text>}
         {data}
       </div>
     );
@@ -603,7 +604,7 @@ function MasterRow({ row }: { row: QueueRow }) {
 const seasonColumns = [{ label: 'Season', hideLabel: true }, { label: 'Actions', hideLabel: true, align: 'end' as const }];
 
 // The episodes of a season, a page of them at a time.
-function SeasonEpisodes({ season, entries }: { season: number; entries: QueueEntryView[] }) {
+function SeasonEpisodes({ season, entries, missing }: { season: number; entries: QueueEntryView[]; missing: QueueGroupRow['missing'] }) {
   const [page, setPage] = useState(1);
   const pages = Math.max(1, Math.ceil(entries.length / EPISODES));
   const current = Math.min(page, pages);
@@ -619,6 +620,7 @@ function SeasonEpisodes({ season, entries }: { season: number; entries: QueueEnt
               key="detail"
               entry={entry}
               inline
+              missing={missing.find((episode) => episode.season === season && episode.number === entry.number)}
             />,
           ],
         }))}
@@ -714,9 +716,6 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
             message={message}
             divider={!importing}
           >
-            {missing.map(({ season, number, rounds }) => (
-              <Text key={`${season}:${number}`} variant="small">{t('Episode {number}: No release in {rounds} searches.', { number, rounds })}</Text>
-            ))}
             {stopped.length > 0 && <GroupFix group={summary} stopped={stopped} run={run} />}
           </DetailStatus>
         ) : (
@@ -736,7 +735,7 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
         entries={entries}
         opened={season}
         onSeason={toggle}
-        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} />}
+        detail={(number) => <SeasonEpisodes season={number} entries={entries.filter((entry) => entry.season === number)} missing={missing} />}
       />
     </div>
   );
