@@ -19,7 +19,8 @@ export const es: Record<string, string> = {
   'Specials': 'Especiales',
   'Season {n}': 'Temporada {n}',
   'All caught up': 'Todo al día',
-  'All items in queue are stuck': 'Todos los elementos de la cola están atascados',
+  '1 item in queue is stuck': '1 elemento de la cola está atascado',
+  '{count} items in queue are stuck': '{count} elementos de la cola están atascados',
   'Download client required': 'Se necesita un cliente de descargas',
   'Pages': 'Páginas',
 

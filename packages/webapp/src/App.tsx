@@ -64,7 +64,11 @@ function QueueStatus({ href, onOpen }: { href: string; onOpen: () => void }) {
   if (job) return <ActivityLine status={jobAction(job.type, true)} task={job.label ?? undefined} href={href} onClick={onOpen} />;
   if (!stage) {
     // A target that stopped on a reason waits for the person, so the line does not say that all is done.
-    if (summary.data.stopped) return <ActivityLine status={t('All items in queue are stuck')} alert href={href} onClick={onOpen} />;
+    const count = summary.data.stopped;
+    if (count) {
+      const status = count === 1 ? t('1 item in queue is stuck') : t('{count} items in queue are stuck', { count });
+      return <ActivityLine status={status} alert href={href} onClick={onOpen} />;
+    }
     // The user paused targets, so their work waits.
     if (summary.data.counts.paused) return <ActivityLine status={t('Paused')} state={{ icon: <Pause /> }} href={href} onClick={onOpen} />;
     return <ActivityLine status={t('All caught up')} state={{ icon: <Check /> }} href={href} onClick={onOpen} />;
