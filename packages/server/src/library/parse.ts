@@ -1,5 +1,5 @@
 import type { EpisodeFacts, Numbering, ParsedEpisodes } from '../types.ts';
-import { catalogPoints } from './numbering.ts';
+import { catalogPoints } from '@ladarr/shared/numbering';
 const MAX_RANGE = 50;
 const VIDEO = /\.(mkv|mp4|m4v|avi|mov|wmv|ts|webm)$/i;
 const SAMPLE = /(^|[^a-z0-9])sample([^a-z0-9]|$)/i;

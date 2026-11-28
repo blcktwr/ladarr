@@ -11,7 +11,7 @@ import { ClientError } from '../downloads/qbittorrent.ts';
 import { addedByApp, isActive, matchesSentTorrent, phaseOfEntry } from '../downloads/queue.ts';
 import { parseRelease, normalizeTitle } from '../grab/release.ts';
 import { matchMovie, readCoverage, validMatches } from '../grab/match.ts';
-import { normalizeNumbering, releasePoint } from '../numbering.ts';
+import { normalizeNumbering, releasePoint } from '@ladarr/shared/numbering';
 import { isSample, isVideoFile, releaseEpisodes } from '../parse.ts';
 import { inside } from '../roots.ts';
 import { linkedSources, readTitleFolder } from '../scan.ts';

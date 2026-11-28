@@ -4,7 +4,7 @@ import { withTitleLock } from '../core/title-lock.ts';
 import { catalog, titleFields } from '../core/log.ts';
 import { isActive } from '../library/downloads/queue.ts';
 import { mergeEpisodes } from '../library/library.ts';
-import { normalizeNumbering } from '../library/numbering.ts';
+import { normalizeNumbering } from '@ladarr/shared/numbering';
 import { scanJob } from '../library/scan.ts';
 import { verifyJob } from '../library/verification.ts';
 import type { Db, EpisodeMeta, Events, Handler, Title, Tmdb } from '../types.ts';

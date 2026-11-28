@@ -5,7 +5,7 @@ import { ClientError } from '../../../../../library/downloads/qbittorrent.ts';
 import { isActive } from '../../../../../library/downloads/queue.ts';
 import { attachTorrent } from '../../../../../library/downloads/attach.ts';
 import { inspectCoverage } from '../../../../../library/coverage.ts';
-import { normalizeNumbering } from '../../../../../library/numbering.ts';
+import { normalizeNumbering } from '@ladarr/shared/numbering';
 import { isSample, isVideoFile } from '../../../../../library/parse.ts';
 import { attachRefusal, HASH, MAX_TARGETS } from '../../../../../helpers/queue-attach.ts';
 import { associationState, label, resolutionCurrent, resolutionVersion, shown } from '../../../../../helpers/queue.ts';

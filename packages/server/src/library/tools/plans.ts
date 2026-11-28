@@ -9,7 +9,7 @@ import { inspectCoverage } from '../coverage.ts';
 import { inside, listFiles } from '../imports/folder-files.ts';
 import { filesByTitle } from './files.ts';
 import { dropSeason, dropTitle, forgetFile, inSeason, retireFile, sameSeen, seeFile, pruneEmpty, torrentsForRemoval } from './remove.ts';
-import { normalizeNumbering, releasePoint } from '../numbering.ts';
+import { normalizeNumbering, releasePoint } from '@ladarr/shared/numbering';
 import { refreshJob } from '../metadata.ts';
 import { log } from '../../core/log.ts';
 import { isActive } from '../downloads/queue.ts';

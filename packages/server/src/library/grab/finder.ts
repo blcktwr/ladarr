@@ -19,7 +19,7 @@ import { detach } from './detach.ts';
 import { currentSelection, enqueueSelection, readySelection, reasonOf as grabReasonOf, sendPhase } from './grab.ts';
 import { requestIdFor } from '../../core/outbound.ts';
 import type { OutsideTitleLock } from '../../core/title-lock.ts';
-import { catalogPoint, catalogSeasons, normalizeNumbering, releasePoint, releaseSeasons } from '../numbering.ts';
+import { catalogPoint, catalogSeasons, normalizeNumbering, releasePoint, releaseSeasons } from '@ladarr/shared/numbering';
 import { needsOtherSeasons } from '@ladarr/shared/queue';
 import { DEFAULT_RELEASE_DAY_MINUTES } from '@ladarr/shared/indexers';
 import type { DecideContext, Decision, Episode, FinderDeps, Indexer, Job, Numbering, QueueEntry, QueueTorrent, QueueTurn, RawRelease, RejectedRelease, ReleaseRef, Scope, SearchPayload, SearchQuery, SearchState, Title, TitleName, Want } from '../../types.ts';

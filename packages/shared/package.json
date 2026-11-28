@@ -6,6 +6,7 @@
     "./config": "./src/config.ts",
     "./enums": "./src/enums.ts",
     "./indexers": "./src/indexers.ts",
+    "./numbering": "./src/numbering.ts",
     "./queue": "./src/queue.ts",
     "./types": "./src/types.ts"
   }

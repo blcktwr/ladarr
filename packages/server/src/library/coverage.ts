@@ -1,6 +1,6 @@
 import type { EpisodeRef, Numbering, Title } from '../types.ts';
 import { parseRelease } from './grab/release.ts';
-import { catalogPoint, normalizeNumbering, releasePoint } from './numbering.ts';
+import { catalogPoint, normalizeNumbering, releasePoint } from '@ladarr/shared/numbering';
 import { isSample, isVideoFile, parseEpisodes, releaseEpisodes } from './parse.ts';
 
 // Original source names establish coverage. A pack name supplies a season, not its episodes.

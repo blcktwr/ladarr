@@ -8,7 +8,7 @@ import {
   releasePoint,
   releaseSeasons,
   validateNumbering,
-} from '../../src/library/numbering.ts';
+} from '@ladarr/shared/numbering';
 import type { Numbering, NumberingRange } from '@ladarr/shared/types';
 
 // The confirmed correspondence: catalog episode 13 is release episode 1 of season 2.

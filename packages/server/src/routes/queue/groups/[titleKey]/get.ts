@@ -7,7 +7,7 @@ import { preparedMapping } from '../../../../helpers/queue-attach.ts';
 import { bySeasonNumber, filtersOf, groupAggregate, lanePositions, reachedOf, shown, view } from '../../../../helpers/queue.ts';
 import { findItem } from '../../../../library/downloads/queue.ts';
 import { inside, torrentVideos } from '../../../../library/imports/importer.ts';
-import { normalizeNumbering, releasePoint } from '../../../../library/numbering.ts';
+import { normalizeNumbering, releasePoint } from '@ladarr/shared/numbering';
 import { recoverMappingSources } from '../../../../library/scan.ts';
 import type { Clients, ImportStatus, Poller, Title, Torrent } from '../../../../types.ts';
 

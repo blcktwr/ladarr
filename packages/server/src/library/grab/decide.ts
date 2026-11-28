@@ -1,5 +1,5 @@
 import { profilesFor } from '../../core/db.ts';
-import { catalogPoints, normalizeNumbering, rangeOfCatalog, releasePoint } from '../numbering.ts';
+import { catalogPoints, normalizeNumbering, rangeOfCatalog, releasePoint } from '@ladarr/shared/numbering';
 import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE } from './quality.ts';
 import { normalizeTitle, parseRelease } from './release.ts';
 import { magnetHash } from './torrent.ts';

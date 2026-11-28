@@ -4,7 +4,7 @@ import { manualRejection, REJECTION_TEXT } from '../library/grab/decide.ts';
 import { aggregate, describe, itemId, needsOtherSeasons, phaseOf, type Problem as StateProblem, type Status, type Tab } from '@ladarr/shared/queue';
 import { createHash } from 'node:crypto';
 import type { QueueGroupRow, QueuePage, QueueRejectedRelease, QueueResolution, QueueRow, QueueSelection } from '@ladarr/shared/types';
-import { normalizeNumbering, releasePoint, seasonRevision } from '../library/numbering.ts';
+import { normalizeNumbering, releasePoint, seasonRevision } from '@ladarr/shared/numbering';
 import { db } from '../core/db.ts';
 import { redact } from '../core/log.ts';
 import { reasonInfo, type ReasonScope } from '../core/reasons.ts';

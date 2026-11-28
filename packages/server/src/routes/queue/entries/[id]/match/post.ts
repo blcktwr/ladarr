@@ -8,7 +8,7 @@ import { correctionJournal, correctionOf, prepareCorrection, recoverCorrection }
 import { PlanError } from '../../../../../library/imports/plan.ts';
 import { bindJournal } from '../../../../../library/imports/importer.ts';
 import { recordTorrent } from '../../../../../library/downloads/attach.ts';
-import { normalizeNumbering } from '../../../../../library/numbering.ts';
+import { normalizeNumbering } from '@ladarr/shared/numbering';
 import { HASH, matchEntry, matchSource, matchSourceKind, preparedFiles, preparedMapping, resumePreparedMapping, torrentInUse } from '../../../../../helpers/queue-attach.ts';
 import { associationState, catalogTargets, label, resolutionCurrent, resolutionVersion } from '../../../../../helpers/queue.ts';
 import type { Clients, EnqueueInput, Finder, ImportJournal, Job, Queue, QueueEntry } from '../../../../../types.ts';

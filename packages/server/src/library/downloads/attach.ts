@@ -1,5 +1,5 @@
 import { db } from '../../core/db.ts';
-import { normalizeNumbering } from '../numbering.ts';
+import { normalizeNumbering } from '@ladarr/shared/numbering';
 import { forgetSource, isActive } from './queue.ts';
 import type { ClientHandle, Queue, QueueEntry, ReleaseRef, Torrent } from '../../types.ts';
 

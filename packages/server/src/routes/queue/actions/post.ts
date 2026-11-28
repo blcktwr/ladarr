@@ -1,5 +1,5 @@
 import { db } from '../../../core/db.ts';
-import { normalizeNumbering, releasePoint, releaseSeasons } from '../../../library/numbering.ts';
+import { normalizeNumbering, releasePoint, releaseSeasons } from '@ladarr/shared/numbering';
 import type { QueueActionName } from '@ladarr/shared/enums';
 import type { WorkPhase } from '@ladarr/shared/queue';
 import type { RequestHandler } from 'express';

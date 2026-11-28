@@ -2,7 +2,7 @@ import { db } from '../../../core/db.ts';
 import { withTitleLock } from '../../../core/title-lock.ts';
 import type { RequestHandler } from 'express';
 import { requestVerification } from '../../../library/verification.ts';
-import { assignSeasons, normalizeNumbering, validateNumbering } from '../../../library/numbering.ts';
+import { assignSeasons, normalizeNumbering, validateNumbering } from '@ladarr/shared/numbering';
 import { changed, detail, isObject } from '../../../helpers/library.ts';
 import type { PatchDeps, Title } from '../../../types.ts';
 

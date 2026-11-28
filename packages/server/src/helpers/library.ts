@@ -5,7 +5,7 @@ import { clock, summarize } from '../library/tools/api.ts';
 import { seriesCounts } from '../library/library.ts';
 import { downloadedQuality } from '../library/grab/upgrades.ts';
 import type { Db, Episode, Events, Title } from '../types.ts';
-import { normalizeNumbering, releasePoint, seasonRevision } from '../library/numbering.ts';
+import { normalizeNumbering, releasePoint, seasonRevision } from '@ladarr/shared/numbering';
 import type { Override } from '@ladarr/shared/enums';
 
 const KEY = /^(movie|tv):[1-9]\d*$/;

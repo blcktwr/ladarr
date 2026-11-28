@@ -1,4 +1,4 @@
-import type { Numbering, NumberingRange } from '@ladarr/shared/types';
+import type { Numbering, NumberingRange } from './types.ts';
 
 // The two coordinate systems of a series. The catalog is the numbering of TMDB, which ladarr stores. The release is the
 // numbering of the indexers, the torrents, and the files that they hold. They differ when a release counts as another

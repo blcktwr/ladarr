@@ -5,7 +5,7 @@ import type { RequestHandler } from 'express';
 import { ClientError } from '../../../../../library/downloads/qbittorrent.ts';
 import { evidenceOf, matchContent } from '../../../../../library/content.ts';
 import { releaseEpisodes } from '../../../../../library/parse.ts';
-import { catalogPoint, normalizeNumbering } from '../../../../../library/numbering.ts';
+import { catalogPoint, normalizeNumbering } from '@ladarr/shared/numbering';
 import { probeFile } from '../../../../../library/probe.ts';
 import { HASH, matchEntry, matchSource, matchSourceKind, preparedFiles, preparedMapping } from '../../../../../helpers/queue-attach.ts';
 import { catalogTargets, label } from '../../../../../helpers/queue.ts';
