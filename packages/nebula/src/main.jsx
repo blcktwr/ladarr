@@ -533,6 +533,7 @@ const Sheet = () => {
                 <PaginationSample />
               </div>
             </Pane>
+            <Pane><Table aria-label="Selection" columns={columns} rows={rows.map((row, index) => ({ ...row, selected: index === 1, onSelect: () => {} }))} /></Pane>
             <Pane><Table aria-label="Table" columns={columns} loading /></Pane>
           </section>
           <section className={wide}>

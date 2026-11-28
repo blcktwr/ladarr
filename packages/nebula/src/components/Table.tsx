@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion, type Transition } from 'motion/react';
-import { Fragment, useId, type MouseEvent, type ReactNode } from 'react';
+import { Fragment, useId, type KeyboardEvent, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { Actions } from './Actions.tsx';
 import { Skeleton } from './Skeleton.tsx';
 
@@ -18,7 +18,11 @@ type Column = {
 // A row can have a detail: content that opens under it, across all the columns, such as the episodes of a season.
 // An active row is open, so it takes the colour of a recess and reads apart from the closed rows.
 // A row with one cell goes across every column, such as a note at the end of the table.
-type Row = { key: string; cells: ReactNode[]; onClick?: () => void; detail?: ReactNode; active?: boolean };
+// A row with onSelect can be selected. The page holds the selection, and selected shows it.
+type Row = { key: string; cells: ReactNode[]; onClick?: () => void; detail?: ReactNode; active?: boolean; selected?: boolean; onSelect?: (mode: Mode) => void };
+
+// one selects only the row, toggle adds or removes it, and range selects from the last row to this one.
+type Mode = 'one' | 'toggle' | 'range';
 
 // The title shows above the table, and it is the name of the table. Without a title, aria-label is the name.
 type TableProps = ({ title: string; 'aria-label'?: never } | { title?: never; 'aria-label': string }) & {
@@ -44,6 +48,12 @@ const cell = 'px-3 first:pl-6 last:pr-6';
 // A click on a control inside a row keeps the action of the control.
 const control = 'button, a, input, select, textarea, label, [role="button"], [role="link"], [role="menuitem"]';
 
+// The events that select a row come from the row itself. A control keeps its own events. A part in a portal, such as an
+// option of a dropdown, sends its events up to the row, but it is not in the row.
+const own = (event: SyntheticEvent) => event.target instanceof Element && event.currentTarget.contains(event.target) && !event.target.closest(control);
+
+const modeOf = (event: { shiftKey: boolean }, other: Mode): Mode => (event.shiftKey ? 'range' : other);
+
 // The motion of a row follows the theme: the ease-stone curve, in 200ms.
 const transition: Transition = { duration: 0.2, ease: [0.16, 1, 0.3, 1] };
 
@@ -56,6 +66,8 @@ const shift = 8;
 // It can have a title above it, as a Section. While loading is on, three rows show a bar in each cell.
 // A row can have a click that opens something, such as the episodes of a series, and a detail that opens under it, across all the columns.
 // The pointer shows the click, and a click on a control inside the row keeps the action of the control.
+// A row can be selected: a click selects it, Ctrl or Cmd and a click add or remove it, and Shift and a click select a range.
+// The row takes the focus, so Space and Shift and Space do the same from the keyboard.
 // With animated, a row that enters, leaves, or moves takes its place with motion, unless the system asks for reduced motion.
 // With stickyFirst, the first column stays at the left edge while the row scrolls sideways. With minWidth, the table is at
 // least that wide, so it scrolls sideways inside the pane.
@@ -68,19 +80,43 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
   const moving = animated && !still;
   const detailCell = `px-6 py-2 ${detailTone === 'open' ? 'bg-row-open' : 'bg-(--recess-lit)'}`;
 
-  const click = (row: Row) =>
-    row.onClick
-      ? (event: MouseEvent<HTMLTableRowElement>) => {
-          if (!(event.target instanceof Element) || !event.target.closest(control)) row.onClick?.();
-        }
-      : undefined;
+  // An active row sinks into the pane, so it reads as open. A selected row has the same look. With a fixed first column,
+  // every row is opaque, so the column covers the cells that scroll under it.
+  const look = (row: Row) => {
+    const sunk = row.active || row.selected;
+    const fill = stickyFirst ? (sunk ? 'bg-row-open' : 'bg-pane') : sunk && 'bg-(--recess-sunk)';
+    // The wrapper of the table cuts what goes past it, so the line of the focus is inside the row.
+    const focus = row.onSelect && 'focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2';
+    return [fill, (row.onClick || row.onSelect) && 'cursor-pointer', focus].filter(Boolean).join(' ') || undefined;
+  };
 
-  // An active row sinks into the pane, so it reads as open. With a fixed first column, every row is opaque, so the
-  // column covers the cells that scroll under it.
-  const look = (row: Row) =>
-    stickyFirst
-      ? [row.active ? 'bg-row-open' : 'bg-pane', row.onClick && 'cursor-pointer'].filter(Boolean).join(' ')
-      : [row.active && 'bg-(--recess-sunk)', row.onClick && 'cursor-pointer'].filter(Boolean).join(' ') || undefined;
+  const interaction = ({ onClick, onSelect, selected }: Row) => ({
+    onClick: onClick || onSelect
+      ? (event: MouseEvent<HTMLTableRowElement>) => {
+          if (!(event.target instanceof Element) || !event.target.closest(control)) onClick?.();
+          if (own(event)) onSelect?.(modeOf(event, event.ctrlKey || event.metaKey ? 'toggle' : 'one'));
+        }
+      : undefined,
+    ...(onSelect && {
+      tabIndex: 0,
+      'aria-selected': Boolean(selected),
+      // On a Mac, Ctrl and a click give no click, but a context menu with the left button.
+      onContextMenu: (event: MouseEvent<HTMLTableRowElement>) => {
+        if (!event.ctrlKey || event.button !== 0 || !own(event)) return;
+        event.preventDefault();
+        onSelect(modeOf(event, 'toggle'));
+      },
+      // Shift and a click select rows, not text.
+      onMouseDown: (event: MouseEvent<HTMLTableRowElement>) => {
+        if (event.shiftKey && own(event)) event.preventDefault();
+      },
+      onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => {
+        if (event.key !== ' ' || event.target !== event.currentTarget) return;
+        event.preventDefault();
+        onSelect(modeOf(event, 'toggle'));
+      },
+    }),
+  });
 
   const cells = (row: Row) =>
     row.cells.map((content, index) => (
@@ -127,7 +163,7 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -shift }}
                     transition={transition}
-                    onClick={click(row)}
+                    {...interaction(row)}
                     className={look(row)}
                   >
                     {cells(row)}
@@ -146,7 +182,7 @@ export function Table({ title, 'aria-label': label, columns, rows = [], loading 
             ) : (
               body.map(row => (
                 <Fragment key={row.key}>
-                  <tr data-row={row.key} onClick={click(row)} className={look(row)}>
+                  <tr data-row={row.key} {...interaction(row)} className={look(row)}>
                     {cells(row)}
                   </tr>
                   {row.detail && (
