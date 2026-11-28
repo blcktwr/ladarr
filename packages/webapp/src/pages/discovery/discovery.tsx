@@ -1,7 +1,7 @@
 import type { DiscoveryFilters, DiscoveryPage, DiscoverySort, WatchProvider } from '@ladarr/shared/types';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { SlidersHorizontal } from 'lucide-react';
-import { Button, Dropdown, EmptyState, Field, Gallery, Panel, SearchField, Slider, Spinner, SubMenu, Text, Thumbnail, Tile } from 'nebula';
+import { Avatar, Button, Dropdown, EmptyState, Field, Gallery, Panel, SearchField, Slider, Spinner, SubMenu, Text, Tile } from 'nebula';
 import { useEffect, useRef, useState } from 'react';
 import { Link as RouterLink, useSearchParams } from 'react-router';
 import { Alert } from '../../components/alert.tsx';
@@ -19,6 +19,12 @@ const column = 'mx-auto w-[min(1200px,calc(100%-40px))]';
 // The rows span the window. The column is as wide as the columns of thumbnails that fit in it, so the room that a
 // column does not fill goes in equal parts to each side (10rem per thumbnail and 1.5rem between them).
 const tiles = 'mx-auto w-[calc(round(down,calc(100%+1.5rem),11.5rem)-1.5rem)]';
+// The people take one row of the column (6rem per person and 1.5rem between them). Each one hides when the column has
+// no room for it, so it also leaves the Tab order and the screen reader. The widest column has room for 10.
+const oneRow = [
+  '', '@max-[13.5rem]:hidden', '@max-[21rem]:hidden', '@max-[28.5rem]:hidden', '@max-[36rem]:hidden',
+  '@max-[43.5rem]:hidden', '@max-[51rem]:hidden', '@max-[58.5rem]:hidden', '@max-[66rem]:hidden', '@max-[73.5rem]:hidden',
+];
 
 // The filters of the panel. An empty value leaves its filter out. The streaming services start in the United States.
 type Rating = readonly [number, number];
@@ -272,19 +278,27 @@ export function Discovery() {
       ) : !hasResults ? (
         <EmptyState>{t(term ? 'No titles match.' : 'No titles.')}</EmptyState>
       ) : (
-        <div className={tiles}>
-          <Gallery>
-            {people.map((person) => (
-              <RouterLink key={`person:${person.id}`} to={`/catalog/person/${person.id}`}>
-                <Thumbnail image={posterUrl(person.profilePath) ?? ''} title={person.name} />
-              </RouterLink>
-            ))}
-            {shown.map((result) => {
-              const key = `${result.mediaType}:${result.tmdbId}`;
-              return <ResultItem key={key} result={result} selected={term ? selection.has(key) : undefined} onSelectedChange={term ? () => selection.toggle(key) : undefined} />;
-            })}
-          </Gallery>
-        </div>
+        <>
+          {people.length > 0 && (
+            <div className={`${column} @container`}>
+              <Gallery>
+                {people.slice(0, oneRow.length).map((person, index) => (
+                  <RouterLink key={person.id} className={oneRow[index]} to={`/catalog/person/${person.id}`}>
+                    <Avatar image={posterUrl(person.profilePath) ?? ''} name={person.name} />
+                  </RouterLink>
+                ))}
+              </Gallery>
+            </div>
+          )}
+          <div className={tiles}>
+            <Gallery>
+              {shown.map((result) => {
+                const key = `${result.mediaType}:${result.tmdbId}`;
+                return <ResultItem key={key} result={result} selected={term ? selection.has(key) : undefined} onSelectedChange={term ? () => selection.toggle(key) : undefined} />;
+              })}
+            </Gallery>
+          </div>
+        </>
       )}
       {hasNextPage && <div ref={more} aria-hidden="true" className="h-px" />}
     </div>

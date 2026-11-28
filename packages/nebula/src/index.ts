@@ -3,6 +3,7 @@ export { ActionMenu } from './components/ActionMenu.tsx';
 export { Actions } from './components/Actions.tsx';
 export { Alerts, alert, useAlerts, useModalOpen } from './components/Alerts.tsx';
 export type { AlertOptions } from './components/Alerts.tsx';
+export { Avatar } from './components/Avatar.tsx';
 export { Backdrop } from './components/Backdrop.tsx';
 export { Background } from './components/Background.tsx';
 export { Badge } from './components/Badge.tsx';
