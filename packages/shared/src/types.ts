@@ -650,7 +650,7 @@ export type QueueMappingEpisode = EpisodeRef & {
   match: { file: string; path: string | null } | null;
 };
 
-export type QueueGroupPage = { cursor: number; group: QueueGroupSummary; items: QueueEntryView[]; mapping?: QueueMappingEpisode[]; numberingRevision?: number };
+export type QueueGroupPage = { cursor: number; group: QueueGroupSummary; items: QueueEntryView[]; mapping?: QueueMappingEpisode[]; numberingRevision?: number; numbering?: Numbering; catalog?: EpisodeRef[] };
 
 export type QueueSummary = {
   cursor: number;

@@ -108,7 +108,9 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
     }
     const summary = groupAggregate(items, season !== null ? findItem(req.params.titleKey, season) : undefined);
     const title = db.data.titles[req.params.titleKey];
-    const numberingRevision = title?.numbering?.revision ?? 0;
+    // Read before the await below, so the numbering, the catalog, and the revision agree.
+    const numbering = normalizeNumbering(title?.numbering);
+    const catalog = title?.episodes.map(({ season, number }) => ({ season, number })) ?? [];
     const mapping = mappingRequested && title ? await mappingOf(title, clients, season, persist, rejected) : undefined;
     res.json({
       cursor: db.data.queueRev,
@@ -118,7 +120,7 @@ export function queueGroupGet(poller: Poller, importStatus: ImportStatus | undef
         download,
       },
       items: items.map((entry) => view(poller, importStatus, entry, lane)),
-      ...(mapping ? { mapping, numberingRevision } : {}),
+      ...(mapping ? { mapping, numberingRevision: numbering.revision, numbering, catalog } : {}),
     } satisfies QueueGroupPage);
   };
 }

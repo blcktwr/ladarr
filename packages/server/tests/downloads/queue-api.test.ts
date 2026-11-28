@@ -1178,6 +1178,50 @@ describe('server resolution previews', () => {
   });
 });
 
+describe('the mapping of a series', () => {
+  async function mapped(extra: Parameters<typeof title>[0] = {}) {
+    pipe = await startPipeline();
+    await pipe.worker.pause();
+    pipe.poller.stop();
+    api = await pipe.api();
+    // The catalog holds a special and an episode that TMDB removed. The rows of the table do not.
+    const series = title({
+      rootId: 'tv',
+      episodes: [episode(0, 1), aired(1), aired(2), episode(1, 3, '2020-01-03', { removedFromTmdb: true })],
+      ...extra,
+    });
+    series.meta.seasons = [0, 1].map((seasonNumber) => ({ seasonNumber, episodeCount: 1, airDate: '2020-01-01' }));
+    pipe.db.data.titles[series.key] = series;
+    return series;
+  }
+  const catalog = [{ season: 0, number: 1 }, { season: 1, number: 1 }, { season: 1, number: 2 }, { season: 1, number: 3 }];
+
+  it.each(['true', 'rejected'])('sends the numbering of the title and its complete catalog with mapping=%s', async (mode) => {
+    const numbering = { revision: 2, ranges: [{ season: 0, from: 1, to: 1, releaseSeason: 3, releaseFrom: 1 }] };
+    const series = await mapped({ numbering });
+
+    const { body } = await api!.get(`/queue/groups/${series.key}?mapping=${mode}`);
+
+    expect(body.numbering).toEqual(numbering);
+    expect(body.numberingRevision).toBe(2);
+    expect(body.catalog).toEqual(catalog);
+    expect(body.mapping.map(({ season, number }: { season: number; number: number }) => [season, number])).toEqual([[1, 1], [1, 2]]);
+  });
+
+  it('sends the empty numbering for a title that has none, and only with the mapping', async () => {
+    const series = await mapped();
+
+    const { body } = await api!.get(`/queue/groups/${series.key}?mapping=true`);
+    const plain = (await api!.get(`/queue/groups/${series.key}`)).body;
+
+    expect(body.numbering).toEqual({ revision: 0, ranges: [] });
+    expect(body.numberingRevision).toBe(0);
+    expect(body.catalog).toEqual(catalog);
+    expect(plain).not.toHaveProperty('numbering');
+    expect(plain).not.toHaveProperty('catalog');
+  });
+});
+
 describe('first acquisition of a multi-season source', () => {
   async function source() {
     pipe = await startPipeline();
