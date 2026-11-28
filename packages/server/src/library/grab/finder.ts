@@ -717,6 +717,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     };
 
     const point = (entry: QueueEntry) => ({ season: entry.season!, number: entry.number! });
+    // The targets that a found season pack is known not to hold.
+    const lacked = new Set<string>();
     const wantForPack = (release: RawRelease, group: QueueEntry[]): Want => ({
       kind: 'season', title, season: group[0]!.season!, releaseSeason: parseRelease(release.title).season ?? group[0]!.season!, numbering,
     });
@@ -734,7 +736,10 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           const decision = decide(release, want, ctx, { inspect: true });
           const known = ctx.coverage(release);
           if (!payload.forced && known?.titleKey === title.key && known.numberingRevision === revision && group.every((entry) =>
-            entry.season === known.season && !known.numbers.includes(entry.number!))) continue;
+            entry.season === known.season && !known.numbers.includes(entry.number!))) {
+            for (const entry of group) lacked.add(entry.id);
+            continue;
+          }
           if (decision.covers.some((covered) => group.some((entry) => entry.season === covered.season && entry.number === covered.number)) ||
             parsed.season === null || group.some((entry) => releaseTarget(numbering, entry)?.season === parsed.season) || payload.forced) result.push({ decision, want });
           continue;
@@ -1060,8 +1065,12 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     if (unavailable && !final && !payload.forced) throw new JobError('outage', 'An indexer did not answer.');
     const rejected = problems().map(({ decision }) => decision).sort(compareRejected);
     const missingNumber = title.mediaType !== 'movie' && left.some((entry) => !releaseTarget(numbering, entry));
-    const stop = mapping() ? 'file_unmapped' : missingNumber ? 'numbering_required' : rejected.length || (payload.forced && !completed.length) ? 'all_rejected'
-      : noIndexers ? 'no_indexers' : payload.otherSeasons ? 'pack_partial' : null;
+    // A season pack that the search found and that does not hold a missing episode needs the user.
+    const partialPack = !payload.forced && !unavailable && !noIndexers && (left.some(({ id }) => lacked.has(id)) ||
+      Object.values(item.selected).some(({ status, release }) => status === 'prepared' && release.kind === 'pack'));
+    const stop = mapping() ? 'file_unmapped' : missingNumber ? 'numbering_required' : partialPack ? 'pack_partial'
+      : rejected.length || (payload.forced && !completed.length) ? 'all_rejected'
+        : noIndexers ? 'no_indexers' : payload.otherSeasons ? 'pack_partial' : null;
     const at = now();
     if (!stop) {
       for (const entry of left) {

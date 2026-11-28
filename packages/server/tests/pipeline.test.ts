@@ -253,8 +253,9 @@ describe('series journey', () => {
 
     const entries = pipe.finder.requestSearch(series.key);
     const turn = itemFor(entries[0]!)!;
-    await until(() => turn.state.kind === 'waiting');
-    expect(turn.search).toMatchObject({ result: 'no_results', rejected: [] });
+    await expect.poll(() => turn.state, { timeout: 8_000 }).toMatchObject({ kind: 'blocked', problem: { code: 'pack_partial' } });
+    expect(entries.slice(13).map((entry) => reasonOfEntry(entry)?.code)).toEqual(Array(10).fill('pack_partial'));
+    expect(turn.search).toMatchObject({ rejected: [] });
     expect(pipe.qbit.torrents.size).toBe(0);
     expect(turn.selected[hashOf(first, firstFiles)]).toMatchObject({ status: 'prepared', numberingRevision: 0 });
     expect(pipe.tracker.state.downloads).toEqual([first]);
@@ -434,8 +435,9 @@ describe('series journey', () => {
 
     const entries = pipe.finder.requestSearch(series.key);
     const turn = itemFor(entries[0]!)!;
-    await until(() => turn.state.kind === 'waiting');
-    expect(turn.search).toMatchObject({ result: 'no_results', rejected: [] });
+    await expect.poll(() => turn.state, { timeout: 8_000 }).toMatchObject({ kind: 'blocked', problem: { code: 'pack_partial' } });
+    expect(entries.slice(12).map((entry) => reasonOfEntry(entry)?.code)).toEqual(Array(11).fill('pack_partial'));
+    expect(turn.search).toMatchObject({ rejected: [] });
     expect(Object.keys(turn.selected[hashOf(first, firstFiles)]?.matches ?? {})).toEqual(entries.slice(0, 12).map(({ id }) => id));
     expect(pipe.qbit.calls.filter((call) => call.path === 'torrents/add')).toHaveLength(0);
     expect(entries.every((entry) => !entry.history.some((event) => event.stage === 'downloading'))).toBe(true);

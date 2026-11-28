@@ -6,7 +6,7 @@ import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
 import { episode, title } from '../helpers/test-fixtures.ts';
 import { MIB, startPipeline } from '../helpers/test-pipeline.ts';
 
-it('does not log a verified partial pack as a failed release while the missing episode waits', async () => {
+it('does not log a verified partial pack as a failed release when the missing episode stops the season', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ladarr-pack-partial-'));
   const pipe = await startPipeline();
   const api = await pipe.api();
@@ -20,7 +20,7 @@ it('does not log a verified partial pack as a failed release while the missing e
     pipe.finder.requestSearch(series.key);
 
     const status = async () => (await api.get(`/queue/groups/${series.key}?season=1`)).body.group.status;
-    await expect.poll(status).toMatch(/^(not_found|no_match|stuck)$/);
+    await expect.poll(status).toBe('stuck');
     await closeLog();
     const failed = (await recentLogs(100, { itemType: 'tv' })).filter((line) => line.event === 'release_failed' && line.code === 'pack_partial');
     expect(failed).toEqual([]);

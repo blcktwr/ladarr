@@ -29,7 +29,8 @@ export function libraryEpisodeDiscard({ events, queue, enqueue }: { events: Even
     }
     episode.fileId = null;
     episode.override = 'unmonitored';
-    if (queue && item?.state.kind === 'blocked' && item.state.problem.code === 'no_results' && item.state.problem.detail === id) {
+    const stop = item?.state.kind === 'blocked' ? item.state.problem : null;
+    if (queue && item && (stop?.code === 'pack_partial' || (stop?.code === 'no_results' && stop.detail === id))) {
       const remaining = item.entryIds.map((id) => db.data.queue[id]!).filter(isActive);
       if (remaining.length && remaining.every((member) => member.state.kind === 'fetching')) {
         queue.transitionItem(item, { kind: 'fetching' });
