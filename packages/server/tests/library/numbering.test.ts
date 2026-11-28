@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assignSeasons,
   catalogPoint,
   catalogPoints,
   NO_NUMBERING,
@@ -69,6 +70,51 @@ describe('the release seasons of a catalog season', () => {
   it('gives the catalog season and the release season of the range', () => {
     expect(releaseSeasons(complete, 1)).toEqual([1, 2]);
     expect(releaseSeasons(NO_NUMBERING, 1)).toEqual([1]);
+  });
+});
+
+describe('the numbers of the episodes that move to another season', () => {
+  // Season 2 starts at episode 3, so the number after its last episode is not its first free number.
+  const catalog = [[1, 1], [1, 2], [1, 3], [2, 3], [2, 4]].map(([season, number]) => ({ season: season!, number: number! }));
+  const move = (season: number, number: number, releaseSeason: number) => ({ season, number, releaseSeason, search: false });
+  const save = (current: Numbering, ...edits: ReturnType<typeof move>[]) => assignSeasons(current, catalog, edits)!.numbering;
+  const release = (map: Numbering, season: number, number: number) => releasePoint(map, { season, number });
+
+  it('starts at 1 in an empty season', () => {
+    const map = save(NO_NUMBERING, move(1, 2, 3), move(1, 3, 3));
+    expect(map.ranges).toEqual([{ season: 1, from: 2, to: 3, releaseSeason: 3, releaseFrom: 1 }]);
+  });
+
+  it('gives the number after the last episode of the season', () => {
+    const map = save(NO_NUMBERING, move(1, 1, 2));
+    expect(map.ranges).toEqual([{ season: 1, from: 1, to: 1, releaseSeason: 2, releaseFrom: 5 }]);
+    expect(release(map, 2, 3)).toEqual({ season: 2, number: 3 });
+    expect(release(map, 2, 4)).toEqual({ season: 2, number: 4 });
+  });
+
+  it('numbers the moved episodes in the order of TMDB, not in the order of the edits', () => {
+    const map = save(NO_NUMBERING, move(1, 3, 2), move(1, 1, 2));
+    expect(release(map, 1, 1)).toEqual({ season: 2, number: 5 });
+    expect(release(map, 1, 3)).toEqual({ season: 2, number: 6 });
+  });
+
+  it('numbers a second move after a saved move, and keeps the saved number', () => {
+    const map = save(save(NO_NUMBERING, move(1, 3, 2)), move(1, 1, 2));
+    expect(release(map, 1, 3)).toEqual({ season: 2, number: 5 });
+    expect(release(map, 1, 1)).toEqual({ season: 2, number: 6 });
+  });
+
+  it('gives an episode that returns to its TMDB season its TMDB number again', () => {
+    const map = save(save(NO_NUMBERING, move(1, 1, 2)), move(1, 1, 1));
+    expect(map.ranges).toEqual([]);
+    expect(release(map, 1, 1)).toEqual({ season: 1, number: 1 });
+  });
+
+  it('gives null when a returning episode finds its TMDB number taken', () => {
+    // 2x4 leaves, 1x1 takes the number after 2x3, and 2x4 comes back.
+    const taken = save(save(NO_NUMBERING, move(2, 4, 5)), move(1, 1, 2));
+    expect(release(taken, 1, 1)).toEqual({ season: 2, number: 4 });
+    expect(assignSeasons(taken, catalog, [move(2, 4, 2)])).toBeNull();
   });
 });
 

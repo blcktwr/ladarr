@@ -91,7 +91,7 @@ export function sameNumbering(a: Numbering, b: Numbering): boolean {
   return a.revision === b.revision && JSON.stringify(a.ranges) === JSON.stringify(b.ranges);
 }
 
-// Keep the release numbers of untouched episodes. Give each moved episode the first free number in its new season.
+// Keep the release numbers of untouched episodes. Number each moved episode after the highest number of its new season.
 export function assignSeasons(current: Numbering, episodes: Point[], edits: unknown) {
   if (!Array.isArray(edits) || edits.length > episodes.length) return null;
   const key = ({ season, number }: Point) => `${season}x${number}`;
@@ -112,6 +112,7 @@ export function assignSeasons(current: Numbering, episodes: Point[], edits: unkn
   if (!changed) return { numbering: current, search };
   const ordered = [...episodes].sort((a, b) => a.season - b.season || a.number - b.number);
   const occupied = new Set<string>();
+  const highest = new Map<number, number>();
   const mapped = new Map<string, Point>();
   const moved: Point[] = [];
   for (const point of ordered) {
@@ -127,15 +128,14 @@ export function assignSeasons(current: Numbering, episodes: Point[], edits: unkn
     if (!keep) continue;
     if (occupied.has(key(keep))) return null;
     occupied.add(key(keep));
+    highest.set(keep.season, Math.max(highest.get(keep.season) ?? 0, keep.number));
     if (!reset && rangeOfCatalog(current, point.season, point.number)) mapped.set(id, keep);
   }
-  const nextNumber = new Map<number, number>();
   for (const point of moved) {
     const season = changes.get(key(point))!;
-    let number = nextNumber.get(season) ?? 1;
-    while (occupied.has(key({ season, number }))) number++;
+    const number = (highest.get(season) ?? 0) + 1;
     mapped.set(key(point), { season, number });
-    nextNumber.set(season, number + 1);
+    highest.set(season, number);
   }
   const ranges: NumberingRange[] = [];
   for (const point of ordered) {
