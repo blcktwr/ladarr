@@ -1,3 +1,4 @@
+import { assignSeasons, normalizeNumbering, releasePoint } from '@ladarr/shared/numbering';
 import type { AttachCandidates, EpisodeRef, FileRow, QueueEntryView, QueueGroupPage, QueueMappingEpisode, QueueMatchPreview, QueuePackFiles, QueueTorrentDetail } from '@ladarr/shared/types';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight } from 'lucide-react';
@@ -6,6 +7,7 @@ import { Button, Checkbox, Dropdown, EmptyState, Modal, SearchableDropdown, Spin
 import { Confirm } from '../../components/confirm.tsx';
 import { api, ApiError } from '../../lib/api.ts';
 import { describeError, formatBytes, groupName, seasonName } from '../../lib/format.ts';
+import { select, type SelectMode } from '../../lib/selection.ts';
 import { t } from '../../i18n/index.ts';
 
 const errorText = (err: unknown) =>
@@ -88,8 +90,12 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
   const existing = mapSeries && !rejected;
   const fixed = fixedSource ? fileSource ?? 'library' : undefined;
   const detailId = useId();
-  const [expanded, setExpanded] = useState<number[]>(() => entry.season === null ? [] : [entry.season]);
+  // The open release seasons. Null until the user opens or closes one.
+  const [expanded, setExpanded] = useState<number[] | null>(null);
   const [seasons, setSeasons] = useState<Record<string, string>>({});
+  const [selection, setSelection] = useState<{ selected: string[]; anchor: string | null }>({ selected: [], anchor: null });
+  // The season in the modal of a new season. Null while that modal is closed.
+  const [target, setTarget] = useState<string | null>(null);
   const [searchSeasons, setSearchSeasons] = useState<number[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [releases, setReleases] = useState<Record<string, ReleaseDraft | undefined>>({});
@@ -120,7 +126,20 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
     return waiting || (item.status === 'stuck' && ['queued', 'searching', 'fetching'].includes(item.phase));
   }) : [];
   const eligible = new Set(pendingRows.map((row) => row.id));
-  const otherSeasons = expanded.filter((season) => season !== entry.season && pendingRows.some((row) => row.season === season));
+  const seasonChanged = (point: QueueMappingEpisode, draft = seasons) => draft[point.id] !== undefined && Number(draft[point.id]) !== point.releaseSeason;
+  // The episodes that a draft moves. Among the rejected releases, only an episode that waits for one can move.
+  const moved = (draft: Record<string, string>) => rows.filter((point) => seasonChanged(point, draft) && (!rejected || eligible.has(point.id)));
+  const numbering = normalizeNumbering(group.data?.numbering);
+  const catalog = group.data?.catalog ?? [];
+  // The numbering that the server saves for a draft. Null when the draft is not possible.
+  const numberingOf = (draft: Record<string, string>) => assignSeasons(numbering, catalog,
+    moved(draft).map(({ id, season, number }) => ({ season, number, releaseSeason: Number(draft[id]), search: false })))?.numbering ?? null;
+  const preview = numberingOf(seasons) ?? numbering;
+  // The number that a row shows. Each request keeps the TMDB number of the episode.
+  const releaseOf = (point: QueueMappingEpisode) => releasePoint(preview, point) ?? { season: point.releaseSeason, number: point.number };
+  const open = expanded ?? [...new Set(rows.filter((point) => point.season === entry.season).map((point) => releaseOf(point).season))];
+  const visible = (point: QueueMappingEpisode) => open.includes(releaseOf(point).season);
+  const otherSeasons = [...new Set(pendingRows.filter(visible).map((point) => point.season))].filter((season) => season !== entry.season);
   const seasonGroups = useQueries({
     queries: otherSeasons.map((season) => ({
       queryKey: [`/queue/groups/${entry.titleKey}?season=${season}`],
@@ -129,11 +148,10 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
   });
   const rejectedBySeason = new Map(otherSeasons.map((season, index) => [season, seasonGroups[index]!.data?.group.rejected ?? []]));
   if (rejected && entry.season !== null) rejectedBySeason.set(entry.season, rejected);
-  const seasonChanged = (point: QueueMappingEpisode) => seasons[point.id] !== undefined && Number(seasons[point.id]) !== point.releaseSeason;
   // An episode that a rejected release holds starts with that release and its file, until the user changes them.
   const selectionOf = (point: QueueMappingEpisode): ReleaseDraft | undefined => {
     if (Object.hasOwn(releases, point.id)) return releases[point.id];
-    if (!eligible.has(point.id) || seasonChanged(point)) return undefined;
+    if (!eligible.has(point.id) || seasonChanged(point) || (point.season !== entry.season && !visible(point))) return undefined;
     const candidate = rejectedBySeason.get(point.season)?.find(({ release }) => release.matches?.[point.id]);
     return candidate && { season: point.season, candidate, file: candidate.release.matches![point.id]! };
   };
@@ -153,13 +171,14 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
     const match = matchesByPath.get(file.path);
     return !file.missing && match ? [{ value: file.path, ...match }] : [];
   });
-  const invalidSeason = Object.values(seasons).some((value) => !validSeason(value));
   const initialSeasons = new Set(rows.flatMap((point) => [point.season, point.releaseSeason]));
   const addedSeasons = [...new Set(rows.map((point) => seasons[point.id]).filter((value) => value !== undefined && validSeason(value)).map(Number))]
     .filter((season) => !initialSeasons.has(season)).sort((a, b) => a - b);
   const knownSeasons = new Set([...initialSeasons, ...addedSeasons]);
+  // An episode that the table does not show, such as a special, can use a release season.
+  const taken = new Set(catalog.map((point) => (releasePoint(numbering, point) ?? point).season));
   let nextSeason = 1;
-  while (knownSeasons.has(nextSeason)) nextSeason++;
+  while (knownSeasons.has(nextSeason) || taken.has(nextSeason)) nextSeason++;
   knownSeasons.add(nextSeason);
   const seasonOptions = [...knownSeasons].sort((a, b) => a - b).map((number) => ({ value: String(number) }));
   const sources = new Map<string, string>();
@@ -254,7 +273,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
   }
 
   async function save() {
-    if (submitting.current || invalidSeason) return;
+    if (submitting.current) return;
     const corrected = new Map<string, EpisodeRef[]>();
     const confirmedIds: string[] = [];
     const coverage = (path: string) => corrected.get(path) ?? library.data?.files.find((file) => file.path === path)?.episodes ?? [];
@@ -277,7 +296,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
     setError('');
     try {
       const assigned = new Set([...confirmedIds, ...posts.flatMap((post) => post.ids), ...assignments.map(({ id }) => id)]);
-      const edits = rows.filter((point) => seasonChanged(point) && (!rejected || eligible.has(point.id))).map((point) => ({
+      const edits = moved(seasons).map((point) => ({
         season: point.season, number: point.number, releaseSeason: Number(seasons[point.id]),
         search: searchSeasons.includes(Number(seasons[point.id])) && !assigned.has(point.id) && !rowSource(point).match,
       }));
@@ -308,17 +327,13 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
 
   const columns = [
     { label: t('Episodes'), width: '9rem' },
-    ...(mapSeries ? [{ label: t('Season'), width: '8rem' }, { label: t('Torrent'), width: '22rem' }] : []),
+    ...(mapSeries ? [{ label: t('Torrent'), width: '22rem' }] : []),
     { label: t('Matches'), width: mapSeries ? '21rem' : undefined },
   ];
 
   const episodeRow = (point: QueueMappingEpisode) => {
     const pending = eligible.has(point.id);
-    const season = (
-      <SearchableDropdown key="season" label={t('Season')} hideLabel width="full" surface="table" allowCustom options={seasonOptions} emptyText={t('No options.')}
-        disabled={busy || (Boolean(rejected) && !pending)} value={seasons[point.id] ?? String(point.releaseSeason)}
-        onValueChange={(value) => setSeasons((state) => ({ ...state, [point.id]: value }))} />
-    );
+    const number = pointText(mapSeries ? releaseOf(point) : point);
     if (rejected) {
       const draft = pending ? selections[point.id] : undefined;
       const manifest = draft ? manifestPath(draft.candidate) : '';
@@ -327,7 +342,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
       return {
         key: point.id,
         cells: [
-          pointText(point), season,
+          number,
           <SearchableDropdown
             key="torrent" label={t('Torrent')} hideLabel width="full" surface="table" value={manifest}
             placeholder={t('No torrent selected')} emptyText={t('No options.')} disabled={busy || !pending}
@@ -382,8 +397,8 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
     return {
       key: point.id,
       cells: [
-        pointText(point),
-        ...(mapSeries ? [season, (
+        number,
+        ...(mapSeries ? [(
           <SearchableDropdown
             key="torrent" label={t('Torrent')} hideLabel width="full" surface="table" value={hash}
             placeholder={t('No torrent selected')} emptyText={t('No options.')}
@@ -398,11 +413,33 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
 
   const bySeason = new Map<number, QueueMappingEpisode[]>();
   if (mapSeries && !loading) for (const point of rows) {
-    const points = bySeason.get(point.season);
+    const { season } = releaseOf(point);
+    const points = bySeason.get(season);
     if (points) points.push(point);
-    else bySeason.set(point.season, [point]);
+    else bySeason.set(season, [point]);
   }
-  const catalogSeasons = [...bySeason].sort(([a], [b]) => a - b);
+  const shownSeasons = [...bySeason].sort(([a], [b]) => a - b)
+    .map(([season, points]) => [season, points.toSorted((a, b) => releaseOf(a).number - releaseOf(b).number)] as const);
+  // The rows that the user can select, from top to bottom. A row of a closed group is not selected.
+  const order = busy ? [] : shownSeasons.flatMap(([, points]) => points)
+    .filter((point) => visible(point) && (!rejected || eligible.has(point.id))).map((point) => point.id);
+  const chosen = order.filter((id) => selection.selected.includes(id));
+  const selectable = (id: string) => order.includes(id) ? {
+    selected: chosen.includes(id),
+    onSelect: (mode: SelectMode) => setSelection(select(chosen, selection.anchor, order, id, mode)),
+  } : {};
+  const draftOf = (season: string) => ({ ...seasons, ...Object.fromEntries(chosen.map((id) => [id, season])) });
+  const created = target !== null && validSeason(target) ? draftOf(target) : null;
+  const possible = created !== null && numberingOf(created) !== null;
+
+  function create() {
+    if (!created) return;
+    setSeasons(created);
+    setExpanded([...new Set([...open, Number(target)])]);
+    setSelection({ selected: [], anchor: null });
+    setTarget(null);
+    setError('');
+  }
 
   const title = groupName({ ...entry, season: null });
   const confirmTitle = addedSeasons.length ? t('Do you want to search for these new seasons?') : t('Apply this episode mapping?');
@@ -413,9 +450,9 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
       title={mapSeries ? title : series && entry.season !== null ? `${title} / ${seasonName(entry.season)}` : entry.label}
       width={mapSeries ? 'xl' : 'lg'}
       actions={mapSeries ? (
-        <Confirm label={t('Apply mapping')} title={confirmTitle}
+        <Confirm label={t('Apply')} title={confirmTitle}
           confirm={t('Yes')} onOpen={() => setSearchSeasons([])} onConfirm={() => void save()}
-          disabled={busy || invalidSeason || !group.data || (existing && rows.some((point) => point.match?.path) && !library.data) || packs.some((pack, i) => essential.has(keys[i]!) && pack.isPending)}>
+          disabled={busy || !group.data || (existing && rows.some((point) => point.match?.path) && !library.data) || packs.some((pack, i) => essential.has(keys[i]!) && pack.isPending)}>
           {addedSeasons.length > 0 && (
             <div className="grid gap-2">
               {addedSeasons.map((season) => (
@@ -425,7 +462,8 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
             </div>
           )}
         </Confirm>
-      ) : <Button disabled={busy || (!series && !movie)} pending={busy} onClick={() => void save()}>{t('Apply mapping')}</Button>}
+      ) : <Button disabled={busy || (!series && !movie)} pending={busy} onClick={() => void save()}>{t('Apply')}</Button>}
+      startActions={chosen.length > 0 && <Button onClick={() => setTarget(String(nextSeason))}>{t('New season')}</Button>}
     >
       {mapSeries ? (
         <Table
@@ -433,31 +471,29 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
           loading={loading}
           columns={[{ label: t('Seasons'), hideLabel: true, width: '100%' }]}
           detailTone="open"
-          rows={catalogSeasons.map(([season, points]) => {
-            const open = expanded.includes(season);
+          rows={shownSeasons.map(([season, points]) => {
+            const isOpen = open.includes(season);
             const id = `${detailId}-${season}`;
-            const toggle = () => setExpanded((current) => current.includes(season)
-              ? current.filter((number) => number !== season)
-              : [...current, season]);
+            const toggle = () => setExpanded(isOpen ? open.filter((number) => number !== season) : [...open, season]);
             return {
               key: String(season),
               onClick: toggle,
               cells: [
                 <div className="flex items-center gap-2">
-                  <Button variant="plain" aria-expanded={open} aria-controls={open ? id : undefined} onClick={toggle}>
-                    {open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+                  <Button variant="plain" aria-expanded={isOpen} aria-controls={isOpen ? id : undefined} onClick={toggle}>
+                    {isOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
                     {seasonName(season)}
                   </Button>
                   <Text variant="small">({points.length})</Text>
                 </div>,
               ],
-              detail: open && (
+              detail: isOpen && (
                 <div id={id}>
                   <Table
                     aria-label={t('Episodes of season {number}', { number: season })}
                     columns={columns}
-                    minWidth="60rem"
-                    rows={points.toSorted((a, b) => a.number - b.number).map(episodeRow)}
+                    minWidth="52rem"
+                    rows={points.map((point) => ({ ...episodeRow(point), ...selectable(point.id) }))}
                   />
                 </div>
               ),
@@ -478,6 +514,17 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
       ) : null}
       {!shown && packs.length > 0 && packs.every((pack) => pack.data?.files.length === 0) && <EmptyState>{t('No video file is available.')}</EmptyState>}
       {shown && <p role="alert">{shown}</p>}
+      {/* Inside the first modal, so a click in this one does not close the first one. */}
+      <Modal
+        open={target !== null}
+        onOpenChange={(next) => { if (!next) setTarget(null); }}
+        title={t('New season')}
+        actions={<Button disabled={!possible} onClick={create}>{t('Create')}</Button>}
+      >
+        <SearchableDropdown label={t('Season')} width="full" allowCustom options={seasonOptions} emptyText={t('No options.')}
+          value={target ?? ''} onValueChange={setTarget} />
+        {created && !possible && <p role="alert">{errorText(new ApiError(400, 'invalid_numbering'))}</p>}
+      </Modal>
     </Modal>
   );
 }

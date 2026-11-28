@@ -1,6 +1,7 @@
 export const es: Record<string, string> = {
   // The shell, the components, the label maps of lib/format.ts and lib/import-labels.ts
   'Cancel': 'Cancelar',
+  'Create': 'Crear',
   'The request did not complete.': 'La solicitud no se completó.',
   'The request did not complete. Try again.': 'La solicitud no se completó. Inténtalo de nuevo.',
   'Retry': 'Reintentar',
@@ -591,6 +592,7 @@ export const es: Record<string, string> = {
   'Frame rate': 'Velocidad de fotogramas',
   'Dolby Vision': 'Dolby Vision',
   'Yes': 'Sí',
+  'Apply': 'Aplicar',
   'Apply this episode mapping?': '¿Aplicar este mapa de episodios?',
   'Do you want to search for these new seasons?': '¿Quieres buscar estas nuevas temporadas?',
   'Manual mapping': 'Mapeo manual',
@@ -687,6 +689,7 @@ export const es: Record<string, string> = {
   'Delete {season}': 'Eliminar {season}',
   'Delete {season}?': '¿Eliminar {season}?',
   'Season': 'Temporada',
+  'New season': 'Nueva temporada',
   'Seasons': 'Temporadas',
   'Add new series': 'Agregar nueva serie',
   'Add new anime': 'Agregar nuevo anime',

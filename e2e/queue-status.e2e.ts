@@ -158,7 +158,7 @@ test('maps explicit files from two rejected releases and sends only those torren
     await select('S02E04', beta);
     await page.getByRole('option').filter({ hasText: beta.files[0]! }).click();
     expect(stack.addRequests()).toHaveLength(0);
-    const apply = dialog.getByRole('button', { name: 'Apply mapping', exact: true });
+    const apply = dialog.getByRole('button', { name: 'Apply', exact: true });
     await apply.click();
     const confirmation = page.getByRole('dialog', { name: 'Apply this episode mapping?', exact: true });
     await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -228,9 +228,10 @@ async function openMapping(page: Page) {
   await page.locator('[data-row="group:tv:1:1"]').click();
   await page.getByRole('button', { name: 'Map episodes manually', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Show Name (2020)', exact: true });
-  const row = (number: number) => dialog.getByRole('table', { name: 'Episodes of season 1', exact: true }).getByRole('row').filter({ hasText: `S01E0${number}` });
-  const field = (name: string) => (number: number) => row(number).getByRole('combobox', { name, exact: true });
-  return { dialog, season: field('Season'), torrent: field('Torrent'), matches: field('Matches') };
+  // The number and the season are the ones that the row shows.
+  const row = (number: number, season = 1) => dialog.getByRole('table', { name: `Episodes of season ${season}`, exact: true }).getByRole('row').filter({ hasText: `S0${season}E0${number}` });
+  const field = (name: string) => (number: number, season?: number) => row(number, season).getByRole('combobox', { name, exact: true });
+  return { dialog, row, torrent: field('Torrent'), matches: field('Matches') };
 }
 
 type Mapping = Awaited<ReturnType<typeof openMapping>>;
@@ -241,15 +242,21 @@ async function expectSelected({ torrent, matches }: Mapping, number: number, tit
   await expect(matches(number)).toHaveValue(new RegExp(`Show\\.Name\\.S01E0${number}\\.mkv`));
 }
 
-async function expectEmpty({ torrent, matches }: Mapping, number: number) {
-  await expect(torrent(number)).toHaveValue('');
-  await expect(matches(number)).toHaveValue('');
+async function expectEmpty({ torrent, matches }: Mapping, number: number, season?: number) {
+  await expect(torrent(number, season)).toHaveValue('');
+  await expect(matches(number, season)).toHaveValue('');
 }
 
-async function moveToSeasonTwo(page: Page, { season }: Mapping, number: number) {
-  await season(number).fill('2');
-  await page.getByRole('option', { name: '2', exact: true }).click();
-  await expect(season(number)).toHaveValue('2');
+// Selects the episodes of season 1, and makes season 2 with them. Season 2 is the next free number.
+async function moveToSeasonTwo(page: Page, { dialog, row }: Mapping, ...numbers: number[]) {
+  for (const [index, number] of numbers.entries()) {
+    await row(number).getByRole('cell').first().click({ modifiers: index ? ['ControlOrMeta'] : [] });
+  }
+  await dialog.getByRole('button', { name: 'New season', exact: true }).click();
+  const modal = page.getByRole('dialog', { name: 'New season', exact: true });
+  await expect(modal.getByRole('combobox', { name: 'Season', exact: true })).toHaveValue('2');
+  await modal.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(modal).toBeHidden();
 }
 
 function writesOf(page: Page) {
@@ -261,7 +268,7 @@ function writesOf(page: Page) {
 }
 
 async function apply(page: Page, { dialog }: Mapping, question: string, season?: string) {
-  await dialog.getByRole('button', { name: 'Apply mapping', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
   const confirmation = page.getByRole('dialog', { name: question, exact: true });
   if (season) await confirmation.getByRole('checkbox', { name: season, exact: true }).check();
   await confirmation.getByRole('button', { name: 'Yes', exact: true }).click();
@@ -310,7 +317,7 @@ test('drops the preselection of an episode that changes season, and takes anothe
     await expectSelected(mapping, 2, BOTH.title);
 
     await moveToSeasonTwo(page, mapping, 2);
-    await expectEmpty(mapping, 2);
+    await expectEmpty(mapping, 1, 2);
     await expectSelected(mapping, 1, first);
     await mapping.torrent(1).click();
     await page.getByRole('option', { name: other, exact: true }).click();
@@ -343,8 +350,8 @@ test('searches the episodes that the user moves to another season, and maps the 
     const first = holders(1)[0]!;
     await expectSelected(mapping, 1, first);
     await expectSelected(mapping, 2, BOTH.title);
-    for (const number of [2, 3]) await moveToSeasonTwo(page, mapping, number);
-    await expectEmpty(mapping, 2);
+    await moveToSeasonTwo(page, mapping, 2, 3);
+    await expectEmpty(mapping, 1, 2);
 
     await apply(page, mapping, 'Do you want to search for these new seasons?', 'Season 02');
 

@@ -132,16 +132,51 @@ function matchRequests(page: Page) {
 const seasonPicker = (panel: Locator) => panel.getByRole('combobox').filter({ hasText: /^Season \d+$/ });
 const seasonTable = (panel: Locator, number: number) => panel.getByRole('table', { name: `Episodes of season ${number}`, exact: true });
 const seasonButton = (panel: Locator, number: number) => panel.getByRole('button', { name: `Season ${number}`, exact: true });
+const labels = (table: Locator) => table.getByRole('cell', { name: /^S\d+E\d+$/ });
+const selection = (panel: Locator) => panel.locator('tr[aria-selected="true"] > td:first-child');
+const newSeason = (panel: Locator) => panel.getByRole('button', { name: 'New season', exact: true });
+const episodeCell = (panel: Locator, label: string) => panel.getByRole('cell', { name: label, exact: true });
+const episodeRow = (panel: Locator, label: string) => panel.getByRole('table', { name: /^Episodes of season / }).getByRole('row')
+  .filter({ has: panel.page().getByRole('cell', { name: label, exact: true }) });
+
+// A click selects the first episode, and each next click adds its row.
+async function selectEpisodes(panel: Locator, ...episodes: string[]) {
+  for (const [index, label] of episodes.entries()) {
+    await episodeCell(panel, label).click({ modifiers: index ? ['ControlOrMeta'] : [] });
+  }
+}
+
+async function openSeasonModal(panel: Locator) {
+  await newSeason(panel).click();
+  const modal = panel.page().getByRole('dialog', { name: 'New season', exact: true });
+  return { modal, season: modal.getByRole('combobox', { name: 'Season', exact: true }), create: modal.getByRole('button', { name: 'Create', exact: true }) };
+}
+
+// Types a value that the list can lack. Escape closes the list.
+async function typeSeason(season: Locator, value: string) {
+  await season.fill(value);
+  await season.press('Escape');
+  await expect(season).toHaveValue(value);
+}
+
+// Moves the selected rows. The modal starts with `next`, and the user can type another target.
+async function createSeason(panel: Locator, next: string, target = next) {
+  const { modal, season, create } = await openSeasonModal(panel);
+  await expect(season).toHaveValue(next);
+  if (target !== next) await typeSeason(season, target);
+  await create.click();
+  await expect(modal).toBeHidden();
+}
 
 async function applyMapping(page: Page, panel: Locator, title = 'Apply this episode mapping?') {
-  await panel.getByRole('button', { name: 'Apply mapping', exact: true }).click();
+  await panel.getByRole('button', { name: 'Apply', exact: true }).click();
   const question = page.getByRole('dialog', { name: title, exact: true });
   await question.getByRole('button', { name: 'Yes', exact: true }).click();
   await expect(question).toBeHidden();
 }
 
 async function expectFooter(panel: Locator) {
-  const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
+  const apply = panel.getByRole('button', { name: 'Apply', exact: true });
   await expect(seasonPicker(panel)).toHaveCount(0);
   await expect(apply).toBeInViewport({ ratio: 1 });
   const [button, body] = await Promise.all([apply.boundingBox(), panel.locator(':scope > :has(table)').boundingBox()]);
@@ -299,7 +334,7 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   const panel = page.getByRole('dialog');
   await expect(panel).toHaveAccessibleName('Show Name (2020)');
   const table = seasonTable(panel, 1);
-  await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Season', 'Torrent', 'Matches']);
+  await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Torrent', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(4);
   for (const label of ['S01E01', 'S01E02', 'S01E03']) await expect(table.getByText(label, { exact: true })).toHaveCount(1);
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
@@ -310,7 +345,7 @@ test('shows source-scoped actions in one row without episode or reason lists', a
   for (const label of ['Original name', 'Location', 'Current association', 'Episodes in this file']) {
     await expect(panel.getByText(label, { exact: true })).toHaveCount(0);
   }
-  const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
+  const apply = panel.getByRole('button', { name: 'Apply', exact: true });
   await expect(apply).toHaveCount(1);
   await expect(apply).toBeEnabled();
   await expectFooter(panel);
@@ -410,50 +445,48 @@ test('maps selected episodes from a completed torrent with different season numb
 
   await open(page, `group:${title.key}:1`);
   await page.getByRole('main').getByRole('button', { name: 'Map episodes manually', exact: true }).click();
-  const panel = page.getByRole('dialog');
-  await expect(panel).toHaveAccessibleName('Show Name (2020)');
+  const panel = page.getByRole('dialog', { name: 'Show Name (2020)', exact: true });
   const table = seasonTable(panel, 1);
-  await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Season', 'Torrent', 'Matches']);
+  await expect(table.getByRole('columnheader')).toHaveText(['Episodes', 'Torrent', 'Matches']);
   await expect(table.getByRole('row')).toHaveCount(11);
   await expect(table.getByText('S00E01', { exact: true })).toHaveCount(0);
   await expect(table.getByText('S01E11', { exact: true })).toHaveCount(0);
-  const cellsOf = (number: number) => table.getByRole('row').filter({
-    has: page.getByRole('cell', { name: episodeLabel(number), exact: true }),
-  }).getByRole('cell');
+  const cellsOf = (label: string) => episodeRow(panel, label).getByRole('cell');
   for (const { number } of firstPart) {
-    const cells = cellsOf(number);
+    const cells = cellsOf(episodeLabel(number));
     await expect(cells.getByRole('combobox', { name: 'Torrent', exact: true })).toHaveValue('Show.Name.S01.1080p.WEB-DL-GRP');
     await expect(cells.last().getByRole('combobox', { name: 'Matches' })).toHaveValue(new RegExp(`Show.Name.${episodeLabel(number)}.mkv`));
   }
   const files = Object.keys(secondFiles);
-  const widths = () => table.getByRole('columnheader').evaluateAll((headers) => headers.map((header) => header.clientWidth));
-  const initialWidths = await widths();
   await expect(table).toHaveCSS('table-layout', 'fixed');
+  // The later episodes move first.
+  await selectEpisodes(panel, episodeLabel(8), episodeLabel(9));
+  const { modal, season, create } = await openSeasonModal(panel);
+  await expect(season).toHaveValue('2');
+  await typeSeason(season, '12');
+  // The open modal hides the dialog under it from the accessibility tree.
+  await expect(page.getByRole('button', { name: 'Season 12', exact: true, includeHidden: true })).toHaveCount(0);
+  await season.fill('2');
+  const option = page.getByRole('option', { name: '2', exact: true });
+  const label = option.getByText('2', { exact: true });
+  await expect(label).toBeVisible();
+  expect(await label.evaluate((node) => node.clientWidth >= node.scrollWidth)).toBe(true);
+  await option.click();
+  await create.click();
+  await expect(modal).toBeHidden();
+  const second = seasonTable(panel, 2);
+  await expect(labels(second)).toHaveText(['S02E01', 'S02E02']);
+  // The earlier episodes move last, into the same season. The numbers follow the order of TMDB.
+  await selectEpisodes(panel, episodeLabel(6), episodeLabel(7));
+  await createSeason(panel, '3', '2');
+  await expect(labels(second)).toHaveText(['S02E01', 'S02E02', 'S02E03', 'S02E04']);
+  await expect(labels(table)).toHaveText([1, 2, 3, 4, 5, 10].map(episodeLabel));
   for (const [index, target] of missing.entries()) {
-    const cells = cellsOf(target.number!);
-    const season = cells.getByRole('combobox', { name: 'Season', exact: true });
-    await expect(season).toHaveValue('1');
-    if (target.id !== unselected.id) {
-      if (index === 0) {
-        await season.click();
-        await page.getByRole('option', { name: '2', exact: true }).click();
-        await season.fill('12');
-        await page.keyboard.press('Escape');
-        await seasonButton(panel, 1).click();
-        await expect(table).toBeHidden();
-        await expect(seasonButton(panel, 12)).toHaveCount(0);
-        await seasonButton(panel, 1).click();
-        await expect(season).toHaveValue('12');
-      }
-      await season.fill('2');
-      const option = page.getByRole('option', { name: '2', exact: true });
-      const label = option.getByText('2', { exact: true });
-      await expect(label).toBeVisible();
-      expect(await label.evaluate((node) => node.clientWidth >= node.scrollWidth)).toBe(true);
-      await option.click();
-      await expect(seasonButton(panel, 2)).toHaveCount(0);
-      await expect(table.getByRole('cell', { name: episodeLabel(target.number!), exact: true })).toBeVisible();
-    }
+    const moved = target.id !== unselected.id;
+    const cells = cellsOf(moved ? `S02E0${index + 1}` : episodeLabel(target.number!));
+    const headers = (moved ? second : table).getByRole('columnheader');
+    const widths = () => headers.evaluateAll((all) => all.map((header) => header.clientWidth));
+    const initialWidths = await widths();
     const input = cells.getByRole('combobox', { name: 'Torrent', exact: true });
     await input.fill('Second.Part');
     const torrent = page.getByRole('option', { name: /Show\.Name\.S02\.Second\.Part\./ });
@@ -461,10 +494,10 @@ test('maps selected episodes from a completed torrent with different season numb
     await expect(page.getByRole('option', { name: /Show\.Name\.S01\./ })).toHaveCount(0);
     await torrent.click();
     await expect(input).toHaveValue(longName);
-    await expect(cells.nth(2).getByRole('button', { name: /delete/i })).toHaveCount(0);
+    await expect(cells.nth(1).getByRole('button', { name: /delete/i })).toHaveCount(0);
     const matches = cells.last().getByRole('combobox');
     await expect(matches).toBeEnabled();
-    if (target.id === unselected.id) {
+    if (!moved) {
       await expect(matches).not.toHaveValue(/\.mkv/);
       continue;
     }
@@ -476,7 +509,7 @@ test('maps selected episodes from a completed torrent with different season numb
     expect(await matches.getAttribute('title')).toContain(files[index]!);
     await expect(matches).toHaveCSS('text-overflow', 'ellipsis');
     expect(await widths()).toEqual(initialWidths);
-    for (const [field, cell] of [[input, cells.nth(2)], [matches, cells.last()]] as const) {
+    for (const [field, cell] of [[input, cells.nth(1)], [matches, cells.last()]] as const) {
       const [control, bounds] = await Promise.all([field.boundingBox(), cell.boundingBox()]);
       expect(control!.x).toBeGreaterThanOrEqual(bounds!.x - 1);
       expect(control!.x + control!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width + 1);
@@ -983,7 +1016,7 @@ test('maps one blocked episode and preserves the library file coverage across se
   for (const label of ['S01E01', 'S01E02', 'S02E03', 'S02E04']) {
     await expect(table.getByText(label, { exact: true })).toHaveCount(1);
   }
-  await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
+  await expect(panel.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled();
   const mapped = table.getByRole('row').filter({ hasText: 'S01E02' });
   await expect(mapped.getByRole('combobox', { name: 'Torrent', exact: true })).toHaveValue('');
   await expect(mapped.getByRole('combobox', { name: 'Matches' })).toHaveValue('Segments.mkv');
@@ -994,7 +1027,7 @@ test('maps one blocked episode and preserves the library file coverage across se
   await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('cell').last().getByRole('combobox').click();
   await page.getByRole('option', { name: /New segment\.mkv/ }).click();
   await expect(panel.getByRole('button', { name: 'Preview changes', exact: true })).toHaveCount(0);
-  await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
+  await expect(panel.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled();
   expect(requests).toEqual([]);
   expect((await stack.call('GET', '/library/tv:3/files')).body.files).toEqual(before);
   expect((await entry(stopped.id)).status).toBe('stuck');
@@ -1203,7 +1236,7 @@ test('corrects two saved matches without reimporting the files', async ({ page }
   expect(stack.tracker.state.downloads).toEqual([]);
 });
 
-test('uses one movie file selector and validates only when Apply mapping is clicked', async ({ page }) => {
+test('uses one movie file selector and validates only when Apply is clicked', async ({ page }) => {
   const stopped = blocked('movie:2', null, null, 'importing', 'file_not_found');
   download(stopped, MOVIE_RELEASE, { 'Feature A.mkv': 'one', 'Feature B.mkv': 'two' });
   await start([stopped]);
@@ -1218,13 +1251,13 @@ test('uses one movie file selector and validates only when Apply mapping is clic
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('combobox')).toHaveCount(1);
-  const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
+  const apply = panel.getByRole('button', { name: 'Apply', exact: true });
   await expect(apply).toBeDisabled();
-  await expect(panel.locator(':scope > :last-child > button', { hasText: 'Apply mapping' })).toBeVisible();
+  await expect(panel.locator(':scope > :last-child > button', { hasText: 'Apply' })).toBeVisible();
   await panel.getByRole('combobox', { name: 'File', exact: true }).click();
   await page.getByRole('option', { name: /Feature B\.mkv/ }).click();
   await expect(panel.getByRole('button', { name: 'Preview changes', exact: true })).toHaveCount(0);
-  await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
+  await expect(panel.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled();
   expect(requests).toEqual([]);
   expect((await entry(stopped.id)).status).toBe('stuck');
   expect((await stack.call('GET', '/library/movie:2/files')).body.files).toHaveLength(0);
@@ -1279,7 +1312,7 @@ test('offers download files without a library source for one target that already
   await expect(page.getByRole('option', { name: /Library alternative\.mkv/ })).toHaveCount(0);
   await page.getByRole('option', { name: /Download alternative\.mkv/ }).click();
   await expect(panel.getByRole('button', { name: 'Preview changes', exact: true })).toHaveCount(0);
-  await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
+  await expect(panel.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled();
   expect(requests).toEqual([]);
   expect((await entry(stopped.id)).status).toBe('stuck');
   expect((await stack.call('GET', '/library/tv:3/files')).body.files).toHaveLength(0);
@@ -1318,7 +1351,7 @@ for (const shared of [false, true]) {
     const table = seasonTable(panel, 1);
     await expect(table.getByRole('row')).toHaveCount(4);
     await expect(table.locator('td:last-child').getByRole('combobox')).toHaveCount(3);
-    const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
+    const apply = panel.getByRole('button', { name: 'Apply', exact: true });
     await expect(apply).toBeEnabled();
     for (const [label, file] of [
       ['S01E01', /Part A\.mkv/],
@@ -1341,7 +1374,7 @@ for (const shared of [false, true]) {
           await expect(panel).toBeInViewport({ ratio: 1 });
           await expectFooter(panel);
           const inputs = table.getByRole('combobox');
-          await expect(inputs).toHaveCount(9);
+          await expect(inputs).toHaveCount(6);
           expect(await inputs.evaluateAll((fields) => fields.every((field) => {
             const bounds = field.closest('td')!.getBoundingClientRect();
             const input = field.getBoundingClientRect();
@@ -1434,7 +1467,7 @@ test('keeps the season and existing associations unchanged when a file choice is
   for (const close of ['Escape', 'Close']) {
     await page.getByRole('main').getByRole('button', { name: 'Map episodes manually', exact: true }).click();
     const panel = page.getByRole('dialog');
-    const apply = panel.getByRole('button', { name: 'Apply mapping', exact: true });
+    const apply = panel.getByRole('button', { name: 'Apply', exact: true });
     await expect(apply).toBeEnabled();
     const table = seasonTable(panel, 1);
     await expect(table.getByRole('row')).toHaveCount(3);
@@ -1488,10 +1521,12 @@ test('keeps Use existing file scoped to the original season and library source',
   await expect(seasonPicker(panel)).toHaveCount(0);
   await expect(table.getByRole('row')).toHaveCount(3);
   await expect(table.getByText('S02E03', { exact: true })).toHaveCount(0);
+  // The rows of this mode can not be selected.
+  await expect(panel.locator('tr[aria-selected]')).toHaveCount(0);
   await table.getByRole('row').filter({ hasText: 'S01E01' }).getByRole('combobox').click();
   await expect(page.getByRole('option', { name: /Download alternative\.mkv/ })).toHaveCount(0);
   await page.getByRole('option', { name: /Existing file\.mkv/ }).click();
-  await panel.getByRole('button', { name: 'Apply mapping', exact: true }).click();
+  await panel.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(panel).toBeHidden();
   await expectMappings(requests, [{ id: stopped.id, file: rel, source: 'library', covers: [{ season: 1, number: 1 }], ids: [stopped.id] }]);
   expect(await entry(other.id)).toEqual(before);
@@ -1524,15 +1559,15 @@ test('restricts Use existing file to library files when the destination exists',
   await expect(panel.getByRole('combobox', { name: 'Source', exact: true })).toHaveCount(0);
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
   await expect(panel.getByRole('combobox')).toHaveCount(1);
-  await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeDisabled();
+  await expect(panel.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();
   await panel.getByRole('combobox', { name: 'File', exact: true }).click();
   await expect(page.getByRole('option', { name: /Download alternative\.mkv/ })).toHaveCount(0);
   await page.getByRole('option', { name: /Movie Name \(2019\)\.mkv/ }).click();
-  await expect(panel.getByRole('button', { name: 'Apply mapping', exact: true })).toBeEnabled();
+  await expect(panel.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled();
   expect(requests).toEqual([]);
   expect((await entry(stopped.id)).status).toBe('stuck');
   expect(readFileSync(path, 'utf8')).toBe('library-video');
-  await panel.getByRole('button', { name: 'Apply mapping', exact: true }).click();
+  await panel.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(panel).toBeHidden();
   await expectMappings(requests, [{ id: stopped.id, source: 'library', file: rel, ids: [stopped.id] }]);
   await expect.poll(async () => (await entry(stopped.id)).status, { timeout: 60_000 }).toBe('available');
@@ -1544,7 +1579,7 @@ test('restricts Use existing file to library files when the destination exists',
   expect(stack.qbit.calls.filter((call) => call.path === 'torrents/add')).toEqual([]);
 });
 
-test('shows the failure of Apply mapping inside the dialog', async ({ page }) => {
+test('shows the failure of Apply inside the dialog', async ({ page }) => {
   const stopped = blocked('tv:3', 1, 1, 'importing', 'file_unmapped');
   download(stopped, 'Two.Seasons.S01.1080p.WEB-DL-GRP', { 'Episode one.mkv': 'first', 'Episode two.mkv': 'second' });
   await start([stopped]);
@@ -1562,3 +1597,334 @@ test('shows the failure of Apply mapping inside the dialog', async ({ page }) =>
   await expect(panel).toBeVisible();
   expect((await entry(stopped.id)).status).toBe('stuck');
 });
+
+function writesOf(page: Page) {
+  const writes: Request[] = [];
+  page.on('request', (request) => {
+    if (request.method() !== 'GET' && /^\/api\/(queue|library|mapping)\//.test(new URL(request.url()).pathname)) writes.push(request);
+  });
+  return writes;
+}
+
+const savedNumbering = async (key: string) => (await stack.call('GET', `/library/${key}`)).body.title.numbering;
+
+async function openMapping(page: Page, row = 'group:tv:1:1', name = 'Show Name (2020)') {
+  await open(page, row);
+  await page.getByRole('main').getByRole('button', { name: 'Map episodes manually', exact: true }).click();
+  return page.getByRole('dialog', { name, exact: true });
+}
+
+const openSeries = (page: Page) => openMapping(page, 'group:tv:3:1', 'Two Seasons (2021)');
+
+// Episodes that stop on one download. Its files name no episode.
+async function stoppedDownload(key: string, name: string, points: [number, number][]) {
+  const entries = points.map(([season, number]) => blocked(key, season, number, 'importing', 'file_unmapped'));
+  const first = entries[0]!;
+  download(first, name, { 'Part A.mkv': 'first', 'Part B.mkv': 'second' });
+  for (const target of entries.slice(1)) {
+    Object.assign(target, { transferHash: first.transferHash, clientId: first.clientId, release: structuredClone(first.release) });
+  }
+  data.queuePaused = true;
+  await start(entries);
+}
+
+// tv:1 has E01 to E03 in season 1. tv:3 has E01 and E02 in season 1, and E03 and E04 in season 2.
+const stoppedShow = () => stoppedDownload('tv:1', 'Show.Name.S01.1080p.WEB-DL-GRP', [[1, 1], [1, 2], [1, 3]]);
+const stoppedSeries = () => stoppedDownload('tv:3', 'Two.Seasons.S01.1080p.WEB-DL-GRP', [[1, 1], [1, 2], [2, 3], [2, 4]]);
+
+test('makes a new season from the selected episodes, and saves it only with Apply', async ({ page }) => {
+  await stoppedShow();
+  const before = await savedNumbering('tv:1');
+  const writes = writesOf(page);
+  const panel = await openMapping(page);
+  await expect(labels(seasonTable(panel, 1))).toHaveText(['S01E01', 'S01E02', 'S01E03']);
+  await expect(newSeason(panel)).toHaveCount(0);
+  await selectEpisodes(panel, 'S01E02', 'S01E03');
+  await expect(selection(panel)).toHaveText(['S01E02', 'S01E03']);
+  // The button is at the bottom left of the dialog, in the row of Apply.
+  await expect(newSeason(panel)).toBeInViewport({ ratio: 1 });
+  const apply = panel.getByRole('button', { name: 'Apply', exact: true });
+  const [dialog, left, right, body] = await Promise.all(
+    [panel, newSeason(panel), apply, panel.locator(':scope > :has(table)')].map((item) => item.boundingBox()),
+  );
+  expect(left!.x - dialog!.x).toBeLessThan(dialog!.width / 4);
+  expect(left!.x + left!.width).toBeLessThan(right!.x);
+  expect(Math.abs(left!.y - right!.y)).toBeLessThan(1);
+  expect(left!.y).toBeGreaterThanOrEqual(body!.y + body!.height - 1);
+
+  await createSeason(panel, '2');
+  await expect(panel).toBeVisible();
+  for (const season of [1, 2]) await expect(seasonButton(panel, season)).toHaveAttribute('aria-expanded', 'true');
+  await expect(labels(seasonTable(panel, 1))).toHaveText(['S01E01']);
+  await expect(labels(seasonTable(panel, 2))).toHaveText(['S02E01', 'S02E02']);
+  await expect(selection(panel)).toHaveCount(0);
+  await expect(newSeason(panel)).toHaveCount(0);
+  expect(writes).toEqual([]);
+  expect(await savedNumbering('tv:1')).toEqual(before);
+
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/library/tv:1', async (route) => {
+    if (route.request().method() === 'PATCH') await held;
+    await route.continue();
+  });
+  await selectEpisodes(panel, 'S01E01');
+  await expect(selection(panel)).toHaveText(['S01E01']);
+  await applyMapping(page, panel, 'Do you want to search for these new seasons?');
+  try {
+    // While the dialog saves, no row can be selected.
+    await expect(panel.locator('tr[aria-selected]')).toHaveCount(0);
+  } finally {
+    release();
+  }
+  await expect(panel).toBeHidden();
+  expect(writes.map((request) => `${request.method()} ${new URL(request.url()).pathname}`)).toEqual(['PATCH /api/library/tv:1']);
+  expect(writes[0]!.postDataJSON()).toEqual({ episodeSeasons: {
+    revision: 0, edits: [2, 3].map((number) => ({ season: 1, number, releaseSeason: 2, search: false })),
+  } });
+  expect(await savedNumbering('tv:1')).toEqual({ revision: 1, ranges: [{ season: 1, from: 2, to: 3, releaseSeason: 2, releaseFrom: 1 }] });
+
+  // Each saved group holds an episode of season 1, so each one starts open.
+  await openMapping(page);
+  for (const season of [1, 2]) await expect(seasonButton(panel, season)).toHaveAttribute('aria-expanded', 'true');
+  await expect(labels(seasonTable(panel, 2))).toHaveText(['S02E01', 'S02E02']);
+});
+
+test('discards the draft of the seasons when the dialog closes before Apply', async ({ page }) => {
+  await stoppedShow();
+  const before = await savedNumbering('tv:1');
+  const writes = writesOf(page);
+  const panel = await openMapping(page);
+  await selectEpisodes(panel, 'S01E02');
+  await createSeason(panel, '2', '12');
+  await expect(labels(seasonTable(panel, 12))).toHaveText(['S12E01']);
+  // An episode that returns to its TMDB season gets its TMDB number again.
+  await selectEpisodes(panel, 'S12E01');
+  await createSeason(panel, '2', '1');
+  await expect(seasonButton(panel, 12)).toHaveCount(0);
+  await expect(labels(seasonTable(panel, 1))).toHaveText(['S01E01', 'S01E02', 'S01E03']);
+  await selectEpisodes(panel, 'S01E03');
+  await createSeason(panel, '2');
+  await expect(labels(seasonTable(panel, 2))).toHaveText(['S02E01']);
+  await panel.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(panel).toBeHidden();
+  expect(writes).toEqual([]);
+  expect(await savedNumbering('tv:1')).toEqual(before);
+
+  await page.getByRole('main').getByRole('button', { name: 'Map episodes manually', exact: true }).click();
+  await expect(labels(seasonTable(panel, 1))).toHaveText(['S01E01', 'S01E02', 'S01E03']);
+  await expect(seasonButton(panel, 2)).toHaveCount(0);
+});
+
+test('removes the rows of a closed group from the selection', async ({ page }) => {
+  await stoppedSeries();
+  const panel = await openSeries(page);
+  await expect(seasonButton(panel, 2)).toHaveAttribute('aria-expanded', 'false');
+  await seasonButton(panel, 2).click();
+  await expect(newSeason(panel)).toHaveCount(0);
+  await selectEpisodes(panel, 'S01E01');
+  await expect(newSeason(panel)).toBeVisible();
+  await seasonButton(panel, 1).click();
+  await expect(newSeason(panel)).toHaveCount(0);
+
+  await seasonButton(panel, 1).click();
+  await selectEpisodes(panel, 'S01E01', 'S02E03');
+  await seasonButton(panel, 1).click();
+  await expect(selection(panel)).toHaveText(['S02E03']);
+  await createSeason(panel, '3');
+  // The open groups stay, and the target opens.
+  await expect(seasonButton(panel, 1)).toHaveAttribute('aria-expanded', 'false');
+  for (const season of [2, 3]) await expect(seasonButton(panel, season)).toHaveAttribute('aria-expanded', 'true');
+  await expect(labels(seasonTable(panel, 2))).toHaveText(['S02E04']);
+  await expect(labels(seasonTable(panel, 3))).toHaveText(['S03E01']);
+  await seasonButton(panel, 1).click();
+  await expect(labels(seasonTable(panel, 1))).toHaveText(['S01E01', 'S01E02']);
+});
+
+test('selects episodes with the pointer and the keyboard, across the open groups', async ({ page }) => {
+  await stoppedSeries();
+  const panel = await openSeries(page);
+  await seasonButton(panel, 2).click();
+  const click = (label: string, ...modifiers: ('ControlOrMeta' | 'Shift')[]) => episodeCell(panel, label).click({ modifiers });
+  const expectSelection = (...episodes: string[]) => expect(selection(panel)).toHaveText(episodes);
+
+  await click('S01E02');
+  await expectSelection('S01E02');
+  await click('S01E01');
+  await expectSelection('S01E01');
+  await click('S02E04', 'ControlOrMeta');
+  await expectSelection('S01E01', 'S02E04');
+  await click('S02E04', 'ControlOrMeta');
+  await expectSelection('S01E01');
+  await click('S01E02');
+  await click('S02E03', 'Shift');
+  await expectSelection('S01E02', 'S02E03');
+  await click('S02E04', 'Shift');
+  await expectSelection('S01E02', 'S02E03', 'S02E04');
+  await click('S01E01', 'Shift');
+  await expectSelection('S01E01', 'S01E02');
+
+  // A control of a row, and an option of its dropdown, keep the selection.
+  await episodeRow(panel, 'S02E04').getByRole('combobox', { name: 'Torrent', exact: true }).click();
+  await page.getByRole('option', { name: 'Two.Seasons.S01.1080p.WEB-DL-GRP', exact: true }).click();
+  await episodeRow(panel, 'S02E04').getByRole('combobox', { name: 'Matches', exact: true }).click();
+  await page.getByRole('option', { name: /Part A\.mkv/ }).click();
+  await expect(episodeRow(panel, 'S02E04').getByRole('combobox', { name: 'Matches', exact: true })).toHaveValue(/Part A\.mkv/);
+  await expectSelection('S01E01', 'S01E02');
+
+  await episodeRow(panel, 'S02E03').press('Space');
+  await expectSelection('S01E01', 'S01E02', 'S02E03');
+  await episodeRow(panel, 'S02E03').press('Space');
+  await expectSelection('S01E01', 'S01E02');
+  await episodeRow(panel, 'S02E04').press('Shift+Space');
+  await expectSelection('S02E03', 'S02E04');
+});
+
+test('numbers a moved episode after the last episode of the season that takes it', async ({ page }) => {
+  await stoppedSeries();
+  const writes = writesOf(page);
+  const panel = await openSeries(page);
+  await selectEpisodes(panel, 'S01E01');
+  const { modal, season, create } = await openSeasonModal(panel);
+  await expect(season).toHaveValue('3');
+  // The list of the dropdown works inside the second modal.
+  await season.click();
+  await page.getByRole('option', { name: '2', exact: true }).click();
+  await expect(season).toHaveValue('2');
+  await expect(modal).toBeVisible();
+  await create.click();
+  await expect(modal).toBeHidden();
+  await expect(seasonButton(panel, 2)).toHaveAttribute('aria-expanded', 'true');
+  // The rows are in the order of their release numbers.
+  await expect(labels(seasonTable(panel, 2))).toHaveText(['S02E03', 'S02E04', 'S02E05']);
+  await expect(labels(seasonTable(panel, 1))).toHaveText(['S01E02']);
+  await applyMapping(page, panel);
+  await expect(panel).toBeHidden();
+  expect(writes[0]!.method()).toBe('PATCH');
+  expect(writes[0]!.postDataJSON()).toEqual({ episodeSeasons: { revision: 0, edits: [{ season: 1, number: 1, releaseSeason: 2, search: false }] } });
+  expect(await savedNumbering('tv:3')).toEqual({ revision: 1, ranges: [{ season: 1, from: 1, to: 1, releaseSeason: 2, releaseFrom: 5 }] });
+});
+
+test('returns a saved episode to its TMDB season with its TMDB number', async ({ page }) => {
+  data.titles['tv:1']!.numbering = { revision: 1, ranges: [{ season: 1, from: 2, to: 3, releaseSeason: 2, releaseFrom: 1 }] };
+  await stoppedShow();
+  const writes = writesOf(page);
+  const panel = await openMapping(page);
+  await expect(labels(seasonTable(panel, 1))).toHaveText(['S01E01']);
+  await expect(labels(seasonTable(panel, 2))).toHaveText(['S02E01', 'S02E02']);
+  await selectEpisodes(panel, 'S02E01');
+  await createSeason(panel, '3', '1');
+  await expect(labels(seasonTable(panel, 1))).toHaveText(['S01E01', 'S01E02']);
+  await expect(labels(seasonTable(panel, 2))).toHaveText(['S02E02']);
+  await applyMapping(page, panel);
+  await expect(panel).toBeHidden();
+  expect(writes[0]!.postDataJSON()).toEqual({ episodeSeasons: { revision: 1, edits: [{ season: 1, number: 2, releaseSeason: 1, search: false }] } });
+  expect(await savedNumbering('tv:1')).toEqual({ revision: 2, ranges: [{ season: 1, from: 3, to: 3, releaseSeason: 2, releaseFrom: 2 }] });
+});
+
+test('keeps Create disabled for a season that cannot take the selected episodes', async ({ page }) => {
+  // S01E01 of TMDB holds the number of S02E04 of TMDB, which is in season 5.
+  data.titles['tv:3']!.numbering = { revision: 1, ranges: [
+    { season: 1, from: 1, to: 1, releaseSeason: 2, releaseFrom: 4 },
+    { season: 2, from: 4, to: 4, releaseSeason: 5, releaseFrom: 1 },
+  ] };
+  await stoppedSeries();
+  const panel = await openSeries(page);
+  await expect(labels(seasonTable(panel, 2))).toHaveText(['S02E03', 'S02E04']);
+  await seasonButton(panel, 5).click();
+  await selectEpisodes(panel, 'S05E01');
+  const { season, create } = await openSeasonModal(panel);
+  await expect(season).toHaveValue('3');
+  const problem = page.getByText('The episode map is not valid. Check the ranges.', { exact: true });
+  await typeSeason(season, '2');
+  await expect(problem.first()).toBeVisible();
+  await expect(create).toBeDisabled();
+  await typeSeason(season, 'x');
+  await expect(problem).toHaveCount(0);
+  await expect(create).toBeDisabled();
+  await typeSeason(season, '3');
+  await expect(problem).toHaveCount(0);
+  await expect(create).toBeEnabled();
+});
+
+test('counts the specials for the next free season and for the numbers of a draft', async ({ page }) => {
+  const title = data.titles['tv:3']!;
+  // A season without names starts a metadata refresh, and the refresh drops the episodes that TMDB does not have.
+  title.meta.seasons.push({ seasonNumber: 0, episodeCount: 1, airDate: null, names: { en: null, es: null } });
+  title.episodes.push({ ...title.episodes[0]!, tmdbId: 300, season: 0, number: 1, fileId: null });
+  title.numbering = { revision: 1, ranges: [{ season: 0, from: 1, to: 1, releaseSeason: 3, releaseFrom: 1 }] };
+  await stoppedSeries();
+  const panel = await openSeries(page);
+  await selectEpisodes(panel, 'S01E01');
+  // The table does not show the special, and it holds S03E01.
+  await expect(seasonButton(panel, 3)).toHaveCount(0);
+  await createSeason(panel, '4', '3');
+  await expect(labels(seasonTable(panel, 3))).toHaveText(['S03E02']);
+});
+
+test('selects only the episodes that wait for a release among the rejected releases', async ({ page }) => {
+  const entries = [1, 2, 3].map((number) => blocked('tv:1', 1, number, 'fetching', 'file_unmapped'));
+  entries[2]!.state = { kind: 'available' };
+  data.queuePaused = true;
+  await start(entries);
+  const mapping = page.waitForRequest((request) => new URL(request.url()).searchParams.get('mapping') === 'rejected');
+  const panel = await openMapping(page);
+  await mapping;
+  await expect(labels(seasonTable(panel, 1))).toHaveText(['S01E01', 'S01E02', 'S01E03']);
+  await expect(panel.locator('tr[aria-selected]')).toHaveCount(2);
+  await selectEpisodes(panel, 'S01E03');
+  await expect(selection(panel)).toHaveCount(0);
+  await expect(newSeason(panel)).toHaveCount(0);
+  await selectEpisodes(panel, 'S01E01');
+  await episodeCell(panel, 'S01E03').click({ modifiers: ['Shift'] });
+  await expect(selection(panel)).toHaveText(['S01E01']);
+  await episodeCell(panel, 'S01E02').click({ modifiers: ['Shift'] });
+  await expect(selection(panel)).toHaveText(['S01E01', 'S01E02']);
+  await createSeason(panel, '2');
+  await expect(labels(seasonTable(panel, 1))).toHaveText(['S01E03']);
+  await expect(labels(seasonTable(panel, 2))).toHaveText(['S02E01', 'S02E02']);
+});
+
+for (const open of [false, true]) {
+  test(`sends the releases of the season of the entry, and ${open ? 'also' : 'not'} those of another season in ${open ? 'an open' : 'a closed'} group`, async ({ page }) => {
+    const targets = ([[1, 1], [1, 2], [2, 3], [2, 4]] as const).map(([season, number]) => blocked('tv:3', season, number, 'fetching', 'file_unmapped'));
+    // The releases number E02 of season 1 as season 3, and all of season 2 as season 5.
+    data.titles['tv:3']!.numbering = { revision: 1, ranges: [
+      { season: 1, from: 2, to: 2, releaseSeason: 3, releaseFrom: 1 },
+      { season: 2, from: 3, to: 4, releaseSeason: 5, releaseFrom: 1 },
+    ] };
+    const releases = targets.map((target, index) => {
+      const name = `Two.Seasons.S0${target.season}E0${target.number}.1080p.WEB-DL-GRP`;
+      // The first target of a season holds the releases of that season.
+      const release = reject(targets[index - (index % 2)]!, name, ['Chapter.mkv']);
+      release.matches = { [target.id]: `${name}/Chapter.mkv` };
+      return release;
+    });
+    // The dialog reads each torrent from the indexer, and the default delay between two requests is too long here.
+    for (const indexer of Object.values(data.indexers)) indexer.delaySeconds = 0;
+    data.queuePaused = true;
+    await start(targets);
+    const writes = writesOf(page);
+    const panel = await openSeries(page);
+    const torrent = (label: string) => episodeRow(panel, label).getByRole('combobox', { name: 'Torrent', exact: true });
+    // The groups that hold an episode of season 1 start open.
+    for (const season of [1, 3]) await expect(seasonButton(panel, season)).toHaveAttribute('aria-expanded', 'true');
+    await expect(seasonButton(panel, 5)).toHaveAttribute('aria-expanded', 'false');
+    await expect(torrent('S01E01')).toHaveValue(releases[0]!.title);
+    await expect(torrent('S03E01')).toHaveValue(releases[1]!.title);
+    await seasonButton(panel, 5).click();
+    await expect(torrent('S05E01')).toHaveValue(releases[2]!.title);
+    await expect(torrent('S05E02')).toHaveValue(releases[3]!.title);
+    if (!open) await seasonButton(panel, 5).click();
+    // A release of the season of the entry goes also from a closed group.
+    await seasonButton(panel, 3).click();
+    await applyMapping(page, panel);
+    await expect(panel).toBeHidden();
+    const sent = writes.flatMap((request) => (request.postDataJSON() as { torrents: { guid: string }[] }).torrents.map(({ guid }) => guid));
+    expect(sent.sort()).toEqual((open ? releases : releases.slice(0, 2)).map(({ guid }) => guid).sort());
+    for (const request of writes) {
+      expect(new URL(request.url()).pathname).toMatch(/\/releases\/map$/);
+      expect((await request.response())?.status()).toBe(202);
+    }
+  });
+}
