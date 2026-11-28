@@ -15,6 +15,7 @@ import { normalizeTitle, parseRelease } from './release.ts';
 import { manualUpgradeTargets } from './upgrades.ts';
 import { fileOf as matchedFile, matchCompletePack, matchEpisode, matchMovie, matchPartialPack, needsManualMapping, readCoverage, readPackCoverage, validMatches } from './match.ts';
 import { readSource, type Evidence } from './source.ts';
+import { detach } from './detach.ts';
 import { currentSelection, enqueueSelection, readySelection, reasonOf as grabReasonOf, sendPhase } from './grab.ts';
 import { requestIdFor } from '../../core/outbound.ts';
 import type { OutsideTitleLock } from '../../core/title-lock.ts';
@@ -69,8 +70,11 @@ const present = (fileId: string | null) => Boolean(fileId && db.data.files[fileI
 // Ties the log line of a search to the requests that answered it, in the app log and in the request log.
 const newRequestId = () => `req-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 const releaseKey = (release: Pick<ReleaseRef, 'indexerId' | 'guid'>) => `${release.indexerId}:${release.guid}`;
+const unique = (releases: RejectedRelease[]) => [...new Map(releases.map((release) => [releaseKey(release), release])).values()];
 type Acquisition = SearchPayload & {
   episodeRound?: boolean;
+  // The search that follows a change of the season map.
+  remapped?: boolean;
   supplied?: RawRelease[];
   forced?: boolean;
   upgrade?: string;
@@ -78,7 +82,8 @@ type Acquisition = SearchPayload & {
     id: string;
     revision: number;
     replies: Record<string, RawRelease[]>;
-    checked: Record<string, { decision: Decision; entries: string[] }>;
+    // For a partial pack, `lacks` holds the targets that it does not have, and `matches` the file of each one that it has.
+    checked: Record<string, { decision: Decision; entries: string[]; lacks?: string[]; matches?: Record<string, string> }>;
     packs: Record<string, string>;
     magnet?: { key: string; source: { magnet: string } };
   };
@@ -307,7 +312,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           queue.updateItem(item, { selected: { ...item.selected, ...Object.fromEntries(retained.map((source) => [source.hash, { ...source, status: 'verify' }])) } });
         } else if (item && remapped && item.state.kind === 'blocked') queue.transitionItem(item, { kind: 'queued' });
         enqueueSearch({ titleKey, season: seasonNumber, entryIds: entries.map((e) => e.id), fresh, ...(manual ? { manual } : {}),
-          ...(remapped ? { episodeRound: false } : {}),
+          ...(remapped ? { episodeRound: false, remapped: true } : {}),
           ...(retained.length ? { supplied: retained.map(({ release }) => rawOf(release)) } : {}) });
       }
     }
@@ -610,8 +615,12 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       numberingOf(title).revision === revision && (item.state.kind === 'searching' || item.state.kind === 'fetching');
     const targets = () => members.filter((entry) => queue.get(entry.id) === entry && eligibleEntry(entry));
     const missing = () => targets().filter((entry) => !prepared(item, entry.id));
+    // The rejected releases stay on the list while the search runs, for the manual mapping.
+    const earlier = item.search?.rejected ?? [];
+    // A rejected partial pack also stays after a round that does not search the packs again.
+    const earlierPacks = earlier.filter(({ manifestProblem, kind }) => manifestProblem === 'pack_partial' && kind === 'pack');
     const searchState: SearchState = (resumed && (manualIds ? members[0]?.search : item.search)) ||
-      { at: now(), indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null, rejected: [] };
+      { at: now(), indexers: [], candidates: 0, accepted: 0, result: null, topRejections: [], nextAt: null, rejected: earlier };
     const phase = (kind: 'searching' | 'fetching', entries: QueueEntry[]) => {
       queue.transitionItem(item, { kind });
       for (const entry of entries) {
@@ -656,6 +665,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     const episodeRound = payload.episodeRound || (!resumed && !payload.supplied && targets().some((entry) => prepared(item, entry.id)))
       || missing().every((entry) => entry.retryDownload?.absent);
     let episodeName = names[0];
+    const searchesPacks = !payload.forced && ((targets().length > 1 && !episodeRound) || Boolean(payload.otherSeasons));
 
     const ask = async (scope: Scope, group: QueueEntry[]) => {
       if (!group.length || !alive()) return [];
@@ -718,8 +728,15 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     };
 
     const point = (entry: QueueEntry) => ({ season: entry.season!, number: entry.number! });
-    // The targets that a found season pack is known not to hold.
-    const lacked = new Set<string>();
+    // The season packs that are known not to hold a target that asked. They are rejected without a new read.
+    const lacked = new Map<string, { decision: Decision; entries: string[]; lacks: string[]; matches: Record<string, string> }>();
+    // The file of each episode of the season that a release has.
+    const held = (fileAt: (target: { season: number; number: number }) => string | null | undefined) =>
+      Object.fromEntries(item.entryIds.flatMap((id) => {
+        const entry = queue.get(id);
+        const file = entry && fileAt(point(entry));
+        return file ? [[id, file] as const] : [];
+      }));
     const wantForPack = (release: RawRelease, group: QueueEntry[]): Want => ({
       kind: 'season', title, season: group[0]!.season!, releaseSeason: parseRelease(release.title).season ?? group[0]!.season!, numbering,
     });
@@ -736,9 +753,18 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
           const want = wantForPack(release, group);
           const decision = decide(release, want, ctx, { inspect: true });
           const known = ctx.coverage(release);
-          if (!payload.forced && known?.titleKey === title.key && known.numberingRevision === revision && group.every((entry) =>
-            entry.season === known.season && !known.numbers.includes(entry.number!))) {
-            for (const entry of group) lacked.add(entry.id);
+          const matched = Object.values(item.selected).some((source) => source.manualMatches && releaseKey(source.release) === releaseKey(release));
+          // A record without the files can only skip a pack that has none of the group. The search reads the others again.
+          const lacks = payload.forced || matched || known?.titleKey !== title.key || known.numberingRevision !== revision ||
+            (!known.files && group.some((entry) => entry.season === known.season && known.numbers.includes(entry.number!)))
+            ? [] : group.filter((entry) => !prepared(item, entry.id) && entry.season === known.season && !known.numbers.includes(entry.number!));
+          if (lacks.length) {
+            const key = releaseKey(release);
+            const seen = lacked.get(key);
+            lacked.set(key, { decision: { ...decision, accepted: false, rejections: ['pack_partial'] },
+              entries: [...new Set([...(seen?.entries ?? []), ...group.map(({ id }) => id)])],
+              lacks: [...new Set([...(seen?.lacks ?? []), ...lacks.map(({ id }) => id)])],
+              matches: held((target) => target.season === known!.season ? known!.files?.[target.number] : undefined) });
             continue;
           }
           if (decision.covers.some((covered) => group.some((entry) => entry.season === covered.season && entry.number === covered.number)) ||
@@ -911,16 +937,34 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
         }
         if (manifest && pack && !manifest.unknown.length && manifest.episodes.length) {
           const season = item.season!;
-          db.data.releaseCoverage[key] = { titleKey: title.key, season, numberingRevision: revision,
-            numbers: manifest.episodes.filter((target) => target.season === season).map(({ number }) => number).sort((a, b) => a - b) };
+          const numbers = manifest.episodes.filter((target) => target.season === season).map(({ number }) => number).sort((a, b) => a - b);
+          db.data.releaseCoverage[key] = { titleKey: title.key, season, numberingRevision: revision, numbers,
+            files: Object.fromEntries(numbers.flatMap((number) => {
+              const file = matchedFile(manifest, { season, number });
+              return file ? [[number, file] as const] : [];
+            })) };
         }
+        const rejectPartial = () => {
+          reject('pack_partial');
+          Object.assign(work.checked[key]!, {
+            lacks: candidates.filter((entry) => !prepared(item, entry.id) && !chosen.includes(entry)).map(({ id }) => id),
+            matches: held((target) => manifest && matchedFile(manifest, target)),
+          });
+        };
         if (!chosen.length || (!pack && manifest && !evidenceTargets.some((entry) => chosen.includes(entry)))) {
-          reject(pack ? partial?.missing.length ? 'pack_partial' : 'metadata_unavailable' : 'wrong_episode');
+          if (pack && partial?.missing.length) rejectPartial();
+          else reject(pack ? 'metadata_unavailable' : 'wrong_episode');
           continue;
         }
         const verified = manifest ? decide(decision.release, want, ctx, { verified: manifest.episodes }) : decision;
         if (!verified.accepted) {
           record(verified);
+          continue;
+        }
+        // A pack without every episode that still has no release is not a release for the season. Only the user can
+        // choose it.
+        if (pack && !payload.forced && !manualMatches && candidates.some((entry) => !prepared(item, entry.id) && !chosen.includes(entry))) {
+          rejectPartial();
           continue;
         }
         record(verified);
@@ -968,7 +1012,6 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
         if (!incomplete) await inspect(candidates(result, group), group);
       } else if (item.season !== null) {
         for (const season of releaseSeasons(numbering, item.season)) {
-          if (payload.otherSeasons && season === item.season) continue;
           const group = targets().filter((entry) => releaseTarget(numbering, entry)?.season === season);
           if (!group.some((entry) => !prepared(item, entry.id)) || !alive()) continue;
           const result = await ask({ kind: 'season', season }, group);
@@ -983,7 +1026,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     }
     const problems = () => {
       const ids = new Set(missing().map((entry) => entry.id));
-      return Object.values(work.checked).filter(({ decision, entries }) => !decision.accepted && entries.some((id) => ids.has(id)));
+      return Object.values({ ...Object.fromEntries(lacked), ...work.checked })
+        .filter(({ decision, entries }) => !decision.accepted && entries.some((id) => ids.has(id)));
     };
     const mapping = () => problems().some(({ decision }) => decision.rejections.includes('file_unmapped'));
     const finished = (result?: string, entries: QueueEntry[] = []) => {
@@ -1014,8 +1058,15 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
         scope: 'series', targets: active.length, accepted, waiting, run: work.id,
       });
     };
+    // True when a rejected pack does not hold a missing target that is past its release day.
+    const refusedPack = () => {
+      if (payload.forced || unavailable || noIndexers) return false;
+      const lacks = new Set([...lacked.values(), ...Object.values(work.checked)].flatMap((checked) => checked.lacks ?? []));
+      return missing().some((entry) => lacks.has(entry.id) && isOverdue(releaseDates.get(entry)!, searchState.at));
+    };
     const completed: string[] = [];
-    if (alive() && !incomplete && !holdingClient && !manualIds && title.mediaType !== 'movie' && !mapping()) {
+    // A partial pack stops the season at once. The user then decides what to search.
+    if (alive() && !incomplete && !holdingClient && !manualIds && title.mediaType !== 'movie' && !mapping() && !refusedPack()) {
       for (const entry of missing()) {
         if (!alive() || prepared(item, entry.id) || (!noIndexers && !dueFor.get(entry)!.length)) continue;
         const at = releaseTarget(numbering, entry);
@@ -1043,7 +1094,11 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       return;
     }
     const left = missing();
-    if (!left.length) {
+    // After a change of the season map, the episodes that the user did not choose stay stopped. The season cannot end
+    // without them.
+    const stopped = !payload.remapped ? [] : item.entryIds.map(queue.get).filter((entry): entry is QueueEntry =>
+      entry?.state.kind === 'blocked' && ['queued', 'searching', 'fetching'].includes(entry.state.at) && !prepared(item, entry.id));
+    if (!left.length && !stopped.length) {
       if (manualIds && !readySelection(item)) {
         const sibling = item.entryIds.flatMap((id) => {
           const entry = queue.get(id);
@@ -1063,20 +1118,24 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       finished();
       return;
     }
-    if (unavailable && !final && !payload.forced) throw new JobError('outage', 'An indexer did not answer.');
-    const found = problems();
-    const rejected = found.map(({ decision }) => decision).sort(compareRejected);
+    if (unavailable && !final && !payload.forced && left.length) throw new JobError('outage', 'An indexer did not answer.');
+    const found = problems().sort((a, b) => compareRejected(a.decision, b.decision));
+    const rejected = found.map(({ decision }) => decision);
     // Until the end of its release day a target can still lack its upload. An empty search or a pack without it does not stop it.
     const overdue = new Set(left.filter((entry) => isOverdue(releaseDates.get(entry)!, searchState.at)).map(({ id }) => id));
-    const refused = found.some(({ decision, entries }) => payload.forced || entries.some((id) => overdue.has(id)) ||
-      decision.rejections.some((code) => code !== 'pack_partial'));
+    const refused = found.some(({ decision }) => payload.forced || decision.rejections.some((code) => code !== 'pack_partial'));
     const missingNumber = title.mediaType !== 'movie' && left.some((entry) => !releaseTarget(numbering, entry));
     // A season pack that the search found and that does not hold a missing episode needs the user.
-    const partialPack = !payload.forced && !unavailable && !noIndexers && overdue.size > 0 && ([...overdue].some((id) => lacked.has(id)) ||
+    const partialPack = !payload.forced && !unavailable && !noIndexers && overdue.size > 0 && (
+      (!searchesPacks && earlierPacks.length > 0) ||
+      found.some(({ decision, entries }) => decision.rejections.includes('pack_partial') && entries.some((id) => overdue.has(id))) ||
       Object.values(item.selected).some(({ status, release }) => status === 'prepared' && release.kind === 'pack'));
     const stop = mapping() ? 'file_unmapped' : missingNumber ? 'numbering_required' : partialPack ? 'pack_partial'
       : refused || (payload.forced && !completed.length) ? 'all_rejected'
-        : noIndexers ? 'no_indexers' : payload.otherSeasons ? 'pack_partial' : null;
+        : noIndexers ? 'no_indexers' : payload.otherSeasons ? 'pack_partial'
+          // A file that the user chose goes to the client when its season stops.
+          : Object.values(item.selected).some(({ status, sendMapped }) => status === 'prepared' && sendMapped) ? 'file_unmapped'
+            : stopped.length ? 'pack_partial' : null;
     const at = now();
     if (!stop) {
       for (const entry of left) {
@@ -1090,15 +1149,34 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     Object.assign(searchState, {
       result: stop && rejected.length ? 'all_rejected' : unavailable ? 'indexers_failed' : 'no_results',
       candidates: Object.keys(work.checked).length, accepted: Object.values(item.selected).filter(({ status }) => status === 'prepared').length,
-      nextAt, topRejections: topRejections(rejected), rejected: rejected.map(rejectionRow),
+      nextAt, topRejections: topRejections(rejected),
+      rejected: unique([...(stopped.length ? earlier : searchesPacks ? [] : earlierPacks), ...found.map(({ decision, matches }) =>
+        ({ ...rejectionRow(decision), ...(matches && Object.keys(matches).length ? { matches } : {}) }))]),
     } satisfies Partial<SearchState>);
-    for (const entry of left) if (stop !== 'file_unmapped') {
+    // Every target of a stopped season stops in the same phase, so one retry takes all of them.
+    const stopTargets = (cause: string) => {
+      if (item.state.kind !== 'blocked') return;
+      const { at: phase, problem } = item.state;
+      const chosen = detach(db.data, item);
+      for (const hash of chosen.hashes) forgetUnusedSource(hash);
+      Object.assign(searchState, { rejected: unique([...searchState.rejected, ...chosen.rows]), nextAt: null,
+        accepted: Object.values(item.selected).filter(({ status }) => status === 'prepared').length });
+      for (const entry of new Set([...left, ...chosen.entries, ...stopped])) {
+        const paused = entry.state.kind === 'paused';
+        if (paused) queue.resume(entry, cause);
+        queue.resolve(entry, phase, cause);
+        queue.block(entry, problem, cause, problem.code);
+        if (paused) queue.pause(entry, cause);
+      }
+      sendPrepared(item);
+    };
+    for (const entry of left) {
       forgetSource(entry);
       Object.assign(entry, { release: null, transferHash: null, clientId: null });
     }
     if (stop) {
       queue.transitionItem(item, { kind: 'blocked', at: item.state.kind === 'fetching' ? 'fetching' : 'searching', problem: { code: stop } });
-      for (const entry of left) queue.block(entry, { code: stop }, 'search ended', stop);
+      stopTargets('search ended');
       queue.updateItem(item, { search: searchState, candidate: stop === 'file_unmapped' ? Object.values(item.selected).find(({ status }) => status === 'verify')?.release ?? null : null });
       finished(stop, left);
       return;
@@ -1119,11 +1197,8 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     });
     if (emptyRounds.length) queue.emptySearch(item, work.id, emptyRounds.map(({ id }) => id), nextAt);
     else queue.requeueItem(item, outcome, nextAt);
-    if (item.state.kind === 'blocked') searchState.nextAt = null;
-    for (const entry of left) {
-      if (item.state.kind === 'blocked') queue.block(entry, item.state.problem, 'search attempts used');
-      else queue.wait(entry, outcome, 'search ended', outcome);
-    }
+    if (item.state.kind === 'blocked') stopTargets('search attempts used');
+    else for (const entry of left) queue.wait(entry, outcome, 'search ended', outcome);
     queue.updateItem(item, { search: searchState, candidate: null });
     if (item.state.kind === 'waiting' && nextAt !== null) enqueueSearch({ ...payload, work: undefined, supplied: undefined,
       fresh: false, forced: false, entryIds: left.map((entry) => entry.id), episodeRound: targets().some((entry) => prepared(item, entry.id)) }, { runAt: nextAt, afterRun: true });
@@ -1413,6 +1488,12 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       if (!entry || !isActive(entry) || ['downloading', 'importing'].includes(entry.state.kind)) return false;
       return !entry.transferHash || !selected[entry.transferHash]?.sendMapped || !sendPhase(entry);
     });
+    // A search that still takes another episode goes on. It stops the season if it must.
+    const searching = ['queued', 'searching', 'fetching'].includes(item.state.kind) && item.entryIds.some((id) => {
+      const entry = queue.get(id);
+      return entry && !entry.transferHash && ['queued', 'searching', 'fetching'].includes(entry.state.kind);
+    });
+    if (searching) return enqueueSelection(item, enqueue, mapped);
     if (pending) {
       if (item.state.kind !== 'blocked') queue.transitionItem(item, { kind: 'blocked', at: 'fetching', problem: { code: 'file_unmapped' } });
     } else if (!['downloading', 'importing'].includes(item.state.kind)) {

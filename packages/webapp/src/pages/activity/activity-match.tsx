@@ -129,7 +129,16 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
   });
   const rejectedBySeason = new Map(otherSeasons.map((season, index) => [season, seasonGroups[index]!.data?.group.rejected ?? []]));
   if (rejected && entry.season !== null) rejectedBySeason.set(entry.season, rejected);
-  const paths = [...new Set(Object.values(releases).flatMap((draft) => draft ? [manifestPath(draft.candidate)] : []))];
+  const seasonChanged = (point: QueueMappingEpisode) => seasons[point.id] !== undefined && Number(seasons[point.id]) !== point.releaseSeason;
+  // An episode that a rejected release holds starts with that release and its file, until the user changes them.
+  const selectionOf = (point: QueueMappingEpisode): ReleaseDraft | undefined => {
+    if (Object.hasOwn(releases, point.id)) return releases[point.id];
+    if (!eligible.has(point.id) || seasonChanged(point)) return undefined;
+    const candidate = rejectedBySeason.get(point.season)?.find(({ release }) => release.matches?.[point.id]);
+    return candidate && { season: point.season, candidate, file: candidate.release.matches![point.id]! };
+  };
+  const selections = Object.fromEntries(rows.map((point) => [point.id, selectionOf(point)]));
+  const paths = [...new Set(Object.values(selections).flatMap((draft) => draft ? [manifestPath(draft.candidate)] : []))];
   const manifests = useQueries({
     queries: paths.map((path) => ({ queryKey: [path], queryFn: () => api<QueueTorrentDetail>(path), staleTime: Infinity, gcTime: 0 })),
   });
@@ -144,7 +153,6 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
     const match = matchesByPath.get(file.path);
     return !file.missing && match ? [{ value: file.path, ...match }] : [];
   });
-  const seasonChanged = (point: QueueMappingEpisode) => seasons[point.id] !== undefined && Number(seasons[point.id]) !== point.releaseSeason;
   const invalidSeason = Object.values(seasons).some((value) => !validSeason(value));
   const initialSeasons = new Set(rows.flatMap((point) => [point.season, point.releaseSeason]));
   const addedSeasons = [...new Set(rows.map((point) => seasons[point.id]).filter((value) => value !== undefined && validSeason(value)).map(Number))]
@@ -262,7 +270,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
       corrected.set(path, [...coverage(path).filter((ep) => !sameEpisode(ep, point)), point]);
     }
     const posts = rejected ? [] : changes(corrected);
-    const assignments = Object.entries(releases).flatMap(([id, draft]) => eligible.has(id) && draft?.file ? [{ id, ...draft }] : []);
+    const assignments = Object.entries(selections).flatMap(([id, draft]) => eligible.has(id) && draft?.file ? [{ id, ...draft }] : []);
     if (!mapSeries && !posts.length && !corrected.size) return;
     submitting.current = true;
     setBusy(true);
@@ -312,7 +320,7 @@ export function MatchDialog({ entry, ids, entries, fileSource, fixedSource, reje
         onValueChange={(value) => setSeasons((state) => ({ ...state, [point.id]: value }))} />
     );
     if (rejected) {
-      const draft = pending ? releases[point.id] : undefined;
+      const draft = pending ? selections[point.id] : undefined;
       const manifest = draft ? manifestPath(draft.candidate) : '';
       const choices = rejectedBySeason.get(point.season) ?? [];
       const saved = point.match?.file ?? '';

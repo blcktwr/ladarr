@@ -1,4 +1,4 @@
-import type { Request } from '@playwright/test';
+import type { BrowserContext, Page, Request } from '@playwright/test';
 import type { QueueGroupPage } from '../packages/shared/src/types.ts';
 import { hashOf } from '../packages/server/tests/helpers/test-pipeline.ts';
 import { expect, test } from './fixtures.ts';
@@ -184,6 +184,183 @@ test('maps explicit files from two rejected releases and sends only those torren
     );
     expect(stack.addRequests()).toHaveLength(2);
     expect(await otherSeason()).toEqual(before);
+  } finally {
+    await stack.stop();
+  }
+});
+
+const release = (title: string, files: string[], size = files.length * 60 * 45 * MIB) => ({ title, size, files });
+const BOTH = release('Show.Name.S01.1080p.WEB-DL-BOTH', ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv']);
+const ONE = release('Show.Name.S01E01.1080p.WEB-DL-ONE', ['Show.Name.S01E01.mkv']);
+// The checks reject it for its quality, so it holds no episode for the mapping.
+const LOW = release('Show.Name.S01E03.480p.WEB-DL-LOW', ['Show.Name.S01E03.mkv'], 20 * 45 * MIB);
+const NEXT = release('Show.Name.S02.1080p.WEB-DL-NEXT', ['Show.Name.S02E01.mkv', 'Show.Name.S02E02.mkv']);
+
+// A season of three episodes that stops: one pack holds E01 and E02, one single holds E01, and nothing holds E03.
+async function stoppedShow(context: BrowserContext) {
+  const stack = await startStack();
+  const cookie = await stack.createOwner();
+  await context.addCookies([{ ...cookie, url: URL_BASE }]);
+  await configure(stack);
+  stack.tracker.state.answer = (url) => {
+    if (url.searchParams.has('ep')) return [];
+    const season = url.searchParams.get('season');
+    return season === '1' ? [BOTH, ONE, LOW] : season === '2' ? [NEXT] : [];
+  };
+  expect((await stack.call('POST', '/library', { mediaType: 'tv', tmdbId: 1, add: 'all' })).status).toBe(201);
+  const group = async (): Promise<QueueGroupPage> => (await stack.call('GET', '/queue/groups/tv:1?season=1')).body;
+  await expect.poll(async () => (await group()).group?.rejected.length, { timeout: 45_000 }).toBe(3);
+  await expect.poll(async () => (await group()).group.status).toBe('stuck');
+  const rejected = (await group()).group.rejected.map(({ release }) => release);
+  // The releases that hold each episode, in the order of the rejected list.
+  const holders = (number: number) => rejected.map(({ title }) => title)
+    .filter((title) => (number === 1 ? [BOTH.title, ONE.title] : number === 2 ? [BOTH.title] : []).includes(title));
+  // The body of one torrent of a mapping request.
+  const torrent = (title: string, numbers: number[]) => {
+    const { indexerId, guid } = rejected.find((item) => item.title === title)!;
+    return { indexerId, guid, files: numbers.map((n) => ({ file: `${title}/Show.Name.S01E0${n}.mkv`, ids: [`tv:1:1x${n}`] })) };
+  };
+  return { stack, holders, torrent };
+}
+
+async function openMapping(page: Page) {
+  await page.goto(`${URL_BASE}/activity`);
+  await page.locator('[data-row="group:tv:1:1"]').click();
+  await page.getByRole('button', { name: 'Map episodes manually', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Show Name (2020)', exact: true });
+  const row = (number: number) => dialog.getByRole('table', { name: 'Episodes of season 1', exact: true }).getByRole('row').filter({ hasText: `S01E0${number}` });
+  const field = (name: string) => (number: number) => row(number).getByRole('combobox', { name, exact: true });
+  return { dialog, season: field('Season'), torrent: field('Torrent'), matches: field('Matches') };
+}
+
+type Mapping = Awaited<ReturnType<typeof openMapping>>;
+
+// The row of an episode shows this release and its file.
+async function expectSelected({ torrent, matches }: Mapping, number: number, title: string) {
+  await expect(torrent(number)).toHaveValue(title);
+  await expect(matches(number)).toHaveValue(new RegExp(`Show\\.Name\\.S01E0${number}\\.mkv`));
+}
+
+async function expectEmpty({ torrent, matches }: Mapping, number: number) {
+  await expect(torrent(number)).toHaveValue('');
+  await expect(matches(number)).toHaveValue('');
+}
+
+async function moveToSeasonTwo(page: Page, { season }: Mapping, number: number) {
+  await season(number).fill('2');
+  await page.getByRole('option', { name: '2', exact: true }).click();
+  await expect(season(number)).toHaveValue('2');
+}
+
+function writesOf(page: Page) {
+  const writes: Request[] = [];
+  page.on('request', (request) => {
+    if (request.method() !== 'GET' && /^\/api\/(queue|library|mapping)\//.test(new URL(request.url()).pathname)) writes.push(request);
+  });
+  return writes;
+}
+
+async function apply(page: Page, { dialog }: Mapping, question: string, season?: string) {
+  await dialog.getByRole('button', { name: 'Apply mapping', exact: true }).click();
+  const confirmation = page.getByRole('dialog', { name: question, exact: true });
+  if (season) await confirmation.getByRole('checkbox', { name: season, exact: true }).check();
+  await confirmation.getByRole('button', { name: 'Yes', exact: true }).click();
+  await expect(dialog).toBeHidden();
+}
+
+// The torrents and the files of a mapping request, in a fixed order.
+type Torrents = { guid: string; files: { file: string }[] }[];
+const ordered = (torrents: Torrents) => torrents
+  .map((item) => ({ ...item, files: item.files.toSorted((a, b) => a.file.localeCompare(b.file)) }))
+  .toSorted((a, b) => a.guid.localeCompare(b.guid));
+
+test('preselects the first rejected release that holds each episode, and maps them with one click', async ({ page, context }) => {
+  test.setTimeout(120_000);
+  const { stack, holders, torrent } = await stoppedShow(context);
+  try {
+    const writes = writesOf(page);
+    const mapping = await openMapping(page);
+    const first = holders(1)[0]!;
+    await expectSelected(mapping, 1, first);
+    await expectSelected(mapping, 2, BOTH.title);
+    await expectEmpty(mapping, 3);
+    expect(writes).toEqual([]);
+
+    await apply(page, mapping, 'Apply this episode mapping?');
+
+    expect(writes.map((request) => new URL(request.url()).pathname)).toEqual([expect.stringMatching(/\/releases\/map$/)]);
+    const expected = first === BOTH.title ? [torrent(BOTH.title, [1, 2])] : [torrent(ONE.title, [1]), torrent(BOTH.title, [2])];
+    expect(ordered(writes[0]!.postDataJSON().torrents)).toEqual(ordered(expected));
+    expect((await writes[0]!.response())?.status()).toBe(202);
+    const used = first === BOTH.title ? [BOTH] : [ONE, BOTH];
+    await expect.poll(() => [...stack.qbit.torrents.keys()].sort(), { timeout: 45_000 }).toEqual(used.map(({ title, files }) => hashOf(title, files)).sort());
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('drops the preselection of an episode that changes season, and takes another release that the user chooses', async ({ page, context }) => {
+  test.setTimeout(120_000);
+  const { stack, holders, torrent } = await stoppedShow(context);
+  try {
+    const writes = writesOf(page);
+    const mapping = await openMapping(page);
+    const [first, other] = holders(1) as [string, string];
+    await expectSelected(mapping, 1, first);
+    await expectSelected(mapping, 2, BOTH.title);
+
+    await moveToSeasonTwo(page, mapping, 2);
+    await expectEmpty(mapping, 2);
+    await expectSelected(mapping, 1, first);
+    await mapping.torrent(1).click();
+    await page.getByRole('option', { name: other, exact: true }).click();
+    await mapping.matches(1).click();
+    await page.getByRole('option').filter({ hasText: 'Show.Name.S01E01.mkv' }).click();
+    await expectSelected(mapping, 1, other);
+    // The user does not ask to search the new season.
+    await apply(page, mapping, 'Do you want to search for these new seasons?');
+
+    expect(writes.map((request) => request.method())).toEqual(['PATCH', 'POST']);
+    expect(writes[0]!.postDataJSON().episodeSeasons.edits).toEqual([{ season: 1, number: 2, releaseSeason: 2, search: false }]);
+    expect(writes[1]!.postDataJSON().torrents).toEqual([torrent(other, [1])]);
+    expect((await writes[1]!.response())?.status()).toBe(202);
+    const chosen = [BOTH, ONE].find(({ title }) => title === other)!;
+    await expect.poll(() => [...stack.qbit.torrents.keys()], { timeout: 45_000 }).toEqual([hashOf(chosen.title, chosen.files)]);
+  } finally {
+    await stack.stop();
+  }
+});
+
+test('searches the episodes that the user moves to another season, and maps the preselected rest', async ({ page, context }) => {
+  test.setTimeout(120_000);
+  const { stack, holders, torrent } = await stoppedShow(context);
+  try {
+    // The queue waits, so the mapping arrives before the search of the moved episodes ends.
+    expect((await stack.call('POST', '/queue/pause', { paused: true })).status).toBe(200);
+    const searched = stack.tracker.state.searches.length;
+    const writes = writesOf(page);
+    const mapping = await openMapping(page);
+    const first = holders(1)[0]!;
+    await expectSelected(mapping, 1, first);
+    await expectSelected(mapping, 2, BOTH.title);
+    for (const number of [2, 3]) await moveToSeasonTwo(page, mapping, number);
+    await expectEmpty(mapping, 2);
+
+    await apply(page, mapping, 'Do you want to search for these new seasons?', 'Season 02');
+
+    expect(writes.map((request) => request.method())).toEqual(['PATCH', 'POST']);
+    expect(new URL(writes[0]!.url()).pathname).toBe('/api/library/tv:1');
+    expect(writes[0]!.postDataJSON().episodeSeasons.edits).toEqual([2, 3].map((number) => ({ season: 1, number, releaseSeason: 2, search: true })));
+    expect(writes[1]!.postDataJSON().torrents).toEqual([torrent(first, [1])]);
+    expect((await writes[1]!.response())?.status()).toBe(202);
+
+    expect((await stack.call('POST', '/queue/pause', { paused: false })).status).toBe(200);
+    const chosen = [BOTH, ONE].find(({ title }) => title === first)!;
+    await expect.poll(() => [...stack.qbit.torrents.keys()].sort(), { timeout: 45_000 }).toEqual(
+      [chosen, NEXT].map(({ title, files }) => hashOf(title, files)).sort(),
+    );
+    // The save searches the moved episodes only.
+    expect(stack.tracker.state.searches.slice(searched).map((url) => url.searchParams.get('season'))).toEqual(['2']);
   } finally {
     await stack.stop();
   }

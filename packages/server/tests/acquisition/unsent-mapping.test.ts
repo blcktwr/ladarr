@@ -123,14 +123,13 @@ async function withOpaqueVideo(run: (fixture: {
   packHash: string;
   single: string;
   singleHash: string;
-}) => Promise<void>) {
+}) => Promise<void>, single = 'Show.Name.S01E02.1080p.WEB-DL-SINGLE') {
   const pipe = await startPipeline();
   const api = await pipe.api();
   try {
     const series = title({ rootId: 'tv', episodes: [episode(1, 1), episode(1, 2)] });
     pipe.db.data.titles[series.key] = series;
     const pack = 'Show.Name.S01.1080p.WEB-DL-PACK';
-    const single = 'Show.Name.S01E02.1080p.WEB-DL-SINGLE';
     const files = ['part-alpha.mkv'];
     const singleFiles = ['Show.Name.S01E02.mkv'];
     pipe.tracker.state.answer = (query) => {
@@ -189,4 +188,21 @@ it('does not count an E01 mapping apply as a manual retry of unselected E02', as
     expect(applied.status).toBe(200);
     expect((await api.get(second)).body.entry.attempt).toBe(before);
   });
+}, 10_000);
+
+it('keeps the pack that the user matched when the search for E02 stops the season', async () => {
+  await withOpaqueVideo(async ({ pipe, api, group, first, match, pack, packHash }) => {
+    const matchPath = `${first}/match`;
+    const preview = await api.post(matchPath, { ...match, preview: true });
+    expect((await api.post(matchPath, { ...match, version: preview.body.version })).status).toBe(200);
+
+    pipe.worker.resume();
+    await expect.poll(() => pipe.tracker.state.searches.some((url) => url.searchParams.get('ep') === '2')).toBe(true);
+    await expect.poll(async () => (await api.get(group)).body.group.status).toBe('stuck');
+
+    const [id] = match.ids;
+    expect(pipe.queue.findItem('tv:1', 1)!.selected[packHash]).toMatchObject({ status: 'prepared', release: { title: pack }, matches: { [id!]: match.file } });
+    expect(pipe.queue.get(id!)).toMatchObject({ transferHash: packHash, release: { title: pack } });
+    expect(pipe.db.data.torrents[packHash]).toBeDefined();
+  }, 'Show.Name.S01E02.480p.WEB-DL-SINGLE');
 }, 10_000);

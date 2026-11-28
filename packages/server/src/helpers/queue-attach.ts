@@ -6,6 +6,8 @@ import { inside, torrentVideos } from '../library/imports/importer.ts';
 import { titleFiles } from '../library/imports/local.ts';
 import { entryId, isActive, itemFor, newEntry, phaseOfEntry } from '../library/downloads/queue.ts';
 import { infoHashOf, magnetHash, torrentFiles } from '../library/grab/torrent.ts';
+import { titleMatches } from '../library/grab/decide.ts';
+import { parseRelease } from '../library/grab/release.ts';
 import { isSample, isVideoFile } from '../library/parse.ts';
 import { shown } from './queue.ts';
 import type { AttachCache, ClientHandle, Clients, Finder, Queue, QueueEntry, QueueTorrent, QueueTurn, Torrent } from '../types.ts';
@@ -97,14 +99,26 @@ export function attachRefusal(entry: QueueEntry): string | null {
 export const torrentInUse = (entry: Pick<QueueEntry, 'titleKey'>, hash: string) =>
   Object.values(db.data.queue).some((other) => other.transferHash === hash && isActive(other) && other.titleKey !== entry.titleKey);
 
-export async function attachCandidates(handles: ClientHandle[], titleKey: string, mapping: boolean, q = '') {
+// The downloads of one title: the ones that ladarr links to it, and the ones that have its name.
+export function downloadsOf(titleKey: string) {
+  const title = db.data.titles[titleKey]!;
+  const linked = new Set([
+    ...Object.values(db.data.queue).flatMap((entry) => entry.titleKey === titleKey && entry.transferHash ? [entry.transferHash] : []),
+    ...Object.values(db.data.files).flatMap((file) => file.titleKey === titleKey && file.download ? [file.download.hash] : []),
+    ...(title.torrents ?? []).map(({ hash }) => hash),
+  ]);
+  return ({ hash, name }: Torrent) => linked.has(hash) || titleMatches(parseRelease(name).title, title);
+}
+
+export async function attachCandidates(handles: ClientHandle[], titleKey: string, mapping: boolean, q = '', wanted?: (torrent: Torrent) => boolean) {
   const byHash = new Map<string, Torrent>();
   for (const list of await Promise.all(handles.map((handle) => handle.api.listAll()))) {
     for (const torrent of list) if ((!mapping || torrent.complete) && !byHash.has(torrent.hash)) byHash.set(torrent.hash, torrent);
   }
   const busy = new Set<string>();
   for (const entry of Object.values(db.data.queue)) if (entry.transferHash && isActive(entry) && entry.titleKey !== titleKey) busy.add(entry.transferHash);
-  const free = [...byHash.values()].filter((torrent) => !busy.has(torrent.hash) && (!q || torrent.name.toLowerCase().includes(q))).sort((a, b) => b.addedAt - a.addedAt);
+  const free = [...byHash.values()].filter((torrent) => !busy.has(torrent.hash) && (!q || torrent.name.toLowerCase().includes(q)) && (!wanted || wanted(torrent)))
+    .sort((a, b) => b.addedAt - a.addedAt);
   const torrents: AttachCandidates['torrents'] = (mapping ? free : free.slice(0, MAX_TORRENTS)).map(({ hash, name, sizeBytes, progress, complete, category, addedAt }) =>
     ({ hash, name, sizeBytes, progress, complete, category, addedAt }));
   return { total: free.length, torrents };

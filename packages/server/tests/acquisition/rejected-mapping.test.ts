@@ -2,9 +2,10 @@ import type { QueueRejectedRelease } from '@ladarr/shared/types';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { withDefaults } from '../../src/core/db.ts';
 import { enqueueSelection } from '../../src/library/grab/grab.ts';
+import { infoHashOf } from '../../src/library/grab/torrent.ts';
 import * as scan from '../../src/library/scan.ts';
 import { episode, title } from '../helpers/test-fixtures.ts';
-import { hashOf, MIB, startPipeline } from '../helpers/test-pipeline.ts';
+import { hashOf, makeTorrent, MIB, startPipeline } from '../helpers/test-pipeline.ts';
 
 const pack = (name: string, files: string[], seeders = 20) => ({ title: name, files, size: 4 * 60 * 45 * MIB, seeders });
 const first = pack('Show.Name.S01.1080p.WEB-DL-Alpha+Beta', ['Disc A/part.mkv', 'Disc B/part.mkv']);
@@ -141,14 +142,26 @@ it('recovers only the mapped torrent when the saved turn also has an automatic s
   const mappedHash = hashOf(rejected.title, rejected.files);
   const [held, mapped, blocked] = [1, 2, 3].map((n) => `tv:1:3x${n}`);
   pipe.db.data.titles['tv:1']!.episodes.push(...[1, 2, 3].map((n) => episode(3, n)));
-  pipe.tracker.state.answer = () => [automatic, rejected];
+  pipe.tracker.state.answer = () => [rejected];
   pipe.finder.requestSearch('tv:1', { season: 3, fresh: true });
   await expect.poll(() => pipe.queue.get(blocked)?.state).toMatchObject({ kind: 'blocked', problem: { code: 'file_unmapped' } });
-  expect(pipe.queue.findItem('tv:1', 3)?.selected[autoHash]).toMatchObject({
-    status: 'prepared', matches: { [held]: pathOf(automatic) }, release: { manual: false },
-  });
   await pipe.poller.pause();
   await pipe.worker.drain();
+  // An older version kept the automatic selection of E01 on the stopped season.
+  const data = makeTorrent(automatic.title, automatic.files);
+  expect(infoHashOf(data)).toBe(autoHash);
+  const turn = pipe.queue.findItem('tv:1', 3)!;
+  const release = {
+    ...turn.search!.rejected[0]!, guid: automatic.title, title: automatic.title, infoHash: autoHash, indexerName: 'Tracker',
+    kind: 'pack' as const, manual: false,
+  };
+  pipe.db.data.torrents[autoHash] = data.toString('base64');
+  turn.selected[autoHash] = {
+    hash: autoHash, release, source: { torrent: true }, numberingRevision: 0, status: 'prepared', clientId: null,
+    matches: { [held!]: pathOf(automatic) },
+  };
+  pipe.queue.resolve(pipe.queue.get(held!)!, 'fetching', 'fixture: saved selection');
+  Object.assign(pipe.queue.get(held!)!, { release, transferHash: autoHash, source: { torrent: true } });
   const result = await api.post(`/queue/entries/${mapped}/releases/map`, { torrents: [
     selection(await rejections(3), rejected, [{ file: pathOf(rejected), ids: [mapped] }]),
   ] });

@@ -499,6 +499,8 @@ export type QueueRejectedRelease = {
   kind: 'single' | 'multi' | 'pack';
   reasons: string[];
   selectable: boolean;
+  // The file of each episode that an incomplete release holds, by episode ID.
+  matches?: Record<string, string>;
   // The size check that stopped the release, with the numbers. Null when the size did not stop it.
   sizeRejection: { code: 'size_below_min' | 'size_above_max'; value: number; limit: number } | null;
 };

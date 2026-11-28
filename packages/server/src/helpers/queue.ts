@@ -143,7 +143,10 @@ export function actionsOf(entries: QueueEntry[]): QueueResolution[] {
       result.set(key, item);
     };
     const title = titleOf(entry);
-    if (['file_not_found', 'file_unmapped', 'coverage_unknown', 'file_unreadable', 'file_invalid', 'destination_exists'].includes(cause) || (title?.mediaType === 'tv' && ['pack_partial', 'numbering_required'].includes(cause))) {
+    // A series that a search stopped takes its releases by hand from the rejected list.
+    const mappable = title?.mediaType === 'tv' && (['pack_partial', 'numbering_required'].includes(cause) ||
+      (['no_results', 'all_rejected'].includes(cause) && rejectedOf(entry).length > 0));
+    if (['file_not_found', 'file_unmapped', 'coverage_unknown', 'file_unreadable', 'file_invalid', 'destination_exists'].includes(cause) || mappable) {
       add('match', title?.mediaType === 'movie' ? 'Select file' : 'Map episodes manually', undefined, entry.transferHash ? 'download' : 'library');
     }
     if (cause === 'destination_exists') {
@@ -368,6 +371,7 @@ function rejectedView(entry: QueueEntry, release: RejectedRelease): QueueRejecte
     kind: release.kind,
     reasons,
     selectable: !manualStopsOf(release).length,
+    ...(release.matches ? { matches: release.matches } : {}),
     sizeRejection: release.sizeRejection,
   };
 }

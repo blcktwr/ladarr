@@ -2,7 +2,7 @@ import { db } from '../../../../../core/db.ts';
 import type { AttachCandidates } from '@ladarr/shared/types';
 import type { RequestHandler } from 'express';
 import { ClientError } from '../../../../../library/downloads/qbittorrent.ts';
-import { attachCandidates, attachRefusal } from '../../../../../helpers/queue-attach.ts';
+import { attachCandidates, attachRefusal, downloadsOf } from '../../../../../helpers/queue-attach.ts';
 import { label, shown } from '../../../../../helpers/queue.ts';
 import type { Clients } from '../../../../../types.ts';
 
@@ -18,7 +18,7 @@ export function queueEntryExternalGet(clients: Clients): RequestHandler<{ id: st
     if (!handles.length) return void res.status(409).json({ error: 'client_missing' });
     const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
     try {
-      const candidates = await attachCandidates(handles, entry.titleKey, mapping, q);
+      const candidates = await attachCandidates(handles, entry.titleKey, mapping, q, mapping ? downloadsOf(entry.titleKey) : undefined);
       const siblings = mapping || entry.season === null
         ? []
         : Object.values(db.data.queue).filter((other) => other.id !== entry.id && other.titleKey === entry.titleKey && other.season === entry.season && shown(other) && attachRefusal(other) === null);

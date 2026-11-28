@@ -4,7 +4,7 @@ import { TextFile } from 'lowdb/node';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { phaseOf, type QueueState } from '@ladarr/shared/queue';
-import { migrateEmptySeason, migrateQueue, migrateTurns } from '../library/downloads/queue-migrate.ts';
+import { migrateEmptySeason, migrateQueue, migrateStoppedSeason, migrateTurns } from '../library/downloads/queue-migrate.ts';
 import { DEFAULT_NAMING } from '../library/naming.ts';
 import { defaultProfiles, defaultSizes, QUALITY_TABLE_VERSION, unlimitedSizes } from '../library/grab/quality.ts';
 import type { Data, Db, OneClient, Profile, QueueData, QueueEntry, Settings } from '../types.ts';
@@ -205,7 +205,10 @@ export function withDefaults(data: Data): Data {
   for (const [id, item] of Object.entries(next.queueItems)) {
     item.entryIds = item.entryIds.filter((entryId) => Object.hasOwn(next.queue, entryId));
     if (!item.entryIds.length) delete next.queueItems[id];
-    else migrateEmptySeason(next, item);
+    else {
+      migrateStoppedSeason(next, item);
+      migrateEmptySeason(next, item);
+    }
   }
   // A copy that no target waits for is of no use.
   const waiting = new Set(Object.values(next.queue).flatMap((entry) => {

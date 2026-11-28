@@ -359,7 +359,7 @@ test('maps selected episodes from a completed torrent with different season numb
   }));
   const episodeLabel = (number: number) => `S01E${String(number).padStart(2, '0')}`;
   const firstPart = title.episodes.slice(0, 5);
-  const available = firstPart.map(({ number }) => blocked(title.key, 1, number, 'fetching', 'pack_partial'));
+  const available = firstPart.map(({ number }) => blocked(title.key, 1, number, 'importing', 'pack_partial'));
   download(available[0]!, 'Show.Name.S01.1080p.WEB-DL-GRP', Object.fromEntries(
     firstPart.map(({ number }) => [`Show.Name.${episodeLabel(number)}.mkv`, `first-part-${number}`]),
   ));
@@ -389,10 +389,11 @@ test('maps selected episodes from a completed torrent with different season numb
   ]));
   const longName = `Show.Name.S02.Second.Part.${'LongReleaseName'.repeat(10)}.1080p.WEB-DL-GRP`;
   const hash = completeTorrent(longName, secondFiles, '');
-  const missing = title.episodes.slice(5).map(({ number }) => blocked(title.key, 1, number, 'fetching', 'pack_partial'));
+  const missing = title.episodes.slice(5).map(({ number }) => blocked(title.key, 1, number, 'importing', 'pack_partial'));
   const unselected = missing.at(-1)!;
   available[0]!.state = { kind: 'queued' };
-  title.meta.seasons.push({ seasonNumber: 0, episodeCount: 1, airDate: null });
+  // A season without names starts a metadata refresh, and the refresh drops the episodes that TMDB does not have.
+  title.meta.seasons.push({ seasonNumber: 0, episodeCount: 1, airDate: null, names: { en: null, es: null } });
   title.episodes.push(
     { ...title.episodes[0]!, tmdbId: 100, season: 0, fileId: null },
     { ...title.episodes[0]!, tmdbId: 111, number: 11, removedFromTmdb: true },
@@ -540,12 +541,12 @@ test('maps selected episodes from a completed torrent with different season numb
 });
 
 test('applies one external file to two seasons and a separate file to one episode', async ({ page }) => {
-  const first = blocked('tv:3', 1, 1, 'fetching', 'pack_partial');
-  const second = blocked('tv:3', 2, 3, 'fetching', 'pack_partial');
-  const third = blocked('tv:3', 2, 4, 'fetching', 'pack_partial');
-  const blank = blocked('tv:3', 1, 2, 'fetching', 'pack_partial');
-  const unrelated = blocked('tv:1', 1, 1, 'fetching', 'pack_partial');
-  const name = 'Two.Seasons.Complete.1080p.WEB-DL-GRP';
+  const first = blocked('tv:3', 1, 1, 'importing', 'pack_partial');
+  const second = blocked('tv:3', 2, 3, 'importing', 'pack_partial');
+  const third = blocked('tv:3', 2, 4, 'importing', 'pack_partial');
+  const blank = blocked('tv:3', 1, 2, 'importing', 'pack_partial');
+  const unrelated = blocked('tv:1', 1, 1, 'importing', 'pack_partial');
+  const name = 'Two.Seasons.S01-S02.Complete.1080p.WEB-DL-GRP';
   const shared = 'Combined chapters.mkv';
   const separate = 'Closing chapter.mkv';
   const hash = completeTorrent(name, { [shared]: 'combined-video', [separate]: 'closing-video' }, '');
@@ -685,8 +686,8 @@ test('shows the file that matches each episode of a season that is not the stopp
 });
 
 test('reads the files of the torrent while the map dialog loads its mapping', async ({ page }) => {
-  const first = blocked('tv:3', 2, 3, 'fetching', 'pack_partial');
-  const second = blocked('tv:3', 2, 4, 'fetching', 'pack_partial');
+  const first = blocked('tv:3', 2, 3, 'importing', 'pack_partial');
+  const second = blocked('tv:3', 2, 4, 'importing', 'pack_partial');
   const name = 'Two.Seasons.S02.1080p.WEB-DL-GRP';
   download(first, name, { 'Two.Seasons.S02E03.mkv': 'third', 'Two.Seasons.S02E04.mkv': 'fourth' });
   Object.assign(second, { transferHash: first.transferHash, clientId: first.clientId, release: structuredClone(first.release) });
@@ -745,9 +746,9 @@ test('shows the map dialog only after every torrent and its match load', async (
 test('shows verified torrent matches and ignores a torrent that never reached the client', async ({ page }) => {
   const title = data.titles['tv:1']!;
   title.folder = 'Show Name (2020)';
-  const imported = blocked(title.key, 1, 1, 'fetching', 'pack_partial');
-  const local = blocked(title.key, 1, 2, 'fetching', 'pack_partial');
-  const stopped = blocked(title.key, 1, 3, 'fetching', 'pack_partial');
+  const imported = blocked(title.key, 1, 1, 'importing', 'pack_partial');
+  const local = blocked(title.key, 1, 2, 'importing', 'pack_partial');
+  const stopped = blocked(title.key, 1, 3, 'importing', 'pack_partial');
   const name = 'Show.Name.S01.1080p.WEB-DL-GRP';
   download(imported, name, { 'Show.Name.S01E01.mkv': 'first' });
   Object.assign(local, { transferHash: imported.transferHash, clientId: imported.clientId, release: structuredClone(imported.release) });
@@ -818,8 +819,8 @@ test('changes the torrent of a mapped episode without a queue entry', async ({ p
     association: { source: 'automatic', originalName: 'Two.Seasons.S02E03.mkv', numberingRevision: 0, identity: { sizeBytes: size, mtimeMs } },
   };
   episode.fileId = 'imported';
-  const alternate = completeTorrent('Two.Seasons.Alternate', { 'Replacement.mkv': 'replacement' });
-  const second = blocked('tv:3', 2, 4, 'fetching', 'pack_partial');
+  const alternate = completeTorrent('Two.Seasons.S02.1080p.WEB-DL-Alternate', { 'Replacement.mkv': 'replacement' });
+  const second = blocked('tv:3', 2, 4, 'importing', 'pack_partial');
   await start([second]);
 
   await open(page, 'group:tv:3:2');
@@ -835,7 +836,7 @@ test('changes the torrent of a mapped episode without a queue entry', async ({ p
   await expect(match).toHaveValue(/Two\.Seasons\.S02E03\.mkv/);
   await expect(match).toBeEnabled();
   await torrent.fill('Alternate');
-  await page.getByRole('option', { name: 'Two.Seasons.Alternate' }).click();
+  await page.getByRole('option', { name: 'Two.Seasons.S02.1080p.WEB-DL-Alternate' }).click();
   await expect(match).toHaveValue('');
   await match.click();
   await page.getByRole('option', { name: /Replacement\.mkv/ }).click();
@@ -1118,6 +1119,58 @@ test('keeps a saved mapping and omits a rejected torrent with no assigned file',
   expect((await entry(browsed.id)).manualMatch).toBeNull();
 });
 
+for (const at of ['queued', 'searching', 'fetching'] as const) {
+  test(`maps only rejected releases for a season stopped at ${at}, also when it has none`, async ({ page }) => {
+    const stopped = blocked('tv:3', 2, 3, at, 'pack_partial');
+    completeTorrent('Two.Seasons.S02.1080p.WEB-DL-GRP', { 'Two.Seasons.S02E03.mkv': 'third' }, '');
+    data.queuePaused = true;
+    await start([stopped]);
+    const clientLists: string[] = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname.endsWith('/external')) clientLists.push(request.url());
+    });
+    await open(page, 'group:tv:3:2');
+    const [group] = await Promise.all([
+      page.waitForResponse((response) => new URL(response.url()).pathname === '/api/queue/groups/tv:3' && new URL(response.url()).searchParams.has('mapping')),
+      page.getByRole('main').getByRole('button', { name: 'Map episodes manually', exact: true }).click(),
+    ]);
+    expect(new URL(group.url()).searchParams.get('mapping')).toBe('rejected');
+    const row = seasonTable(page.getByRole('dialog'), 2).getByRole('row').filter({ hasText: 'S02E03' });
+    const torrent = row.getByRole('combobox', { name: 'Torrent', exact: true });
+    await torrent.click();
+    await expect(page.getByText('No options.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('option')).toHaveCount(0);
+    expect(clientLists).toEqual([]);
+  });
+}
+
+test('offers every rejected release in the mapping, also one of another title', async ({ page }) => {
+  const first = blocked('tv:3', 1, 1, 'fetching', 'file_unmapped');
+  const second = blocked('tv:3', 2, 3, 'fetching', 'file_unmapped');
+  const releases = [first, second].map((target) => ({
+    own: reject(target, `Two.Seasons.S0${target.season}.1080p.WEB-DL-GRP`, ['Chapter.mkv']),
+    foreign: reject(target, `Other.Show.S0${target.season}.1080p.WEB-DL-GRP`, ['Chapter.mkv']),
+  }));
+  for (const { foreign } of releases) {
+    Object.assign(foreign, { reasons: ['The title of the release is not this title.'], manifestProblem: undefined });
+  }
+  data.queuePaused = true;
+  await start([first, second]);
+
+  await open(page, 'group:tv:3:1');
+  await page.getByRole('main').getByRole('button', { name: 'Map episodes manually', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Two Seasons (2021)', exact: true });
+  await seasonButton(dialog, 2).click();
+  for (const [index, label] of ['S01E01', 'S02E03'].entries()) {
+    await seasonTable(dialog, index + 1).getByRole('row').filter({ hasText: label }).getByRole('combobox', { name: 'Torrent', exact: true }).click();
+    const { own, foreign } = releases[index]!;
+    await expect(page.getByRole('option')).toHaveCount(2);
+    expect((await page.getByRole('option').allTextContents()).sort()).toEqual([own.title, foreign.title].sort());
+    await dialog.getByText(label, { exact: true }).click();
+    await expect(page.getByRole('option')).toHaveCount(0);
+  }
+});
+
 test('corrects two saved matches without reimporting the files', async ({ page }) => {
   const title = data.titles['tv:1']!;
   title.folder = 'Show Name (2020)';
@@ -1132,7 +1185,7 @@ test('corrects two saved matches without reimporting the files', async ({ page }
     data.files[file]!.download = { hash, clientId: data.downloadClients[0]!.id, external: false };
     episode.fileId = file;
   }
-  const stopped = blocked(title.key, 1, 3, 'fetching', 'pack_partial');
+  const stopped = blocked(title.key, 1, 3, 'importing', 'pack_partial');
   await start([stopped]);
   await open(page, `group:${title.key}:1`);
   await page.getByRole('button', { name: 'Map episodes manually', exact: true }).click();

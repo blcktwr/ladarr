@@ -393,7 +393,8 @@ describe('the content of a pack', () => {
     const files = ['Show.Name.S02E01.mkv', 'Show.Name.S02E02.mkv'];
     pipe.tracker.state.items = [{ title: PACK, size: packSize, files }];
     const entries = pipe.finder.requestSearch(series.key);
-    await until(() => entries.every((entry) => reasonOfEntry(entry)?.code === 'all_rejected'));
+    await until(() => entries.every((entry) => entry.state.kind === 'blocked'));
+    expect(entries.map((entry) => reasonOfEntry(entry)?.code)).toEqual(['pack_partial', 'pack_partial', 'pack_partial']);
     expect(entries.every((entry) => entry.search?.rejected[0]?.manifestProblem === 'pack_partial' && entry.transferHash === null)).toBe(true);
     expect(pipe.qbit.torrents.size).toBe(0);
     expect(pipe.qbit.calls.filter((c) => c.path === 'torrents/add')).toEqual([]);

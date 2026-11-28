@@ -137,7 +137,8 @@ export type Data = {
   // The episodes that the files of a release held, keyed by `<indexer ID>:<GUID>`. A pack can hold fewer episodes than
   // TMDB gives its season, so a later search reads this record instead of the count of the season. The record belongs to
   // the numbering revision that read the files.
-  releaseCoverage: Record<string, { titleKey: string; season: number; numbers: number[]; numberingRevision: number }>;
+  // `files` holds the file of each episode number that the pack has.
+  releaseCoverage: Record<string, { titleKey: string; season: number; numbers: number[]; numberingRevision: number; files?: Record<number, string> }>;
   // The torrents that ladarr sent to a client, keyed by info hash. A torrent in this record belongs to the app, also
   // when its target searches again or the target that sent it is gone. A torrent that the user added is not here.
   sentTorrents: Record<string, number>;
@@ -502,6 +503,8 @@ export type HistoryEvent = { at: number; state: QueueState; stage: Phase; attemp
 // carries the API key.
 export type RejectedRelease = {
   manifestProblem?: 'pack_partial' | 'file_unmapped';
+  // The file of each episode that an incomplete release holds, by episode ID.
+  matches?: Record<string, string>;
   indexerId: number;
   guid: string;
   title: string;

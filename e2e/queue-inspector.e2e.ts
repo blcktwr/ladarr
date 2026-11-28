@@ -1,6 +1,6 @@
 import { hashOf } from '../packages/server/tests/helpers/test-pipeline.ts';
 import { expect, test } from './fixtures.ts';
-import { addClient, configure, MIB, MOVIE_RELEASE, SERIES_PACK, startStack, URL_BASE, type Stack } from './stack.ts';
+import { addClient, configure, MIB, MOVIE_RELEASE, startStack, URL_BASE, type Stack } from './stack.ts';
 
 test.setTimeout(120_000);
 
@@ -72,24 +72,25 @@ test('shows each prepared torrent while the only download slot is full', async (
   stack.qbit.progress(movieHash, 0.4);
 
   const files = ['Show.Name.S01E01.mkv', 'Show.Name.S01E02.mkv'];
+  const double = 'Show.Name.S01E01E02.1080p.WEB-DL-GRP';
   const single = 'Show.Name.S01E03.1080p.BluRay-GRP';
-  const packHash = hashOf(SERIES_PACK, files);
+  const doubleHash = hashOf(double, files);
   const singleHash = hashOf(single);
-  const pack = { title: SERIES_PACK, size: 2 * 60 * 45 * MIB, files };
+  const both = { title: double, size: 2 * 60 * 45 * MIB, files };
   const episode = { title: single, size: 60 * 45 * MIB };
-  stack.tracker.state.items = [pack, episode];
+  stack.tracker.state.items = [both, episode];
   stack.tracker.state.answer = (url) => {
     if (url.searchParams.get('season') !== '1') return [];
     const number = url.searchParams.get('ep');
-    return number === null ? [pack] : Number(number) === 3 ? [episode] : [];
+    return number === null ? [both] : Number(number) === 3 ? [episode] : [];
   };
   expect((await stack.call('POST', '/library', { mediaType: 'tv', tmdbId: 1, add: 'all' })).status).toBe(201);
   await page.goto(`${URL_BASE}/activity`);
   const row = page.locator('[data-row="group:tv:1:1"]');
   await row.getByRole('button', { name: 'Inspect Show Name (2020) Season 1' }).click();
-  await expect.poll(() => [...stack.tracker.state.downloads].sort(), { timeout: 30_000 }).toEqual([MOVIE_RELEASE, SERIES_PACK, single].sort());
+  await expect.poll(() => [...stack.tracker.state.downloads].sort(), { timeout: 30_000 }).toEqual([MOVIE_RELEASE, double, single].sort());
   await expect(row).toContainText('Fetching');
-  for (const detail of [SERIES_PACK, single, 'WEB-DL 1080p', 'BluRay 1080p', '5.3 GiB', '2.6 GiB']) {
+  for (const detail of [double, single, 'WEB-DL 1080p', 'BluRay 1080p', '5.3 GiB', '2.6 GiB']) {
     await expect(page.getByText(detail, { exact: true })).toBeVisible();
   }
   await expect(page.getByText('Releases', { exact: true })).toHaveCount(0);
@@ -100,15 +101,15 @@ test('shows each prepared torrent while the only download slot is full', async (
   expect(stack.addRequests()).toHaveLength(1);
 
   stack.complete(MOVIE_RELEASE, { [`${MOVIE_RELEASE}.mkv`]: 'movie' });
-  const accepted = () => [packHash, singleHash].filter((hash) => stack.qbit.torrents.has(hash));
+  const accepted = () => [doubleHash, singleHash].filter((hash) => stack.qbit.torrents.has(hash));
   await expect.poll(() => accepted().length, { timeout: 40_000 }).toBe(1);
   expect(stack.addRequests()).toHaveLength(2);
-  if (accepted().includes(packHash)) {
-    stack.complete(SERIES_PACK, { [files[0]!]: 'one', [files[1]!]: 'two' }, packHash);
+  if (accepted().includes(doubleHash)) {
+    stack.complete(double, { [files[0]!]: 'one', [files[1]!]: 'two' }, doubleHash);
   } else {
     stack.complete(single, { [`${single}.mkv`]: 'three' });
   }
-  await expect.poll(accepted, { timeout: 40_000 }).toEqual([packHash, singleHash]);
+  await expect.poll(accepted, { timeout: 40_000 }).toEqual([doubleHash, singleHash]);
   expect(stack.addRequests()).toHaveLength(3);
-  expect([...stack.tracker.state.downloads].sort()).toEqual([MOVIE_RELEASE, SERIES_PACK, single].sort());
+  expect([...stack.tracker.state.downloads].sort()).toEqual([MOVIE_RELEASE, double, single].sort());
 });

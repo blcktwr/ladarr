@@ -121,8 +121,8 @@ const fixKey = (item: QueueResolution) => (item.action === 'settings' ? `setting
 
 function GroupFix({ group, stopped, run }: { group: QueueGroupPage['group']; stopped: QueueEntryView[]; run: Run }) {
   const { actions } = group;
-  const rejected = actions.some(({ action, phase, cause }) =>
-    action === 'match' && ['queued', 'searching', 'fetching'].includes(phase) && (cause === 'file_unmapped' || group.rejected.length > 0))
+  // A season that stopped before a download maps its rejected releases, also when the list is empty.
+  const rejected = actions.some(({ action, phase }) => action === 'match' && ['queued', 'searching', 'fetching'].includes(phase))
     ? group.rejected : undefined;
   const fixes = new Map<string, QueueResolution>();
   for (const item of actions) {

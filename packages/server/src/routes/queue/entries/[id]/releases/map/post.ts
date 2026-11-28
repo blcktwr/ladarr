@@ -73,7 +73,7 @@ export function queueEntryReleaseMapPost(finder: Finder, indexers: IndexerServic
         if (target.transferHash) return target.state.kind === 'blocked' && target.state.at === 'fetching' && target.state.problem.code === 'file_unmapped' &&
           (!item || item.selected[target.transferHash]?.status === 'verify');
         if (target.state.kind === 'blocked') return ['queued', 'searching', 'fetching'].includes(target.state.at);
-        return !target.release && (target.state.kind === 'queued' || target.state.kind === 'waiting');
+        return !target.release && ['queued', 'waiting', 'searching'].includes(target.state.kind);
       });
     };
     if (!candidates.every((candidate) => candidate !== undefined)) return void res.status(404).json({ error: 'release_not_found' });

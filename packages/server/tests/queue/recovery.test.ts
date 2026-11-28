@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { QueueState } from '@ladarr/shared/queue';
 import { open, set } from '../../src/core/db.ts';
 import { enqueue } from '../../src/core/jobs.ts';
 import { itemFor } from '../../src/library/downloads/queue.ts';
 import { unfinishedImports } from '../../src/library/imports/importer.ts';
 import { infoHashOf } from '../../src/library/grab/torrent.ts';
-import type { Data, QueueEntry, ReleaseRef } from '../../src/types.ts';
+import type { Data, QueueEntry, QueueTorrent, ReleaseRef } from '../../src/types.ts';
 import { episode, movie, NOW, release, title } from '../helpers/test-fixtures.ts';
 import { hashOf, makeTorrent, MIB, startPipeline } from '../helpers/test-pipeline.ts';
 
@@ -289,6 +290,153 @@ describe('persisted queue recovery', () => {
     expect(waiting.status).toBe('not_found');
     expect(waiting.nextAt).toBeGreaterThan(NOW);
     expect(adds(pipeline)).toHaveLength(0);
+  });
+
+  const PARTIAL = 'The torrent does not contain all the requested episodes.';
+  type Source = { status: QueueTorrent['status']; extra?: Partial<QueueTorrent>; manual?: boolean; state: QueueEntry['state']; client?: boolean };
+
+  // A season as an older version saved it. Each source covers the episode of its position. The episodes after the
+  // sources have no release.
+  function savedSeason(pipeline: Pipeline, season: number, state: QueueState, sources: Source[], missing = 1) {
+    const numbers = Array.from({ length: sources.length + missing }, (_, index) => index + 1);
+    const series = pipeline.db.data.titles['tv:1'] ?? title({ rootId: 'tv' });
+    series.episodes.push(...numbers.map((number) => episode(season, number)));
+    pipeline.db.data.titles[series.key] = series;
+    const entries = numbers.map((number) => {
+      const entry = pipeline.queue.ensure(series.key, season, number);
+      pipeline.queue.request(entry, 'search requested');
+      entry.numbering = { revision: 0, ranges: [] };
+      return entry;
+    });
+    const turn = pipeline.queue.findItem(series.key, season)!;
+    const saved = sources.map((source, index) => {
+      const entry = entries[index]!;
+      const name = `Show.Name.S0${season}E0${entry.number}.1080p.WEB-DL-SAVED`;
+      const files = [`Show.Name.S0${season}E0${entry.number}.mkv`];
+      const release = { ...ref(pipeline, name, files, 'single'), manual: source.manual ?? false };
+      const hash = release.infoHash!;
+      const clientId = source.client ? pipeline.db.data.downloadClients[0]!.id : null;
+      const accepted = source.status === 'accepted';
+      if (!accepted) pipeline.db.data.torrents[hash] = makeTorrent(name, files).toString('base64');
+      turn.selected[hash] = {
+        hash, release, source: accepted ? null : { torrent: true }, numberingRevision: 0, status: source.status, clientId,
+        matches: { [entry.id]: `${name}/${files[0]}` }, ...source.extra,
+      };
+      entry.state = source.state;
+      // An episode whose files wait for the user has no torrent of its own.
+      if (source.status !== 'verify') Object.assign(entry, { release, transferHash: hash, clientId, source: accepted ? null : { torrent: true } });
+      return { entry, hash, release, status: source.status };
+    });
+    const rest = entries.slice(sources.length);
+    turn.state = state;
+    for (const entry of rest) entry.state = structuredClone(state);
+    turn.search = { at: NOW - 1_000, indexers: [], candidates: 1, accepted: sources.length, result: 'all_rejected', topRejections: [], nextAt: null, rejected: [] };
+    pipeline.db.data.jobs = {};
+    return { series, turn, saved, rest };
+  }
+
+  const stop = (code: string, at: 'queued' | 'searching' | 'fetching' | 'importing') => ({ kind: 'blocked' as const, at, problem: { code } });
+  const fetching = { kind: 'fetching' as const };
+  const automatic: Source = { status: 'prepared', state: fetching };
+
+  it.each([
+    stop('pack_partial', 'fetching'),
+    stop('pack_partial', 'queued'),
+    stop('all_rejected', 'searching'),
+    stop('no_results', 'searching'),
+  ])('releases the automatic sources of a season saved as blocked with $problem.code at $at', async (state) => {
+    const { pipeline, app } = await start();
+    const { series, turn, saved, rest } = savedSeason(pipeline, 1, state, [
+      automatic,
+      automatic,
+      { ...automatic, manual: true },
+      { ...automatic, extra: { sendMapped: true } },
+      { ...automatic, extra: { manualMatches: { 'Show.Name.S01E05.mkv': [{ season: 1, number: 5 }] } } },
+      { status: 'verify', state },
+      { status: 'uncertain', state: { kind: 'sending' }, client: true },
+      { status: 'accepted', state: { kind: 'downloading' }, client: true },
+    ]);
+    if (state.problem.code === 'no_results') turn.emptySearches = { [rest[0]!.id]: 3 };
+    await reload(pipeline);
+
+    const loaded = pipeline.queue.findItem(series.key, 1)!;
+    const released = saved.slice(0, 2);
+    const kept = saved.slice(2);
+    expect(loaded.state).toEqual(state);
+    expect(Object.keys(loaded.selected).sort()).toEqual(kept.map(({ hash }) => hash).sort());
+    for (const { id } of [...released.map(({ entry }) => entry), ...rest]) {
+      expect(pipeline.queue.get(id)).toMatchObject({ release: null, transferHash: null });
+      expect(pipeline.queue.get(id)!.state).toEqual(state);
+    }
+    for (const { entry, hash, release, status } of kept) {
+      if (status !== 'verify') expect(pipeline.queue.get(entry.id)).toMatchObject({ transferHash: hash, release: { title: release.title } });
+    }
+    for (const { entry } of kept.slice(-2)) expect(pipeline.queue.get(entry.id)!.state).toEqual(entry.state);
+    expect(loaded.search!.rejected.map(({ title }) => title).sort()).toEqual(released.map(({ release }) => release.title).sort());
+    for (const row of loaded.search!.rejected) expect(row).toMatchObject({ indexerId: 1, reasons: [PARTIAL], manifestProblem: 'pack_partial' });
+    for (const { hash } of released) expect(pipeline.db.data.torrents[hash]).toBeUndefined();
+    for (const { hash } of kept.slice(0, -1)) expect(pipeline.db.data.torrents[hash]).toBeDefined();
+    const { group } = (await app.get(`/queue/groups/${series.key}?season=1`)).body;
+    expect(group.rejected).toHaveLength(2);
+    expect(group.rejected.every(({ release }: { release: { selectable: boolean } }) => release.selectable)).toBe(true);
+    expect(pipeline.tracker.state.searches).toEqual([]);
+    expect(adds(pipeline)).toEqual([]);
+  });
+
+  it('lists the file of each released source on its rejected release after the load', async () => {
+    const { pipeline, app } = await start();
+    const { series, saved } = savedSeason(pipeline, 1, stop('pack_partial', 'fetching'), [automatic, automatic]);
+    await reload(pipeline);
+
+    const { group } = (await app.get(`/queue/groups/${series.key}?season=1`)).body;
+    const listed = (group.rejected as { release: { title: string; matches?: Record<string, string> } }[]).map(({ release }) => [release.title, release.matches]);
+    expect(Object.fromEntries(listed)).toEqual(Object.fromEntries(saved.map(({ entry, release }) =>
+      [release.title, { [entry.id]: `${release.title}/Show.Name.S01E0${entry.number}.mkv` }])));
+  });
+
+  it('keeps a converted season stuck when it holds no other source and no file', async () => {
+    const { pipeline } = await start();
+    const state = stop('no_results', 'searching');
+    const { series, turn, rest } = savedSeason(pipeline, 1, state, [automatic]);
+    turn.emptySearches = { [rest[0]!.id]: 3 };
+    // The reload reads the file twice, and the second read finds the season without a source.
+    await reload(pipeline);
+
+    expect(pipeline.queue.findItem(series.key, 1)).toMatchObject({ state, selected: {}, emptySearches: { [rest[0]!.id]: 3 } });
+    for (const id of pipeline.queue.findItem(series.key, 1)!.entryIds) expect(pipeline.queue.get(id)!.state).toEqual(state);
+  });
+
+  it('keeps the stored copy of a released torrent that another season uses', async () => {
+    const { pipeline } = await start();
+    const { series, saved } = savedSeason(pipeline, 1, stop('pack_partial', 'fetching'), [automatic]);
+    // A pack of two seasons: the second season still waits with the same torrent.
+    const waiting = { kind: 'waiting' as const, outcome: 'no_results' as const };
+    const other = savedSeason(pipeline, 2, waiting, []);
+    const { hash, release } = saved[0]!;
+    const [target] = other.rest;
+    other.turn.selected[hash] = { hash, release, source: { torrent: true }, numberingRevision: 0, status: 'prepared', clientId: null, matches: { [target!.id]: null } };
+    Object.assign(target!, { state: fetching, release, transferHash: hash, source: { torrent: true } });
+    await reload(pipeline);
+
+    expect(pipeline.queue.findItem(series.key, 1)!.selected).toEqual({});
+    expect(pipeline.queue.findItem(series.key, 2)!.selected[hash]).toMatchObject({ status: 'prepared' });
+    expect(pipeline.db.data.torrents[hash]).toBeDefined();
+  });
+
+  it.each([
+    { name: 'a send failure', state: stop('client_rejected', 'fetching') },
+    { name: 'a file that names no episode', state: stop('file_unmapped', 'fetching') },
+    { name: 'a pack that the import found partial', state: stop('pack_partial', 'importing') },
+    { name: 'a wait for the next search', state: { kind: 'waiting' as const, outcome: 'no_results' as const } },
+  ])('keeps the automatic source of a season saved with $name', async ({ state }) => {
+    const { pipeline } = await start();
+    const { series, saved } = savedSeason(pipeline, 1, state, [automatic]);
+    const [{ entry, hash }] = saved as [(typeof saved)[number]];
+    await reload(pipeline);
+
+    expect(pipeline.queue.findItem(series.key, 1)).toMatchObject({ state, selected: { [hash]: { status: 'prepared' } }, search: { rejected: [] } });
+    expect(pipeline.queue.get(entry.id)).toMatchObject({ transferHash: hash, state: fetching });
+    expect(pipeline.db.data.torrents[hash]).toBeDefined();
   });
 
   it('migrates a missing-client block to a configuration wait and resumes the saved source once', async () => {

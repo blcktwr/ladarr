@@ -1,6 +1,7 @@
 import { isActiveState, itemId, phaseOf, type Phase, type QueueState, type SearchOutcome, type WorkPhase } from '@ladarr/shared/queue';
 import type { Data, ImportJournal, Job, LegacyEntry, QueueEntry, QueueTorrent, QueueTurn, SearchPayload, StoredEvent } from '../../types.ts';
 import { newTurn, seasonHasCoverage } from './queue.ts';
+import { detach } from '../grab/detach.ts';
 
 const WORK: readonly Phase[] = ['queued', 'searching', 'fetching', 'waiting_slot', 'sending', 'downloading', 'importing'];
 
@@ -99,8 +100,27 @@ function withoutEmptySearchBlock(state: QueueState): QueueState {
   return state;
 }
 
+// An older version stopped a season and kept the releases that it chose for a part of the episodes.
+export function migrateStoppedSeason(data: Data, item: QueueTurn) {
+  const { state, search } = item;
+  if (item.season === null || !search || state.kind !== 'blocked' || !['queued', 'searching', 'fetching'].includes(state.at) ||
+    !['pack_partial', 'all_rejected', 'no_results'].includes(state.problem.code)) return;
+  const { entries, rows } = detach(data, item);
+  if (!rows.length) return;
+  search.rejected = [...new Map([...search.rejected, ...rows].map((row) => [`${row.indexerId}:${row.guid}`, row])).values()];
+  const now = Date.now();
+  item.revision = ++data.queueRev;
+  for (const entry of entries) {
+    entry.state = entry.state.kind === 'paused' ? { kind: 'paused', resume: state.at, problem: state.problem } : { ...state };
+    entry.stateSince = entry.phaseSince = now;
+    entry.revision = ++data.queueRev;
+  }
+}
+
 export function migrateEmptySeason(data: Data, item: QueueTurn) {
-  if (item.season === null || !Object.keys(item.emptySearches).length || seasonHasCoverage(data, item)) return;
+  // A stopped season whose found releases went to the rejected list had coverage when it stopped.
+  if (item.season === null || !Object.keys(item.emptySearches).length || seasonHasCoverage(data, item) ||
+    item.search?.rejected.some(({ manifestProblem }) => manifestProblem === 'pack_partial')) return;
   item.emptySearches = {};
   item.lastEmptyRound = null;
   const now = Date.now();

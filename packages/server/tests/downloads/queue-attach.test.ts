@@ -425,6 +425,60 @@ describe('attach a download', () => {
   });
 });
 
+describe('the torrents of the manual mapping', () => {
+  // The client holds finished torrents of the series, of other titles, and torrents that ladarr links to a title.
+  async function client() {
+    pipe = await startPipeline();
+    await pipe.worker.pause();
+    pipe.poller.stop();
+    api = await pipe.api();
+    const series = title({ rootId: 'tv', episodes: [aired(1), aired(2)] });
+    series.meta.aliases = ['Nombre Serie'];
+    const film = movie({ rootId: 'movie' });
+    pipe.db.data.titles = { [series.key]: series, [film.key]: film };
+    const stopped = [1, 2].map((number) => {
+      const entry = pipe!.queue.ensure(series.key, 1, number);
+      pipe!.queue.request(entry, 'search requested');
+      move(pipe!.queue, entry, { stage: 'searching', reason: { code: 'pack_partial' } }, 'fixture');
+      return entry;
+    });
+    const finished = (name: string) => {
+      const hash = addExternal(name);
+      pipe!.qbit.progress(hash, 1);
+      return name;
+    };
+    const named = ['Show.Name.S01.1080p.WEB-DL-GRP', 'Show.Name.2020.S02.720p.WEB-DL-GRP', 'Nombre.Serie.S01.1080p.WEB-DL-GRP'].map(finished);
+    const linked = ['Linked.To.A.Target', 'Linked.To.A.File', 'Linked.To.The.Title'].map(finished);
+    // A name that only starts like the name of the series belongs to another series.
+    const foreign = ['Other.Show.S01.1080p.WEB-DL-GRP', 'Show.Name.Origins.S01.1080p.WEB-DL-GRP', 'Linked.To.Another.Title'].map(finished);
+    const [target, file, remembered] = linked.map((name) => hashOf(name));
+    Object.assign(stopped[1]!, { transferHash: target, clientId: 'client-1' });
+    pipe.db.data.files.imported = {
+      id: 'imported', titleKey: series.key, path: 'Show Name/Show.Name.S01E01.mkv', sizeBytes: 1_000, mtimeMs: 1, addedAt: 1, missing: false,
+      episodes: [{ season: 1, number: 1 }], download: { clientId: 'client-1', hash: file!, external: true },
+    };
+    series.torrents = [{ clientId: 'client-1', hash: remembered!, season: 1, number: 1 }];
+    film.torrents = [{ clientId: 'client-1', hash: hashOf('Linked.To.Another.Title'), season: null, number: null }];
+    const incomplete = 'Show.Name.S01.2160p.WEB-DL-INCOMPLETE';
+    addExternal(incomplete);
+    const names = async (path: string) => ((await api!.get(path)).body.torrents as { name: string }[]).map(({ name }) => name).sort();
+    return { entry: stopped[0]!, named, linked, foreign, incomplete, names };
+  }
+
+  it('lists only the finished torrents of the series and the torrents that ladarr links to it', async () => {
+    const { entry, named, linked, names } = await client();
+
+    expect(await names(`/queue/entries/${entry.id}/external?mapping=true`)).toEqual([...named, ...linked].sort());
+  });
+
+  it('keeps every torrent in the list that attaches a download', async () => {
+    const { entry, named, linked, foreign, incomplete, names } = await client();
+
+    expect(await names(`/queue/entries/${entry.id}/external`)).toEqual([...named, ...linked, ...foreign, incomplete].sort());
+    expect(await names('/library/tv:1/attach')).toEqual([...named, ...linked, ...foreign].sort());
+  });
+});
+
 describe('client details', () => {
   async function downloading() {
     pipe = await startPipeline();

@@ -4,42 +4,10 @@ import { evaluateChain, explainProfile, qualityLabel, qualityOf, RANK_STRIDE } f
 import { normalizeTitle, parseRelease } from './release.ts';
 import { magnetHash } from './torrent.ts';
 import { hashOfMagnet, linkOf } from './source.ts';
+import { REJECTION_TEXT } from './rejections.ts';
 import type { Covered, DecideContext, Decision, Episode, ExplainedDecision, Numbering, Profile, RawRelease, Title, Want } from '../../types.ts';
 
-// The text for each code. It is the key of the web i18n, and it names the affected title in the user interface, so it has no title in it.
-export const REJECTION_TEXT: Record<string, string> = {
-  wrong_title: 'The title of the release is not this title.',
-  year_missing: 'The release has no year, so the movie cannot be identified.',
-  year_mismatch: 'The year of the release is not the year of the title.',
-  not_a_movie: 'The release is for a series.',
-  not_an_episode: 'The release has no season and episode.',
-  not_a_pack: 'The release is not a full season.',
-  wrong_season: 'The release is for another season.',
-  wrong_episode: 'The release is for other episodes.',
-  daily_ambiguous: 'The air date matches more than one episode, or none.',
-  multi_season_pack: 'The release holds more than one season.',
-  pack_covers_others: 'An earlier download of this pack held other episodes.',
-  pack_partial: 'The torrent does not contain all the requested episodes.',
-  file_unmapped: 'The releases available do not contain all the episodes.',
-  covers_available_episode: 'The release covers an episode that is available already.',
-  already_available: 'A file is available for this target.',
-  not_an_upgrade: 'The quality of the release is not better than the quality of the current file.',
-  upgrade_needs_single: 'The release is for several episodes. It cannot replace the file of one episode.',
-  already_downloading: 'This release is in the queue.',
-  no_download_link: 'The release has no download link.',
-  invalid_torrent: 'The torrent is invalid.',
-  invalid_magnet: 'The magnet link is invalid.',
-  no_video: 'The torrent has no video file.',
-  metadata_unavailable: 'The torrent file list is not available.',
-  indexer_removed: 'The indexer of the release was removed.',
-  quality_rejected: 'The quality is not good enough (for example a camera copy).',
-  no_seeders: 'The release has no seeders.',
-  quality_not_in_profile: 'The quality of the release is not in the allowed qualities.',
-  size_below_min: 'The file is smaller than the quality allows for this runtime.',
-  size_above_max: 'The file is larger than the quality allows for this runtime.',
-  audio_unverified: 'The name of the release does not say which audio it has.',
-  audio_language_missing: 'The release does not have the audio language that you selected.',
-};
+export { REJECTION_TEXT };
 
 const alias = (title: Title) => [title.meta.title, title.meta.originalTitle, ...title.meta.aliases].filter(Boolean).map(normalizeTitle);
 
