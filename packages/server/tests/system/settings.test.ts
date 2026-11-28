@@ -28,12 +28,11 @@ afterAll(() => {
 describe('settings', () => {
   it('starts with defaults and offers the two profiles of version 1', async () => {
     const { body } = await app.get('/settings');
-    expect(body.settings).toMatchObject({ setupCompleted: false, audio: null });
+    expect(body.settings).toMatchObject({ setupCompleted: false, audio: null, timeZone: 'UTC' });
     expect(body.settings).not.toHaveProperty('keepQueueLogs');
     expect(body.settings).not.toHaveProperty('upgrades');
     expect(body.settings).not.toHaveProperty('defaultPreset');
     expect(body.settings).not.toHaveProperty('region');
-    expect(body.settings).not.toHaveProperty('timeZone');
     expect(body.settings).not.toHaveProperty('maxAliases');
     expect(body.settings).not.toHaveProperty('recentDays');
     expect(body.presets).toEqual([
@@ -61,9 +60,22 @@ describe('settings', () => {
     expect((await app.patch('/settings', { audio: null })).body.settings.audio).toBeNull();
   });
 
+  it('saves a time zone', async () => {
+    for (const timeZone of ['America/Argentina/Buenos_Aires', 'UTC']) {
+      expect((await app.patch('/settings', { timeZone })).status).toBe(200);
+      expect((await app.get('/settings')).body.settings.timeZone).toBe(timeZone);
+    }
+  });
+
+  it.each(['Mars/Olympus', '', 3, null, ['UTC']])('rejects the time zone %j and changes nothing', async (timeZone) => {
+    const before = (await app.get('/settings')).body.settings;
+    const res = await app.patch('/settings', { theme: 'dark', timeZone });
+    expect(res).toMatchObject({ status: 400, body: { error: 'invalid_setting', field: 'timeZone' } });
+    expect((await app.get('/settings')).body.settings).toEqual(before);
+  });
+
   it.each([
     [{ region: 'AR' }, 'region'],
-    [{ timeZone: 'UTC' }, 'timeZone'],
     [{ language: 'fr' }, 'language'],
     [{ theme: 'blue' }, 'theme'],
     [{ defaultPreset: 'p1080' }, 'defaultPreset'],

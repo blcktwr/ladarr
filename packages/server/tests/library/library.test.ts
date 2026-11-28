@@ -8,6 +8,7 @@ import { metadataRefreshHandler } from '../../src/jobs/metadata-refresh.ts';
 import { createQueue, itemFor } from '../../src/library/downloads/queue.ts';
 import { createEvents } from '../../src/core/events.ts';
 import { enqueue } from '../../src/core/jobs.ts';
+import { open } from '../../src/core/db.ts';
 import { closeLog, logToFile, recentLogs } from '../../src/core/log.ts';
 import { withOutboundRequests } from '../../src/core/outbound.ts';
 import { createTmdb } from '../../src/metadata/tmdb.ts';
@@ -49,6 +50,11 @@ const title = (extra: Partial<Title> = {}): Title => ({
   episodes: [],
   fileId: null,
   ...extra,
+});
+
+// The release dates follow the time zone of the settings.
+beforeAll(async () => {
+  await open('unused.json');
 });
 
 describe('monitoring', () => {

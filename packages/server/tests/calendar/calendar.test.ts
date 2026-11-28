@@ -1,6 +1,7 @@
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
+import { availability } from '../../src/library/library.ts';
 import { libraryFilter } from '../../src/library/tools/filters.ts';
 import { buildIcal } from '../../src/library/calendar/calendar-feed.ts';
 import { addDays, calendarEvents, dayOf, isDay, MAX_EVENTS } from '../../src/library/calendar/calendar.ts';
@@ -122,6 +123,27 @@ describe('calendar events', () => {
     const midnight = Date.UTC(2024, 5, 15);
     expect(calendarEvents(all, midnight - 1).events.map((e) => e.availability)).toEqual(['missing', 'waiting']);
     expect(calendarEvents(all, midnight).events.map((e) => e.availability)).toEqual(['missing', 'missing']);
+  });
+
+  it.each([
+    { zone: 'America/Argentina/Buenos_Aires', midnight: Date.UTC(2024, 5, 15, 3) },
+    { zone: 'Asia/Tokyo', midnight: Date.UTC(2024, 5, 14, 15) },
+  ])('releases a date at local midnight in $zone, in the calendar and in the library', async ({ zone, midnight }) => {
+    const db = await dbWith(
+      show('tv:1', { episodes: [episode(1, 1, '2024-06-15')] }),
+      film('movie:2', [digital('2024-06-15T00:00:00.000Z')], {}, '2024-06-15'),
+    );
+    Object.assign(db.data.settings, { timeZone: zone });
+    const read = (now: number) => ({
+      calendar: calendarEvents(all, now).events.map((e) => [e.id, e.day, e.availability]),
+      library: Object.values(db.data.titles).map((item) => availability(item, { now, files: {} })),
+    });
+    const expected = (state: string) => ({
+      calendar: [['movie:2', '2024-06-15', state], ['tv:1:1x1', '2024-06-15', state]],
+      library: [state, state],
+    });
+    expect(read(midnight - 1)).toEqual(expected('waiting'));
+    expect(read(midnight)).toEqual(expected('missing'));
   });
 
   it('shows a file as available and a missing file as missing', async () => {

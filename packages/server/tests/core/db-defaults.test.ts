@@ -3,6 +3,18 @@ import { emptyData, withDefaults } from '../../src/core/db.ts';
 import type { QueueEntry } from '../../src/types.ts';
 
 describe('the defaults of an older file', () => {
+  it('gives UTC to a file without a time zone', () => {
+    const data = emptyData();
+    delete (data.settings as unknown as Record<string, unknown>).timeZone;
+    expect(withDefaults(data).settings).toMatchObject({ timeZone: 'UTC' });
+  });
+
+  it('keeps the saved time zone of a file', () => {
+    const data = emptyData();
+    Object.assign(data.settings, { timeZone: 'Asia/Tokyo' });
+    expect(withDefaults(data).settings).toMatchObject({ timeZone: 'Asia/Tokyo' });
+  });
+
   it('drops the blocklist that an older file had', () => {
     const data = emptyData() as ReturnType<typeof emptyData> & { blocklist?: unknown };
     data.blocklist = { '1:Show.Name.S01.1080p.WEB-DL-GRP': { title: 'Show.Name.S01.1080p.WEB-DL-GRP', reason: 'invalid_torrent', at: 1 } };

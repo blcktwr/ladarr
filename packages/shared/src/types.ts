@@ -319,6 +319,7 @@ export type SettingsData = {
   setupCompleted: boolean;
   language: Language;
   theme: 'dark' | 'light';
+  timeZone: string;
   defaultRoots: { movie: string | null; tv: string | null };
   audio: { language: string; strict: boolean } | null;
   naming: { movie: string; episode: string };

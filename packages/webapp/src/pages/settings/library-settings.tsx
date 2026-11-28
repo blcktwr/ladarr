@@ -3,7 +3,7 @@ import type { RenameCheck, RootRow, SettingsData, SettingsResponse } from '@lada
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api.ts';
-import { Button, Divider, Dropdown, Field, Form, Section, Spinner } from 'nebula';
+import { Button, Divider, Dropdown, Field, Form, SearchableDropdown, Section, Spinner } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { describeError } from '../../lib/format.ts';
@@ -12,6 +12,8 @@ import { languages, t } from '../../i18n/index.ts';
 import { WithSettings } from './with-settings.tsx';
 
 const mediaTypes = ['movie', 'tv'] as const;
+// The list of the browser does not have UTC.
+const timeZones = ['UTC', ...Intl.supportedValuesOf('timeZone')];
 
 function Failure({ message }: { message: string }) {
   return <Alert tone="danger">{message}</Alert>;
@@ -21,7 +23,7 @@ function GeneralCard({ data, reload }: { data: SettingsResponse; reload: () => v
   const { settings } = data;
   const [message, setMessage] = useState('');
 
-  async function saveSetting(body: { language: string } | { theme: string }) {
+  async function saveSetting(body: { language: string } | { theme: string } | { timeZone: string }) {
     setMessage('');
     try {
       await api('/settings', { method: 'PATCH', body });
@@ -37,6 +39,7 @@ function GeneralCard({ data, reload }: { data: SettingsResponse; reload: () => v
       <div className="flex flex-col items-start gap-4 w-full">
         <Dropdown label={t('Language')} value={settings.language} options={Object.entries(languages).map(([value, label]) => ({ value, label }))} onValueChange={(value) => void saveSetting({ language: value as string })} />
         <Dropdown label={t('Theme')} value={settings.theme} options={[{ value: 'dark', label: t('Dark') }, { value: 'light', label: t('Light') }]} onValueChange={(value) => void saveSetting({ theme: value as string })} />
+        <SearchableDropdown label={t('Time zone')} emptyText={t('No options.')} value={settings.timeZone} options={[...new Set([settings.timeZone, ...timeZones])].map((value) => ({ value }))} onValueChange={(value) => { if (value) void saveSetting({ timeZone: value }); }} />
       </div>
     </>
   );

@@ -27,6 +27,8 @@ export type Settings = {
   language: Language;
   // The colors of the interface.
   theme: 'dark' | 'light';
+  // The IANA zone in which a release date without a time starts.
+  timeZone: string;
   // Root IDs.
   defaultRoots: { movie: string | null; tv: string | null };
   audio: { language: string; strict: boolean } | null;
@@ -1089,7 +1091,7 @@ export type TitleMeta = SearchResult & {
   releaseDates: ReleaseDate[];
   seasons: SeasonSummary[];
 };
-// A date-only air date stays a date. The caller uses UTC.
+// A date-only air date stays a date. It starts in the time zone of the settings.
 // shortcut: no episode overview, to keep the database file small. Fetch it on demand if the UI needs it.
 export type EpisodeMeta = {
   tmdbId: number;

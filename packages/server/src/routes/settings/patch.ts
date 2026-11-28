@@ -6,6 +6,16 @@ import type { Db, Settings } from '../../types.ts';
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
+function isTimeZone(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Returns the changes to apply, or the name of the first field that is not valid.
 function parseChanges(body: unknown): Partial<Settings> | { invalid: string } {
   if (!isObject(body)) return { invalid: 'body' };
@@ -13,6 +23,7 @@ function parseChanges(body: unknown): Partial<Settings> | { invalid: string } {
   for (const [key, value] of Object.entries(body)) {
     if (key === 'language' && (value === 'en' || value === 'es')) changes.language = value;
     else if (key === 'theme' && (value === 'dark' || value === 'light')) changes.theme = value;
+    else if (key === 'timeZone' && isTimeZone(value)) changes.timeZone = value;
     else if (key === 'naming' && isObject(value) && !templateProblem('movie', value.movie) && !templateProblem('episode', value.episode)) {
       changes.naming = { movie: (value.movie as string).trim(), episode: (value.episode as string).trim() };
     } else if (key === 'audio' && value === null) changes.audio = null;

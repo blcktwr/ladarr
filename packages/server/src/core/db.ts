@@ -33,6 +33,7 @@ export const emptyData = (): Data => ({
     setupCompleted: false,
     language: 'en',
     theme: 'dark',
+    timeZone: 'UTC',
     defaultRoots: { movie: null, tv: null },
     audio: null,
     naming: { ...DEFAULT_NAMING },
@@ -100,11 +101,10 @@ export function rememberTorrent(data: Data, entry: QueueEntry, state: QueueState
 // A file from an older version can lack a collection that a newer version added.
 export function withDefaults(data: Data): Data {
   const empty = emptyData();
-  const loaded = { ...empty.settings, ...data.settings } as Settings & { maxAliases?: number; aliasLanguages?: string[] | null; upgrades?: { enabled: boolean; stopAt: string }; defaultPreset?: string; recentDays?: number; recoveryDays?: number; region?: string; timeZone?: string; keepQueueLogs?: boolean };
+  const loaded = { ...empty.settings, ...data.settings } as Settings & { maxAliases?: number; aliasLanguages?: string[] | null; upgrades?: { enabled: boolean; stopAt: string }; defaultPreset?: string; recentDays?: number; recoveryDays?: number; region?: string; keepQueueLogs?: boolean };
   delete loaded.keepQueueLogs;
-  // The movie release region and the time zone are gone from the settings.
+  // The movie release region is gone from the settings.
   delete loaded.region;
-  delete loaded.timeZone;
   // An older file has the number of aliases. The search asks for every alias now.
   delete loaded.maxAliases;
   // The languages of the aliases are a choice of each indexer now.

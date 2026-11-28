@@ -256,6 +256,7 @@ export const es: Record<string, string> = {
   'Backup restored': 'Respaldo restaurado',
   'Backups': 'Backups',
   'Check updates': 'Buscar actualizaciones',
+  'Time zone': 'Zona horaria',
   'Installed version': 'Versión instalada',
   'Version {version} is available.': 'La versión {version} está disponible.',
   'Install update': 'Instalar actualización',

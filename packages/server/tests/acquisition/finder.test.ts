@@ -269,6 +269,28 @@ describe('the sweep', () => {
     expect(pipe.acquisition.filter((event) => event.type === 'add')).toEqual([{ type: 'add', hash: hashOf(pack, files) }]);
   });
 
+  it.each([
+    { zone: 'America/Argentina/Buenos_Aires', date: '2026-11-21', midnight: Date.UTC(2026, 10, 21, 3) },
+    { zone: 'Asia/Tokyo', date: '2026-11-21', midnight: Date.UTC(2026, 10, 20, 15) },
+    // The first day after the clocks of New York go forward.
+    { zone: 'America/New_York', date: '2026-03-09', midnight: Date.UTC(2026, 2, 9, 4) },
+  ])('starts the search of an episode and a movie at local midnight in $zone', async ({ zone, date, midnight }) => {
+    let now = midnight - 1;
+    using clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    pipe = await startPipeline();
+    Object.assign(pipe.db.data.settings, { timeZone: zone });
+    const series = title({ rootId: 'tv', episodes: [episode(1, 1, date)] });
+    const m = movie({ rootId: 'movie', meta: { ...movie().meta, date } });
+    pipe.db.data.titles = { [series.key]: series, [m.key]: m };
+
+    pipe.finder.sweep();
+    expect(Object.keys(pipe.db.data.queue)).toEqual([]);
+    now = midnight;
+    pipe.finder.sweep();
+    expect(Object.keys(pipe.db.data.queue).sort()).toEqual([m.key, 'tv:1:1x1']);
+    await expect.poll(searches).toBe(2);
+  });
+
   it('searches a season again with one request, so a pack that arrived later is taken', async () => {
     let now = Date.UTC(2026, 10, 26);
     using clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
