@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, apiUrl } from '../../lib/api.ts';
-import { Actions, Badge, Button, Confirm, Details, Divider, EmptyState, List, Row, Section, Spinner, Text } from 'nebula';
+import { Actions, Badge, Button, Confirm, Details, EmptyState, List, Modal, Row, Section, Spinner, Text } from 'nebula';
 import { Alert } from '../../components/alert.tsx';
 import { LoadFailed } from '../../components/load-failed.tsx';
 import { formatBytes, describeError } from '../../lib/format.ts';
@@ -14,6 +14,7 @@ export function SystemVersion() {
   const { data, error, isFetching: loading, refetch: reload } = useQuery<VersionInfo>({ queryKey: ['/system/version'] });
   const [result, setResult] = useState<UpdateCheck | null>(null);
   const [failed, setFailed] = useState(false);
+  const [updateOpen, setUpdateOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [installed, setInstalled] = useState('');
@@ -43,7 +44,9 @@ export function SystemVersion() {
     setResult(null);
     setPending(true);
     try {
-      setResult(await api<UpdateCheck>('/system/update'));
+      const found = await api<UpdateCheck>('/system/update');
+      setResult(found);
+      setUpdateOpen(found.available);
     } catch {
       setFailed(true);
     } finally {
@@ -100,25 +103,35 @@ export function SystemVersion() {
         <Details items={[{ label: t('Installed version'), value: data?.version ?? '' }]} />
       )}
       {result && !result.available && <Text variant="body" className="w-full text-center text-success">{t('You have the latest version.')}</Text>}
-      {installing ? (
-        <div className="grid w-full justify-items-center">
-          <Spinner label={t('Installing update')} />
-        </div>
-      ) : result?.available && !installed ? (
-        <>
-          <Divider />
-          <div className="flex w-full items-center justify-between gap-4">
-            <Text variant="heading">{t('New version {version}', { version: result.latest })}</Text>
-            <Button pending={installing} onClick={() => void install()}>
-              {t('Install update')}
-            </Button>
-          </div>
-          {result.notes && <pre>{result.notes}</pre>}
-        </>
-      ) : null}
-      {installed && <Text variant="body" className="w-full text-center text-success">{t('Version {version} installed, the server will restart in {seconds}s...', { version: installed, seconds })}</Text>}
-      {failed && <Alert tone="danger">{t('The request did not complete.')}</Alert>}
+      {failed && !updateOpen && <Alert tone="danger">{t('The request did not complete.')}</Alert>}
       {resetError && <Alert tone="danger">{resetError}</Alert>}
+      <Modal
+        open={updateOpen}
+        // An install that runs or ended keeps the modal, so its result stays on view.
+        onOpenChange={(open) => {
+          if (installing || installed) return;
+          setUpdateOpen(open);
+          setFailed(false);
+        }}
+        title={t('New version {version}', { version: result?.latest ?? '' })}
+        width="lg"
+        actions={!installing && !installed && <Button onClick={() => void install()}>{t('Install update')}</Button>}
+      >
+        {installing ? (
+          <div className="grid w-full justify-items-center">
+            <Spinner label={t('Installing update')} />
+          </div>
+        ) : installed ? (
+          <Text variant="body" className="w-full text-center text-success">{t('Version {version} installed, the server will restart in {seconds}s...', { version: installed, seconds })}</Text>
+        ) : (
+          result?.notes && <pre className="w-full overflow-x-auto">{result.notes}</pre>
+        )}
+        {failed && (
+          <div role="alert">
+            <Text>{t('The request did not complete.')}</Text>
+          </div>
+        )}
+      </Modal>
       <Confirm
         open={resetOpen}
         onOpenChange={(open) => !resetting && setResetOpen(open)}
