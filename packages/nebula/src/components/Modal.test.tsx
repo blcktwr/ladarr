@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { describe, expect, it } from 'vitest';
 import { Button, Modal } from '../index.ts';
 
@@ -31,6 +32,28 @@ function expectPanel(dialog: ReturnType<typeof within>, selected: 'File' | 'Torr
   expect(within(panel).getByText(`${selected} details`)).toBeTruthy();
   expect(dialog.getAllByRole('tabpanel')).toEqual([panel]);
 }
+
+describe('Modal start actions', () => {
+  // The footer is the last part of the dialog.
+  async function footerOf(props: Pick<ComponentProps<typeof Modal>, 'startActions' | 'actions'>) {
+    render(<Modal open title="Map episodes" {...props}><p>Episodes</p></Modal>);
+    const dialog = await screen.findByRole('dialog', { name: 'Map episodes' });
+    return within(dialog.lastElementChild as HTMLElement);
+  }
+
+  it('puts the start actions before the actions', async () => {
+    const footer = await footerOf({ startActions: <Button>New season</Button>, actions: <Button>Apply</Button> });
+
+    expect(footer.getAllByRole('button').map((button) => button.textContent)).toEqual(['New season', 'Apply']);
+  });
+
+  it('shows the footer when it has only start actions', async () => {
+    const footer = await footerOf({ startActions: <Button>New season</Button> });
+
+    expect(footer.getByRole('button', { name: 'New season' })).toBeTruthy();
+    expect(footer.queryByText('Episodes')).toBeNull();
+  });
+});
 
 describe('Modal tabs', () => {
   it('keeps the dialog name when the title is hidden and selects the first tab', async () => {
