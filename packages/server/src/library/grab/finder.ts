@@ -44,6 +44,7 @@ const episodeOf = (title: Title, entry: QueueEntry) => title.episodes.find((epis
 const releaseAt = (title: Title, entry: QueueEntry) =>
   title.mediaType === 'movie' ? movieEligibleAt(title) : episodeEligibleAt(episodeOf(title, entry)?.airDate ?? null);
 const isReleaseDay = (release: number | null, at: number) => release !== null && release <= at && at < release + DAY_MS;
+const isOverdue = (release: number | null, at: number) => release === null || at >= release + DAY_MS;
 const releaseDayInterval = (indexer: Indexer) => (indexer.releaseDayMinutes ?? DEFAULT_RELEASE_DAY_MINUTES) * 60_000;
 const nextSearchAt = (release: number | null, indexer: Indexer, last: number) => {
   if (release !== null && release > last) return release;
@@ -1063,13 +1064,18 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
       return;
     }
     if (unavailable && !final && !payload.forced) throw new JobError('outage', 'An indexer did not answer.');
-    const rejected = problems().map(({ decision }) => decision).sort(compareRejected);
+    const found = problems();
+    const rejected = found.map(({ decision }) => decision).sort(compareRejected);
+    // Until the end of its release day a target can still lack its upload. An empty search or a pack without it does not stop it.
+    const overdue = new Set(left.filter((entry) => isOverdue(releaseDates.get(entry)!, searchState.at)).map(({ id }) => id));
+    const refused = found.some(({ decision, entries }) => payload.forced || entries.some((id) => overdue.has(id)) ||
+      decision.rejections.some((code) => code !== 'pack_partial'));
     const missingNumber = title.mediaType !== 'movie' && left.some((entry) => !releaseTarget(numbering, entry));
     // A season pack that the search found and that does not hold a missing episode needs the user.
-    const partialPack = !payload.forced && !unavailable && !noIndexers && (left.some(({ id }) => lacked.has(id)) ||
+    const partialPack = !payload.forced && !unavailable && !noIndexers && overdue.size > 0 && ([...overdue].some((id) => lacked.has(id)) ||
       Object.values(item.selected).some(({ status, release }) => status === 'prepared' && release.kind === 'pack'));
     const stop = mapping() ? 'file_unmapped' : missingNumber ? 'numbering_required' : partialPack ? 'pack_partial'
-      : rejected.length || (payload.forced && !completed.length) ? 'all_rejected'
+      : refused || (payload.forced && !completed.length) ? 'all_rejected'
         : noIndexers ? 'no_indexers' : payload.otherSeasons ? 'pack_partial' : null;
     const at = now();
     if (!stop) {
@@ -1100,7 +1106,7 @@ export function createFinder({ queue, indexers, enqueue, clients = createClients
     const outcome = unavailable ? 'indexers_failed' : 'no_results';
     phase('searching', left);
     const emptyRounds = unavailable || !completed.length || !seasonHasCoverage(db.data, item) ? [] : left.filter((entry) => {
-      if (!completed.includes(entry.id)) return false;
+      if (!completed.includes(entry.id) || !overdue.has(entry.id)) return false;
       // A fast indexer cannot use up the episode's three rounds before a slower indexer answers.
       const answered = new Set(entry.emptyRoundIndexers);
       for (const indexer of dueFor.get(entry)!) answered.add(indexer.id);

@@ -1,7 +1,7 @@
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { episode, movie, title } from '../helpers/test-fixtures.ts';
 import { hashOf, MIB, startFakeTracker, startPipeline, type FakeItem } from '../helpers/test-pipeline.ts';
-import type { ClientConfig, Title } from '../../src/types.ts';
+import type { ClientConfig, QueueTurn, Title } from '../../src/types.ts';
 
 let pipe: Awaited<ReturnType<typeof startPipeline>>;
 let api: Awaited<ReturnType<typeof pipe.api>> | undefined;
@@ -484,6 +484,129 @@ it('stops an episode when its search returns a pack that is known not to hold it
   await expect.poll(() => pipe.tracker.state.searches).toHaveLength(1);
   await expectStoppedByPartialPack(series.key, [3]);
   expect(pipe.acquisition.filter(({ type }) => type === 'search')).toEqual([episodeSearch(3)]);
+});
+
+describe('the release day', () => {
+  const HOUR = 60 * 60 * 1000;
+  // Local midnight of 2026-11-26 in a zone west of UTC. Its release day ends at 03:00 UTC of the next date.
+  const MIDNIGHT = Date.UTC(2026, 10, 26, 3);
+  const HOURS = [0, 1, 2, 3, 23];
+  let now = MIDNIGHT;
+  const mockClock = () => {
+    now = MIDNIGHT;
+    return vi.spyOn(Date, 'now').mockImplementation(() => now);
+  };
+
+  // A season whose last episode comes out on 2026-11-26.
+  async function releaseSeason(numbers = [1, 2, 3]) {
+    const series = await setup(numbers);
+    Object.assign(pipe.db.data.settings, { timeZone: 'America/Argentina/Buenos_Aires' });
+    series.episodes.at(-1)!.airDate = '2026-11-26';
+    return series;
+  }
+
+  // The search returns a pack with E01 and E02. A known pack comes from an earlier download of those two episodes.
+  async function searchWithPartialPack(known: boolean, numbers?: number[]) {
+    const series = await releaseSeason(numbers);
+    const first = partial();
+    if (known) {
+      inLibrary(series, [1, 2]);
+      pipe.db.data.releaseCoverage[`1:${PACK}`] = { titleKey: series.key, season: 1, numbers: [1, 2], numberingRevision: 0 };
+    }
+    advertise([first], known ? [first] : []);
+    pipe.finder.requestSearch(series.key, { season: 1 });
+    return { series, turn: pipe.queue.findItem(series.key, 1)! };
+  }
+
+  // Waits for the end of the search that is due now: the season then waits for a later search, or it stops.
+  const searched = (turn: QueueTurn) =>
+    expect.poll(() => turn.state.kind === 'blocked' || (turn.state.kind === 'waiting' && turn.nextAt! > now)).toBe(true);
+
+  it('does not count empty searches on the release day, and counts three rounds after it', async () => {
+    using _clock = mockClock();
+    const series = await releaseSeason();
+    inLibrary(series, [1, 2]);
+    advertise([]);
+    pipe.finder.requestSearch(series.key, { season: 1 });
+    const turn = pipe.queue.findItem(series.key, 1)!;
+
+    for (const hour of HOURS) {
+      now = MIDNIGHT + hour * HOUR;
+      await searched(turn);
+      expect(await group(series.key)).toMatchObject({ status: 'not_found' });
+      expect(turn.emptySearches).toEqual({});
+      expect(turn.nextAt).toBe(now + HOUR);
+    }
+    for (const round of [1, 2, 3]) {
+      now = turn.nextAt!;
+      await searched(turn);
+      expect(turn.emptySearches).toEqual({ [`${series.key}:1x3`]: round });
+      expect(await group(series.key)).toMatchObject({ status: round < 3 ? 'not_found' : 'stuck' });
+    }
+    expect(await group(series.key)).toMatchObject({ tabs: ['stuck'], problem: { code: 'no_results' } });
+    expect(pipe.acquisition).toEqual(Array(HOURS.length + 3).fill(missingSearch));
+  });
+
+  it.each([
+    { pack: 'chosen for the other episodes', known: false },
+    { pack: 'known not to hold it', known: true },
+  ])('keeps searching on the release day with a pack $pack, and stops after that day', async ({ known }) => {
+    using _clock = mockClock();
+    const { series, turn } = await searchWithPartialPack(known);
+
+    for (const hour of HOURS) {
+      now = MIDNIGHT + hour * HOUR;
+      await searched(turn);
+      expect(await group(series.key)).toMatchObject({ status: 'not_found' });
+      expect(turn.nextAt).toBe(now + HOUR);
+    }
+    expect(pipe.acquisition.filter((event) => event.type === 'search' && event.episode === '3')).toHaveLength(HOURS.length);
+    expect(adds()).toEqual([]);
+
+    now = turn.nextAt!;
+    await expectStoppedByPartialPack(series.key, [3]);
+  });
+
+  it.each([false, true])('stops with a partial pack on the release day when an older episode is missing too (pack known: %s)', async (known) => {
+    using _clock = mockClock();
+    const { series } = await searchWithPartialPack(known, [1, 2, 3, 4]);
+
+    await expectStoppedByPartialPack(series.key, [3, 4]);
+  });
+
+  it('does not stop a retried search that runs before local midnight of the episode', async () => {
+    using _clock = mockClock();
+    // The date started in UTC, but not yet in the time zone of the settings.
+    now = MIDNIGHT - HOUR;
+    const series = await releaseSeason();
+    const last = series.episodes.at(-1)!;
+    // An older date lets the season stop first.
+    last.airDate = '2020-01-01';
+    inLibrary(series, [1, 2]);
+    pipe.db.data.releaseCoverage[`1:${PACK}`] = { titleKey: series.key, season: 1, numbers: [1, 2], numberingRevision: 0 };
+    advertise([], [partial()]);
+    pipe.finder.requestSearch(series.key, { season: 1 });
+    await expect.poll(async () => (await group(series.key)).status).toBe('stuck');
+
+    last.airDate = '2026-11-26';
+    expect((await api!.post('/queue/actions', { action: 'retry', group: { titleKey: series.key, season: 1 } })).status).toBe(200);
+    const turn = pipe.queue.findItem(series.key, 1)!;
+    await searched(turn);
+    expect(pipe.tracker.state.searches).toHaveLength(2);
+    expect(await group(series.key)).toMatchObject({ status: 'not_found' });
+    expect(turn.emptySearches).toEqual({});
+  });
+
+  it('stops on the release day when the checks reject every release', async () => {
+    using _clock = mockClock();
+    const series = await releaseSeason();
+    inLibrary(series, [1, 2]);
+    advertise([], [pack('Show.Name.S01E03.480p.WEB-DL-LOW', [file(3)], 1)]);
+    pipe.finder.requestSearch(series.key, { season: 1 });
+
+    await expect.poll(async () => (await group(series.key)).status).toBe('stuck');
+    expect(await group(series.key)).toMatchObject({ tabs: ['stuck'], problem: { code: 'all_rejected' } });
+  });
 });
 
 it.each([
