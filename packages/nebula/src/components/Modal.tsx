@@ -55,15 +55,15 @@ export function Modal({ trigger, title, hideTitle, actions, width = 'md', tabs, 
               {heading}
               <BaseTabs.Root defaultValue={tabs[0].value} className="flex min-h-0 min-w-0 flex-col gap-4">
                 <TabHeader label={title} items={tabs} className={`-mx-6 px-6 ${hideTitle ? '-mt-6' : ''}`}>{close}</TabHeader>
-                <div className={`-mx-6 grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] ${actions ? '-mb-5' : '-mb-6'}`}>
-                  <TabPanels items={tabs} stack className={`px-6 pt-1 ${actions ? 'pb-5' : 'pb-6'}`} />
+                <div className={`-mx-6 grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] ${actions ? '-mb-2' : '-mb-6'}`}>
+                  <TabPanels items={tabs} stack className={`px-6 pt-1 ${actions ? 'pb-2' : 'pb-6'}`} />
                 </div>
               </BaseTabs.Root>
             </>
           ) : (
             <>
               <div className="flex items-center justify-between gap-4 w-full">{heading}{close}</div>
-              <div className={`${body} ${actions ? '-mt-6 -mb-5 pt-6 pb-5' : '-my-6 py-6'}`}>{children}</div>
+              <div className={`${body} ${actions ? '-mt-6 -mb-2 pt-6 pb-2' : '-my-6 py-6'}`}>{children}</div>
             </>
           )}
           {actions && <Actions className="w-full justify-end">{actions}</Actions>}
