@@ -1,6 +1,6 @@
 import type { QueueActionName } from '@ladarr/shared/enums';
 import { RETRY_STATUSES } from '@ladarr/shared/queue';
-import type { LogEntry, LogsResponse, Numbering, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueResolution, QueueRow, QueueSummary, QueueTorrentDetail } from '@ladarr/shared/types';
+import type { LogEntry, LogsResponse, Numbering, PlanRequest, QueueActionPreview, QueueEntryView, QueueGroupPage, QueueGroupRow, QueuePage, QueueRejectedRelease, QueueResolution, QueueRow, QueueSelection, QueueSummary, QueueTorrentDetail } from '@ladarr/shared/types';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Circle, ExternalLink, FileText, FileVideo, Info, LoaderCircle, Pause, Play, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
@@ -253,6 +253,38 @@ function ReleaseDetails({ entryId, release, selection }: { entryId: string; rele
         { label: t('Size'), value: formatBytes(release.sizeBytes) },
         ...(release.comment ? [{ label: t('Comment'), value: <CommentText text={release.comment} />, wide: true }] : []),
       ]}
+    />
+  );
+}
+
+// The torrents of a season that uses more than one: a row for each. A click on a row or on its button opens the details of
+// the torrent under its row, and a second click closes them.
+function TorrentTable({ torrents }: { torrents: QueueSelection[] }) {
+  const [opened, setOpened] = useState<string | null>(null);
+  return (
+    <Table
+      aria-label={t('Torrents')}
+      columns={[{ label: t('Release'), hideLabel: true }, { label: t('Actions'), align: 'end', hideLabel: true }]}
+      rows={torrents.map(({ key, entryId, release }) => {
+        const open = opened === key;
+        const toggle = () => setOpened(open ? null : key);
+        const size = formatBytes(release.sizeBytes);
+        const name = release.title;
+        return {
+          key,
+          onClick: toggle,
+          detail: open ? <ReleaseDetails entryId={entryId} release={release} selection={key} /> : undefined,
+          cells: [
+            <div key="release" className="grid gap-1 min-w-0">
+              <Text><span className="[overflow-wrap:anywhere]">{name}</span></Text>
+              <Text variant="small">{release.quality ? `${release.quality} (${size})` : size}</Text>
+            </div>,
+            <Button key="open" variant="ghost" iconOnly aria-label={open ? t('Hide details of {name}', { name }) : t('Show details of {name}', { name })} onClick={toggle}>
+              {open ? <ChevronDown /> : <ChevronRight />}
+            </Button>,
+          ],
+        };
+      })}
     />
   );
 }
@@ -721,7 +753,9 @@ function GroupDetail({ group, filters, run }: { group: QueueGroupRow; filters: F
         )}
         {importing && <ImportChecks entry={importing} />}
         {importing && torrents.length > 0 && <Divider />}
-        {torrents.map((torrent) => <ReleaseDetails key={torrent.key} entryId={torrent.entryId} release={torrent.release} selection={torrent.key} />)}
+        {torrents.length > 1
+          ? <TorrentTable torrents={torrents} />
+          : torrents.map((torrent) => <ReleaseDetails key={torrent.key} entryId={torrent.entryId} release={torrent.release} selection={torrent.key} />)}
       </div>
       {(torrents.length > 0 || importing) && (
         <div className="mt-6">
